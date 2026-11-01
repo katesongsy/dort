@@ -1,5 +1,5 @@
-//! UI-independent observation/planning and experimental recoverable one-file adoption.
-//! Public CLI writes, general deployment and external package work remain deferred.
+//! UI-independent planning and experimental journalled adoption/link/unmanage services.
+//! Public CLI writes and external package work remain deferred.
 #[cfg(not(unix))]
 compile_error!("Dort currently supports macOS and Ubuntu only.");
 
@@ -8,6 +8,8 @@ pub mod context;
 pub mod discovery;
 pub mod error;
 pub mod journal;
+pub mod lifecycle;
+mod lifecycle_journal;
 pub mod local;
 pub mod manifest;
 pub mod model;

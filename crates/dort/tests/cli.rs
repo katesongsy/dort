@@ -413,6 +413,83 @@ fn malformed_transaction_diagnosis_retains_intent_and_redacts_record_contents() 
 }
 
 #[test]
+fn schema2_history_is_reported_without_locking_replaying_or_creating_checkpoints() {
+    use dort_core::{
+        context::HostContext,
+        lifecycle,
+        local::{RepositoryRegistry, repository_state_path},
+        planner::{self, Request},
+        platform::{Architecture, Platform},
+        state::WriterLock,
+    };
+    let sandbox = Sandbox::new();
+    let manifest = sandbox.manifest(
+        "schema=1\n[[files]]\nid='editor'\nsource='editor'\ntarget='~/.editor'\nmode='link'\n",
+    );
+    let repo = manifest.parent().unwrap();
+    fs::create_dir(repo.join(".git")).unwrap();
+    fs::write(repo.join("editor"), "SCHEMA2-CONTENT-SENTINEL").unwrap();
+    let host = HostContext::new(
+        sandbox.home.clone(),
+        None,
+        None,
+        Platform::Ubuntu,
+        Architecture::X86_64,
+    )
+    .unwrap();
+    let lock = WriterLock::acquire(&host).unwrap();
+    let id = RepositoryRegistry::register(&host, &lock, repo).unwrap();
+    let approval = lifecycle::Approval::from_plan(planner::plan(
+        planner::observe(&host, repo, &[], Request::Apply).unwrap(),
+    ))
+    .unwrap();
+    assert!(
+        lifecycle::execute(&host, &lock, approval, |event| {
+            if event.sequence == 2 {
+                Err(dort_core::Error::Invalid("injected stop".into()))
+            } else {
+                Ok(())
+            }
+        })
+        .is_err()
+    );
+    let history = lifecycle::history(&host).unwrap();
+    let tx = repository_state_path(&host, &id)
+        .unwrap()
+        .join("transactions")
+        .join(&history[0].transaction_id);
+    let before = fs::read_dir(&tx).unwrap().count();
+    // Deliberately retain the writer lock: read-only diagnosis must still work.
+    let output = sandbox
+        .command()
+        .args(["--json", "recovery", "list"])
+        .assert()
+        .code(4)
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["transactions"][0]["journal_schema"], 2);
+    assert_eq!(report["write_blocked"], true);
+    assert!(
+        !String::from_utf8(output)
+            .unwrap()
+            .contains("SCHEMA2-CONTENT-SENTINEL")
+    );
+    sandbox
+        .command()
+        .args(["recovery", "list"])
+        .assert()
+        .code(4);
+    assert!(!sandbox.home.join(".editor").exists());
+    assert_eq!(fs::read_dir(tx).unwrap().count(), before);
+    assert_eq!(
+        fs::read_to_string(manifest).unwrap(),
+        "schema=1\n[[files]]\nid='editor'\nsource='editor'\ntarget='~/.editor'\nmode='link'\n"
+    );
+}
+
+#[test]
 fn malformed_local_configuration_does_not_leak_variable_values() {
     let sandbox = Sandbox::new();
     let config = sandbox.home.join(".config/dort");

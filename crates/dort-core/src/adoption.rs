@@ -49,7 +49,7 @@ impl Approval {
 
 // Directory timestamps/link counts change when state or siblings are created. Bind their
 // identities, ownership and permissions, not unrelated directory churn.
-fn canonical(plan: &Plan) -> Result<String> {
+pub(crate) fn canonical(plan: &Plan) -> Result<String> {
     let mut value =
         serde_json::to_value(plan).map_err(|_| Error::Invalid("cannot encode approval".into()))?;
     fn normalize(value: &mut serde_json::Value) {
@@ -116,7 +116,7 @@ fn checkpoint(
     notify(journal, Boundary::Checkpoint, observer)
 }
 
-fn transaction_id() -> String {
+pub(crate) fn transaction_id() -> String {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     journal::digest(
         format!(
@@ -132,7 +132,7 @@ fn transaction_id() -> String {
     )
 }
 
-fn parent_identity(a: &Fingerprint, b: &Fingerprint) -> bool {
+pub(crate) fn parent_identity(a: &Fingerprint, b: &Fingerprint) -> bool {
     a.device == b.device
         && a.inode == b.inode
         && a.mode == b.mode
@@ -140,7 +140,7 @@ fn parent_identity(a: &Fingerprint, b: &Fingerprint) -> bool {
         && a.gid == b.gid
 }
 
-fn same(a: &Entry, b: &Entry, strict: bool) -> bool {
+pub(crate) fn same(a: &Entry, b: &Entry, strict: bool) -> bool {
     if a.kind != b.kind || a.link_target != b.link_target || a.sha256 != b.sha256 {
         return false;
     }
@@ -168,7 +168,7 @@ fn inspect(path: &Path, role: Role) -> Result<Entry> {
     }
 }
 
-fn checked_bytes(entry: &Entry) -> Result<Vec<u8>> {
+pub(crate) fn checked_bytes(entry: &Entry) -> Result<Vec<u8>> {
     let handle = observation::parent_handle(&entry.path)?;
     let bytes = observation::read_checked(
         &handle,
@@ -212,7 +212,7 @@ fn stage_file(journal: &Journal, id: usize, bytes: &[u8], mode: u32, gid: u32) -
     journal.directory.sync()
 }
 
-fn anchors(entries: &[&Entry]) -> Vec<Parent> {
+pub(crate) fn anchors(entries: &[&Entry]) -> Vec<Parent> {
     let mut all = BTreeMap::new();
     for entry in entries {
         for parent in &entry.parents {

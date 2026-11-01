@@ -51,7 +51,7 @@ dort --repo /path/to/dotfiles files plan unmanage editor --mode remove
 - `apply`: preview active link mappings. Correct managed links are no-ops. Replacing a safe ordinary destination includes a backup effect; unsafe destinations block the mapping.
 - `adopt`: preview an existing owned, single-link regular destination into a new source/new base-profile mapping. Source copy, manifest addition, backups and destination link form one proposed transaction. Existing sources/mappings or unsafe/sensitive entries block adoption.
 - `unmanage --mode keep`: preview replacing the currently correct managed link with a materialized regular file and removing its mapping.
-- `unmanage --mode remove`: preview deleting that link and removing the mapping; marked as needing separate destructive-removal acknowledgement in a future executor.
+- `unmanage --mode remove`: preview deleting that link and removing the mapping; marked as needing separate destructive-removal acknowledgement (available only in the experimental core API, not collected by this command).
 
 Both unmanage modes retain the repository source. A drifted or foreign destination is blocked. These modes **do not execute**, collect acknowledgement or change files.
 
@@ -64,7 +64,7 @@ dort recovery list
 dort --json recovery list
 ```
 
-This inspects **all** local repository transaction histories. Omit `--repo`; it is rejected for this command. Reports include transaction/repository IDs, phase, valid-checkpoint count and integrity problems.
+This inspects **all** local repository transaction histories. Omit `--repo`; it is rejected for this command. Reports include transaction/repository IDs, phase, last validated `journal_schema` (1 for adoption, 2 for apply/unmanage, or null), valid-checkpoint count and integrity problems. Both completed and incomplete transactions are retained; this is journal history/integrity diagnosis, not a check for current live-file drift.
 
 Incomplete or malformed histories are write blockers for core writers. The CLI never replays or rolls back anything, and there is no `recovery rollback` command. See [safety and troubleshooting](safety.md#recovery-and-write-blockers).
 

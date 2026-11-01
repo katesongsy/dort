@@ -6,7 +6,7 @@ These repository instructions apply to all files unless a more specific instruct
 
 - Read [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md) before changing behaviour.
 - Dort is a Rust workspace: `crates/dort-core` owns UI-independent services; `crates/dort` owns the Clap CLI and presentation.
-- The CLI is currently entirely read-only. Core-only regular-file adoption and guarded rollback are experimental. Do not expose writes, install tools for users, or imply unsupported capabilities work as part of an unrelated change.
+- The CLI is currently entirely read-only. Core-only regular-file adoption, link apply, unmanage and guarded rollback/history are experimental. Do not expose writes, install tools for users, or imply unsupported capabilities work as part of an unrelated change.
 - Do not introduce a TUI/provider execution layer or change journal/schema/security contracts without explicit agreement.
 - Keep existing uncommitted work intact. Do not commit, push, tag or release unless requested.
 
@@ -53,6 +53,7 @@ git diff --check
 - Preserve bounded reads, stable identities and explicit rejection of non-UTF-8 report paths; never silently use lossy path identity.
 - Writers require the application lock, explicit approval and fresh independent revalidation. Preview JSON is not execution authorization.
 - Persist immutable checksummed intent before live mutations/inverses; verify private durable backups and postconditions. Incomplete/malformed transactions block subsequent writes.
+- Keep schema-1 adoption diagnosis/rollback compatible. Schema-2 apply/unmanage uses one recoverable transaction per approved request, immutable source watches and a separate matching removal acknowledgement. No silent format migration.
 - Recovery is explicit and guarded. Never automatically replay/rollback on startup or overwrite later user/source edits.
 - Preserve the current same-filesystem atomic-rename constraint; do not add an unsafe cross-device fallback.
 - Do not put file contents, local variable values or secrets in reports, logs or checkpoint metadata. Backups are private but ordinary backups are not encrypted.

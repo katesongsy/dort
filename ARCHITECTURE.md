@@ -8,12 +8,12 @@ Dort currently supports macOS and Ubuntu on x86_64/ARM64. It uses a Rust 2024 wo
 
 | Component | Responsibility | Current boundary |
 | --- | --- | --- |
-| `crates/dort-core` | Models, validation, profiles/graphs, local state, observation, discovery, planning, journals, experimental adoption/recovery | UI-independent; explicit host inputs; no package-manager execution. |
+| `crates/dort-core` | Models, validation, profiles/graphs, local state, observation, discovery, planning, journals, experimental filesystem lifecycle/recovery | UI-independent; explicit host inputs; no package-manager execution. |
 | `crates/dort` | Clap commands, environment/platform boundary, repository selection, human/JSON presentation, exit codes | All CLI commands are read-only; no write approval/replay interface. |
 | `examples/` | Tracked manifest examples | Validation examples, not an installed environment or a deployable source tree. |
 | `docs/` | Tracked end-user guides | Document shipped commands, not internal implementation plans. |
 
-General apply/unmanage execution, tool installation/inventory, templates, secrets, cloning/sync and the TUI remain unimplemented. The core adoption executor is a sandbox-tested prototype, not production-ready general deployment.
+Public write commands, tool installation/inventory, templates, secrets, cloning/sync and the TUI remain unimplemented. Core adoption/apply/unmanage executors are sandbox-tested prototypes, not production-ready general deployment.
 
 ## Module map
 
@@ -29,7 +29,8 @@ All module paths below are under `crates/dort-core/src/`:
 | `discovery.rs` | Bounded metadata discovery, path exclusions and candidate reporting. No candidate-content reads. |
 | `planner.rs` | Explicit observation into snapshots, then pure deterministic lifecycle planning. Unsupported effects become blockers. |
 | `journal.rs` | Private per-repository transaction storage, immutable checksum chains, integrity/state validation, read-only diagnosis and write blocking. |
-| `adoption.rs` | Opaque approval, fresh revalidation, private staging, one-file adoption, explicit guarded/restartable rollback. |
+| `adoption.rs` | Schema-1 opaque approval, fresh revalidation, private staging, one-file adoption and explicit guarded/restartable rollback; shared identity/approval helpers. |
+| `lifecycle.rs`, `lifecycle_journal.rs` | Schema-2 apply/unmanage approval/execution/rollback, immutable transaction store/validation and retained history. Sources are watches, never operation targets. |
 | `error.rs` | Shared errors; callers decide presentation and exit status. |
 
 CLI routing and reports live in [crates/dort/src/cli.rs](crates/dort/src/cli.rs). Domain services do not depend on Clap, terminal rendering or CLI output.
@@ -82,7 +83,7 @@ Repository IDs are initially SHA-256 of the canonical root path; explicit reloca
 
 Private directory/file access is descriptor-relative. Configuration/checkpoints/backups use private owned single-link regular files (0600), and transaction directories use 0700. Prepared objects/retained originals can retain live modes inside private directories. Configuration replacement stages, syncs, renames and syncs its directory. The application lock retains its inode and is never unlinked to release ownership.
 
-Incomplete or malformed transaction history blocks registration/relocation and new adoption. Read-only commands do not create missing state or acquire writer locks.
+Incomplete or malformed transaction history blocks registration/relocation and all new filesystem transactions. Read-only commands do not create missing state or acquire writer locks.
 
 ## Core adoption flow
 
@@ -102,7 +103,18 @@ Approval cannot be deserialized from preview JSON. It binds host context, mappin
 
 One transaction publishes missing source-parent directories (0700), copies the regular file, appends/revalidates the mapping without rewriting existing manifest text/comments, and replaces the destination with an absolute link. Source/manifest modes and groups are preserved; ACLs and extended attributes are not copied.
 
-**State, repository and destination must share one filesystem supporting atomic no-replace/exchange renames.** There is no cross-device fallback. Each publication is atomic; the multi-path adoption is not globally atomic and readers can see intermediate states. General link/unmanage execution is intentionally separate future work.
+**State, repository and destination must share one filesystem supporting atomic no-replace/exchange renames.** There is no cross-device fallback. Each publication is atomic; the multi-path adoption is not globally atomic and readers can see intermediate states. The schema-2 lifecycle executor below uses the same constraint, including watched sources.
+
+## Core link/unmanage flow
+
+`lifecycle::Approval::from_plan` accepts only unmodified, unblocked apply/keep plans. Remove requires the distinct `from_removal_plan` API and a `RemovalAcknowledgement::confirm` matching its mapping ID. These opaque types cannot be deserialized. The caller must present effects and obtain approval; the core does not prompt. Execution requires the matching lock, registered repository, clean journal history and a fresh independent plan-digest match.
+
+- **Apply:** one approved request becomes one recoverable transaction for all changed mappings, ordered by ID after deduplicated missing destination-parent operations (0700, parents before children). Correct links are untouched. Entirely correct/empty apply returns `None` without transaction storage or callbacks.
+- **Keep:** exchange the managed link for a regular copy preserving source bytes/mode/group, then exchange the manifest with a focused mapping removal. `toml_edit` preserves unrelated declarations/comments; full parse, host validation and semantic comparison verify the edit. Array-of-tables and inline file arrays are supported.
+- **Remove:** withdraw the correct managed link into private storage with a no-replace rename, then remove its manifest mapping. No source is deleted.
+- **Guards:** all selected source entries remain immutable watches, including no-op mappings and resolved platform overrides. Manifest/configuration, destination, parent, stage and backup guards are rechecked around mutations/inverses. Any affected guard mismatch blocks the whole rollback preflight; unrelated edits outside created directories are retained.
+
+The prototype caps a request at 128 selected mappings and 256 operations. Checked reads/checkpoints are at most 16 MiB; bounded history scans and no garbage collector remain limitations. Individual renames are atomic, not the request as a whole; failures retain durable intent and never auto-undo.
 
 ## Journal schema 1 and recovery contracts
 
@@ -113,6 +125,18 @@ Each transaction uses a unique 64-hex ID under its stable local repository ID. D
 - Payload schema/sequence/previous-checksum binding; repository/root/transaction IDs; approved-plan digest; mapping, profiles and input/parent fingerprints; backup hashes; ordered operation IDs, progress and observed postconditions.
 - Private, synced, hash-verified `manifest.backup` and `destination.backup` byte copies.
 - `op-0000`, … prepared objects or retained originals. Source-parent operations precede source publication, manifest exchange and destination exchange.
+
+## Journal schema 2
+
+Schema 2 is a separate wire format, not a reinterpretation/migration of schema-1 adoption records. Both live under the same repository/transaction layout and use the same immutable checksummed envelope/chain convention. Its header binds repository/root/transaction IDs, approved-plan digest, action (`apply`, `keep`, `remove`), separate removal acknowledgement, profiles, original manifest/configuration, ordered mapping/source/destination watches, parent anchors and verified backup specifications.
+
+Operations bind contiguous IDs, roles (`directory`, `destination`, `manifest`), mutation (`publish`, `exchange`, `withdraw`), preconditions, prepared entries, progress and observed postconditions. Scope/order is reconstructed from the header and independently bound to the original validated manifest and host protections before recovery. Source paths cannot become mutation targets.
+
+`backup-0000`, … stores byte copies of replaced regular files/manifests or exact raw symlink target text, with bound hashes and 0600 private access. `op-0000`, … stores prepared objects/retained originals. Publish uses no-replace; exchange retains the original; withdraw moves the link into an initially absent private slot with no-replace (its inverse republishes it). Both directories are synced. Directory operations precede apply links; unmanage changes the destination before removing the mapping.
+
+The reader dispatches by the first checkpoint's schema hint, then independently verifies the entire chain, immutable operation identities, format-specific scope/order/progress, backup bindings and known artifacts. The hint is never authorization. Unsupported versions and corrupted/torn tails fail closed, even with a valid earlier prefix. Schema-1 reading and `adoption::rollback` stay supported; `lifecycle::rollback` handles schema 2. No format is rewritten on read.
+
+## Shared durability and recovery
 
 Transaction phases:
 
@@ -126,7 +150,9 @@ Preparing can only change private transaction storage. Running operations progre
 
 A torn final checkpoint never overwrites an earlier record. Gaps, malformed/truncated records, unsupported schemas, bad checksum chains, invalid transitions/bindings and damaged backups fail closed. Diagnosis may report the valid prefix but cannot silently discard an invalid tail. Checksums detect corruption, not malicious-owner forgery. Checkpoints contain metadata/hashes, never file contents or local variable values. Backups are not encrypted; secret deployment is unsupported.
 
-Rollback requires an explicit transaction ID and matching application lock. It preflights all affected paths, parents, prepared objects and linked-source content, then rechecks around inverses. Recognizable interrupted atomic renames can be resolved from retained identity/content; uncertain states are refused. Source edits, substituted files/parents, extra entries in created directories and corrupt backups stop recovery without overwriting user work. Rollback itself is checkpointed and restartable. Completed adoption can also be explicitly rolled back if its guards still match.
+Rollback requires an explicit transaction ID and matching application lock. It preflights all affected paths, parents, prepared objects and linked-source content, then rechecks around inverses. Recognizable interrupted atomic renames can be resolved from retained identity/content; uncertain states are refused. Source edits, substituted files/parents, extra entries in created directories and corrupt backups stop recovery without overwriting user work. Rollback itself is checkpointed and restartable. Completed transactions can also be explicitly rolled back if their guards still match. Schema-2 inverses handle publication/exchange/withdrawal without writing repository sources. A later transaction or editor can invalidate an older transaction's guards; history does not promise arbitrary undo order.
+
+`lifecycle::history`/`journal::diagnose` expose content-free retained history across both schemas. `Diagnosis.journal_schema` reports the last fully validated record's schema (or null), not an unverified dispatch hint. `recovery list` presents this metadata without acquiring a writer lock or reading live source content. Diagnosis checks journal integrity, not current live drift; completed history does not establish that rollback is still safe.
 
 No automatic recovery, garbage collection or transaction-history migration is implemented. Retained originals, backups and copied sources are not deleted after rollback. Malformed histories require manual diagnosis/repair rather than speculative execution.
 
@@ -134,6 +160,6 @@ No automatic recovery, garbage collection or transaction-history migration is im
 
 The CLI emits reports on stdout and errors on stderr, with optional JSON. Exit codes are 0 success, 1 I/O, 2 invalid input/configuration/host, 3 lock contention, and 4 a blocked plan or blocking recovery diagnosis. No file contents should enter logs or reports.
 
-Integration tests use disposable canonicalized homes and isolated child environments. They cover pure planning, no-write CLI behaviour, unsafe paths/races, malformed state, approvals, guarded rollback, every exposed checkpoint/post-mutation error boundary, and process exits/lock release. These tests do **not** establish real power-loss or filesystem fault-injection guarantees.
+Integration tests use disposable canonicalized homes and isolated child environments. They cover pure planning, no-write CLI behaviour, unsafe paths/races, malformed state, approvals, guarded rollback, every exposed checkpoint/post-mutation error boundary, forward/inverse lifecycle process exits/lock release, no-journal repeated apply, batch/shared-parent execution, source preservation, separate removal acknowledgement and schema-1 compatibility. These tests do **not** establish real power-loss or filesystem fault-injection guarantees.
 
 CI is configured for Ubuntu and macOS on both architectures; local test success is not evidence every remote runner passed. See [README.md](README.md#development) for current validation and [AGENTS.md](AGENTS.md) for required checks. Maintain this document when these boundaries, flows, persistence formats or guarantees change.

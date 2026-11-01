@@ -408,7 +408,7 @@ pub fn plan(snapshot: Snapshot) -> Plan {
         }
         files.push(result);
     }
-    Plan { schema: 1, preview_only: true, inputs: snapshot, files, warnings: vec!["Preview only: no executor, backups or journals exist yet. A future executor must lock, re-observe and invalidate stale approval before writing.".into(), "Backups must be durable and transaction intent persisted before destructive effects. Adoption's source copy, manifest edit and link replacement are one recoverable transaction, not independent writes.".into(), "Sensitivity checks are heuristic. Review content privately before adoption; no file contents are printed. Unmanage always retains the repository source.".into()] }
+    Plan { schema: 1, preview_only: true, inputs: snapshot, files, warnings: vec!["Preview only: planning creates no backups or journals. Core execution requires explicit approval, the writer lock and independent re-observation.".into(), "Backups must be durable and transaction intent persisted before destructive effects. Adoption's source copy, manifest edit and link replacement are one recoverable transaction, not independent writes.".into(), "Sensitivity checks are heuristic. Review content privately before adoption; no file contents are printed. Unmanage always retains the repository source.".into()] }
 }
 
 impl Plan {

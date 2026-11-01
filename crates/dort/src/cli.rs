@@ -213,10 +213,11 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
             } else {
                 for transaction in &transactions {
                     println!(
-                        "{} / {}: {:?} ({} valid checkpoints)",
+                        "{} / {}: {:?} (journal schema {:?}; {} valid checkpoints)",
                         transaction.repository_id,
                         transaction.transaction_id,
                         transaction.phase,
+                        transaction.journal_schema,
                         transaction.valid_checkpoints
                     );
                     if let Some(problem) = &transaction.problem {

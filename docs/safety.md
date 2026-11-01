@@ -51,7 +51,11 @@ dort --json recovery list
 
 This command never creates state, takes a write lock, repairs records or changes files. Exit 4 means at least one incomplete or malformed transaction is a blocker for subsequent core writes, not that recovery has occurred.
 
-Core adoption is experimental. Its private journal retains immutable checksummed checkpoints, verified backups and prepared/original objects. It requires repository, destination and state on one filesystem with atomic rename support. Ordinary backups are **not encrypted**. Individual operations are atomic; the full multi-path transaction is not.
+Core adoption, link apply and unmanage are experimental, with no CLI write interface. Their private journals retain immutable checksummed checkpoints, verified backups and prepared/original objects. Schema 1 remains adoption-specific; schema 2 covers apply/unmanage, without migrating existing records. They require repository/sources, destinations and state on one filesystem with atomic rename support. Ordinary backups are **not encrypted**. Individual operations are atomic; the full multi-path transaction is not.
+
+Apply groups all changed mappings from one approved request into a single recoverable transaction; repeated correct apply creates no transaction. Unmanage keeps repository sources and changes the destination before removing the mapping. Core removal needs a separate matching acknowledgement. These prototypes support at most 128 selected mappings and 256 operations per request.
+
+`recovery list` includes retained completed transactions and the last validated journal schema. A completed journal is not proof that live files are unchanged or that rollback is still safe. The command never reads live source content to establish those guards.
 
 If a transaction is incomplete:
 
@@ -60,7 +64,7 @@ If a transaction is incomplete:
 3. Seek maintainer assistance. There is no end-user recovery write command yet.
 4. Do not delete the journal, remove the lock inode or edit checksums to make a blocker disappear. A truncated tail must not be silently discarded.
 
-Rollback is explicit and core-only. It refuses changed sources (including edits through a live link), destinations, parents, prepared objects, unexpected files in created directories or corrupted backups rather than overwriting user work. A malformed record requires manual diagnosis/repair, not speculative replay. There is no automatic startup rollback or garbage collector.
+Rollback is explicit and core-only, through the API corresponding to the journal schema. Apply/unmanage watch all selected sources, including no-op mappings, without writing them. Rollback preflights the entire transaction and refuses changed sources (including edits through a live link), destinations, parents, prepared objects, unexpected files in created directories or corrupted backups rather than overwriting user work. A malformed record requires manual diagnosis/repair, not speculative replay. There is no automatic startup rollback or garbage collector.
 
 The application lock coordinates Dort writers only, not editors or malicious same-user processes. No-follow access is not full filesystem isolation. Tests use disposable homes and process exits at durable boundaries; they do not establish real power-loss safety.
 

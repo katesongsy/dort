@@ -17,10 +17,10 @@ Dort helps describe a development environment in a Git repository. **The current
 | Discover hidden configuration metadata | Yes: `files discover`. |
 | Inspect declared active files | Yes: `files list`. |
 | Preview links, adoption and unmanage effects | Yes: `files plan …`; no changes are made. |
-| Diagnose local transactions | Yes: `recovery list`; never replays or repairs them. |
+| Inspect retained transaction history/integrity | Yes: `recovery list` supports both journal formats; never replays or repairs them. |
 | Install tools, deploy/adopt/unmanage files or recover through the CLI | Not yet. |
 | Templates, secrets, Git clone/sync or a TUI | Not yet. |
 
-An experimental adoption/rollback API exists for core developers, not as a supported end-user write workflow. Do not bypass CLI limits to manage your real configuration.
+Experimental adoption, link apply, unmanage and rollback/history APIs exist for core developers, not as supported end-user write workflows. Do not bypass CLI limits to manage your real configuration.
 
 For project status, see [README](../README.md). Internals are in [ARCHITECTURE.md](../ARCHITECTURE.md); contributor instructions are in [AGENTS.md](../AGENTS.md). [CHANGLOG.md](../CHANGLOG.md) records committed history and is not a list of uncommitted work.

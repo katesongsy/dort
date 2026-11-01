@@ -113,6 +113,8 @@ pub struct Diagnosis {
     pub repository_id: String,
     pub transaction_id: String,
     pub phase: Option<Phase>,
+    /// Last fully validated checkpoint schema, not an untrusted dispatch hint.
+    pub journal_schema: Option<u32>,
     pub valid_checkpoints: usize,
     pub problem: Option<String>,
 }
@@ -457,6 +459,7 @@ fn scan(
     let mut diagnosis = Diagnosis {
         repository_id: repository_id.into(),
         transaction_id: transaction_id.into(),
+        journal_schema: None,
         phase: None,
         valid_checkpoints: 0,
         problem: None,
@@ -519,6 +522,7 @@ fn scan(
             }
             diagnosis.valid_checkpoints += 1;
             diagnosis.phase = Some(record.phase);
+            diagnosis.journal_schema = Some(record.schema);
             hash = Some(envelope.sha256);
             latest = Some(record);
         }
@@ -571,6 +575,7 @@ pub fn diagnose(host: &HostContext) -> Result<Vec<Diagnosis>> {
                 reports.push(Diagnosis {
                     repository_id: id.into(),
                     transaction_id: "<invalid name>".into(),
+                    journal_schema: None,
                     phase: None,
                     valid_checkpoints: 0,
                     problem: Some("unknown transaction entry".into()),
@@ -578,10 +583,17 @@ pub fn diagnose(host: &HostContext) -> Result<Vec<Diagnosis>> {
                 continue;
             };
             match PrivateDir::open(&path.join(txid), false) {
-                Ok(Some(directory)) => reports.push(scan(&directory, id, txid).0),
+                Ok(Some(directory)) => {
+                    reports.push(if crate::lifecycle_journal::is_schema2(&directory) {
+                        crate::lifecycle_journal::scan(&directory, id, txid).0
+                    } else {
+                        scan(&directory, id, txid).0
+                    })
+                }
                 _ => reports.push(Diagnosis {
                     repository_id: id.into(),
                     transaction_id: txid.into(),
+                    journal_schema: None,
                     phase: None,
                     valid_checkpoints: 0,
                     problem: Some("unsafe transaction directory".into()),
