@@ -1,7 +1,7 @@
 //! Read-only, descriptor-relative filesystem snapshots. No symlinked parent is followed.
 use crate::{Error, Result, context::validate_absolute, error::io_error};
 use rustix::fs::{self, AtFlags, FileType, Mode, OFlags};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeSet,
@@ -18,7 +18,8 @@ const DIRECTORY_FLAGS: OFlags = OFlags::RDONLY
     .union(OFlags::NOFOLLOW)
     .union(OFlags::CLOEXEC);
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Fingerprint {
     pub device: u64,
     pub inode: u64,
@@ -33,7 +34,7 @@ pub struct Fingerprint {
 
 impl Fingerprint {
     #[allow(clippy::unnecessary_cast)] // stat field widths differ across Unix platforms.
-    fn from_stat(s: &fs::Stat) -> Self {
+    pub(crate) fn from_stat(s: &fs::Stat) -> Self {
         Self {
             device: s.st_dev as u64,
             inode: s.st_ino as u64,
@@ -48,7 +49,7 @@ impl Fingerprint {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     Missing,
@@ -58,13 +59,15 @@ pub enum Kind {
     Special,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Parent {
     pub path: PathBuf,
     pub fingerprint: Fingerprint,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Entry {
     pub path: PathBuf,
     pub kind: Kind,
@@ -76,14 +79,14 @@ pub struct Entry {
     pub sensitive: bool,
 }
 
-struct ParentHandle {
-    directory: File,
-    name: OsString,
-    parents: Vec<Parent>,
-    missing: bool,
+pub(crate) struct ParentHandle {
+    pub(crate) directory: File,
+    pub(crate) name: OsString,
+    pub(crate) parents: Vec<Parent>,
+    pub(crate) missing: bool,
 }
 
-fn parent_handle(path: &Path) -> Result<ParentHandle> {
+pub(crate) fn parent_handle(path: &Path) -> Result<ParentHandle> {
     validate_output_path(path)?;
     let name = path
         .file_name()
@@ -210,7 +213,11 @@ pub fn inspect(path: &Path, hash: bool) -> Result<Entry> {
 
 use std::os::unix::ffi::OsStringExt;
 
-fn read_checked(handle: &ParentHandle, path: &Path, expected: &Fingerprint) -> Result<Vec<u8>> {
+pub(crate) fn read_checked(
+    handle: &ParentHandle,
+    path: &Path,
+    expected: &Fingerprint,
+) -> Result<Vec<u8>> {
     if expected.size < 0 || expected.size as u64 > MAX_CONTENT {
         return Err(Error::Invalid(
             "file exceeds the 16 MiB observation limit".into(),

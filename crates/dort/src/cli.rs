@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use dort_core::{
     Error, Manifest,
     context::HostContext,
-    discovery,
+    discovery, journal,
     local::LocalConfig,
     model::{FileMode, ManagedFile},
     planner::{self, Request, UnmanageMode},
@@ -37,11 +37,22 @@ enum Command {
         #[command(subcommand)]
         command: FilesCommand,
     },
+    /// Read-only transaction diagnosis. Never replays or rolls back a transaction.
+    Recovery {
+        #[command(subcommand)]
+        command: RecoveryCommand,
+    },
     /// Read-only manifest diagnostics.
     Manifest {
         #[command(subcommand)]
         command: ManifestCommand,
     },
+}
+
+#[derive(Subcommand)]
+enum RecoveryCommand {
+    /// List all local transaction checkpoints, integrity problems and write blockers.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -183,6 +194,41 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                     "Registered repositories: {}",
                     report.registered_repositories
                 );
+            }
+        }
+        Command::Recovery {
+            command: RecoveryCommand::List,
+        } => {
+            if cli.repo.is_some() {
+                return Err(Error::Invalid(
+                    "recovery list inspects all local repositories; omit --repo".into(),
+                ));
+            }
+            let transactions = journal::diagnose(&host)?;
+            let write_blocked = transactions.iter().any(journal::Diagnosis::blocks_writes);
+            if cli.json {
+                print_json(
+                    &serde_json::json!({"schema": 1, "read_only": true, "write_blocked": write_blocked, "transactions": transactions}),
+                )?;
+            } else {
+                for transaction in &transactions {
+                    println!(
+                        "{} / {}: {:?} ({} valid checkpoints)",
+                        transaction.repository_id,
+                        transaction.transaction_id,
+                        transaction.phase,
+                        transaction.valid_checkpoints
+                    );
+                    if let Some(problem) = &transaction.problem {
+                        println!("  BLOCKED: {problem}");
+                    }
+                }
+                println!(
+                    "Read-only diagnosis; writes blocked: {write_blocked}. Recovery is explicit and currently core-API only."
+                );
+            }
+            if write_blocked {
+                return Ok(ExitCode::from(4));
             }
         }
         Command::Files { command } => {

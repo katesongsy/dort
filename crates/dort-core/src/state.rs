@@ -1,4 +1,4 @@
-//! Descriptor-relative local state access. This is not a live-dotfile deployment engine.
+//! Descriptor-relative private local state access and application writer locking.
 use crate::{
     Error, Result,
     context::{HostContext, validate_absolute},
@@ -14,8 +14,8 @@ use std::{
 };
 
 pub(crate) struct PrivateDir {
-    file: File,
-    path: PathBuf,
+    pub(crate) file: File,
+    pub(crate) path: PathBuf,
 }
 
 impl PrivateDir {
@@ -76,7 +76,7 @@ impl PrivateDir {
         }))
     }
 
-    fn check_file(&self, file: &File, name: &str) -> Result<()> {
+    pub(crate) fn check_file(&self, file: &File, name: &str) -> Result<()> {
         let metadata = file
             .metadata()
             .map_err(|e| io_error("inspect state file", self.path.join(name), e))?;
@@ -110,6 +110,31 @@ impl PrivateDir {
         file.read_to_string(&mut text)
             .map_err(|e| io_error("read state file", self.path.join(name), e))?;
         Ok(Some(text))
+    }
+
+    /// Publish a new immutable file; never overwrite an earlier checkpoint or backup.
+    pub(crate) fn create(&self, name: &str, content: &[u8]) -> Result<()> {
+        let mut file = File::from(
+            fs::openat(
+                &self.file,
+                name,
+                OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::RUSR | Mode::WUSR,
+            )
+            .map_err(|e| io_error("create immutable state file", self.path.join(name), e))?,
+        );
+        self.check_file(&file, name)?;
+        file.write_all(content)
+            .map_err(|e| io_error("write immutable state file", self.path.join(name), e))?;
+        file.sync_all()
+            .map_err(|e| io_error("sync immutable state file", self.path.join(name), e))?;
+        self.sync()
+    }
+
+    pub(crate) fn sync(&self) -> Result<()> {
+        self.file
+            .sync_all()
+            .map_err(|e| io_error("sync private directory", &self.path, e))
     }
 
     pub(crate) fn replace(&self, name: &str, content: &str) -> Result<()> {

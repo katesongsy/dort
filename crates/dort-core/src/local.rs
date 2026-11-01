@@ -122,6 +122,7 @@ pub struct RepositoryRegistry;
 impl RepositoryRegistry {
     pub fn register(host: &HostContext, lock: &WriterLock, root: &Path) -> Result<String> {
         lock.check_context(host)?;
+        crate::journal::ensure_writable(host)?;
         let root = inspect_repository(host, root)?;
         let mut config = LocalConfig::load(host)?;
         let id = config
@@ -141,6 +142,7 @@ impl RepositoryRegistry {
     /// Preserve the state ID after a deliberate move. Refuse forks or missing manifests.
     pub fn relocate(host: &HostContext, lock: &WriterLock, id: &str, root: &Path) -> Result<()> {
         lock.check_context(host)?;
+        crate::journal::ensure_writable(host)?;
         let mut config = LocalConfig::load(host)?;
         let old = config
             .repositories

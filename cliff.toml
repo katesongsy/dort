@@ -1,0 +1,52 @@
+# Generated history is maintained with git-cliff 2.14.2 via scripts/changelog.sh.
+[changelog]
+header = """
+# Changelog
+
+Generated with git-cliff from committed Git history. Do not edit entries by hand.
+Uncommitted changes are not included. Untagged history appears under Unreleased.
+
+"""
+body = """
+{% if version %}\
+## {{ version }} — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## Unreleased
+{% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group }}
+{% for commit in commits %}
+- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | split(pat="\n") | first }} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/katesongsy/dort/commit/{{ commit.id }}))
+{% endfor %}
+{% endfor %}
+"""
+trim = true
+render_always = true
+postprocessors = [
+    { pattern = '\n{3,}', replace = "\n\n" },
+    { pattern = '\n+\z', replace = "\n" },
+]
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+require_conventional = false
+split_commits = false
+protect_breaking_commits = true
+commit_preprocessors = []
+commit_parsers = [
+    # Keep generated-only maintenance commits out of their own generated history.
+    { message = "^chore\\(changelog\\):", skip = true },
+    { message = "^chore\\(release\\):", skip = true },
+    { message = "^feat", group = "Features" },
+    { message = "^(Add secure read-only|Implement read-only)", group = "Features" },
+    { message = "^fix", group = "Fixes" },
+    { message = "^(docs?|Add initial README)", group = "Documentation" },
+    { message = "^test", group = "Tests" },
+    { message = "^refactor", group = "Refactoring" },
+    { message = "^perf", group = "Performance" },
+    { message = ".*", group = "Maintenance" },
+]
+filter_commits = false
+tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"
+sort_commits = "newest"

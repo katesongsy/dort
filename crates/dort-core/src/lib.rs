@@ -1,11 +1,13 @@
-//! Shared, UI-independent models, secure read-only observation and pure previews.
-//! Live deployment and recovery execution are deliberately not implemented yet.
+//! UI-independent observation/planning and experimental recoverable one-file adoption.
+//! Public CLI writes, general deployment and external package work remain deferred.
 #[cfg(not(unix))]
 compile_error!("Dort currently supports macOS and Ubuntu only.");
 
+pub mod adoption;
 pub mod context;
 pub mod discovery;
 pub mod error;
+pub mod journal;
 pub mod local;
 pub mod manifest;
 pub mod model;

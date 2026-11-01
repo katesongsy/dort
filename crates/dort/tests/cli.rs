@@ -351,6 +351,68 @@ fn plan_profile_selection_and_readonly_help_are_explicit() {
 }
 
 #[test]
+fn recovery_diagnosis_is_read_only_and_never_exposes_replay_commands() {
+    let sandbox = Sandbox::new();
+    let output = sandbox
+        .command()
+        .args(["--json", "recovery", "list"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["read_only"], true);
+    assert_eq!(report["write_blocked"], false);
+    assert_eq!(report["transactions"].as_array().unwrap().len(), 0);
+    sandbox
+        .command()
+        .args(["recovery", "rollback"])
+        .assert()
+        .code(2);
+    sandbox.assert_readonly();
+}
+
+#[test]
+fn malformed_transaction_diagnosis_retains_intent_and_redacts_record_contents() {
+    let sandbox = Sandbox::new();
+    let state = sandbox.home.join(".local/state/dort");
+    let tx = state
+        .join("repositories")
+        .join("a".repeat(64))
+        .join("transactions")
+        .join("b".repeat(64));
+    fs::create_dir_all(&tx).unwrap();
+    for directory in tx.ancestors().take_while(|p| p.starts_with(&state)) {
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let checkpoint = tx.join("000000.json");
+    fs::write(&checkpoint, b"MALFORMED-SENSITIVE-SENTINEL").unwrap();
+    fs::set_permissions(&checkpoint, fs::Permissions::from_mode(0o600)).unwrap();
+    let output = sandbox
+        .command()
+        .args(["--json", "recovery", "list"])
+        .assert()
+        .code(4)
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["write_blocked"], true);
+    assert_eq!(report["transactions"][0]["valid_checkpoints"], 0);
+    assert!(
+        !String::from_utf8(output)
+            .unwrap()
+            .contains("MALFORMED-SENSITIVE-SENTINEL")
+    );
+    assert_eq!(
+        fs::read(checkpoint).unwrap(),
+        b"MALFORMED-SENSITIVE-SENTINEL"
+    );
+    assert!(!state.join("lock").exists());
+}
+
+#[test]
 fn malformed_local_configuration_does_not_leak_variable_values() {
     let sandbox = Sandbox::new();
     let config = sandbox.home.join(".config/dort");
