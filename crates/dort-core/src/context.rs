@@ -74,7 +74,7 @@ impl HostContext {
         self.config_dir.join("local.toml")
     }
 
-    /// Lexical validation only; descriptor-safe live-file inspection is a later slice.
+    /// Lexical validation only; live reads must also use `observation`'s no-follow boundary.
     pub fn target_path(&self, target: &Path, repository: Option<&Path>) -> Result<PathBuf> {
         let path = if let Ok(suffix) = target.strip_prefix("~") {
             self.home.join(suffix)

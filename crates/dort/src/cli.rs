@@ -1,6 +1,12 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use dort_core::{
-    Error, Manifest, context::HostContext, local::LocalConfig, model::FileMode, profiles::selected,
+    Error, Manifest,
+    context::HostContext,
+    discovery,
+    local::LocalConfig,
+    model::{FileMode, ManagedFile},
+    planner::{self, Request, UnmanageMode},
+    profiles::selected,
 };
 use serde::Serialize;
 use std::{collections::BTreeSet, path::PathBuf, process::ExitCode};
@@ -8,7 +14,7 @@ use std::{collections::BTreeSet, path::PathBuf, process::ExitCode};
 #[derive(Parser)]
 #[command(
     version,
-    about = "Git-native developer environment manager (read-only foundation)",
+    about = "Git-native developer environment manager (read-only observation and planning)",
     arg_required_else_help = true
 )]
 struct Cli {
@@ -26,6 +32,11 @@ struct Cli {
 enum Command {
     /// Show supported host and local state locations without creating them.
     Doctor,
+    /// Read-only discovery, inventory and previews. No file mutation commands exist yet.
+    Files {
+        #[command(subcommand)]
+        command: FilesCommand,
+    },
     /// Read-only manifest diagnostics.
     Manifest {
         #[command(subcommand)]
@@ -44,6 +55,53 @@ enum ManifestCommand {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum FilesCommand {
+    /// Discover hidden files and .config metadata; never read candidate contents.
+    Discover,
+    /// Inspect active manifest mappings (no tool execution).
+    List {
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
+    /// Preview only; no writes, approvals, backups or journals are performed.
+    Plan {
+        #[arg(long = "profile", global = true)]
+        profiles: Vec<String>,
+        #[command(subcommand)]
+        command: PlanCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum PlanCommand {
+    /// Preview active link mappings.
+    Apply,
+    /// Preview regular-file adoption as one source/manifest/destination transaction.
+    Adopt {
+        /// Absolute or ~/ path; quote ~ when it must be expanded by Dort.
+        target: PathBuf,
+        #[arg(long)]
+        id: String,
+        /// New repository-relative source path; must not already exist.
+        #[arg(long)]
+        source: PathBuf,
+    },
+    /// Preview removal of a mapping; repository source is always retained.
+    Unmanage {
+        id: String,
+        /// Keep materializes an ordinary file; remove deletes the managed link.
+        #[arg(long, value_enum)]
+        mode: RemovalMode,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum RemovalMode {
+    Keep,
+    Remove,
 }
 
 #[derive(Serialize)]
@@ -76,7 +134,7 @@ pub fn run() -> ExitCode {
         .with_target(false)
         .init();
     match execute(&cli) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(error) => {
             let (code, kind) = match &error {
                 Error::Io { .. } => (1, "io"),
@@ -99,7 +157,7 @@ pub fn run() -> ExitCode {
     }
 }
 
-fn execute(cli: &Cli) -> dort_core::Result<()> {
+fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
     let host = HostContext::from_env()?;
     // Read only; missing configuration uses defaults without creating directories.
     let local = LocalConfig::load(&host)?;
@@ -125,6 +183,102 @@ fn execute(cli: &Cli) -> dort_core::Result<()> {
                     "Registered repositories: {}",
                     report.registered_repositories
                 );
+            }
+        }
+        Command::Files { command } => {
+            match command {
+                FilesCommand::Discover => {
+                    // Discovery does not require an active repository.
+                    let root = if cli.repo.is_some() || local.active_repository.is_some() {
+                        Some(local.select_repository(cli.repo.as_deref())?)
+                    } else {
+                        None
+                    };
+                    let report = discovery::discover(&host, root.as_deref())?;
+                    if cli.json {
+                        print_json(&report)?;
+                    } else {
+                        for candidate in &report.candidates {
+                            println!(
+                                "{}: {:?}, adoption candidate: {}{}",
+                                candidate.entry.path.display(),
+                                candidate.entry.kind,
+                                candidate.supported_for_adoption,
+                                candidate
+                                    .link_state
+                                    .as_ref()
+                                    .map_or(String::new(), |state| format!(", link: {state:?}"))
+                            );
+                        }
+                        for warning in &report.warnings {
+                            println!("Warning: {warning}");
+                        }
+                        println!("{}", report.sensitivity_notice);
+                    }
+                }
+                FilesCommand::List { profiles } => {
+                    let root = local.select_repository(cli.repo.as_deref())?;
+                    let requested = requested_profiles(&local, profiles);
+                    let snapshot = planner::observe(&host, &root, &requested, Request::Apply)?;
+                    if cli.json {
+                        print_json(&snapshot)?;
+                    } else {
+                        for file in &snapshot.files {
+                            println!(
+                                "{}: {} -> {}",
+                                file.mapping.id,
+                                file.target_path.display(),
+                                file.source_path.display()
+                            );
+                            println!(
+                                "  Source: {:?}; destination: {:?}",
+                                file.source.as_ref().map(|f| &f.kind),
+                                file.destination.as_ref().map(|f| &f.kind)
+                            );
+                            for blocker in &file.blockers {
+                                println!("  BLOCKED: {blocker}");
+                            }
+                        }
+                        println!(
+                            "Read-only inventory; use files plan apply for safety/conflict decisions."
+                        );
+                    }
+                }
+                FilesCommand::Plan { profiles, command } => {
+                    let root = local.select_repository(cli.repo.as_deref())?;
+                    let requested = requested_profiles(&local, profiles);
+                    let request = match command {
+                        PlanCommand::Apply => Request::Apply,
+                        PlanCommand::Adopt { target, id, source } => Request::Adopt {
+                            mapping: ManagedFile {
+                                id: id.clone(),
+                                source: source.clone(),
+                                target: target.clone(),
+                                mode: FileMode::Link,
+                                profiles: vec!["base".into()],
+                                requires: vec![],
+                                overrides: Default::default(),
+                                permissions: None,
+                            },
+                        },
+                        PlanCommand::Unmanage { id, mode } => Request::Unmanage {
+                            id: id.clone(),
+                            mode: match mode {
+                                RemovalMode::Keep => UnmanageMode::Keep,
+                                RemovalMode::Remove => UnmanageMode::Remove,
+                            },
+                        },
+                    };
+                    let plan = planner::plan(planner::observe(&host, &root, &requested, request)?);
+                    if cli.json {
+                        print_json(&plan)?;
+                    } else {
+                        print!("{}", plan.human());
+                    }
+                    if plan.has_blockers() {
+                        return Ok(ExitCode::from(4));
+                    }
+                }
             }
         }
         Command::Manifest {
@@ -224,7 +378,16 @@ fn execute(cli: &Cli) -> dort_core::Result<()> {
             }
         }
     }
-    Ok(())
+    Ok(ExitCode::SUCCESS)
+}
+
+fn requested_profiles(local: &LocalConfig, requested: &[String]) -> Vec<String> {
+    local
+        .active_profiles
+        .iter()
+        .chain(requested)
+        .cloned()
+        .collect()
 }
 
 fn print_json(value: &impl Serialize) -> dort_core::Result<()> {

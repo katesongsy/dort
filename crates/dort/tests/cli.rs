@@ -182,6 +182,175 @@ fn unknown_profile_and_conflicting_selection_flags_are_errors() {
 }
 
 #[test]
+fn discovery_needs_no_repository_and_does_not_read_candidate_contents() {
+    let sandbox = Sandbox::new();
+    fs::write(sandbox.home.join(".zshrc"), "password=DO-NOT-PRINT").unwrap();
+    fs::create_dir(sandbox.home.join(".ssh")).unwrap();
+    fs::write(sandbox.home.join(".ssh/id_ed25519"), "DO-NOT-PRINT").unwrap();
+    let output = sandbox
+        .command()
+        .args(["--json", "files", "discover"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(json["candidates"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        json["candidates"][0]["entry"]["sha256"],
+        serde_json::Value::Null
+    );
+    assert!(!text.contains("DO-NOT-PRINT"));
+    assert!(!text.contains("id_ed25519"));
+    assert!(!sandbox.home.join(".config").exists());
+    assert!(!sandbox.home.join(".local").exists());
+}
+
+#[test]
+fn adoption_json_and_human_previews_do_not_write_any_files_or_print_contents() {
+    let sandbox = Sandbox::new();
+    let manifest = sandbox.manifest("schema=1\n");
+    let target = sandbox.home.join(".zshrc");
+    fs::write(&target, "ADOPTION-CONTENT-SENTINEL").unwrap();
+    let root = manifest.parent().unwrap();
+    let output = sandbox
+        .command()
+        .arg("--repo")
+        .arg(root)
+        .args(["--json", "files", "plan", "adopt"])
+        .arg(&target)
+        .args(["--id", "zshrc", "--source", "files/zshrc"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(json["preview_only"], true);
+    assert_eq!(json["schema"], 1);
+    assert_eq!(json["files"][0]["effects"][2]["action"], "copy_source");
+    assert!(!text.contains("ADOPTION-CONTENT-SENTINEL"));
+    let output = sandbox
+        .command()
+        .arg("--repo")
+        .arg(root)
+        .args(["files", "plan", "adopt"])
+        .arg(&target)
+        .args(["--id", "zshrc", "--source", "files/zshrc"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let human = String::from_utf8(output).unwrap();
+    assert!(human.contains("Backup"));
+    assert!(human.contains("AddMapping"));
+    assert!(human.contains("permissions"));
+    assert!(!human.contains("ADOPTION-CONTENT-SENTINEL"));
+    assert_eq!(fs::read_to_string(&manifest).unwrap(), "schema=1\n");
+    assert_eq!(
+        fs::read_to_string(target).unwrap(),
+        "ADOPTION-CONTENT-SENTINEL"
+    );
+    assert!(!root.join("files").exists());
+    assert!(!sandbox.home.join(".config").exists());
+    assert!(!sandbox.home.join(".local").exists());
+}
+
+#[test]
+fn blocked_preview_uses_exit_four_with_complete_json_on_stdout() {
+    let sandbox = Sandbox::new();
+    let manifest = sandbox.manifest(
+        "schema=1\n[[files]]\nid='zshrc'\nsource='missing'\ntarget='~/.zshrc'\nmode='link'\n",
+    );
+    let output = sandbox
+        .command()
+        .arg("--repo")
+        .arg(manifest.parent().unwrap())
+        .args(["--json", "files", "plan", "apply"])
+        .assert()
+        .code(4)
+        .get_output()
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["files"][0]["outcome"], "blocked");
+    assert!(json["files"][0]["effects"].as_array().unwrap().is_empty());
+    assert!(output.stderr.is_empty());
+    sandbox.assert_readonly();
+}
+
+#[test]
+fn inventory_apply_noop_and_both_unmanage_modes_are_readonly() {
+    let sandbox = Sandbox::new();
+    let manifest = sandbox.manifest(
+        "schema=1\n[[files]]\nid='zshrc'\nsource='zshrc'\ntarget='~/.zshrc'\nmode='link'\n",
+    );
+    let root = manifest.parent().unwrap();
+    fs::write(root.join("zshrc"), "safe").unwrap();
+    let target = sandbox.home.join(".zshrc");
+    std::os::unix::fs::symlink(root.join("zshrc"), &target).unwrap();
+    for arguments in [
+        vec!["files", "list"],
+        vec!["files", "plan", "apply"],
+        vec!["files", "plan", "unmanage", "zshrc", "--mode", "keep"],
+        vec!["files", "plan", "unmanage", "zshrc", "--mode", "remove"],
+    ] {
+        let output = sandbox
+            .command()
+            .arg("--repo")
+            .arg(root)
+            .arg("--json")
+            .args(&arguments)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        if arguments.last() == Some(&"apply") {
+            assert_eq!(json["files"][0]["outcome"], "no_op");
+        }
+        if arguments.last() == Some(&"remove") {
+            assert_eq!(json["files"][0]["requires_removal_acknowledgement"], true);
+        }
+    }
+    assert!(target.is_symlink());
+    assert_eq!(fs::read_to_string(root.join("zshrc")).unwrap(), "safe");
+    assert!(!sandbox.home.join(".config").exists());
+    assert!(!sandbox.home.join(".local").exists());
+}
+
+#[test]
+fn plan_profile_selection_and_readonly_help_are_explicit() {
+    let sandbox = Sandbox::new();
+    let manifest = sandbox.manifest("schema=1\n[profiles]\navailable=['dev']\n");
+    sandbox
+        .command()
+        .arg("--repo")
+        .arg(manifest.parent().unwrap())
+        .args(["files", "plan", "apply", "--profile", "dev"])
+        .assert()
+        .success();
+    sandbox
+        .command()
+        .args(["files", "plan", "apply"])
+        .assert()
+        .code(2);
+    // No approval flags or actual mutation commands are exposed in this slice.
+    sandbox.command().args(["files", "apply"]).assert().code(2);
+    sandbox
+        .command()
+        .env_remove("HOME")
+        .args(["files", "plan", "--help"])
+        .assert()
+        .success();
+    sandbox.assert_readonly();
+}
+
+#[test]
 fn malformed_local_configuration_does_not_leak_variable_values() {
     let sandbox = Sandbox::new();
     let config = sandbox.home.join(".config/dort");
