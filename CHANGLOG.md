@@ -11,6 +11,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **cli:** add approved file lifecycle and recoverable repository bootstrap ([20ac569](https://github.com/katesongsy/dort/commit/20ac56918e73fb9e1efecf0ba5ff292dd336934d))
+
 - **git:** add hardened read-only status and diff inspection ([bb1b897](https://github.com/katesongsy/dort/commit/bb1b897d5e2fbab5c9aaab56a952fe117f328d4a))
 
 - **core:** add recoverable link apply and unmanage lifecycle ([5a2c015](https://github.com/katesongsy/dort/commit/5a2c015254935203e5e1520c4714e9d3615e81bf))
