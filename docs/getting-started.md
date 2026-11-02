@@ -83,6 +83,18 @@ Keep removes the mapping and materializes the source bytes at `.notesrc`; the re
 
 The demo remains for inspection; remove only that demo yourself when finished. On failure, stop and inspect `history`; never assume a failed write had no effects. See [explicit recovery](commands.md#explicit-recovery).
 
+## Optional: try the interactive interface
+
+In the same disposable demo shell, with terminal stdin/stdout/stderr:
+
+```sh
+demo_dort --dry-run tui
+```
+
+Overview, active Files and Recovery use the same services as the CLI. Press `?` for keys, `Tab` to switch views and `q` to exit. `a` previews apply; Enter cannot approve while `--dry-run` is set. After the keep step above, there are no active mappings; Recovery still shows retained history.
+
+To try interactive mutations, omit `--dry-run` **only within the disposable demo**. Review the scrollable preview, Enter, then type `yes`; deleting a managed link additionally asks for its exact ID first. Esc cancels before execution. q/Ctrl-C after approval waits for the write to finish. Plain terminal `dort` also opens the interface; explicit CLI commands remain available for init/adoption/Git and scripting. See [interactive keys](commands.md#interactive-interface).
+
 ## Use an existing environment repository
 
 ```sh

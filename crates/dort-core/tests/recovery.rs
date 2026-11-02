@@ -48,10 +48,15 @@ fn rollback_previews_are_readonly_tamper_checked_and_head_bound() {
     let a =
         recovery::Approval::from_preview(recovery::preview(&t.host, &id, &tid).unwrap()).unwrap();
     // Change only the journal head by interrupting an otherwise safe rollback.
-    lifecycle::rollback(&t.host, &lock, &id, &tid, |_| {
+    let interrupted =
+        recovery::Approval::from_preview(recovery::preview(&t.host, &id, &tid).unwrap()).unwrap();
+    let mut events = 0;
+    recovery::execute_with_observer(&t.host, &lock, interrupted, |_| {
+        events += 1;
         Err(Error::Invalid("stop".into()))
     })
     .unwrap_err();
+    assert_eq!(events, 1);
     assert!(recovery::execute(&t.host, &lock, a).is_err());
     let a =
         recovery::Approval::from_preview(recovery::preview(&t.host, &id, &tid).unwrap()).unwrap();

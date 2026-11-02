@@ -59,6 +59,16 @@ pub fn preview(host: &HostContext, repository_id: &str, transaction_id: &str) ->
 }
 
 pub fn execute(host: &HostContext, lock: &WriterLock, approval: Approval) -> Result<()> {
+    execute_with_observer(host, lock, approval, |_| Ok(()))
+}
+
+/// The same guarded dispatch with metadata-only progress. Observer errors retain intent.
+pub fn execute_with_observer(
+    host: &HostContext,
+    lock: &WriterLock,
+    approval: Approval,
+    observer: impl FnMut(&adoption::Event) -> Result<()>,
+) -> Result<()> {
     lock.check_context(host)?;
     let old = approval.0;
     let fresh = preview(host, &old.repository_id, &old.transaction_id)?;
@@ -71,14 +81,14 @@ pub fn execute(host: &HostContext, lock: &WriterLock, approval: Approval) -> Res
             lock,
             &fresh.repository_id,
             &fresh.transaction_id,
-            |_| Ok(()),
+            observer,
         ),
         2 => lifecycle::rollback(
             host,
             lock,
             &fresh.repository_id,
             &fresh.transaction_id,
-            |_| Ok(()),
+            observer,
         ),
         _ => unreachable!(),
     }

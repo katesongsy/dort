@@ -10,6 +10,14 @@ Known key/credential locations, caches, browsers and generated data are excluded
 
 Reports can contain personal paths, metadata and hashes. Review them privately before sharing. Do not use `sudo` or weaken permissions to bypass protection.
 
+## Terminal and interruption
+
+The TUI is not a separate safety engine. It consumes actual core previews/opaque approvals, requires literal `yes` (and a separate exact file ID for deletion), and preserves lock/fresh-guard checks. `--dry-run` disables confirmation, and terminals below 48×14 cannot approve. Metadata is escaped before rendering; no file bodies, local variable values or Git patches are displayed. Paths/IDs can still be private.
+
+Esc dismisses a preview/confirmation without writing. Once approved, the worker runs to completion: q/Ctrl-C asks to exit afterward, not to cancel a transaction. Input/render errors restore the terminal and wait for the worker before the process exits. There is no automatic undo, detached mutation, editor/shell suspension or startup recovery replay. Another process may invalidate a preview; execution must then refuse it rather than use stale inputs.
+
+Normal returns, handled terminal errors and panics attempt raw-mode/alternate-screen restoration. A disconnected terminal, SIGKILL or other forced termination cannot guarantee cleanup or completion. If the shell is left unusable, run `stty sane` in that shell and reopen the terminal if necessary. Then inspect `dort history`; do not delete journals, rerun blindly or assume a terminated write made no changes. A clean TUI exit is not proof that all operations succeeded; service errors remain visible in its scrollable error view (Esc dismisses; refresh Recovery afterward).
+
 ## Git inspection boundary
 
 `git status` and default `git diff` reports are metadata-only. Only explicitly adding `git diff --patch` discloses file content, which can include secrets. Patch escaping prevents terminal control injection; it does **not** redact credentials. Patches never enter Dort logs/errors/journals, but redirected output is your responsibility. Do not upload patches by default when reporting a problem.

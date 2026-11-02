@@ -9,11 +9,40 @@ Checks, discovery, inventory, plans, status, history and Git inspection are read
 - `--json`: structured reports on stdout; structured errors on stderr.
 - `--repo PATH`: override the selected environment directory for repository commands. It does not register the directory.
 - `--dry-run`: mutation preview only; never creates state/directories/locks/backups/journals or prompts. Read-only commands remain read-only regardless.
-- `--yes`: explicit write approval without prompting. Required for JSON/nonterminal writes; does not bypass guards.
+- `--yes`: explicit CLI write approval without prompting. Required for JSON/nonterminal writes; does not bypass guards. Not accepted by the TUI.
 - `--confirm-remove ID`: separate exact-ID acknowledgement for deleting a managed link with `files remove --mode remove`.
 - `--help`, `--version`: available without a configured HOME.
 
-Other commands require a supported host and HOME. No command starts a TUI. Do not rely on the working directory being auto-discovered as a repository; supply `--repo`.
+Other commands require a supported host and HOME. Terminal invocation without a subcommand opens the TUI; nonterminal invocation without a subcommand fails promptly with exit 2. Do not rely on the working directory being auto-discovered as a repository; use the selected repository or supply `--repo`.
+
+## Interactive interface
+
+```sh
+dort                       # terminal only; same as dort tui
+dort --repo /absolute/path/to/dotfiles tui
+dort --dry-run tui         # inspection/previews only; confirmation disabled
+```
+
+All three standard streams must be terminals. TUI entry rejects `--json`, `--yes` and `--confirm-remove`; no flags silently approve TUI writes. Use explicit CLI subcommands for automation. Startup observes only: it does not create missing configuration/state, acquire a lock or replay recovery. Without a repository, Overview explains `init PATH`; Recovery still diagnoses all retained local transactions. Init/attach, discovery/adoption, Git inspection and additional profile selection remain CLI-only.
+
+| Key | Action |
+| --- | --- |
+| `Tab`, `1`, `2`, `3`, `?` | Next view, Overview, Files, Recovery, Help. |
+| Up / Down | Select an active file or retained transaction. |
+| PgUp / PgDn | Scroll view details; in previews, scroll the report. |
+| `r` | Refresh read-only observations/history. |
+| `a` | Preview apply (Overview / Files). |
+| `k` / `d` | Preview unmanage-and-keep / delete managed link for the selected file. Both retain its repository source. |
+| `b` | Preview guarded schema-1/2 rollback of the selected transaction. |
+| `s` / `x` | Preview schema-3 bootstrap resume / abandon. Abandon retains published data/artifacts. |
+| Left / Right (preview) | Scroll long report lines horizontally. |
+| Enter (preview) | Open confirmation, unless blocked, dry-run or smaller than 48×14. |
+| Esc | Dismiss a preview, confirmation or error; no execution is started. |
+| `q` / Ctrl-C | Quit; an active worker finishes first. |
+
+Review the full scrollable preview before Enter. Type literal `yes` and Enter to execute. Deletion first requires its exact file ID in a separate acknowledgement, then `yes`; typing yes alone cannot delete a link. Execution independently revalidates under the same application lock as the CLI. Read-only inspection remains available while another process holds that lock. During work, Tab navigation, redraw/resize and exit requests stay responsive; only one service worker runs at a time.
+
+Esc does **not** interrupt an approved write. q/Ctrl-C requests exit after it finishes, including on a small screen. Input/render errors restore the terminal then wait for the worker; no write is detached or automatically rolled back. A failed write may leave durable partial effects: dismiss the error, refresh Recovery, and explicitly preview the appropriate recovery action. Panics restore the terminal where cleanup is possible; forced termination cannot guarantee this. See [terminal/interruption safety](safety.md#terminal-and-interruption).
 
 ## Initialization and approval
 
@@ -149,6 +178,8 @@ For schema 3, remove `--dry-run` and confirm (or add `--yes`) to resume or aband
 There is no automatic startup replay/rollback. Malformed chains, uncertain layouts, edited sources/destinations/parents or damaged backups require investigation, not a force flag. Do not discard damaged checkpoint tails. Recovery flags approve only a newly observed preview, not a saved JSON document.
 
 ## Output and exit codes
+
+The table below describes explicit CLI commands. A clean TUI exit returns 0 even if it displayed service/preview errors or write blockers; those stay in the interface. Fatal terminal failures return 1 (I/O), and a worker panic returns 2 after cleanup. If a worker fails while an exit request is waiting, the failure is instead emitted on stderr after restoration with its normal error code (1/2/3), not silently discarded. Do not use the TUI exit code as an automation success report.
 
 | Code | Meaning |
 | --- | --- |

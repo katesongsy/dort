@@ -1,6 +1,6 @@
 # Dort user guide
 
-Dort helps describe a development environment in a Git repository. The experimental CLI supports local initialization, regular-file adoption/link deployment, unmanage and guarded recovery after explicit approval. **Start with a disposable HOME**, not real dotfiles. Tool execution, templates, secrets, remote Git workflows and the TUI are not implemented.
+Dort helps describe a development environment in a Git repository. The experimental CLI supports local initialization, regular-file adoption/link deployment, unmanage and guarded recovery after explicit approval. A minimal interactive interface provides Overview, active Files, previews/approval/progress and Recovery over the same services. **Start with a disposable HOME**, not real dotfiles. Tool execution, templates, secrets and remote Git workflows are not implemented.
 
 ## Start here
 
@@ -23,7 +23,8 @@ Dort helps describe a development environment in a Git repository. The experimen
 | Adopt/deploy/unmanage regular-file links | Experimental: `files add`, `files apply`, `files remove`. |
 | Guarded rollback / bootstrap recovery | Experimental: `rollback`, `recovery resume` / `abandon`. |
 | Install tools or Git staging/commit/push | Not yet. |
-| Templates, secrets, Git clone/sync or a TUI | Not yet. |
+| Interactive Overview, Files/apply/unmanage and Recovery | Experimental: terminal `dort` or `dort tui`; [keys and limitations](commands.md#interactive-interface). |
+| Templates, secrets or Git clone/sync | Not yet. |
 
 Use `--dry-run` to inspect effects without writes, locks or prompts. Writes require terminal confirmation or `--yes`; JSON/nonterminal writes always need `--yes`. Destructive link deletion needs a separate exact-ID acknowledgement. These sandbox-tested prototypes are not a production deployment guarantee.
 

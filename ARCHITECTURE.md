@@ -9,11 +9,11 @@ Dort currently supports macOS and Ubuntu on x86_64/ARM64. It uses a Rust 2024 wo
 | Component | Responsibility | Current boundary |
 | --- | --- | --- |
 | `crates/dort-core` | Models, validation, profiles/graphs, local state, observation, discovery, planning, journals, experimental filesystem lifecycle/recovery | UI-independent; explicit host inputs; no package-manager execution. |
-| `crates/dort` | Clap commands, environment/platform boundary, repository selection, human/JSON presentation, exit codes | Read-only observation plus explicit terminal/flag approval for local bootstrap, file lifecycle and guarded recovery. |
+| `crates/dort` | Clap commands, Ratatui interface, environment/platform boundary, repository selection, presentation, exit codes | Shared core services and opaque approvals; terminal/flag approval for local bootstrap, file lifecycle and guarded recovery. |
 | `examples/` | Tracked manifest examples | Validation examples, not an installed environment or a deployable source tree. |
 | `docs/` | Tracked end-user guides | Document shipped commands, not internal implementation plans. |
 
-Tool installation/inventory, templates, secrets, Git staging/commit/push, cloning/sync and the TUI remain unimplemented. Core adoption/apply/unmanage executors are sandbox-tested prototypes, not production-ready general deployment.
+Tool installation/inventory, templates, secrets, Git staging/commit/push and cloning/sync remain unimplemented. The minimal TUI exposes active Files/apply/unmanage and Recovery; init, discovery/adoption and Git inspection remain CLI-only. Core adoption/apply/unmanage executors are sandbox-tested prototypes, not production-ready general deployment.
 
 ## Module map
 
@@ -36,12 +36,12 @@ All module paths below are under `crates/dort-core/src/`:
 | `recovery.rs` | Read-only schema-1/2 inverse-path previews, opaque tamper-checked approvals bound to the journal head, fresh guard checks and rollback dispatch. |
 | `error.rs` | Shared errors; callers decide presentation and exit status. |
 
-CLI routing and reports live in [crates/dort/src/cli.rs](crates/dort/src/cli.rs). Domain services do not depend on Clap, terminal rendering or CLI output.
+CLI routing and reports live in [crates/dort/src/cli.rs](crates/dort/src/cli.rs). [services.rs](crates/dort/src/services.rs) shares opaque file-approval construction and locked dispatch between CLI/TUI. [tui/](crates/dort/src/tui/) contains pure application/key state (`app.rs`), service actions (`actions.rs`), worker ownership/progress (`events.rs`) and Ratatui rendering (`views.rs`). Domain services do not depend on Clap, Ratatui, the TUI worker or CLI output.
 
 ## Read and plan flow
 
 ```text
-CLI arguments + environment
+CLI arguments / TUI action + environment
     → HostContext + private LocalConfig (read-only)
     → explicit --repo or locally selected registered root
     → manifest validation + effective profiles
@@ -185,10 +185,20 @@ The public rollback service first validates the schema-specific full scope/layou
 
 No automatic recovery, garbage collection or transaction-history migration is implemented. Retained originals, backups and copied sources are not deleted after rollback. Malformed histories require manual diagnosis/repair rather than speculative execution.
 
+## Minimal TUI execution and terminal lifecycle
+
+Terminal no-argument invocation and `tui` share one entry point, requiring terminal stdin/stdout/stderr and refusing JSON/automatic-approval flags. Host discovery remains at the application boundary; the TUI receives explicit host/repository/dry-run inputs. Missing selection is a read-only Overview state, not a bootstrap trigger. All-repository recovery diagnosis is independent of the selected file repository. TUI startup never replays history, creates state or acquires a lock.
+
+The render/input loop polls Crossterm on one thread. At most one owned standard-library worker performs observations, preview creation or approved execution; no asynchronous runtime or detached job exists. A bounded, nonblocking metadata-only progress channel may coalesce/drop display updates, but never stops the executor if the display goes away. The UI keeps processing input and resizing during work. Approvals consume the actual in-memory core preview, never serialized JSON. Source/configuration/parent/journal-head revalidation and locking remain inside the existing core service path. `recovery::execute_with_observer` forwards callbacks through the same schema-1/2 guarded dispatch; the original `execute` remains compatible.
+
+Previews have vertical/horizontal scrolling. Enter opens a literal-yes confirmation; remove first collects a separate exact-ID acknowledgement. Esc cancels only before execution; dry-run/blocked previews and layouts below 48×14 cannot approve. q/Ctrl-C during a worker requests exit after it finishes. Once approved, writes are not cooperatively stopped or automatically rolled back. Terminal input/render errors restore the terminal and join the worker before returning; a main-thread unwind also joins it. Worker panics exit through cleanup, rather than continuing to render after Ratatui's panic hook restored the terminal. Forced process termination cannot promise cleanup and may leave an incomplete journal requiring explicit recovery.
+
+A guard covers partial initialization, ordinary returns/errors and unwinding. Ratatui installs its panic-restoration hook. No external editor/shell suspension or background jobs are offered. Dynamic terminal metadata escapes control/non-ASCII characters, including bidi controls; no file bodies/local values/patches are rendered. Scrollable errors retain detailed diagnostics, while progress contains only transaction ID, boundary and sequence.
+
 ## Presentation, validation and known limits
 
 The CLI emits reports on stdout and errors on stderr, with optional JSON. Explicit mutation commands present previews in human mode, then require terminal confirmation or --yes; JSON/nonterminal writes require --yes and never prompt. Remove mode additionally requires an exact-ID flag or separate human-terminal typed acknowledgement. --dry-run returns only a preview, never creates state/locks/artifacts and never prompts. Status, plan, history, checks, discovery and Git inspection remain read-only. Successful mutation JSON reports schema/operation/completed/nullable transaction_id; errors may leave durable partial effects, so inspect history after failures. Exit codes are 0 success, 1 I/O, 2 invalid input/configuration/host, 3 lock contention, and 4 a blocked plan or blocking recovery diagnosis. No file contents should enter logs or ordinary reports; only an explicitly requested escaped Git patch report may disclose bounded content.
 
-Integration tests use disposable canonicalized homes and isolated child environments. They cover pure planning, no-write CLI behaviour, unsafe paths/races, malformed state, approvals, guarded rollback, every exposed checkpoint/post-mutation error boundary, forward/inverse lifecycle process exits/lock release, no-journal repeated apply, batch/shared-parent execution, source preservation, separate removal acknowledgement and schema-1 compatibility. CLI Git tests use deterministic fake executables and missing-Git cases, with no installed-tool requirement. Optional core real-Git fixtures skip explicitly when unavailable and cover no-write index/config/source identity, unusual paths, unborn/conflict/detached/worktree states, helper non-execution, filters/promisor refusal and explicit patch disclosure. Runner tests exercise stdout/stderr bounds, deadlines and descendant-held pipes. These tests do **not** establish real power-loss or filesystem fault-injection guarantees.
+Integration tests use disposable canonicalized homes and isolated child environments. They cover pure planning, no-write CLI behaviour, unsafe paths/races, malformed state, approvals, guarded rollback, every exposed checkpoint/post-mutation error boundary, forward/inverse lifecycle process exits/lock release, no-journal repeated apply, batch/shared-parent execution, source preservation, separate removal acknowledgement and schema-1 compatibility. CLI Git tests use deterministic fake executables and missing-Git cases, with no installed-tool requirement. Optional core real-Git fixtures skip explicitly when unavailable and cover no-write index/config/source identity, unusual paths, unborn/conflict/detached/worktree states, helper non-execution, filters/promisor refusal and explicit patch disclosure. Runner tests exercise stdout/stderr bounds, deadlines and descendant-held pipes. TUI tests cover small-layout and confirmation snapshots, cancellation/dry-run without state creation, exact-ID then yes approval, shared guarded apply/keep/remove/rollback/bootstrap-abandon, no-op apply, stale approval, lock contention, worker joining and responsive input. Local PTY checks additionally exercise no-argument/explicit entry, q/Ctrl-C, small-screen exit, cancellation, approved apply and terminal attributes/alternate-screen restoration after normal return, synthetic terminal error and panic; the child probe is test-only, not a production environment switch. These tests do **not** establish real power-loss or filesystem fault-injection guarantees.
 
 CI is configured for Ubuntu and macOS on both architectures; local test success is not evidence every remote runner passed. See [README.md](README.md#development) for current validation and [AGENTS.md](AGENTS.md) for required checks. Maintain this document when these boundaries, flows, persistence formats or guarantees change.

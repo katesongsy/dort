@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use dort_core::{
-    Error, Manifest, adoption, bootstrap,
+    Error, Manifest, bootstrap,
     context::HostContext,
-    discovery, git, journal, lifecycle,
+    discovery, git, journal,
     local::LocalConfig,
     model::{FileMode, ManagedFile},
     planner::{self, Request, UnmanageMode},
@@ -16,8 +16,7 @@ use std::{collections::BTreeSet, path::PathBuf, process::ExitCode};
 #[derive(Parser)]
 #[command(
     version,
-    about = "Git-native developer environment manager (experimental guarded file lifecycle)",
-    arg_required_else_help = true
+    about = "Git-native developer environment manager (experimental guarded file lifecycle)"
 )]
 struct Cli {
     /// Emit structured output; diagnostics remain on stderr.
@@ -36,11 +35,13 @@ struct Cli {
     #[arg(long, global = true)]
     confirm_remove: Option<String>,
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
 enum Command {
+    /// Open the interactive Overview, Files and Recovery interface (also the terminal default).
+    Tui,
     /// Create a local repository at an absent path, or attach an already-valid one.
     Init { path: PathBuf },
     /// Inspect active link state and blockers without writing.
@@ -259,12 +260,20 @@ pub fn run() -> ExitCode {
 }
 
 fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
+    let command = cli.command.as_ref().unwrap_or(&Command::Tui);
+    if matches!(command, Command::Tui) {
+        if cli.json || cli.yes || cli.confirm_remove.is_some() || !interactive(cli) {
+            return Err(Error::Invalid("TUI requires terminal stdin/stdout/stderr, without --json/--yes/--confirm-remove; use --help or an explicit CLI command".into()));
+        }
+        crate::tui::run(HostContext::from_env()?, cli.repo.clone(), cli.dry_run)?;
+        return Ok(ExitCode::SUCCESS);
+    }
     let host = HostContext::from_env()?;
     // Read only; missing configuration uses defaults without creating directories.
     let local = LocalConfig::load(&host)?;
     if cli.repo.is_some()
         && matches!(
-            &cli.command,
+            command,
             Command::Rollback { .. }
                 | Command::Recovery {
                     command: RecoveryCommand::Rollback { .. }
@@ -277,7 +286,8 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
             "recovery uses explicit repository/transaction IDs; omit --repo".into(),
         ));
     }
-    match &cli.command {
+    match command {
+        Command::Tui => unreachable!(),
         Command::Init { path } => {
             if cli.repo.is_some() {
                 return Err(Error::Invalid(
@@ -355,7 +365,7 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                 },
         } => {
             let action = if matches!(
-                &cli.command,
+                command,
                 Command::Recovery {
                     command: RecoveryCommand::Resume { .. }
                 }
@@ -798,7 +808,6 @@ fn file_operation(
         } => Some(id.clone()),
         _ => None,
     };
-    let is_adopt = matches!(&request, Request::Adopt { .. });
     let plan = planner::plan(planner::observe(host, &root, &requested, request)?);
     if !write || cli.dry_run || plan.has_blockers() {
         if cli.json {
@@ -833,22 +842,8 @@ fn file_operation(
         ));
     }
     approve(cli)?;
-    let tid = if is_adopt {
-        let approval = adoption::Approval::from_plan(plan)?;
-        let lock = WriterLock::acquire(host)?;
-        Some(adoption::execute(host, &lock, approval, |_| Ok(()))?)
-    } else {
-        let approval = if let Some(id) = removal {
-            lifecycle::Approval::from_removal_plan(
-                plan,
-                lifecycle::RemovalAcknowledgement::confirm(id),
-            )?
-        } else {
-            lifecycle::Approval::from_plan(plan)?
-        };
-        let lock = WriterLock::acquire(host)?;
-        lifecycle::execute(host, &lock, approval, |_| Ok(()))?
-    };
+    let approval = crate::services::FileApproval::from_plan(plan, removal.as_deref())?;
+    let tid = approval.execute(host, |_| Ok(()))?;
     mutation_report("files", tid)?;
     Ok(ExitCode::SUCCESS)
 }

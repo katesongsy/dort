@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 clap.workspace = true
+ratatui.workspace = true
 dort-core = { path = "../dort-core" }
 serde.workspace = true
 serde_json.workspace = true

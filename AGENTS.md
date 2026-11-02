@@ -5,9 +5,9 @@ These repository instructions apply to all files unless a more specific instruct
 ## Scope and current capabilities
 
 - Read [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md) before changing behaviour.
-- Dort is a Rust workspace: `crates/dort-core` owns UI-independent services; `crates/dort` owns the Clap CLI and presentation.
+- Dort is a Rust workspace: `crates/dort-core` owns UI-independent services; `crates/dort` owns the Clap CLI, minimal Ratatui interface and presentation.
 - The experimental CLI exposes approved local init/attach, regular-file adoption, link apply, unmanage and guarded recovery. Keep discovery/checks/plans/status/history/Git inspection read-only. Do not add provider execution, cloning/sync, Git staging/commit/push or unrelated writes.
-- Do not introduce a TUI/provider execution layer or change journal/schema/security contracts without explicit agreement.
+- The approved minimal TUI exposes Overview, active Files (apply/unmanage) and Recovery through shared services. Keep init/attach, discovery/adoption and Git inspection CLI-only for this slice. Do not add provider execution or change journal/schema/security contracts without explicit agreement.
 - Keep existing uncommitted work intact. Do not commit, push, tag or release unless requested.
 
 ## Required documentation maintenance
@@ -56,6 +56,7 @@ git diff --check
 - Keep schema-1 adoption diagnosis/rollback compatible. Schema-2 apply/unmanage uses one recoverable transaction per approved request, immutable source watches and a separate matching removal acknowledgement. No silent format migration.
 - Recovery is explicit and guarded. Never automatically replay/rollback on startup or overwrite later user/source edits. Schema-3 bootstrap is separate from schema-1/2 lifecycle journals: private staged Git initialization, durable no-replace publication/registration intents, explicit guarded resume/abandon only. Abandon retains published repositories, registration and private artifacts; never delete a published repository automatically.
 - Mutation CLI commands must present previews and collect human-terminal confirmation or explicit --yes. JSON/nonterminal writes never prompt. Link deletion additionally needs a separate exact-ID acknowledgement. --dry-run must not create directories/state/locks/backups/journals or prompt. Keep approvals opaque and bind fresh previews/journal heads under the writer lock.
+- TUI approvals must consume the real in-memory core preview, never serialized plans. Keep separate exact-ID then literal-yes confirmation for removal; blocked/dry-run/small layouts cannot approve. q/Ctrl-C during a worker waits for completion; no cooperative write cancellation, detached worker or automatic rollback. Restore the terminal on returns/errors/panics and join active workers before exit. Keep Crossterm input on one thread and progress nonblocking/metadata-only. Test with Ratatui's backend and disposable fixtures; terminal failure/panic injection belongs only in isolated test children.
 - Preserve the current same-filesystem atomic-rename constraint; do not add an unsafe cross-device fallback.
 - Do not put file contents, local variable values or secrets in ordinary reports, logs or checkpoint metadata. The agreed narrow exception is explicit `git diff --patch`: bounded patch content is disclosed only in that requested report, with unsafe bytes escaped, never in logs/errors/journals. Summary/status reports stay metadata-only; patches are not secret-proof. Backups are private but ordinary backups are not encrypted.
 - Extend failure-boundary/process-crash tests when changing the executor. Do not claim process-exit tests establish power-loss safety.
