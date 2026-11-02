@@ -11,6 +11,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tui:** add guarded file and recovery workflows with responsive progress ([352b0a1](https://github.com/katesongsy/dort/commit/352b0a1cfbdf82af677afd725709b7ed0155900f))
+
 - **cli:** add approved file lifecycle and recoverable repository bootstrap ([20ac569](https://github.com/katesongsy/dort/commit/20ac56918e73fb9e1efecf0ba5ff292dd336934d))
 
 - **git:** add hardened read-only status and diff inspection ([bb1b897](https://github.com/katesongsy/dort/commit/bb1b897d5e2fbab5c9aaab56a952fe117f328d4a))
