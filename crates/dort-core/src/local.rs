@@ -186,6 +186,27 @@ fn validate_repository_id(id: &str) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn registration_text(host: &HostContext, root: &Path) -> Result<(String, String)> {
+    let mut config = LocalConfig::load(host)?;
+    let id = config
+        .repositories
+        .iter()
+        .find(|(_, r)| r.root == root)
+        .map(|(id, _)| id.clone())
+        .unwrap_or_else(|| format!("{:x}", Sha256::digest(root.as_os_str().as_bytes())));
+    config.repositories.insert(
+        id.clone(),
+        RepositoryRecord {
+            root: root.to_owned(),
+        },
+    );
+    config.active_repository = Some(id.clone());
+    config.validate()?;
+    let text = toml::to_string(&config)
+        .map_err(|_| Error::Invalid("cannot encode registration (values redacted)".into()))?;
+    Ok((id, text))
+}
+
 fn inspect_repository(host: &HostContext, root: &Path) -> Result<PathBuf> {
     let root = root
         .canonicalize()
@@ -212,8 +233,7 @@ fn inspect_repository(host: &HostContext, root: &Path) -> Result<PathBuf> {
         .map_err(|e| io_error("inspect Git metadata", &root, e))?
     {
         return Err(Error::Invalid(
-            "repository must already have Git metadata; Git initialisation is not implemented yet"
-                .into(),
+            "registry requires existing Git metadata; use bootstrap to create a repository".into(),
         ));
     }
     let path = root.join("dort.toml");

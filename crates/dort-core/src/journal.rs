@@ -583,13 +583,13 @@ pub fn diagnose(host: &HostContext) -> Result<Vec<Diagnosis>> {
                 continue;
             };
             match PrivateDir::open(&path.join(txid), false) {
-                Ok(Some(directory)) => {
-                    reports.push(if crate::lifecycle_journal::is_schema2(&directory) {
-                        crate::lifecycle_journal::scan(&directory, id, txid).0
-                    } else {
-                        scan(&directory, id, txid).0
-                    })
-                }
+                Ok(Some(directory)) => reports.push(if crate::bootstrap::is_schema3(&directory) {
+                    crate::bootstrap::scan(&directory, id, txid).0
+                } else if crate::lifecycle_journal::is_schema2(&directory) {
+                    crate::lifecycle_journal::scan(&directory, id, txid).0
+                } else {
+                    scan(&directory, id, txid).0
+                }),
                 _ => reports.push(Diagnosis {
                     repository_id: id.into(),
                     transaction_id: txid.into(),

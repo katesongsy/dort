@@ -1,9 +1,10 @@
-//! UI-independent planning and experimental journalled adoption/link/unmanage services.
-//! Public CLI writes and external package work remain deferred.
+//! UI-independent planning, experimental journalled bootstrap/file lifecycle and guarded recovery.
+//! External package work, remote Git workflows and generated/secret deployment remain deferred.
 #[cfg(not(unix))]
 compile_error!("Dort currently supports macOS and Ubuntu only.");
 
 pub mod adoption;
+pub mod bootstrap;
 pub mod context;
 pub mod discovery;
 pub mod error;
@@ -18,6 +19,7 @@ pub mod observation;
 pub mod planner;
 pub mod platform;
 pub mod profiles;
+pub mod recovery;
 pub mod state;
 
 pub use error::{Error, Result};

@@ -133,6 +133,27 @@ impl Git {
         })
     }
 
+    // Only bootstrap may initialize Git, and only in its newly allocated private stage.
+    pub(crate) fn initialize_private(executable: PathBuf, stage: &Path) -> Result<()> {
+        let backend = Self::new(executable)?;
+        let output = backend.run(
+            stage,
+            &[
+                "init",
+                "--quiet",
+                "--template=",
+                "--initial-branch=main",
+                "--object-format=sha1",
+                ".",
+            ],
+        )?;
+        if output.code != Some(0) {
+            return Err(failure("private Git initialization failed"));
+        }
+        backend.preflight(stage)?;
+        Ok(())
+    }
+
     fn preflight(&self, repository: &Path) -> Result<PathBuf> {
         if !repository.is_absolute() {
             return Err(failure("Git repository must be an absolute path"));

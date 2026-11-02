@@ -4,9 +4,9 @@
 
 ## Requirements and build
 
-Supported hosts are **macOS or Ubuntu**, on Intel/x86_64 or ARM64. Other Linux distributions are not currently supported. You need Git and a Rust installation capable of using the pinned **Rust 1.99.1** toolchain; Cargo/rustup may download dependencies and toolchain components.
+Supported hosts are **macOS or Ubuntu**, on Intel/x86_64 or ARM64. Other Linux distributions are not currently supported. You need a Rust installation capable of using pinned **Rust 1.99.1**; Cargo/rustup may download dependencies/toolchain components. Local init/attach and Git inspection additionally need an installed trusted Git executable in an absolute PATH directory. Dort never installs Git.
 
-From a checkout of Dort:
+From the Dort checkout:
 
 ```sh
 cargo build --release --workspace --locked
@@ -14,41 +14,27 @@ cargo build --release --workspace --locked
 ./target/release/dort --version
 ```
 
-There is no Dort installer or package-manager integration yet. In other guide pages, `dort` means this executable; replace it with its absolute path if it is not on your PATH.
+There is no installer or package-manager execution yet. Elsewhere, `dort` means this executable; use its absolute path if necessary.
 
 ## First check: declarations only
-
-Run from the checkout:
 
 ```sh
 ./target/release/dort manifest check --manifest examples/dort.toml
 ./target/release/dort --json manifest check --manifest examples/dort.toml --profile dev
 ```
 
-The example includes future template/secret/tool capabilities. A successful manifest check means the declarations are valid, **not** that files exist, tools are installed or deployment is supported. The CLI reports unsupported capabilities.
+A successful check validates declarations, **not** live files or installed tools. The example includes future template/secret/tool capabilities, which are reported as unsupported.
 
 ## Try file previews without using your own configuration
 
-The commands below create only a new temporary demo directory. Dort is given that demo HOME and explicit XDG roots; it never inspects your normal HOME in this walkthrough. Keep the same shell session and start from the Dort checkout.
+The following walkthrough first previews, then explicitly executes **inside a disposable demo HOME**. It never uses your normal dotfiles. These are experimental write commands; review the [safety guide](safety.md) first. Keep one shell session, starting from the Dort checkout.
 
 ```sh
 dort_bin="$(pwd -P)/target/release/dort"
 demo="$(mktemp -d)"
-# macOS temporary paths can contain /var symlink aliases; use the physical path.
+# Resolve macOS /var aliases; no-follow access requires physical paths.
 demo="$(cd "$demo" && pwd -P)"
-mkdir -p "$demo/home" "$demo/dotfiles/files"
-
-cat > "$demo/dotfiles/dort.toml" <<'TOML'
-schema = 1
-
-[[files]]
-id = "editor"
-source = "files/editorrc"
-target = "~/.editorrc"
-mode = "link"
-TOML
-
-printf 'set editor-mode safe\n' > "$demo/dotfiles/files/editorrc"
+mkdir -p "$demo/home"
 printf 'notes-format plain\n' > "$demo/home/.notesrc"
 
 demo_dort() {
@@ -59,44 +45,54 @@ demo_dort() {
 }
 
 demo_dort doctor
-demo_dort --repo "$demo/dotfiles" manifest check
+# Parent exists; dotfiles destination must be absent.
+demo_dort init "$demo/dotfiles" --dry-run
+demo_dort init "$demo/dotfiles" --yes
 demo_dort files discover
-demo_dort --repo "$demo/dotfiles" files list
-demo_dort --repo "$demo/dotfiles" files plan apply
-demo_dort --repo "$demo/dotfiles" --json files plan apply
+demo_dort files add '~/.notesrc' --id notes --source files/notesrc --dry-run
 ```
 
-The apply preview proposes a link for `.editorrc`. It does not create the link or any state directory.
+The init dry run creates nothing. Approved init publishes a minimal local Git repository and `dort.toml`, then registers/selects it. It does not clone, stage or commit. The add dry run previews source copy, manifest addition, backups and destination-link effects without performing them.
 
-Now preview adopting the existing ordinary `.notesrc` into a **new** mapping:
+Now explicitly approve adoption and inspect the result:
 
 ```sh
-demo_dort --repo "$demo/dotfiles" files plan adopt '~/.notesrc' \
-    --id notes --source files/notesrc
+demo_dort files add '~/.notesrc' --id notes --source files/notesrc --yes
+demo_dort status
+demo_dort plan
+demo_dort --json files plan apply
+demo_dort git status
+demo_dort git diff
+# Correct apply is a no-op, with no new transaction.
+demo_dort files apply --yes
+demo_dort history
+```
+
+`.notesrc` is now linked to its copied repository source. Git diff remains metadata-only; new untracked files appear in status, not diff. Dort exposes no Git staging/commit command. You can manage the disposable Git repository yourself, but never automatically merge into live-linked sources.
+
+Unmanage while retaining an ordinary destination file:
+
+```sh
+demo_dort files remove notes --mode keep --dry-run
+demo_dort files remove notes --mode keep --yes
 demo_dort --json recovery list
 printf 'Demo directory: %s\n' "$demo"
 ```
 
-Adoption previews source copy, manifest addition, backups and destination-link effects together. Nothing is copied, edited, backed up or linked. The demo stays on disk for your inspection; remove that demo directory yourself when finished.
+Keep removes the mapping and materializes the source bytes at `.notesrc`; the repository source remains. The alternative `--mode remove` deletes only the correct managed link and requires separate `--confirm-remove notes` acknowledgement. Do not run that alternative after keep: its mapping/link is already gone.
+
+The demo remains for inspection; remove only that demo yourself when finished. On failure, stop and inspect `history`; never assume a failed write had no effects. See [explicit recovery](commands.md#explicit-recovery).
 
 ## Use an existing environment repository
-
-Specify it explicitly:
 
 ```sh
 dort --repo /absolute/path/to/dotfiles manifest check
 dort --repo /absolute/path/to/dotfiles files list
 dort --repo /absolute/path/to/dotfiles files plan apply
+# Optional attachment/selection: valid non-bare Git root plus dort.toml required.
+dort init /absolute/path/to/dotfiles --dry-run
 ```
 
-There is no CLI repository registration, `init` or `clone` command yet. Without `--repo`, repository commands require an already registered active repository. Manifest/file explicit-repository commands need a directory containing `dort.toml`; they do not initialize Git or register it. The separate Git inspection commands need a real non-bare Git working-tree root but no manifest:
+Read-only manifest/file commands can inspect an explicit directory with `dort.toml` without registration. Mutation commands require prior approved init/attachment. Init accepts only valid existing repositories or an absent root under an existing safe parent—not arbitrary empty directories. Relative init paths resolve from the current directory; explicit physical absolute paths are recommended. There is no clone command.
 
-```sh
-dort --repo /absolute/path/to/dotfiles git status
-dort --repo /absolute/path/to/dotfiles git diff
-dort --repo /absolute/path/to/dotfiles git diff --staged
-```
-
-These reports are metadata-only. Content requires the explicit `git diff --patch` option and can expose secrets; read the [Git safety boundary](safety.md#git-inspection-boundary) first. A trusted installed Git must be available through an absolute PATH entry; other Dort commands do not require Git at runtime.
-
-Quote `'~/.editorrc'` when passing a destination that Dort should expand against its configured HOME. Do not use `sudo`. Read the [safety guide](safety.md) before inspecting personal configuration or sharing reports.
+Quote `'~/.notesrc'` so Dort expands it against the configured HOME. JSON/nonterminal writes require `--yes` and never prompt; human terminal mode can confirm interactively. `--dry-run` never prompts or acquires a lock. Do not use `sudo` or share reports blindly. Only explicit `git diff --patch` reveals bounded escaped file content, potentially secrets; read the [Git boundary](safety.md#git-inspection-boundary) before using it.

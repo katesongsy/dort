@@ -6,9 +6,9 @@ Dort is a Git-native developer environment manager. It is designed to reconcile 
 
 ## Current status
 
-**Read-only Git inspection slice (A0–A9), with an entirely read-only CLI.** Dort provides strict manifest validation, profile/dependency resolution, platform detection, local registry/locking APIs, bounded discovery, descriptor-safe file observation, pure lifecycle previews, hardened Git status/diff, and experimental core-only adoption, link apply, unmanage and guarded rollback/history with immutable journals.
+**Experimental end-to-end CLI slice (A0–A10).** Dort provides strict manifest validation, profile/dependency resolution, bounded discovery, descriptor-safe observation, pure previews, hardened read-only Git status/diff, local repository init/attach, and approved adoption, link apply, unmanage and guarded recovery with immutable journals.
 
-Public adoption/deployment/recovery write commands, package-manager execution, remote cloning/sync, templates, secrets, and the Ratatui interface are **not implemented**. A successful preview is not permission or an executable artifact for a later write. The executor is tested only against disposable homes; this is not yet a production-ready dotfile manager.
+Package-manager execution, remote cloning/sync, Git staging/commit/push, templates, secrets, and the Ratatui interface are **not implemented**. A successful preview is not permission or an executable artifact for a later write. The executor is tested only against disposable homes; this is not yet a production-ready dotfile manager.
 
 ## Documentation
 
@@ -42,13 +42,13 @@ cargo run -p dort -- --json manifest check --manifest examples/dort.toml --profi
 cargo run -p dort -- --repo /path/to/dotfiles manifest check
 ```
 
-Without `--manifest` or `--repo`, repository commands use a locally registered active repository. Registration currently exists only as a core API; there is no `init` command yet. Discovery also works without a repository. `--profile` affects only the current check/list/preview.
+Without `--manifest` or `--repo`, repository commands use the active repository selected by `dort init PATH`. Discovery also works without a repository. Repeatable `--profile` affects only the current check/list/plan/file operation.
 
-JSON reports go to stdout; JSON errors go to stderr. Exit codes are 0 for success, 1 for I/O failure, 2 for invalid input/configuration or unsupported hosts, 3 for a held writer lock, and **4 for a blocked plan or recovery diagnosis reporting write blockers**. Those reports are still emitted in full on stdout (not as a separate stderr error). No current CLI command acquires a write lock or changes repository registration.
+JSON reports go to stdout; JSON errors go to stderr. Exit codes are 0 for success, 1 for I/O failure, 2 for invalid input/configuration or unsupported hosts, 3 for a held writer lock, and **4 for a blocked plan or recovery diagnosis reporting write blockers**. Those reports are still emitted in full on stdout (not as a separate stderr error). Mutations require confirmation or `--yes`; JSON/nonterminal writes require `--yes` and never prompt. `--dry-run` never creates state or locks.
 
 ## Read-only Git inspection
 
-An installed, trusted Git executable must be available through an absolute PATH entry; Dort never installs Git. Other commands do not need Git at runtime.
+An installed, trusted Git executable must be available through an absolute PATH entry; Dort never installs Git. Initialization/attachment also needs Git; other commands do not.
 
 ```sh
 dort --repo /path/to/dotfiles git status
@@ -61,7 +61,7 @@ dort --repo /path/to/dotfiles git diff --patch
 
 Status and default diff reports contain metadata only. Diff compares tracked worktree changes to the index, or the index to HEAD with `--staged` (including unborn repositories). Untracked names appear in status; their contents are never included in diff. Diff summaries use change codes, modes and paths, without rename detection; status can report renames. Only explicit `--patch` discloses content, escaping control/non-ASCII bytes and backslashes; binary files get a change marker, not binary payloads. Patches are display reports, not directly applicable patch files, and are **not secret-proof**.
 
-Git runs with a cleared environment, fixed safe arguments, no optional locks/index refresh, hooks, external diff/textconv, fsmonitor or submodule recursion. Configured content filters and partial-clone/promisor settings are conservatively refused, even when unused/false. Each child has a 10-second deadline and a combined 4 MiB stdout/stderr limit; errors never echo Git stderr or partial output. There is no fallback, network, merge or write operation. This is hardening, **not OS sandboxing or protection from a malicious same-user configuration race**. Git reads repository-controlled configuration/includes/attributes/object paths using Git's own filesystem access, not Dort's no-follow observer.
+Git runs with a cleared environment, fixed safe arguments, no optional locks/index refresh, hooks, external diff/textconv, fsmonitor or submodule recursion. Configured content filters and partial-clone/promisor settings are conservatively refused, even when unused/false. Each child has a 10-second deadline and a combined 4 MiB stdout/stderr limit; errors never echo Git stderr or partial output. These inspection commands have no fallback, network, merge or write operation. This is hardening, **not OS sandboxing or protection from a malicious same-user configuration race**. Git reads repository-controlled configuration/includes/attributes/object paths using Git's own filesystem access, not Dort's no-follow observer.
 
 `--repo` must identify the exact non-bare working-tree root (linked worktrees supported), with no manifest/registration requirement. Reports are not globally atomic; summary and explicit patch are separate reads. See [command details](docs/commands.md#git-inspection) and [Git safety/troubleshooting](docs/safety.md#git-inspection-boundary).
 
@@ -91,9 +91,33 @@ Discovery is intentionally limited to top-level hidden files and three levels be
 
 `files list` observes active mappings; `files plan` makes the safety/conflict decision. Plans are schema-versioned, deterministically ordered by file ID, and contain parent/file metadata fingerprints and safe regular-file SHA-256 hashes, never file contents. Human output shows source/destination paths, permissions, proposed backups and effects, conflicts, and destructiveness. Identical saved snapshots yield identical plans without further filesystem reads. Correct managed links are no-ops.
 
-Initial adoption supports only owned, single-link regular files into a new repository source and a new active mapping. The CLI adoption preview creates a base-profile mapping; core callers can use other declared active profiles. It refuses existing sources, mapping/source collisions, directories, special files, foreign/broken links, detected sensitive content/paths, and special permission bits. Applying links can preview replacement of an ordinary regular destination only with an explicit backup effect. Unmanage requires the currently correct managed link; drift is blocked. Destructive removal requires a separate core acknowledgement; CLI previews never collect it. Template/secret mappings and files with unverified tool prerequisites are always blocked, never silently treated as links.
+Initial adoption supports only owned, single-link regular files into a new repository source and a new active mapping. The CLI adoption preview creates a base-profile mapping; core callers can use other declared active profiles. It refuses existing sources, mapping/source collisions, directories, special files, foreign/broken links, detected sensitive content/paths, and special permission bits. Applying links can preview replacement of an ordinary regular destination only with an explicit backup effect. Unmanage requires the currently correct managed link; drift is blocked. Destructive removal requires a separate matching acknowledgement; CLI previews never collect it. Template/secret mappings and files with unverified tool prerequisites are always blocked, never silently treated as links.
 
-Filename/content sensitivity checks are deliberately conservative heuristics, not secret detection guarantees; false positives are possible. Review content privately before adoption. No current CLI command can execute a plan, collect approval, or create a backup.
+Filename/content sensitivity checks are deliberately conservative heuristics, not secret detection guarantees; false positives are possible. Review content privately before adoption. Only the explicit mutation commands below can execute after approval; previews themselves never write.
+
+## Approved local mutations (experimental)
+
+Try these only in a [disposable HOME](docs/getting-started.md) first:
+
+```sh
+# Explicit path: absent destination under an existing safe parent, or valid Git+dort.toml root.
+dort init /absolute/path/to/dotfiles --dry-run
+dort init /absolute/path/to/dotfiles --yes
+# Preview first; nonterminal/JSON writes always need --yes.
+dort files add '~/.editorrc' --id editor --source files/editorrc --dry-run
+dort files add '~/.editorrc' --id editor --source files/editorrc --yes
+dort status
+dort plan
+dort files apply --dry-run
+dort files apply --yes
+dort files remove editor --mode keep --yes
+# Alternative destructive mode (requires the correct managed link):
+# dort files remove editor --mode remove --yes --confirm-remove editor
+dort history
+# dort rollback REPOSITORY_ID TRANSACTION_ID --dry-run
+```
+
+`files adopt`/`files unmanage` alias `add`/`remove`. Both unmanage modes retain sources. Interactive confirmation is available only with terminal stdin/stdout/stderr and without `--json`; `--yes` bypasses it, not validation or separate link-removal acknowledgement. Dry runs never prompt or create state, locks or artifacts. See [commands](docs/commands.md) for recovery and JSON details. On any failed write, inspect `history`: effects may be partially published, never automatically undone.
 
 ## Manifest basics
 
@@ -135,11 +159,11 @@ Write-capable registry and filesystem lifecycle APIs require a single advisory a
 
 Live-file observation also walks absolute paths descriptor-relatively with no-follow directory opens and no-follow terminal inspection. Symlinked parents (including aliases such as macOS `/var`), source symlinks/escapes, hard links, directories, and special files cannot enter regular-file deployment plans. Terminal links can be classified as broken, looping, or unsafe without reading their referents. Regular-file reads are bounded to 16 MiB, check descriptor/named-file identity and metadata before/after reading, and hash only owned, single-link files. Non-UTF-8 report paths/link targets fail explicitly rather than being lossily serialized.
 
-Snapshots are not globally atomic and do not authorize later writes. The experimental core executors below revalidate approval and journal changes, but public deployment remains unavailable. No automatic Git merge may edit live-linked sources. No destructive real-home testing is permitted.
+Snapshots are not globally atomic and do not authorize later writes. The experimental executors below independently revalidate approval and journal changes. No automatic Git merge may edit live-linked sources. No destructive real-home testing is permitted.
 
 ## Core filesystem execution and recovery (experimental)
 
-There are deliberately **no CLI write commands**. Core callers must register the repository, present and privately review an unblocked adoption preview, explicitly construct `adoption::Approval::from_plan`, then call `adoption::execute` while holding `WriterLock`. Approval is opaque and cannot be deserialized from preview JSON. Execution independently re-observes and compares the approved manifest, relevant configuration, mapping/effects, source/destination fingerprints and parent identities. Unrelated directory timestamp churn does not invalidate approval; identity, ownership and permissions still must match.
+The CLI exposes the shared core services through explicit approval boundaries. Core callers must register the repository, present and privately review an unblocked adoption preview, explicitly construct `adoption::Approval::from_plan`, then call `adoption::execute` while holding `WriterLock`. Approval is opaque and cannot be deserialized from preview JSON. Execution independently re-observes and compares the approved manifest, relevant configuration, mapping/effects, source/destination fingerprints and parent identities. Unrelated directory timestamp churn does not invalidate approval; identity, ownership and permissions still must match.
 
 One transaction includes new source-parent directories (0700), source copy, manifest addition and destination link. The source and manifest preserve permission bits and group; the manifest addition preserves existing comments/text and is fully revalidated. Adoption copies file bytes, not ACLs or extended attributes. It supports only the regular-file link subset described above. **Repository, destination and transaction state must be on one filesystem supporting atomic exchange/no-replace renames**; there is no cross-device copy fallback. Individual publications are atomic, not the entire multi-path transaction. Other readers may see intermediate states.
 
@@ -161,11 +185,19 @@ Apply/unmanage use a separate schema-2 payload in the same private transaction l
 
 Ordered operations explicitly distinguish directory/destination/manifest roles and `publish` (no-replace), `exchange` (retain original) or `withdraw` (move link into private storage) mutations. `op-0000`, … holds prepared objects or originals; a withdrawal starts with an absent slot. `backup-0000`, … contains verified private byte copies of replaced regular files/manifests, or the exact raw link target text for replaced/removed links. No file contents enter checkpoint metadata. Apply never edits the manifest or sources; unmanage publishes the destination change before exchanging the edited manifest. Diagnosis independently validates each format's full chain and fails closed on unsupported versions or malformed tails.
 
+### Journal schema 3: local bootstrap
+
+`init PATH` creates a minimal `schema = 1` manifest and local Git repository in a private 0700 stage, or attaches an already-valid repository. Git initialization uses no templates, fixed `main`/SHA-1, no global/system configuration or inherited environment, and the existing bounded runner. It never clones, contacts a remote, stages or commits files. A missing destination requires an existing owned, non-group/world-writable physical parent; arbitrary existing directories are refused.
+
+Schema 3 uses the same immutable checkpoint envelope/layout, but a dedicated bootstrap payload: `preparing → publish_intent → published → register_intent → completed`, or explicit `abandoned`. Intent precedes each no-replace repository publication and atomic registration publication/exchange. A synced bounded tree snapshot, parent/configuration identities and hashes bind recovery; configuration values/bodies stay only in private `config.new`/`config.backup`, never checkpoints. Original configuration inodes are retained after exchange. Repository/configuration/state must share a filesystem. Private configuration directories may be created during preparation.
+
+Incomplete bootstrap blocks other writes. Inspect `recovery resume REPOSITORY_ID TRANSACTION_ID --dry-run` or `recovery abandon … --dry-run`, then approve explicitly. Resume recognizes only the exact prepared/published repository and before/after registration, refusing edits/substitutions. Incomplete private preparation can only be abandoned and retried. Abandon marks terminal without deleting a published repository, undoing registration or removing private artifacts. Malformed chains require manual diagnosis, not speculative recovery.
+
 ### Shared durability and recovery
 
-The durable phases are `preparing → running → verifying → completed`, with explicit `rolling_back → rolled_back`. Preparing may create only private artifacts, never live effects. Intent is checkpointed and synced **before each live mutation and each inverse**; postconditions get a separate immutable checkpoint. A torn final write cannot overwrite earlier durable intent. Missing records, truncated/malformed records, unsupported schemas, checksum/backup mismatches and invalid transitions fail closed. Diagnosis reports the valid prefix but never silently ignores a damaged tail. Checksums detect corruption; they do not authenticate against a malicious owner/root.
+For file lifecycle (schemas 1/2), durable phases are `preparing → running → verifying → completed`, with explicit `rolling_back → rolled_back`. Preparing may create only private artifacts, never live effects. Intent is checkpointed and synced **before each live mutation and each inverse**; postconditions get a separate immutable checkpoint. A torn final write cannot overwrite earlier durable intent. Missing records, truncated/malformed records, unsupported schemas, checksum/backup mismatches and invalid transitions fail closed. Diagnosis reports the valid prefix but never silently ignores a damaged tail. Checksums detect corruption; they do not authenticate against a malicious owner/root.
 
-`recovery list` inspects all local repositories without creating state, acquiring a lock or replaying anything. It reports incomplete/malformed transactions as write blockers (exit 4). Recovery is core-only: use `adoption::rollback` for schema 1 or `lifecycle::rollback` for schema 2, with an explicit transaction ID and matching lock. `lifecycle::history` returns content-free retained history for both formats; `recovery list` includes the last validated `journal_schema` (or null when none is valid). History diagnoses journal integrity, not live drift; a completed record does not guarantee rollback guards still match. There is **no automatic startup rollback**. Malformed journals require manual diagnosis/repair rather than speculative execution.
+`recovery list` inspects all local repositories without creating state, acquiring a lock or replaying anything. It reports incomplete/malformed transactions as write blockers (exit 4). Use `rollback REPOSITORY_ID TRANSACTION_ID --dry-run` to inspect guarded schema-1/2 inverse paths; omit `--dry-run` and confirm to execute. Core callers can use `recovery::preview`/opaque approval/`execute`, dispatching to the existing schema-specific rollback with a fresh head/layout check under the matching lock. `history` and `lifecycle::history` return content-free retained history across all three formats; `recovery list` includes the last validated `journal_schema` (or null when none is valid). History diagnoses journal integrity, not live drift; a completed record does not guarantee rollback guards still match. There is **no automatic startup rollback**. Malformed journals require manual diagnosis/repair rather than speculative execution.
 
 Rollback preflights all source, manifest, destination, staged-object and parent guards before changing anything, then rechecks around each inverse. Edits through the live source link, replacement files, changed parent identities/permissions, extra files in newly created directories or damaged backups stop recovery instead of overwriting user work. An interrupted rename can be recognized from the persisted intent and retained object identity/content; uncertain states are refused. Interrupted rollback can itself be resumed explicitly. Failed calls leave durable state for diagnosis, never silently auto-undo.
 
@@ -179,9 +211,9 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 ```
 
-Local validation on macOS ARM64: **119 tests pass**, formatting passes, and Clippy passes with warnings denied. Cross-platform CI is configured but has not been run locally. Linux additionally exercises FIFO observation, real non-UTF-8 directory/link entries (APFS rejects such filenames at creation), and cross-device refusal when a separate `/dev/shm` filesystem is available.
+Local validation on macOS ARM64: **137 tests pass**, formatting passes, and Clippy passes with warnings denied. Cross-platform CI is configured but has not been run locally. Linux additionally exercises FIFO observation, real non-UTF-8 directory/link entries (APFS rejects such filenames at creation), and cross-device refusal when a separate `/dev/shm` filesystem is available.
 
-Integration tests use disposable homes/repositories and isolated child-process environments. Coverage includes symlink parents/loops, racing terminal substitution, hard links/special files, sensitive exclusions, observation limits, profile overrides, deterministic/no-op/blocked plans, both unmanage preview modes, every adoption/apply/unmanage/recovery checkpoint and post-mutation error boundary, child-process crash/recovery and lock release for forward and inverse lifecycle work, schema-1 compatibility, no-journal repeated apply, separate removal acknowledgement, focused manifest edits, shared destination parents, source preservation, CLI history diagnosis without replay, malformed/checksum/schema/backup failures, stale approvals, source/user-edit rollback guards, and CLI no-write/content-redaction assertions. Git coverage adds unborn/dirty/detached/conflicted repositories, unusual/rename paths, linked worktrees, binary markers, helper non-execution, filter/partial-clone refusal, bounded subprocess failures, explicit patch disclosure/escaping, and unchanged index/config/source identities/bytes. CLI Git tests use fake executables; optional core integration tests use installed Git against disposable fixtures only. They never install packages or mutate the developer's configuration. CI is configured for Ubuntu x86_64/ARM64 and macOS Intel/Apple Silicon; local validation does not establish that all CI platforms have passed.
+Integration tests use disposable homes/repositories and isolated child-process environments. Coverage includes symlink parents/loops, racing terminal substitution, hard links/special files, sensitive exclusions, observation limits, profile overrides, deterministic/no-op/blocked plans, both unmanage preview modes, every adoption/apply/unmanage/recovery checkpoint and post-mutation error boundary, child-process crash/recovery and lock release for forward and inverse lifecycle work, schema-1 compatibility, no-journal repeated apply, separate removal acknowledgement, focused manifest edits, shared destination parents, source preservation, CLI history diagnosis without replay, malformed/checksum/schema/backup failures, stale approvals, source/user-edit rollback guards, and CLI no-write/content-redaction assertions. Git coverage adds unborn/dirty/detached/conflicted repositories, unusual/rename paths, linked worktrees, binary markers, helper non-execution, filter/partial-clone refusal, bounded subprocess failures, explicit patch disclosure/escaping, and unchanged index/config/source identities/bytes. CLI Git tests use fake executables; optional core integration tests use installed Git against disposable fixtures only. A10 adds bootstrap checkpoint/mutation process exits and explicit recovery, config backup/exchange/value redaction, unsafe/stale/torn-state guards, head-bound rollback previews, CLI approval/removal-ack/lock/dry-run checks and the isolated create/adopt/apply/unmanage workflow. The documented walkthrough and five real-terminal PTY consent/no-prompt cases were also exercised locally. They never install packages or mutate the developer's configuration. CI is configured for Ubuntu x86_64/ARM64 and macOS Intel/Apple Silicon; local validation does not establish that all CI platforms have passed.
 
 ### Maintaining documentation and history
 
@@ -201,7 +233,7 @@ The script uses `cliff.toml`, local committed history and no remote metadata or 
 
 Implementation specs and planning notes are transient local artifacts in ignored `specs/`; they are not required to build or test Dort. Implemented behaviour is documented in this README, tracked end-user `docs/`, and `ARCHITECTURE.md`. The new `docs/` is public documentation, not the ignored implementation notes.
 
-Read-only Git status/diff (A9) is implemented; the next slice is public write/approval commands (A10). Core filesystem lifecycle execution (A8) is sandbox-tested, not a production deployment guarantee. The broader roadmap adds tools, unified setup, generated/secret configuration, safe Git synchronisation, and the full TUI.
+Public write/approval commands (A10) are implemented experimentally; the next slice is the TUI (A11). Filesystem lifecycle/bootstrap execution is sandbox-tested, not a production deployment guarantee. The broader roadmap adds tools, unified setup, generated/secret configuration, safe Git synchronisation, and the full TUI.
 
 ## License
 

@@ -641,6 +641,35 @@ fn mutate(journal: &Journal, id: usize, undo: bool) -> Result<()> {
     journal.directory.sync()
 }
 
+/// Read-only preflight and conservative inverse paths for the head-bound recovery service.
+pub(crate) fn rollback_preview(
+    host: &HostContext,
+    repository_id: &str,
+    transaction_id: &str,
+) -> Result<(String, Vec<PathBuf>)> {
+    let j = Journal::open(host, repository_id, transaction_id)?;
+    validate_record(host, &j)?;
+    if !matches!(j.record.phase, Phase::Preparing | Phase::RolledBack) {
+        j.verify_backups()?;
+        validate_layout(host, &j)?;
+    }
+    let effects = if matches!(j.record.phase, Phase::Preparing | Phase::RolledBack) {
+        vec![]
+    } else {
+        j.record
+            .operations
+            .iter()
+            .rev()
+            .filter(|o| o.progress != Progress::Undone)
+            .map(|o| o.before.path.clone())
+            .collect()
+    };
+    Ok((
+        journal::digest(journal::encode(&j.record)?.as_bytes()),
+        effects,
+    ))
+}
+
 /// Explicit guarded rollback, never startup replay. Can also undo a completed adoption.
 /// Preflight ALL guards (including linked-source content) before changing anything.
 pub fn rollback(

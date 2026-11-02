@@ -757,6 +757,34 @@ fn validate_scope(host: &HostContext, j: &Journal) -> Result<()> {
     Ok(())
 }
 
+/// Read-only preflight and conservative inverse paths for the head-bound recovery service.
+pub(crate) fn rollback_preview(
+    host: &HostContext,
+    repository_id: &str,
+    transaction_id: &str,
+) -> Result<(String, Vec<PathBuf>)> {
+    let j = Journal::open(host, repository_id, transaction_id)?;
+    validate_scope(host, &j)?;
+    if !matches!(j.record.phase, Phase::Preparing | Phase::RolledBack) {
+        validate_layout(host, &j)?;
+    }
+    let effects = if matches!(j.record.phase, Phase::Preparing | Phase::RolledBack) {
+        vec![]
+    } else {
+        j.record
+            .operations
+            .iter()
+            .rev()
+            .filter(|o| o.progress != Progress::Undone)
+            .map(|o| o.before.path.clone())
+            .collect()
+    };
+    Ok((
+        journal::digest(journal::encode(&j.record)?.as_bytes()),
+        effects,
+    ))
+}
+
 /// Explicit/restartable guarded rollback, including completed schema-2 transactions.
 /// Schema-1 adoption transactions remain recoverable using adoption::rollback.
 pub fn rollback(

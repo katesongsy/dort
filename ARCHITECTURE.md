@@ -9,11 +9,11 @@ Dort currently supports macOS and Ubuntu on x86_64/ARM64. It uses a Rust 2024 wo
 | Component | Responsibility | Current boundary |
 | --- | --- | --- |
 | `crates/dort-core` | Models, validation, profiles/graphs, local state, observation, discovery, planning, journals, experimental filesystem lifecycle/recovery | UI-independent; explicit host inputs; no package-manager execution. |
-| `crates/dort` | Clap commands, environment/platform boundary, repository selection, human/JSON presentation, exit codes | All CLI commands are read-only; no write approval/replay interface. |
+| `crates/dort` | Clap commands, environment/platform boundary, repository selection, human/JSON presentation, exit codes | Read-only observation plus explicit terminal/flag approval for local bootstrap, file lifecycle and guarded recovery. |
 | `examples/` | Tracked manifest examples | Validation examples, not an installed environment or a deployable source tree. |
 | `docs/` | Tracked end-user guides | Document shipped commands, not internal implementation plans. |
 
-Public write commands, tool installation/inventory, templates, secrets, cloning/sync and the TUI remain unimplemented. Core adoption/apply/unmanage executors are sandbox-tested prototypes, not production-ready general deployment.
+Tool installation/inventory, templates, secrets, Git staging/commit/push, cloning/sync and the TUI remain unimplemented. Core adoption/apply/unmanage executors are sandbox-tested prototypes, not production-ready general deployment.
 
 ## Module map
 
@@ -32,6 +32,8 @@ All module paths below are under `crates/dort-core/src/`:
 | `adoption.rs` | Schema-1 opaque approval, fresh revalidation, private staging, one-file adoption and explicit guarded/restartable rollback; shared identity/approval helpers. |
 | `lifecycle.rs`, `lifecycle_journal.rs` | Schema-2 apply/unmanage approval/execution/rollback, immutable transaction store/validation and retained history. Sources are watches, never operation targets. |
 | `git.rs` | Fixed read-only Git executable adapter, conservative configuration preflight, bounded nonblocking subprocess runner, NUL status/raw-diff parsers and explicit escaped patch disclosure. No state/journal interaction. |
+| `bootstrap.rs` | Opaque init/attach previews, schema-3 staged bootstrap chains, guarded resume/abandon, verified private configuration backups and registration publication. |
+| `recovery.rs` | Read-only schema-1/2 inverse-path previews, opaque tamper-checked approvals bound to the journal head, fresh guard checks and rollback dispatch. |
 | `error.rs` | Shared errors; callers decide presentation and exit status. |
 
 CLI routing and reports live in [crates/dort/src/cli.rs](crates/dort/src/cli.rs). Domain services do not depend on Clap, terminal rendering or CLI output.
@@ -60,7 +62,7 @@ A snapshot records the manifest, relevant local configuration metadata, source/d
 
 CLI environment discovery resolves a trusted absolute Git executable from absolute PATH entries (empty/relative entries are ignored). Core `git::Git` receives that path explicitly and exposes only `status` and `diff(staged, patch)`, never arbitrary arguments/revisions or mutations. An explicit repository needs no manifest/registration but must equal Git's canonical non-bare toplevel; linked worktrees and unborn repositories are supported. Subdirectories are not silently searched upward.
 
-Every child clears its environment and sets fixed locale, disabled global/system configuration, system attributes, optional locks, prompts, lazy fetch and replace objects. Fixed Git options disable pagers, hooks, fsmonitor, untracked-cache updates, index auto-refresh, external diff/textconv and submodule recursion/inspection. A safe builtin configuration query honors repository includes and refuses **any configured filter driver or partial-clone/promisor declaration**, including unused/false settings, before status/diff. No shell, install, fallback, network or Git mutation API exists.
+Every child clears its environment and sets fixed locale, disabled global/system configuration, system attributes, optional locks, prompts, lazy fetch and replace objects. Fixed Git options disable pagers, hooks, fsmonitor, untracked-cache updates, index auto-refresh, external diff/textconv and submodule recursion/inspection. A safe builtin configuration query honors repository includes and refuses **any configured filter driver or partial-clone/promisor declaration**, including unused/false settings, before status/diff. No shell, install, fallback, network or public arbitrary Git mutation API exists. Bootstrap alone can call a narrow crate-private initializer inside its new private stage, reusing the same bounded/environment-cleared runner.
 
 The private runner concurrently drains nonblocking stdout/stderr, caps their combined bytes at 4 MiB per child and enforces a 10-second deadline. On errors it kills the isolated process group and reaps the child; reader threads cannot hang on descendant-held pipes. Stderr is discarded, never echoed. Failures emit no partial report/patch. Limits bound captured data/time, not the subprocess's OS resource usage; this is not an OS sandbox.
 
@@ -92,7 +94,7 @@ ${XDG_STATE_HOME:-$HOME/.local/state}/dort/
 
 `LocalConfig` holds active profiles, variables, the selected repository ID and registered canonical roots. Variable values deliberately have no Debug representation and are not embedded in snapshots/journals. Configuration is machine-local, not part of the shared manifest.
 
-Repository IDs are initially SHA-256 of the canonical root path; explicit relocation preserves the ID. They identify local state, not a Git revision or portable repository identity. Registration requires an existing Git marker and valid manifest; the CLI does not expose registration yet.
+Repository IDs are initially SHA-256 of the canonical root path; explicit relocation preserves the ID. They identify local state, not a Git revision or portable repository identity. The legacy core registry requires an existing Git marker and valid manifest. Public `init PATH` uses the separate bootstrap protocol and validates real non-bare Git roots before attachment; arbitrary existing/empty directories are not initialization targets.
 
 Private directory/file access is descriptor-relative. Configuration/checkpoints/backups use private owned single-link regular files (0600), and transaction directories use 0700. Prepared objects/retained originals can retain live modes inside private directories. Configuration replacement stages, syncs, renames and syncs its directory. The application lock retains its inode and is never unlinked to release ownership.
 
@@ -149,9 +151,21 @@ Operations bind contiguous IDs, roles (`directory`, `destination`, `manifest`), 
 
 The reader dispatches by the first checkpoint's schema hint, then independently verifies the entire chain, immutable operation identities, format-specific scope/order/progress, backup bindings and known artifacts. The hint is never authorization. Unsupported versions and corrupted/torn tails fail closed, even with a valid earlier prefix. Schema-1 reading and `adoption::rollback` stay supported; `lifecycle::rollback` handles schema 2. No format is rewritten on read.
 
+## Journal schema 3: staged bootstrap
+
+`bootstrap::preview` receives explicit host/root/Git inputs and creates no state. It accepts only a missing root under an existing owned, non-group/world-writable no-follow parent, or an existing valid non-bare Git root with a host-valid manifest. HOME/root and Dort metadata overlaps are forbidden. Preview approval is opaque/tamper-checked and independently re-observed under the lock.
+
+A separate schema-3 payload uses the existing immutable checksummed envelope and repository/transaction layout, without migrating schemas 1/2. It binds the initial destination/manifest/Git marker/configuration metadata, parent identities, configuration hashes, intended registration hash, local repository ID and state path. Configuration values never enter checkpoints. Preparing creates only private artifacts/configuration directories. Git initializes only the newly allocated private 0700 `repository` stage with `--template=`, fixed `main`/SHA-1, no global/system/inherited configuration, hooks or network, using the bounded runner. The minimal manifest is `schema = 1`. Git's own private-stage filesystem writes are not Dort descriptor-relative operations.
+
+The staged tree is no-follow inspected, synced and bounded to 256 regular/directory entries. Entries bind identities/content; symlinks, hard links, special files and unsafe ownership/modes are refused. `config.backup` holds a verified private copy of an existing configuration; `config.new` holds prepared registration bytes and retains the original inode after an exchange. Configuration values remain private, unencrypted backup data. The prepared checkpoint binds tree/configuration/target-parent guards before publication.
+
+Bootstrap steps are `preparing → publish_intent → published → register_intent → completed`, with explicit `abandoned` from any nonterminal step. Diagnosis maps intermediate steps to running and abandoned to rolled_back, reporting journal schema 3. No-replace repository publication precedes registration publication (no-replace if missing, exchange otherwise); both affected directories are synced. All three locations must share a filesystem; no cross-device fallback exists. Attachment follows the same registration protocol without repository mutation.
+
+Explicit bootstrap recovery previews inspect guarded live/private states without creating state or taking a lock. Opaque approvals bind action, effects and journal head; execution revalidates under the lock. Resume recognizes interrupted renames only by exact retained identities/hashes and parent guards. Preparing can only be abandoned/retried. Abandon appends a terminal record and **never deletes a published repository, undoes registration or removes artifacts**. Edits, substitutions, malformed chains and uncertain layouts refuse recovery. There is no automatic replay/deletion. Checksums/guards do not isolate a malicious same-user process.
+
 ## Shared durability and recovery
 
-Transaction phases:
+File lifecycle phases (schemas 1/2; bootstrap steps are separate):
 
 ```text
 preparing → running → verifying → completed
@@ -165,13 +179,15 @@ A torn final checkpoint never overwrites an earlier record. Gaps, malformed/trun
 
 Rollback requires an explicit transaction ID and matching application lock. It preflights all affected paths, parents, prepared objects and linked-source content, then rechecks around inverses. Recognizable interrupted atomic renames can be resolved from retained identity/content; uncertain states are refused. Source edits, substituted files/parents, extra entries in created directories and corrupt backups stop recovery without overwriting user work. Rollback itself is checkpointed and restartable. Completed transactions can also be explicitly rolled back if their guards still match. Schema-2 inverses handle publication/exchange/withdrawal without writing repository sources. A later transaction or editor can invalidate an older transaction's guards; history does not promise arbitrary undo order.
 
-`lifecycle::history`/`journal::diagnose` expose content-free retained history across both schemas. `Diagnosis.journal_schema` reports the last fully validated record's schema (or null), not an unverified dispatch hint. `recovery list` presents this metadata without acquiring a writer lock or reading live source content. Diagnosis checks journal integrity, not current live drift; completed history does not establish that rollback is still safe.
+`lifecycle::history`/`journal::diagnose` expose content-free retained history across all three schemas. `Diagnosis.journal_schema` reports the last fully validated record's schema (or null), not an unverified dispatch hint. `recovery list` presents this metadata without acquiring a writer lock or reading live source content. Diagnosis checks journal integrity, not current live drift; completed history does not establish that rollback is still safe.
+
+The public rollback service first validates the schema-specific full scope/layout and reports conservative inverse paths without writes or a lock. Its opaque approval binds the exact report and immutable journal head; execution reopens/revalidates under the application lock before calling the existing guarded rollback. JSON preview documents cannot authorize recovery.
 
 No automatic recovery, garbage collection or transaction-history migration is implemented. Retained originals, backups and copied sources are not deleted after rollback. Malformed histories require manual diagnosis/repair rather than speculative execution.
 
 ## Presentation, validation and known limits
 
-The CLI emits reports on stdout and errors on stderr, with optional JSON. Exit codes are 0 success, 1 I/O, 2 invalid input/configuration/host, 3 lock contention, and 4 a blocked plan or blocking recovery diagnosis. No file contents should enter logs or ordinary reports; only an explicitly requested escaped Git patch report may disclose bounded content.
+The CLI emits reports on stdout and errors on stderr, with optional JSON. Explicit mutation commands present previews in human mode, then require terminal confirmation or --yes; JSON/nonterminal writes require --yes and never prompt. Remove mode additionally requires an exact-ID flag or separate human-terminal typed acknowledgement. --dry-run returns only a preview, never creates state/locks/artifacts and never prompts. Status, plan, history, checks, discovery and Git inspection remain read-only. Successful mutation JSON reports schema/operation/completed/nullable transaction_id; errors may leave durable partial effects, so inspect history after failures. Exit codes are 0 success, 1 I/O, 2 invalid input/configuration/host, 3 lock contention, and 4 a blocked plan or blocking recovery diagnosis. No file contents should enter logs or ordinary reports; only an explicitly requested escaped Git patch report may disclose bounded content.
 
 Integration tests use disposable canonicalized homes and isolated child environments. They cover pure planning, no-write CLI behaviour, unsafe paths/races, malformed state, approvals, guarded rollback, every exposed checkpoint/post-mutation error boundary, forward/inverse lifecycle process exits/lock release, no-journal repeated apply, batch/shared-parent execution, source preservation, separate removal acknowledgement and schema-1 compatibility. CLI Git tests use deterministic fake executables and missing-Git cases, with no installed-tool requirement. Optional core real-Git fixtures skip explicitly when unavailable and cover no-write index/config/source identity, unusual paths, unborn/conflict/detached/worktree states, helper non-execution, filters/promisor refusal and explicit patch disclosure. Runner tests exercise stdout/stderr bounds, deadlines and descendant-held pipes. These tests do **not** establish real power-loss or filesystem fault-injection guarantees.
 

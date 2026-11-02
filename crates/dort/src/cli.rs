@@ -1,12 +1,14 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use dort_core::{
-    Error, Manifest,
+    Error, Manifest, adoption, bootstrap,
     context::HostContext,
-    discovery, git, journal,
+    discovery, git, journal, lifecycle,
     local::LocalConfig,
     model::{FileMode, ManagedFile},
     planner::{self, Request, UnmanageMode},
     profiles::selected,
+    recovery,
+    state::WriterLock,
 };
 use serde::Serialize;
 use std::{collections::BTreeSet, path::PathBuf, process::ExitCode};
@@ -14,7 +16,7 @@ use std::{collections::BTreeSet, path::PathBuf, process::ExitCode};
 #[derive(Parser)]
 #[command(
     version,
-    about = "Git-native developer environment manager (read-only observation and planning)",
+    about = "Git-native developer environment manager (experimental guarded file lifecycle)",
     arg_required_else_help = true
 )]
 struct Cli {
@@ -24,20 +26,48 @@ struct Cli {
     /// Override the locally registered active repository.
     #[arg(long, global = true)]
     repo: Option<PathBuf>,
+    /// Preview mutations without creating state, locks, backups or journals.
+    #[arg(long, global = true)]
+    dry_run: bool,
+    /// Explicitly approve writes without prompting (required for JSON/nonterminal use).
+    #[arg(long, global = true)]
+    yes: bool,
+    /// Separate acknowledgement for deleting the managed link of this exact file ID.
+    #[arg(long, global = true)]
+    confirm_remove: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
 
 #[derive(Subcommand)]
 enum Command {
+    /// Create a local repository at an absent path, or attach an already-valid one.
+    Init { path: PathBuf },
+    /// Inspect active link state and blockers without writing.
+    Status {
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
+    /// Preview active link deployment (equivalent to files plan apply).
+    Plan {
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
+    /// Read-only retained history across all repositories.
+    History,
+    /// Explicitly preview/approve guarded rollback of a schema-1/2 transaction.
+    Rollback {
+        repository_id: String,
+        transaction_id: String,
+    },
     /// Show supported host and local state locations without creating them.
     Doctor,
-    /// Read-only discovery, inventory and previews. No file mutation commands exist yet.
+    /// Discover, preview, adopt, apply and unmanage regular-file links.
     Files {
         #[command(subcommand)]
         command: FilesCommand,
     },
-    /// Read-only transaction diagnosis. Never replays or rolls back a transaction.
+    /// Diagnose history or explicitly preview/approve guarded recovery.
     Recovery {
         #[command(subcommand)]
         command: RecoveryCommand,
@@ -71,6 +101,21 @@ enum GitCommand {
 
 #[derive(Subcommand)]
 enum RecoveryCommand {
+    /// Explicit guarded rollback for file lifecycle history (schemas 1 and 2).
+    Rollback {
+        repository_id: String,
+        transaction_id: String,
+    },
+    /// Resume an intact prepared bootstrap (schema 3), never automatically.
+    Resume {
+        repository_id: String,
+        transaction_id: String,
+    },
+    /// Mark bootstrap abandoned, retaining any published repository/registration.
+    Abandon {
+        repository_id: String,
+        transaction_id: String,
+    },
     /// List all local transaction checkpoints, integrity problems and write blockers.
     List,
 }
@@ -90,6 +135,31 @@ enum ManifestCommand {
 
 #[derive(Subcommand)]
 enum FilesCommand {
+    /// Adopt an owned regular file into a new repository source and mapping.
+    #[command(alias = "adopt")]
+    Add {
+        target: PathBuf,
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
+    /// Deploy all active ordinary link mappings in one recoverable transaction.
+    Apply {
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
+    /// Remove a mapping, retaining its source. Keep materializes; remove deletes the link.
+    #[command(alias = "unmanage")]
+    Remove {
+        id: String,
+        #[arg(long, value_enum)]
+        mode: RemovalMode,
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
     /// Discover hidden files and .config metadata; never read candidate contents.
     Discover,
     /// Inspect active manifest mappings (no tool execution).
@@ -192,7 +262,122 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
     let host = HostContext::from_env()?;
     // Read only; missing configuration uses defaults without creating directories.
     let local = LocalConfig::load(&host)?;
+    if cli.repo.is_some()
+        && matches!(
+            &cli.command,
+            Command::Rollback { .. }
+                | Command::Recovery {
+                    command: RecoveryCommand::Rollback { .. }
+                        | RecoveryCommand::Resume { .. }
+                        | RecoveryCommand::Abandon { .. }
+                }
+        )
+    {
+        return Err(Error::Invalid(
+            "recovery uses explicit repository/transaction IDs; omit --repo".into(),
+        ));
+    }
     match &cli.command {
+        Command::Init { path } => {
+            if cli.repo.is_some() {
+                return Err(Error::Invalid(
+                    "init uses its explicit path; omit --repo".into(),
+                ));
+            }
+            let root = if path.is_absolute() {
+                path.clone()
+            } else {
+                std::env::current_dir()
+                    .map_err(|source| Error::Io {
+                        operation: "resolve current directory",
+                        path: path.clone(),
+                        source,
+                    })?
+                    .join(path)
+            };
+            let git = resolve_git()?;
+            let report = bootstrap::preview(&host, &root, &git)?;
+            if cli.dry_run {
+                print_git_json(&report)?;
+            } else {
+                if !cli.json {
+                    print_git_json(&report)?;
+                }
+                approve(cli)?;
+                let approval = bootstrap::Approval::from_preview(report)?;
+                let lock = WriterLock::acquire(&host)?;
+                let tid = bootstrap::execute(&host, &lock, approval, &git, |_| Ok(()))?;
+                print_git_json(
+                    &serde_json::json!({"schema":1,"operation":"init","completed":true,"repository":root,"transaction_id":tid}),
+                )?;
+            }
+        }
+        Command::Status { profiles } | Command::Plan { profiles } => {
+            return file_operation(cli, &host, &local, profiles, Request::Apply, false);
+        }
+        Command::Rollback {
+            repository_id,
+            transaction_id,
+        }
+        | Command::Recovery {
+            command:
+                RecoveryCommand::Rollback {
+                    repository_id,
+                    transaction_id,
+                },
+        } => {
+            let report = recovery::preview(&host, repository_id, transaction_id)?;
+            if cli.dry_run {
+                print_git_json(&report)?;
+            } else {
+                if !cli.json {
+                    print_git_json(&report)?;
+                }
+                approve(cli)?;
+                let approval = recovery::Approval::from_preview(report)?;
+                let lock = WriterLock::acquire(&host)?;
+                recovery::execute(&host, &lock, approval)?;
+                mutation_report("rollback", Some(transaction_id.clone()))?;
+            }
+        }
+        Command::Recovery {
+            command:
+                RecoveryCommand::Resume {
+                    repository_id,
+                    transaction_id,
+                },
+        }
+        | Command::Recovery {
+            command:
+                RecoveryCommand::Abandon {
+                    repository_id,
+                    transaction_id,
+                },
+        } => {
+            let action = if matches!(
+                &cli.command,
+                Command::Recovery {
+                    command: RecoveryCommand::Resume { .. }
+                }
+            ) {
+                bootstrap::RecoveryAction::Resume
+            } else {
+                bootstrap::RecoveryAction::Abandon
+            };
+            let report = bootstrap::recovery_preview(&host, repository_id, transaction_id, action)?;
+            if cli.dry_run {
+                print_git_json(&report)?;
+            } else {
+                if !cli.json {
+                    print_git_json(&report)?;
+                }
+                approve(cli)?;
+                let approval = bootstrap::RecoveryApproval::from_preview(report)?;
+                let lock = WriterLock::acquire(&host)?;
+                bootstrap::recover(&host, &lock, approval, |_| Ok(()))?;
+                mutation_report("bootstrap_recovery", Some(transaction_id.clone()))?;
+            }
+        }
         Command::Doctor => {
             let report = DoctorReport {
                 host,
@@ -216,7 +401,8 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                 );
             }
         }
-        Command::Recovery {
+        Command::History
+        | Command::Recovery {
             command: RecoveryCommand::List,
         } => {
             if cli.repo.is_some() {
@@ -245,7 +431,7 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                     }
                 }
                 println!(
-                    "Read-only diagnosis; writes blocked: {write_blocked}. Recovery is explicit and currently core-API only."
+                    "Read-only diagnosis; writes blocked: {write_blocked}. Recovery requires an explicit preview and approval."
                 );
             }
             if write_blocked {
@@ -306,6 +492,40 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
         }
         Command::Files { command } => {
             match command {
+                FilesCommand::Add {
+                    target,
+                    id,
+                    source,
+                    profiles,
+                } => {
+                    return file_operation(
+                        cli,
+                        &host,
+                        &local,
+                        profiles,
+                        adopt_request(target, id, source),
+                        true,
+                    );
+                }
+                FilesCommand::Apply { profiles } => {
+                    return file_operation(cli, &host, &local, profiles, Request::Apply, true);
+                }
+                FilesCommand::Remove { id, mode, profiles } => {
+                    return file_operation(
+                        cli,
+                        &host,
+                        &local,
+                        profiles,
+                        Request::Unmanage {
+                            id: id.clone(),
+                            mode: match mode {
+                                RemovalMode::Keep => UnmanageMode::Keep,
+                                RemovalMode::Remove => UnmanageMode::Remove,
+                            },
+                        },
+                        true,
+                    );
+                }
                 FilesCommand::Discover => {
                     // Discovery does not require an active repository.
                     let root = if cli.repo.is_some() || local.active_repository.is_some() {
@@ -497,6 +717,139 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
             }
         }
     }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn adopt_request(target: &std::path::Path, id: &str, source: &std::path::Path) -> Request {
+    Request::Adopt {
+        mapping: ManagedFile {
+            id: id.into(),
+            source: source.into(),
+            target: target.into(),
+            mode: FileMode::Link,
+            profiles: vec!["base".into()],
+            requires: vec![],
+            overrides: Default::default(),
+            permissions: None,
+        },
+    }
+}
+
+fn mutation_report(operation: &str, transaction: Option<String>) -> dort_core::Result<()> {
+    print_git_json(
+        &serde_json::json!({"schema":1,"operation":operation,"completed":true,"transaction_id":transaction}),
+    )
+}
+
+fn interactive(cli: &Cli) -> bool {
+    use std::io::IsTerminal;
+    !cli.json
+        && std::io::stdin().is_terminal()
+        && std::io::stdout().is_terminal()
+        && std::io::stderr().is_terminal()
+}
+fn answer(prompt: &str) -> dort_core::Result<String> {
+    use std::io::{BufRead, Read, Write};
+    eprint!("{prompt}");
+    std::io::stderr()
+        .flush()
+        .map_err(|_| Error::Invalid("could not present confirmation".into()))?;
+    let mut bytes = Vec::new();
+    std::io::stdin()
+        .lock()
+        .take(257)
+        .read_until(b'\n', &mut bytes)
+        .map_err(|_| Error::Invalid("could not read confirmation".into()))?;
+    if bytes.len() > 256 {
+        return Err(Error::Invalid("confirmation too long".into()));
+    }
+    String::from_utf8(bytes)
+        .map(|s| s.trim_end_matches(['\r', '\n']).to_owned())
+        .map_err(|_| Error::Invalid("invalid confirmation".into()))
+}
+fn approve(cli: &Cli) -> dort_core::Result<()> {
+    if cli.yes {
+        return Ok(());
+    }
+    if !interactive(cli) {
+        return Err(Error::Invalid(
+            "write requires --yes in JSON/nonterminal mode; use --dry-run to preview".into(),
+        ));
+    }
+    if answer("Review the effects above. Type yes to proceed: ")? != "yes" {
+        return Err(Error::Invalid("write not approved".into()));
+    }
+    Ok(())
+}
+fn file_operation(
+    cli: &Cli,
+    host: &HostContext,
+    local: &LocalConfig,
+    profiles: &[String],
+    request: Request,
+    write: bool,
+) -> dort_core::Result<ExitCode> {
+    let root = local.select_repository(cli.repo.as_deref())?;
+    let requested = requested_profiles(local, profiles);
+    let removal = match &request {
+        Request::Unmanage {
+            id,
+            mode: UnmanageMode::Remove,
+        } => Some(id.clone()),
+        _ => None,
+    };
+    let is_adopt = matches!(&request, Request::Adopt { .. });
+    let plan = planner::plan(planner::observe(host, &root, &requested, request)?);
+    if !write || cli.dry_run || plan.has_blockers() {
+        if cli.json {
+            print_git_json(&plan)?;
+        } else {
+            print!("{}", plan.human());
+        }
+        return Ok(ExitCode::from(if plan.has_blockers() { 4 } else { 0 }));
+    }
+    if !cli.json {
+        print!("{}", plan.human());
+    }
+    // Reject missing/incorrect destructive acknowledgement before acquiring any lock.
+    if let Some(id) = &removal {
+        let acknowledged = match &cli.confirm_remove {
+            Some(value) => value == id,
+            None if !cli.yes && interactive(cli) => {
+                answer(&format!(
+                    "Delete the managed link? Type its exact ID {id:?}: "
+                ))? == *id
+            }
+            None => false,
+        };
+        if !acknowledged {
+            return Err(Error::Invalid(
+                "link deletion requires separate --confirm-remove with the exact mapping ID".into(),
+            ));
+        }
+    } else if cli.confirm_remove.is_some() {
+        return Err(Error::Invalid(
+            "--confirm-remove is only valid for remove mode".into(),
+        ));
+    }
+    approve(cli)?;
+    let tid = if is_adopt {
+        let approval = adoption::Approval::from_plan(plan)?;
+        let lock = WriterLock::acquire(host)?;
+        Some(adoption::execute(host, &lock, approval, |_| Ok(()))?)
+    } else {
+        let approval = if let Some(id) = removal {
+            lifecycle::Approval::from_removal_plan(
+                plan,
+                lifecycle::RemovalAcknowledgement::confirm(id),
+            )?
+        } else {
+            lifecycle::Approval::from_plan(plan)?
+        };
+        let lock = WriterLock::acquire(host)?;
+        lifecycle::execute(host, &lock, approval, |_| Ok(()))?
+    };
+    mutation_report("files", tid)?;
     Ok(ExitCode::SUCCESS)
 }
 
