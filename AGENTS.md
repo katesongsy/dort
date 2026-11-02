@@ -47,7 +47,7 @@ git diff --check
 
 - Never test destructive operations against the real HOME, real dotfiles or package managers.
 - Use disposable canonicalized homes/repositories (`tests/support::TestHome`). macOS `/var` aliases are symlinks; use physical temporary paths.
-- Do not mutate process-global HOME/XDG variables in tests. Configure isolated child processes instead; CLI tests must not require external tools.
+- Do not mutate process-global HOME/XDG variables in tests. Configure isolated child processes instead. CLI tests use deterministic fake Git/missing-Git fixtures and must not require installed external tools. Optional core real-Git integration tests use only disposable repositories and skip explicitly when Git is absent.
 - Keep live/state access descriptor-relative and no-follow. Do not substitute ordinary path-based writes for secure helpers.
 - Reject unsafe parents, special files, hard links, sensitive ordinary adoption and unsupported template/secret/prerequisite execution. Filename/content heuristics are not proof of secrecy.
 - Preserve bounded reads, stable identities and explicit rejection of non-UTF-8 report paths; never silently use lossy path identity.
@@ -56,9 +56,10 @@ git diff --check
 - Keep schema-1 adoption diagnosis/rollback compatible. Schema-2 apply/unmanage uses one recoverable transaction per approved request, immutable source watches and a separate matching removal acknowledgement. No silent format migration.
 - Recovery is explicit and guarded. Never automatically replay/rollback on startup or overwrite later user/source edits.
 - Preserve the current same-filesystem atomic-rename constraint; do not add an unsafe cross-device fallback.
-- Do not put file contents, local variable values or secrets in reports, logs or checkpoint metadata. Backups are private but ordinary backups are not encrypted.
+- Do not put file contents, local variable values or secrets in ordinary reports, logs or checkpoint metadata. The agreed narrow exception is explicit `git diff --patch`: bounded patch content is disclosed only in that requested report, with unsafe bytes escaped, never in logs/errors/journals. Summary/status reports stay metadata-only; patches are not secret-proof. Backups are private but ordinary backups are not encrypted.
 - Extend failure-boundary/process-crash tests when changing the executor. Do not claim process-exit tests establish power-loss safety.
 - Do not automatically merge Git changes into live-linked sources.
+- Git inspection uses a caller-supplied trusted absolute executable, cleared child environment, fixed read-only arguments, no optional locks/index refresh, no hooks/external diff/textconv/fsmonitor/submodule recursion, and bounded concurrent pipe drains/deadlines. Reject configured content filters and partial clones/promisor settings before status/diff; no unsafe fallback, arbitrary arguments, network or writes. This is hardening, not isolation against a malicious same-user config race. Keep Git executable/environment resolution at the CLI boundary.
 
 ## Changelog maintenance
 

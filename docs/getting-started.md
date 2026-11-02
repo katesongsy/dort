@@ -89,6 +89,14 @@ dort --repo /absolute/path/to/dotfiles files list
 dort --repo /absolute/path/to/dotfiles files plan apply
 ```
 
-There is no CLI repository registration, `init` or `clone` command yet. Without `--repo`, repository commands require an already registered active repository. The read-only explicit-repository commands need a directory containing `dort.toml`; they do not initialize Git or register it.
+There is no CLI repository registration, `init` or `clone` command yet. Without `--repo`, repository commands require an already registered active repository. Manifest/file explicit-repository commands need a directory containing `dort.toml`; they do not initialize Git or register it. The separate Git inspection commands need a real non-bare Git working-tree root but no manifest:
+
+```sh
+dort --repo /absolute/path/to/dotfiles git status
+dort --repo /absolute/path/to/dotfiles git diff
+dort --repo /absolute/path/to/dotfiles git diff --staged
+```
+
+These reports are metadata-only. Content requires the explicit `git diff --patch` option and can expose secrets; read the [Git safety boundary](safety.md#git-inspection-boundary) first. A trusted installed Git must be available through an absolute PATH entry; other Dort commands do not require Git at runtime.
 
 Quote `'~/.editorrc'` when passing a destination that Dort should expand against its configured HOME. Do not use `sudo`. Read the [safety guide](safety.md) before inspecting personal configuration or sharing reports.

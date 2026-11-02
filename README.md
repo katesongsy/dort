@@ -6,7 +6,7 @@ Dort is a Git-native developer environment manager. It is designed to reconcile 
 
 ## Current status
 
-**Core filesystem lifecycle slice (A0–A8), with an entirely read-only CLI.** Dort provides strict manifest validation, profile/dependency resolution, platform detection, local registry/locking APIs, bounded discovery, descriptor-safe file observation, pure lifecycle previews, and experimental core-only adoption, link apply, unmanage and guarded rollback/history with immutable journals.
+**Read-only Git inspection slice (A0–A9), with an entirely read-only CLI.** Dort provides strict manifest validation, profile/dependency resolution, platform detection, local registry/locking APIs, bounded discovery, descriptor-safe file observation, pure lifecycle previews, hardened Git status/diff, and experimental core-only adoption, link apply, unmanage and guarded rollback/history with immutable journals.
 
 Public adoption/deployment/recovery write commands, package-manager execution, remote cloning/sync, templates, secrets, and the Ratatui interface are **not implemented**. A successful preview is not permission or an executable artifact for a later write. The executor is tested only against disposable homes; this is not yet a production-ready dotfile manager.
 
@@ -45,6 +45,25 @@ cargo run -p dort -- --repo /path/to/dotfiles manifest check
 Without `--manifest` or `--repo`, repository commands use a locally registered active repository. Registration currently exists only as a core API; there is no `init` command yet. Discovery also works without a repository. `--profile` affects only the current check/list/preview.
 
 JSON reports go to stdout; JSON errors go to stderr. Exit codes are 0 for success, 1 for I/O failure, 2 for invalid input/configuration or unsupported hosts, 3 for a held writer lock, and **4 for a blocked plan or recovery diagnosis reporting write blockers**. Those reports are still emitted in full on stdout (not as a separate stderr error). No current CLI command acquires a write lock or changes repository registration.
+
+## Read-only Git inspection
+
+An installed, trusted Git executable must be available through an absolute PATH entry; Dort never installs Git. Other commands do not need Git at runtime.
+
+```sh
+dort --repo /path/to/dotfiles git status
+dort --repo /path/to/dotfiles --json git status
+dort --repo /path/to/dotfiles git diff
+dort --repo /path/to/dotfiles git diff --staged
+# Explicit CONTENT disclosure: may expose secrets; review privately.
+dort --repo /path/to/dotfiles git diff --patch
+```
+
+Status and default diff reports contain metadata only. Diff compares tracked worktree changes to the index, or the index to HEAD with `--staged` (including unborn repositories). Untracked names appear in status; their contents are never included in diff. Diff summaries use change codes, modes and paths, without rename detection; status can report renames. Only explicit `--patch` discloses content, escaping control/non-ASCII bytes and backslashes; binary files get a change marker, not binary payloads. Patches are display reports, not directly applicable patch files, and are **not secret-proof**.
+
+Git runs with a cleared environment, fixed safe arguments, no optional locks/index refresh, hooks, external diff/textconv, fsmonitor or submodule recursion. Configured content filters and partial-clone/promisor settings are conservatively refused, even when unused/false. Each child has a 10-second deadline and a combined 4 MiB stdout/stderr limit; errors never echo Git stderr or partial output. There is no fallback, network, merge or write operation. This is hardening, **not OS sandboxing or protection from a malicious same-user configuration race**. Git reads repository-controlled configuration/includes/attributes/object paths using Git's own filesystem access, not Dort's no-follow observer.
+
+`--repo` must identify the exact non-bare working-tree root (linked worktrees supported), with no manifest/registration requirement. Reports are not globally atomic; summary and explicit patch are separate reads. See [command details](docs/commands.md#git-inspection) and [Git safety/troubleshooting](docs/safety.md#git-inspection-boundary).
 
 ## File discovery and previews
 
@@ -160,9 +179,9 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 ```
 
-Local validation on macOS ARM64: **108 tests pass**, formatting passes, and Clippy passes with warnings denied. Cross-platform CI is configured but has not been run locally. Linux additionally exercises FIFO observation, real non-UTF-8 directory/link entries (APFS rejects such filenames at creation), and cross-device refusal when a separate `/dev/shm` filesystem is available.
+Local validation on macOS ARM64: **119 tests pass**, formatting passes, and Clippy passes with warnings denied. Cross-platform CI is configured but has not been run locally. Linux additionally exercises FIFO observation, real non-UTF-8 directory/link entries (APFS rejects such filenames at creation), and cross-device refusal when a separate `/dev/shm` filesystem is available.
 
-Integration tests use disposable homes/repositories and isolated child-process environments. Coverage includes symlink parents/loops, racing terminal substitution, hard links/special files, sensitive exclusions, observation limits, profile overrides, deterministic/no-op/blocked plans, both unmanage preview modes, every adoption/apply/unmanage/recovery checkpoint and post-mutation error boundary, child-process crash/recovery and lock release for forward and inverse lifecycle work, schema-1 compatibility, no-journal repeated apply, separate removal acknowledgement, focused manifest edits, shared destination parents, source preservation, CLI history diagnosis without replay, malformed/checksum/schema/backup failures, stale approvals, source/user-edit rollback guards, and CLI no-write/content-redaction assertions. They never install packages or mutate the developer's configuration. CI is configured for Ubuntu x86_64/ARM64 and macOS Intel/Apple Silicon; local validation does not establish that all CI platforms have passed.
+Integration tests use disposable homes/repositories and isolated child-process environments. Coverage includes symlink parents/loops, racing terminal substitution, hard links/special files, sensitive exclusions, observation limits, profile overrides, deterministic/no-op/blocked plans, both unmanage preview modes, every adoption/apply/unmanage/recovery checkpoint and post-mutation error boundary, child-process crash/recovery and lock release for forward and inverse lifecycle work, schema-1 compatibility, no-journal repeated apply, separate removal acknowledgement, focused manifest edits, shared destination parents, source preservation, CLI history diagnosis without replay, malformed/checksum/schema/backup failures, stale approvals, source/user-edit rollback guards, and CLI no-write/content-redaction assertions. Git coverage adds unborn/dirty/detached/conflicted repositories, unusual/rename paths, linked worktrees, binary markers, helper non-execution, filter/partial-clone refusal, bounded subprocess failures, explicit patch disclosure/escaping, and unchanged index/config/source identities/bytes. CLI Git tests use fake executables; optional core integration tests use installed Git against disposable fixtures only. They never install packages or mutate the developer's configuration. CI is configured for Ubuntu x86_64/ARM64 and macOS Intel/Apple Silicon; local validation does not establish that all CI platforms have passed.
 
 ### Maintaining documentation and history
 
@@ -182,7 +201,7 @@ The script uses `cliff.toml`, local committed history and no remote metadata or 
 
 Implementation specs and planning notes are transient local artifacts in ignored `specs/`; they are not required to build or test Dort. Implemented behaviour is documented in this README, tracked end-user `docs/`, and `ARCHITECTURE.md`. The new `docs/` is public documentation, not the ignored implementation notes.
 
-The next slice adds read-only Git status/diff (A9); public write/approval commands remain deferred to A10. Core filesystem lifecycle execution (A8) is sandbox-tested, not a production deployment guarantee. The broader roadmap adds tools, unified setup, generated/secret configuration, safe Git synchronisation, and the full TUI.
+Read-only Git status/diff (A9) is implemented; the next slice is public write/approval commands (A10). Core filesystem lifecycle execution (A8) is sandbox-tested, not a production deployment guarantee. The broader roadmap adds tools, unified setup, generated/secret configuration, safe Git synchronisation, and the full TUI.
 
 ## License
 

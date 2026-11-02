@@ -17,6 +17,7 @@ Dort helps describe a development environment in a Git repository. **The current
 | Discover hidden configuration metadata | Yes: `files discover`. |
 | Inspect declared active files | Yes: `files list`. |
 | Preview links, adoption and unmanage effects | Yes: `files plan …`; no changes are made. |
+| Inspect Git status/diff | Yes: metadata-only `git status` / `git diff`; explicit `--patch` discloses bounded escaped content. |
 | Inspect retained transaction history/integrity | Yes: `recovery list` supports both journal formats; never replays or repairs them. |
 | Install tools, deploy/adopt/unmanage files or recover through the CLI | Not yet. |
 | Templates, secrets, Git clone/sync or a TUI | Not yet. |

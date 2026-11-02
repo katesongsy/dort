@@ -57,6 +57,28 @@ Both unmanage modes retain the repository source. A drifted or foreign destinati
 
 Repeatable `--profile` is supported for file list/plan operations. Human plans show source/destination paths, permissions, backups, effects, conflicts and destructiveness. JSON includes schema-versioned snapshots and hashes; saving it does not create execution authorization.
 
+## Git inspection
+
+Requires an installed, trusted Git in an absolute PATH directory. No automatic installation occurs. `--repo` must name the exact non-bare working-tree root; linked worktrees are supported, subdirectories are rejected. Git commands need no `dort.toml` or registration.
+
+```sh
+dort --repo /path/to/dotfiles git status
+dort --repo /path/to/dotfiles --json git status
+dort --repo /path/to/dotfiles git diff
+dort --repo /path/to/dotfiles git diff --staged
+# Explicitly disclose CONTENT (possibly secrets); do not share blindly.
+dort --repo /path/to/dotfiles git diff --patch
+dort --repo /path/to/dotfiles --json git diff --staged --patch
+```
+
+- `status`: metadata-only branch headers and changed/untracked entries, with two-column index/worktree codes where applicable and rename original paths. Unborn and detached HEADs and unmerged entries are supported. Ignored files and submodule changes are excluded.
+- `diff`: tracked worktree versus index; `--staged` compares index versus HEAD (or the empty tree before the first commit). Metadata-only summaries contain change codes, old/new modes and paths. Rename detection is disabled for diff: a rename appears as deletion/addition. Untracked contents are never shown.
+- `--patch`: the **only content-disclosure option**, accepted only by `git diff`. Adds a separate bounded display patch. All non-ASCII/control bytes and backslashes are escaped, except LF line breaks. This is not a directly applicable patch file. Binary changes produce markers, not binary payloads. It can expose secrets; there is no secret-proof filtering.
+
+JSON reports have `schema: 1`, `read_only: true` and `entries`. Status adds `branch` (Git branch-header strings without the `# branch.` prefix), with entry `kind`, nullable `xy`, `path` and nullable `original_path`. Diff adds `staged`, entry `change`, `old_mode`, `new_mode`, `path`, and `patch` only when requested. JSON escapes control/non-ASCII characters without changing decoded path identity; human metadata is quoted. Non-UTF-8 paths/metadata fail explicitly. Summary and patch reads are not one atomic snapshot.
+
+No optional locks/index refresh, hooks, external diff/textconv, fsmonitor or submodule recursion are permitted. Global/system Git configuration is ignored. Configured content filters and partial-clone/promisor settings are refused even if unused/false; errors are deliberately generic and never include Git stderr. Each child has a 10-second deadline and combined 4 MiB stdout/stderr limit. Exceeding either fails without a partial report. There are no revision/pathspec passthrough arguments, writes, fetches or merges. See the [Git boundary and troubleshooting](safety.md#git-inspection-boundary).
+
 ## Recovery diagnosis
 
 ```sh
@@ -74,10 +96,10 @@ Incomplete or malformed histories are write blockers for core writers. The CLI n
 | --- | --- |
 | 0 | Command succeeded; not proof deployment is supported. |
 | 1 | I/O failure. |
-| 2 | Invalid input/configuration, unsupported host or argument error. |
+| 2 | Invalid input/configuration, unsupported host/arguments, unavailable or failed/refused/bounded Git read. |
 | 3 | Writer lock contention (primarily relevant to core APIs; current CLI commands do not acquire write locks). |
 | 4 | A file plan is blocked, or recovery diagnosis reports write blockers. |
 
 Blocked plans/diagnosis still emit their full report on **stdout**. Other runtime errors go to **stderr**, as JSON when `--json` is selected. Clap help/argument-parsing output has its own normal formatting; `--json` does not turn invalid CLI syntax into a JSON report.
 
-Reports expose paths/metadata/hashes but not file bodies or local variable values. These reports can still reveal personal paths or configuration names; review before sharing.
+Ordinary reports expose paths/metadata/hashes but not file bodies or local variable values. Explicit `git diff --patch` additionally discloses bounded escaped content, which may contain secrets. Even metadata reports can reveal personal paths or configuration names; review before sharing.

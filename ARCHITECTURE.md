@@ -31,6 +31,7 @@ All module paths below are under `crates/dort-core/src/`:
 | `journal.rs` | Private per-repository transaction storage, immutable checksum chains, integrity/state validation, read-only diagnosis and write blocking. |
 | `adoption.rs` | Schema-1 opaque approval, fresh revalidation, private staging, one-file adoption and explicit guarded/restartable rollback; shared identity/approval helpers. |
 | `lifecycle.rs`, `lifecycle_journal.rs` | Schema-2 apply/unmanage approval/execution/rollback, immutable transaction store/validation and retained history. Sources are watches, never operation targets. |
+| `git.rs` | Fixed read-only Git executable adapter, conservative configuration preflight, bounded nonblocking subprocess runner, NUL status/raw-diff parsers and explicit escaped patch disclosure. No state/journal interaction. |
 | `error.rs` | Shared errors; callers decide presentation and exit status. |
 
 CLI routing and reports live in [crates/dort/src/cli.rs](crates/dort/src/cli.rs). Domain services do not depend on Clap, terminal rendering or CLI output.
@@ -54,6 +55,18 @@ Profiles are a deterministic union of built-in `base`, defaults, platform select
 A snapshot records the manifest, relevant local configuration metadata, source/destination entries, every existing parent identity, active profiles and the request. Regular-file hashes bind safe observed content; snapshots never include file bodies. The snapshot is not globally atomic and is never trusted as later write authorization.
 
 `plan` performs no I/O, clock reads or random ID generation. Plans have stable file-ID ordering and explicit backup, permission, source/manifest/destination, destructive and acknowledgement effects. Correct managed links are no-ops. Templates, secrets and unverified tool prerequisites are blocked rather than treated as links.
+
+## Read-only Git boundary
+
+CLI environment discovery resolves a trusted absolute Git executable from absolute PATH entries (empty/relative entries are ignored). Core `git::Git` receives that path explicitly and exposes only `status` and `diff(staged, patch)`, never arbitrary arguments/revisions or mutations. An explicit repository needs no manifest/registration but must equal Git's canonical non-bare toplevel; linked worktrees and unborn repositories are supported. Subdirectories are not silently searched upward.
+
+Every child clears its environment and sets fixed locale, disabled global/system configuration, system attributes, optional locks, prompts, lazy fetch and replace objects. Fixed Git options disable pagers, hooks, fsmonitor, untracked-cache updates, index auto-refresh, external diff/textconv and submodule recursion/inspection. A safe builtin configuration query honors repository includes and refuses **any configured filter driver or partial-clone/promisor declaration**, including unused/false settings, before status/diff. No shell, install, fallback, network or Git mutation API exists.
+
+The private runner concurrently drains nonblocking stdout/stderr, caps their combined bytes at 4 MiB per child and enforces a 10-second deadline. On errors it kills the isolated process group and reaps the child; reader threads cannot hang on descendant-held pipes. Stderr is discarded, never echoed. Failures emit no partial report/patch. Limits bound captured data/time, not the subprocess's OS resource usage; this is not an OS sandbox.
+
+Status parses porcelain-v2 NUL records, preserving rename originals and embedded whitespace. Diff parses raw NUL records with rename detection disabled; summaries contain change codes/modes/paths only. Non-UTF-8 metadata/paths fail explicitly, not lossily. Human metadata is quoted; Git JSON is ASCII-escaped while preserving decoded Unicode identity. The only file-content-report exception is **explicit `--patch`**: a separate bounded read returns a display-only patch with all control/non-ASCII bytes and backslashes escaped (LF preserved), never in errors/logs/journals. Binary payloads are not requested; untracked contents are excluded. Patches can expose secrets; no heuristic promises otherwise.
+
+Git reads configuration/includes/attributes/object paths through its own filesystem code, not Dort's no-follow observer. Preflight and reads are not globally atomic; the configuration is rechecked before a separate patch read, but a malicious same-user process racing configuration can defeat preflight. Trust the Git installation/repository and do not treat hardening as isolation. No live-linked source, index, configuration, registration or transaction state is intentionally modified, and no app writer lock/state creation is needed.
 
 ## Filesystem boundary and threat model
 
@@ -158,8 +171,8 @@ No automatic recovery, garbage collection or transaction-history migration is im
 
 ## Presentation, validation and known limits
 
-The CLI emits reports on stdout and errors on stderr, with optional JSON. Exit codes are 0 success, 1 I/O, 2 invalid input/configuration/host, 3 lock contention, and 4 a blocked plan or blocking recovery diagnosis. No file contents should enter logs or reports.
+The CLI emits reports on stdout and errors on stderr, with optional JSON. Exit codes are 0 success, 1 I/O, 2 invalid input/configuration/host, 3 lock contention, and 4 a blocked plan or blocking recovery diagnosis. No file contents should enter logs or ordinary reports; only an explicitly requested escaped Git patch report may disclose bounded content.
 
-Integration tests use disposable canonicalized homes and isolated child environments. They cover pure planning, no-write CLI behaviour, unsafe paths/races, malformed state, approvals, guarded rollback, every exposed checkpoint/post-mutation error boundary, forward/inverse lifecycle process exits/lock release, no-journal repeated apply, batch/shared-parent execution, source preservation, separate removal acknowledgement and schema-1 compatibility. These tests do **not** establish real power-loss or filesystem fault-injection guarantees.
+Integration tests use disposable canonicalized homes and isolated child environments. They cover pure planning, no-write CLI behaviour, unsafe paths/races, malformed state, approvals, guarded rollback, every exposed checkpoint/post-mutation error boundary, forward/inverse lifecycle process exits/lock release, no-journal repeated apply, batch/shared-parent execution, source preservation, separate removal acknowledgement and schema-1 compatibility. CLI Git tests use deterministic fake executables and missing-Git cases, with no installed-tool requirement. Optional core real-Git fixtures skip explicitly when unavailable and cover no-write index/config/source identity, unusual paths, unborn/conflict/detached/worktree states, helper non-execution, filters/promisor refusal and explicit patch disclosure. Runner tests exercise stdout/stderr bounds, deadlines and descendant-held pipes. These tests do **not** establish real power-loss or filesystem fault-injection guarantees.
 
 CI is configured for Ubuntu and macOS on both architectures; local test success is not evidence every remote runner passed. See [README.md](README.md#development) for current validation and [AGENTS.md](AGENTS.md) for required checks. Maintain this document when these boundaries, flows, persistence formats or guarantees change.

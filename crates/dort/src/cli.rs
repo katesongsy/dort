@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use dort_core::{
     Error, Manifest,
     context::HostContext,
-    discovery, journal,
+    discovery, git, journal,
     local::LocalConfig,
     model::{FileMode, ManagedFile},
     planner::{self, Request, UnmanageMode},
@@ -42,10 +42,30 @@ enum Command {
         #[command(subcommand)]
         command: RecoveryCommand,
     },
+    /// Hardened read-only Git inspection; no network, helpers or writes.
+    Git {
+        #[command(subcommand)]
+        command: GitCommand,
+    },
     /// Read-only manifest diagnostics.
     Manifest {
         #[command(subcommand)]
         command: ManifestCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum GitCommand {
+    /// Metadata-only working-tree/index status, including untracked names.
+    Status,
+    /// Metadata-only tracked diff by default; untracked contents are excluded.
+    Diff {
+        /// Compare the index to HEAD (also works before the first commit).
+        #[arg(long)]
+        staged: bool,
+        /// Explicitly disclose bounded patch CONTENT, with unsafe bytes escaped.
+        #[arg(long)]
+        patch: bool,
     },
 }
 
@@ -230,6 +250,58 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
             }
             if write_blocked {
                 return Ok(ExitCode::from(4));
+            }
+        }
+        Command::Git { command } => {
+            let root =
+                local
+                    .select_repository(cli.repo.as_deref())
+                    .map_err(|error| match error {
+                        Error::NoRepository => Error::NoRepository,
+                        _ => Error::Invalid("could not resolve Git repository root".into()),
+                    })?;
+            let backend = git::Git::new(resolve_git()?)?;
+            match command {
+                GitCommand::Status => {
+                    let report = backend.status(&root)?;
+                    if cli.json {
+                        print_git_json(&report)?;
+                    } else {
+                        for header in &report.branch {
+                            println!("Branch: {header:?}");
+                        }
+                        for entry in &report.entries {
+                            println!(
+                                "{} {} {:?} (original: {:?})",
+                                entry.kind,
+                                entry.xy.as_deref().unwrap_or("?"),
+                                entry.path,
+                                entry.original_path
+                            );
+                        }
+                        println!("Read-only Git status; {} entries.", report.entries.len());
+                    }
+                }
+                GitCommand::Diff { staged, patch } => {
+                    let report = backend.diff(&root, *staged, *patch)?;
+                    if cli.json {
+                        print_git_json(&report)?;
+                    } else {
+                        for entry in &report.entries {
+                            println!(
+                                "{} {} -> {} {:?}",
+                                entry.change, entry.old_mode, entry.new_mode, entry.path
+                            );
+                        }
+                        println!(
+                            "Read-only Git diff; {} entries. Untracked contents excluded.",
+                            report.entries.len()
+                        );
+                        if let Some(patch) = &report.patch {
+                            println!("Explicit patch CONTENT (unsafe bytes escaped):\n{patch}");
+                        }
+                    }
+                }
             }
         }
         Command::Files { command } => {
@@ -435,6 +507,47 @@ fn requested_profiles(local: &LocalConfig, requested: &[String]) -> Vec<String> 
         .chain(requested)
         .cloned()
         .collect()
+}
+
+// Environment discovery belongs to the application boundary, not the core.
+// Ignore empty/relative PATH entries so a repository-local `git` is not selected.
+fn resolve_git() -> dort_core::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    if let Some(path) = std::env::var_os("PATH") {
+        for directory in std::env::split_paths(&path).filter(|p| p.is_absolute()) {
+            let candidate = directory.join("git");
+            if let Ok(metadata) = candidate.metadata()
+                && metadata.is_file()
+                && metadata.permissions().mode() & 0o111 != 0
+                && let Ok(absolute) = candidate.canonicalize()
+            {
+                return Ok(absolute);
+            }
+        }
+    }
+    Err(Error::Invalid(
+        "Git executable not found in absolute PATH entries; install Git separately".into(),
+    ))
+}
+
+// ASCII-only JSON protects terminals from C1/bidi controls while preserving the
+// exact decoded Unicode path identity, including supplementary-plane characters.
+fn print_git_json(value: &impl Serialize) -> dort_core::Result<()> {
+    use std::fmt::Write;
+    let json = serde_json::to_string_pretty(value)
+        .map_err(|_| Error::Invalid("could not encode Git output".into()))?;
+    let mut escaped = String::new();
+    for character in json.chars() {
+        if character >= '\u{7f}' {
+            for unit in character.encode_utf16(&mut [0; 2]) {
+                let _ = write!(escaped, "\\u{unit:04x}");
+            }
+        } else {
+            escaped.push(character);
+        }
+    }
+    println!("{escaped}");
+    Ok(())
 }
 
 fn print_json(value: &impl Serialize) -> dort_core::Result<()> {

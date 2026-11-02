@@ -7,6 +7,7 @@ pub mod adoption;
 pub mod context;
 pub mod discovery;
 pub mod error;
+pub mod git;
 pub mod journal;
 pub mod lifecycle;
 mod lifecycle_journal;

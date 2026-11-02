@@ -10,6 +10,24 @@ Known key/credential locations, caches, browsers and generated data are excluded
 
 Reports can contain personal paths, metadata and hashes. Review them privately before sharing. Do not use `sudo` or weaken permissions to bypass protection.
 
+## Git inspection boundary
+
+`git status` and default `git diff` reports are metadata-only. Only explicitly adding `git diff --patch` discloses file content, which can include secrets. Patch escaping prevents terminal control injection; it does **not** redact credentials. Patches never enter Dort logs/errors/journals, but redirected output is your responsibility. Do not upload patches by default when reporting a problem.
+
+Dort uses your installed trusted Git executable with a cleared child environment, fixed read-only options, no optional locks/index refresh, hooks, external diff/textconv, fsmonitor or submodule inspection/recursion. Global/system Git configuration and global/system attributes are ignored. Repository-configured content filters and partial-clone/promisor declarations are refused conservatively, even if unused/false. No Git installation, arbitrary argument passthrough, network or write operation is available.
+
+This is hardening, **not an OS sandbox or protection from a malicious same-user configuration race**. Git reads repository-controlled configuration/includes/attributes/object paths through Git's own filesystem access, not Dort's no-follow observer. Use trusted installations/repositories. Summary and explicit patch are separate, non-atomic reads. There is no automatic Git merge into live-linked sources.
+
+| Git problem | Action |
+| --- | --- |
+| Executable not found/unavailable | Install Git separately and use a trusted absolute PATH directory; relative/empty PATH entries are ignored. Other Dort commands do not need Git at runtime. |
+| Filter/partial-clone refusal | Inspect configuration privately, including includes. Use Git yourself with appropriate precautions; Dort offers no bypass or automatic config editing. |
+| Invalid repository/root | Supply the exact non-bare working-tree root, not a subdirectory, dummy `.git` directory or bare repository. Linked worktrees are supported; a manifest is not needed. |
+| Time/output limit | Each child is limited to 10 seconds and 4 MiB combined stdout/stderr. Narrowing arbitrary Git arguments or lifting bounds is not exposed. No partial report is emitted. |
+| Generic Git read failure | Check Git availability/version and repository integrity privately. Stderr is intentionally not echoed because it can contain sensitive values/content. |
+
+Git access may update filesystem access times; “read-only” does not promise otherwise. Tests verify index/config/source bytes, identities, modes and modification times stay unchanged, including a source reached through a live link.
+
 ## Where local state lives
 
 Both macOS and Ubuntu use:
@@ -70,4 +88,4 @@ The application lock coordinates Dort writers only, not editors or malicious sam
 
 ## Reporting a problem
 
-Include the Dort version, OS/architecture, exact command, exit status and a minimized/redacted manifest when useful. State whether the error came from manifest validation, discovery, a file preview or recovery diagnosis. Do not upload local variables, private backup files, credential material or full transaction directories.
+Include the Dort version, OS/architecture, exact command, exit status and a minimized/redacted manifest when useful. State whether the error came from manifest validation, discovery, a file preview, Git inspection or recovery diagnosis. Omit patch content unless you have privately reviewed/redacted it. Do not upload local variables, private backup files, credential material or full transaction directories.
