@@ -1,17 +1,16 @@
+use crate::services::adopt_request;
 use clap::{Parser, Subcommand, ValueEnum};
 use dort_core::{
-    Error, Manifest, bootstrap,
+    Error, bootstrap,
     context::HostContext,
-    discovery, git, journal,
+    git, journal,
     local::LocalConfig,
-    model::{FileMode, ManagedFile},
     planner::{self, Request, UnmanageMode},
-    profiles::selected,
     recovery,
     state::WriterLock,
 };
 use serde::Serialize;
-use std::{collections::BTreeSet, path::PathBuf, process::ExitCode};
+use std::{path::PathBuf, process::ExitCode};
 
 #[derive(Parser)]
 #[command(
@@ -212,18 +211,6 @@ struct DoctorReport {
     registered_repositories: usize,
     active_repository: Option<String>,
     mode: &'static str,
-}
-
-#[derive(Serialize)]
-struct CheckReport {
-    manifest: PathBuf,
-    schema: u32,
-    active_profiles: BTreeSet<String>,
-    selected_tools: usize,
-    selected_files: usize,
-    tool_dependency_order: Vec<String>,
-    unsupported_capabilities: Vec<String>,
-    filesystem_and_tools_inspected: bool,
 }
 
 pub fn run() -> ExitCode {
@@ -499,136 +486,125 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                 }
             }
         }
-        Command::Files { command } => {
-            match command {
-                FilesCommand::Add {
-                    target,
-                    id,
-                    source,
+        Command::Files { command } => match command {
+            FilesCommand::Add {
+                target,
+                id,
+                source,
+                profiles,
+            } => {
+                return file_operation(
+                    cli,
+                    &host,
+                    &local,
                     profiles,
-                } => {
-                    return file_operation(
-                        cli,
-                        &host,
-                        &local,
-                        profiles,
-                        adopt_request(target, id, source),
-                        true,
-                    );
-                }
-                FilesCommand::Apply { profiles } => {
-                    return file_operation(cli, &host, &local, profiles, Request::Apply, true);
-                }
-                FilesCommand::Remove { id, mode, profiles } => {
-                    return file_operation(
-                        cli,
-                        &host,
-                        &local,
-                        profiles,
-                        Request::Unmanage {
-                            id: id.clone(),
-                            mode: match mode {
-                                RemovalMode::Keep => UnmanageMode::Keep,
-                                RemovalMode::Remove => UnmanageMode::Remove,
-                            },
+                    adopt_request(target, id, source),
+                    true,
+                );
+            }
+            FilesCommand::Apply { profiles } => {
+                return file_operation(cli, &host, &local, profiles, Request::Apply, true);
+            }
+            FilesCommand::Remove { id, mode, profiles } => {
+                return file_operation(
+                    cli,
+                    &host,
+                    &local,
+                    profiles,
+                    Request::Unmanage {
+                        id: id.clone(),
+                        mode: match mode {
+                            RemovalMode::Keep => UnmanageMode::Keep,
+                            RemovalMode::Remove => UnmanageMode::Remove,
                         },
-                        true,
-                    );
-                }
-                FilesCommand::Discover => {
-                    // Discovery does not require an active repository.
-                    let root = if cli.repo.is_some() || local.active_repository.is_some() {
-                        Some(local.select_repository(cli.repo.as_deref())?)
-                    } else {
-                        None
-                    };
-                    let report = discovery::discover(&host, root.as_deref())?;
-                    if cli.json {
-                        print_json(&report)?;
-                    } else {
-                        for candidate in &report.candidates {
-                            println!(
-                                "{}: {:?}, adoption candidate: {}{}",
-                                candidate.entry.path.display(),
-                                candidate.entry.kind,
-                                candidate.supported_for_adoption,
-                                candidate
-                                    .link_state
-                                    .as_ref()
-                                    .map_or(String::new(), |state| format!(", link: {state:?}"))
-                            );
-                        }
-                        for warning in &report.warnings {
-                            println!("Warning: {warning}");
-                        }
-                        println!("{}", report.sensitivity_notice);
-                    }
-                }
-                FilesCommand::List { profiles } => {
-                    let root = local.select_repository(cli.repo.as_deref())?;
-                    let requested = requested_profiles(&local, profiles);
-                    let snapshot = planner::observe(&host, &root, &requested, Request::Apply)?;
-                    if cli.json {
-                        print_json(&snapshot)?;
-                    } else {
-                        for file in &snapshot.files {
-                            println!(
-                                "{}: {} -> {}",
-                                file.mapping.id,
-                                file.target_path.display(),
-                                file.source_path.display()
-                            );
-                            println!(
-                                "  Source: {:?}; destination: {:?}",
-                                file.source.as_ref().map(|f| &f.kind),
-                                file.destination.as_ref().map(|f| &f.kind)
-                            );
-                            for blocker in &file.blockers {
-                                println!("  BLOCKED: {blocker}");
-                            }
-                        }
+                    },
+                    true,
+                );
+            }
+            FilesCommand::Discover => {
+                let report = crate::services::discover(&host, &local, cli.repo.as_deref())?.report;
+                if cli.json {
+                    print_json(&report)?;
+                } else {
+                    for candidate in &report.candidates {
                         println!(
-                            "Read-only inventory; use files plan apply for safety/conflict decisions."
+                            "{}: {:?}, adoption candidate: {}{}",
+                            candidate.entry.path.display(),
+                            candidate.entry.kind,
+                            candidate.supported_for_adoption,
+                            candidate
+                                .link_state
+                                .as_ref()
+                                .map_or(String::new(), |state| format!(", link: {state:?}"))
                         );
                     }
-                }
-                FilesCommand::Plan { profiles, command } => {
-                    let root = local.select_repository(cli.repo.as_deref())?;
-                    let requested = requested_profiles(&local, profiles);
-                    let request = match command {
-                        PlanCommand::Apply => Request::Apply,
-                        PlanCommand::Adopt { target, id, source } => Request::Adopt {
-                            mapping: ManagedFile {
-                                id: id.clone(),
-                                source: source.clone(),
-                                target: target.clone(),
-                                mode: FileMode::Link,
-                                profiles: vec!["base".into()],
-                                requires: vec![],
-                                overrides: Default::default(),
-                                permissions: None,
-                            },
-                        },
-                        PlanCommand::Unmanage { id, mode } => Request::Unmanage {
-                            id: id.clone(),
-                            mode: match mode {
-                                RemovalMode::Keep => UnmanageMode::Keep,
-                                RemovalMode::Remove => UnmanageMode::Remove,
-                            },
-                        },
-                    };
-                    let plan = planner::plan(planner::observe(&host, &root, &requested, request)?);
-                    if cli.json {
-                        print_json(&plan)?;
-                    } else {
-                        print!("{}", plan.human());
+                    for warning in &report.warnings {
+                        println!("Warning: {warning}");
                     }
-                    if plan.has_blockers() {
-                        return Ok(ExitCode::from(4));
-                    }
+                    println!("{}", report.sensitivity_notice);
                 }
             }
-        }
+            FilesCommand::List { profiles } => {
+                let snapshot = crate::services::observe(
+                    &host,
+                    &local,
+                    cli.repo.as_deref(),
+                    profiles,
+                    Request::Apply,
+                )?;
+                if cli.json {
+                    print_json(&snapshot)?;
+                } else {
+                    for file in &snapshot.files {
+                        println!(
+                            "{}: {} -> {}",
+                            file.mapping.id,
+                            file.target_path.display(),
+                            file.source_path.display()
+                        );
+                        println!(
+                            "  Source: {:?}; destination: {:?}",
+                            file.source.as_ref().map(|f| &f.kind),
+                            file.destination.as_ref().map(|f| &f.kind)
+                        );
+                        for blocker in &file.blockers {
+                            println!("  BLOCKED: {blocker}");
+                        }
+                    }
+                    println!(
+                        "Read-only inventory; use files plan apply for safety/conflict decisions."
+                    );
+                }
+            }
+            FilesCommand::Plan { profiles, command } => {
+                let request = match command {
+                    PlanCommand::Apply => Request::Apply,
+                    PlanCommand::Adopt { target, id, source } => adopt_request(target, id, source),
+                    PlanCommand::Unmanage { id, mode } => Request::Unmanage {
+                        id: id.clone(),
+                        mode: match mode {
+                            RemovalMode::Keep => UnmanageMode::Keep,
+                            RemovalMode::Remove => UnmanageMode::Remove,
+                        },
+                    },
+                };
+                let plan = planner::plan(crate::services::observe(
+                    &host,
+                    &local,
+                    cli.repo.as_deref(),
+                    profiles,
+                    request,
+                )?);
+                if cli.json {
+                    print_json(&plan)?;
+                } else {
+                    print!("{}", plan.human());
+                }
+                if plan.has_blockers() {
+                    return Ok(ExitCode::from(4));
+                }
+            }
+        },
         Command::Manifest {
             command: ManifestCommand::Check { manifest, profiles },
         } => {
@@ -644,62 +620,7 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                     .select_repository(cli.repo.as_deref())?
                     .join("dort.toml")
             };
-            let text = std::fs::read_to_string(&path).map_err(|source| Error::Io {
-                operation: "read manifest",
-                path: path.clone(),
-                source,
-            })?;
-            tracing::debug!("validating environment manifest");
-            let manifest = Manifest::parse(&text)?;
-            let requested: Vec<_> = local
-                .active_profiles
-                .iter()
-                .chain(profiles)
-                .cloned()
-                .collect();
-            // Resolve the repository root for lexical target overlap protection.
-            let root = path
-                .parent()
-                .unwrap_or_else(|| std::path::Path::new("."))
-                .canonicalize()
-                .map_err(|source| Error::Io {
-                    operation: "resolve manifest directory",
-                    path: path.clone(),
-                    source,
-                })?;
-            let active = manifest.validate_for_host(&host, &requested, Some(&root))?;
-            let tools: Vec<_> = manifest
-                .tools
-                .iter()
-                .filter(|t| selected(&t.profiles, &active))
-                .collect();
-            let files: Vec<_> = manifest
-                .files
-                .iter()
-                .filter(|f| selected(&f.profiles, &active))
-                .collect();
-            let mut unsupported = vec![];
-            if !tools.is_empty() {
-                unsupported.push("tool inventory and installation".into());
-            }
-            for file in &files {
-                if file.mode != FileMode::Link {
-                    unsupported.push(format!("{}: {:?} deployment", file.id, file.mode));
-                }
-                if !file.requires.is_empty() {
-                    unsupported.push(format!("{}: tool prerequisite verification", file.id));
-                }
-            }
-            let report = CheckReport {
-                manifest: path,
-                schema: manifest.schema,
-                selected_tools: tools.len(),
-                selected_files: files.len(),
-                tool_dependency_order: manifest.dependency_order(host.platform, &active)?,
-                active_profiles: active,
-                unsupported_capabilities: unsupported,
-                filesystem_and_tools_inspected: false,
-            };
+            let report = crate::services::check_manifest(&host, &local, path, profiles)?;
             if cli.json {
                 print_json(&report)?;
             } else {
@@ -727,21 +648,6 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
         }
     }
     Ok(ExitCode::SUCCESS)
-}
-
-fn adopt_request(target: &std::path::Path, id: &str, source: &std::path::Path) -> Request {
-    Request::Adopt {
-        mapping: ManagedFile {
-            id: id.into(),
-            source: source.into(),
-            target: target.into(),
-            mode: FileMode::Link,
-            profiles: vec!["base".into()],
-            requires: vec![],
-            overrides: Default::default(),
-            permissions: None,
-        },
-    }
 }
 
 fn mutation_report(operation: &str, transaction: Option<String>) -> dort_core::Result<()> {
@@ -798,8 +704,6 @@ fn file_operation(
     request: Request,
     write: bool,
 ) -> dort_core::Result<ExitCode> {
-    let root = local.select_repository(cli.repo.as_deref())?;
-    let requested = requested_profiles(local, profiles);
     let removal = match &request {
         Request::Unmanage {
             id,
@@ -807,7 +711,13 @@ fn file_operation(
         } => Some(id.clone()),
         _ => None,
     };
-    let plan = planner::plan(planner::observe(host, &root, &requested, request)?);
+    let plan = planner::plan(crate::services::observe(
+        host,
+        local,
+        cli.repo.as_deref(),
+        profiles,
+        request,
+    )?);
     if !write || cli.dry_run || plan.has_blockers() {
         if cli.json {
             print_git_json(&plan)?;
@@ -845,15 +755,6 @@ fn file_operation(
     let tid = approval.execute(host, |_| Ok(()))?;
     mutation_report("files", tid)?;
     Ok(ExitCode::SUCCESS)
-}
-
-fn requested_profiles(local: &LocalConfig, requested: &[String]) -> Vec<String> {
-    local
-        .active_profiles
-        .iter()
-        .chain(requested)
-        .cloned()
-        .collect()
 }
 
 // ASCII-only JSON protects terminals from C1/bidi controls while preserving the

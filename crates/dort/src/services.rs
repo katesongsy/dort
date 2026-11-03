@@ -1,13 +1,137 @@
 //! Shared application dispatch; presentation must obtain approval before calling.
 use dort_core::{
-    Result, adoption, bootstrap,
+    Manifest, Result, adoption, bootstrap,
     context::HostContext,
-    lifecycle,
-    planner::{Plan, Request, UnmanageMode},
+    discovery, lifecycle,
+    local::LocalConfig,
+    model::{FileMode, ManagedFile},
+    planner::{self, Plan, Request, Snapshot, UnmanageMode},
+    profiles::selected,
     state::WriterLock,
 };
 
-use std::path::{Path, PathBuf};
+use serde::Serialize;
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+};
+
+pub fn requested_profiles(local: &LocalConfig, requested: &[String]) -> Vec<String> {
+    local
+        .active_profiles
+        .iter()
+        .chain(requested)
+        .cloned()
+        .collect()
+}
+
+pub fn observe(
+    host: &HostContext,
+    local: &LocalConfig,
+    explicit: Option<&Path>,
+    requested: &[String],
+    request: Request,
+) -> Result<Snapshot> {
+    let root = local.select_repository(explicit)?;
+    planner::observe(host, &root, &requested_profiles(local, requested), request)
+}
+
+pub struct ProfileChoices {
+    pub known: BTreeSet<String>,
+    pub defaults: Vec<String>,
+    pub platform: Vec<String>,
+    pub local: Vec<String>,
+    pub mandatory: BTreeSet<String>,
+}
+
+#[derive(Serialize)]
+pub struct CheckReport {
+    pub manifest: PathBuf,
+    pub schema: u32,
+    pub active_profiles: BTreeSet<String>,
+    pub selected_tools: usize,
+    pub selected_files: usize,
+    pub tool_dependency_order: Vec<String>,
+    pub unsupported_capabilities: Vec<String>,
+    pub filesystem_and_tools_inspected: bool,
+    #[serde(skip)]
+    pub choices: ProfileChoices,
+}
+
+/// Preserve CLI structural-check semantics, including its ordinary manifest read.
+/// This is not file observation and deliberately does not inspect source contents.
+pub fn check_manifest(
+    host: &HostContext,
+    local: &LocalConfig,
+    path: PathBuf,
+    requested: &[String],
+) -> Result<CheckReport> {
+    let text = std::fs::read_to_string(&path).map_err(|source| dort_core::Error::Io {
+        operation: "read manifest",
+        path: path.clone(),
+        source,
+    })?;
+    tracing::debug!("validating environment manifest");
+    let manifest = Manifest::parse(&text)?;
+    let root = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .canonicalize()
+        .map_err(|source| dort_core::Error::Io {
+            operation: "resolve manifest directory",
+            path: path.clone(),
+            source,
+        })?;
+    let active =
+        manifest.validate_for_host(host, &requested_profiles(local, requested), Some(&root))?;
+    let tools: Vec<_> = manifest
+        .tools
+        .iter()
+        .filter(|t| selected(&t.profiles, &active))
+        .collect();
+    let files: Vec<_> = manifest
+        .files
+        .iter()
+        .filter(|f| selected(&f.profiles, &active))
+        .collect();
+    let mut unsupported = vec![];
+    if !tools.is_empty() {
+        unsupported.push("tool inventory and installation".into());
+    }
+    for file in &files {
+        if file.mode != FileMode::Link {
+            unsupported.push(format!("{}: {:?} deployment", file.id, file.mode));
+        }
+        if !file.requires.is_empty() {
+            unsupported.push(format!("{}: tool prerequisite verification", file.id));
+        }
+    }
+    let choices = ProfileChoices {
+        known: manifest.profiles.known(),
+        defaults: manifest.profiles.default.clone(),
+        platform: manifest
+            .profiles
+            .platform
+            .get(&host.platform)
+            .cloned()
+            .unwrap_or_default(),
+        local: local.active_profiles.clone(),
+        mandatory: manifest
+            .profiles
+            .resolve(host.platform, &local.active_profiles)?,
+    };
+    Ok(CheckReport {
+        manifest: path,
+        schema: manifest.schema,
+        selected_tools: tools.len(),
+        selected_files: files.len(),
+        tool_dependency_order: manifest.dependency_order(host.platform, &active)?,
+        active_profiles: active,
+        unsupported_capabilities: unsupported,
+        filesystem_and_tools_inspected: false,
+        choices,
+    })
+}
 
 pub fn resolve_root(path: &Path, launch_directory: &Path) -> PathBuf {
     if path.is_absolute() {
@@ -15,6 +139,50 @@ pub fn resolve_root(path: &Path, launch_directory: &Path) -> PathBuf {
     } else {
         launch_directory.join(path)
     }
+}
+
+pub fn adopt_request(target: &Path, id: &str, source: &Path) -> Request {
+    Request::Adopt {
+        mapping: ManagedFile {
+            id: id.into(),
+            source: source.into(),
+            target: target.into(),
+            mode: FileMode::Link,
+            profiles: vec!["base".into()],
+            requires: vec![],
+            overrides: Default::default(),
+            permissions: None,
+        },
+    }
+}
+
+pub struct Discovery {
+    pub repository: Option<PathBuf>,
+    pub report: discovery::Discovery,
+}
+
+/// Missing selection is allowed; invalid selected scope must never become unscoped.
+pub fn discover(
+    host: &HostContext,
+    local: &LocalConfig,
+    explicit: Option<&Path>,
+) -> Result<Discovery> {
+    let repository = if explicit.is_some() || local.active_repository.is_some() {
+        let root = local.select_repository(explicit)?;
+        if dort_core::observation::inspect(&root, false)?.kind
+            != dort_core::observation::Kind::Directory
+        {
+            return Err(dort_core::Error::Invalid(
+                "selected discovery repository must be an existing no-follow directory".into(),
+            ));
+        }
+        dort_core::observation::validate_output_path(&root)?;
+        Some(root)
+    } else {
+        None
+    };
+    let report = discovery::discover(host, repository.as_deref())?;
+    Ok(Discovery { repository, report })
 }
 
 /// Own the actual preview and its executable binding, never a serialized report.

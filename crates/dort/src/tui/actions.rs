@@ -19,14 +19,40 @@ pub struct Data {
     pub known_roots: Vec<PathBuf>,
     pub profiles: Vec<String>,
     pub files: Vec<(String, String)>,
+    pub files_error: Option<String>,
     pub history: Vec<journal::Diagnosis>,
     pub history_error: Option<String>,
 }
 
+// TOML parser Display includes source lines. Ordinary TUI errors are metadata only.
+pub fn diagnostic(error: &Error) -> String {
+    match error {
+        Error::Parse(_) => "Invalid TOML; manifest source text is not displayed.".into(),
+        _ => error.to_string(),
+    }
+}
+
+/// Deferred quit returns through CLI error presentation after terminal restoration.
+pub fn exit_error(error: Error) -> Error {
+    if matches!(error, Error::Parse(_)) {
+        Error::Invalid(diagnostic(&error))
+    } else {
+        error
+    }
+}
+
+#[cfg(test)]
 pub fn load(host: &HostContext, repository: Option<&Path>) -> Result<Data> {
+    load_scoped(host, repository, &[])
+}
+pub fn load_scoped(
+    host: &HostContext,
+    repository: Option<&Path>,
+    requested: &[String],
+) -> Result<Data> {
     let (history, history_error) = match journal::diagnose(host) {
         Ok(rows) => (rows, None),
-        Err(error) => (vec![], Some(error.to_string())),
+        Err(error) => (vec![], Some(diagnostic(&error))),
     };
     let mut overview = format!(
         "Experimental local-file manager\nHost: {:?} / {:?}\nWrite blockers: {}\n",
@@ -39,13 +65,18 @@ pub fn load(host: &HostContext, repository: Option<&Path>) -> Result<Data> {
     }
     let local = LocalConfig::load(host);
     let mut files = vec![];
+    let mut files_error = None;
     let mut known_roots = vec![];
     let mut profiles = vec![];
     let mut selected = None;
     match local {
-        Err(error) => overview.push_str(&format!(
-            "Configuration unavailable: {error}\nRecovery remains available.\n"
-        )),
+        Err(error) => {
+            let error = diagnostic(&error);
+            files_error = Some(format!("Configuration unavailable: {error}"));
+            overview.push_str(&format!(
+                "Configuration unavailable: {error}\nRecovery remains available.\n"
+            ));
+        }
         Ok(local) => {
             known_roots = local
                 .repositories
@@ -53,9 +84,15 @@ pub fn load(host: &HostContext, repository: Option<&Path>) -> Result<Data> {
                 .map(|record| record.root.clone())
                 .collect();
             match local.select_repository(repository) {
-                Err(error) => overview.push_str(&format!(
-                    "{error}\nWelcome: open Actions to Choose repository or Create/attach.\n"
-                )),
+                Err(error) => {
+                    let error = diagnostic(&error);
+                    files_error = Some(format!(
+                        "{error}\nChoose repository or Create/attach in Actions."
+                    ));
+                    overview.push_str(&format!(
+                        "{error}\nWelcome: open Actions to Choose repository or Create/attach.\n"
+                    ));
+                }
                 Ok(root) => {
                     let registered = known_roots.contains(&root);
                     overview.push_str(&format!(
@@ -67,9 +104,17 @@ pub fn load(host: &HostContext, repository: Option<&Path>) -> Result<Data> {
                         }
                     ));
                     selected = Some(root.clone());
-                    match planner::observe(host, &root, &local.active_profiles, Request::Apply) {
+                    match crate::services::observe(
+                        host,
+                        &local,
+                        Some(&root),
+                        requested,
+                        Request::Apply,
+                    ) {
                         Err(error) => {
-                            overview.push_str(&format!("File observation failed: {error}\n"))
+                            let error = diagnostic(&error);
+                            files_error = Some(format!("File observation failed: {error}"));
+                            overview.push_str(&format!("File observation failed: {error}\n"));
                         }
                         Ok(snapshot) => {
                             profiles = snapshot.active_profiles.iter().cloned().collect();
@@ -87,11 +132,13 @@ pub fn load(host: &HostContext, repository: Option<&Path>) -> Result<Data> {
                                 files.push((
                                     file.id.clone(),
                                     format!(
-                                        "{} [{:?}]\nSource: {:?}\nTarget: {:?}\n{}",
+                                        "{} [{:?}]\nSource: {:?} [{:?}]\nTarget: {:?} [{:?}]\n{}",
                                         file.id,
                                         file.outcome,
                                         input.source_path,
+                                        input.source.as_ref().map(|e| &e.kind),
                                         input.target_path,
+                                        input.destination.as_ref().map(|e| &e.kind),
                                         file.blockers.join("\n")
                                     ),
                                 ));
@@ -102,13 +149,14 @@ pub fn load(host: &HostContext, repository: Option<&Path>) -> Result<Data> {
             }
         }
     }
-    overview.push_str("\nActions: Choose repository | Create/attach | Preview apply\nNo tool execution, templates, secrets, network, staging or commits.\nPreviews never authorize execution. Failed writes may retain partial effects.\n");
+    overview.push_str("\nActions: Choose repository | Create/attach | Discover files | Check standalone manifest | Profiles | Preview apply\nNo tool execution, templates, secrets, network, staging or commits.\nPreviews never authorize execution. Failed writes may retain partial effects.\n");
     Ok(Data {
         overview,
         repository: selected,
         known_roots,
         profiles,
         files,
+        files_error,
         history,
         history_error,
     })
@@ -123,7 +171,12 @@ pub enum Pending {
 impl Pending {
     pub fn report(&self) -> Result<String> {
         Ok(match self {
-            Self::Files(plan) => plan.human(),
+            Self::Files(plan) => format!(
+                "Repository: {:?}\nEffective profiles: {:?}\nScope: all mappings selected by this request; display filters never narrow it.\n{}",
+                plan.inputs.repository,
+                plan.inputs.active_profiles,
+                plan.human()
+            ),
             Self::Init(preview) => format!(
                 "{} local repository\nResolved path: {:?}\nRepository ID: {}\n\nEffects:\n- {}\n\nRegistration and active selection are persistent only after approval.\nPrivate artifacts are retained on failure; inspect Recovery.\nNo network, cloning or live dotfile changes.",
                 if preview.report.create {
@@ -245,8 +298,21 @@ impl Approved {
 
 pub enum Task {
     Refresh,
+    Discover,
+    Check {
+        manifest: Option<PathBuf>,
+        requested: Vec<String>,
+    },
+    Profiles {
+        manifest: Option<PathBuf>,
+        requested: Vec<String>,
+        apply: bool,
+    },
     Select(Option<PathBuf>),
-    Init { root: PathBuf, git: PathBuf },
+    Init {
+        root: PathBuf,
+        git: PathBuf,
+    },
     Files(Request),
     Rollback(String, String),
     Bootstrap(String, String, bootstrap::RecoveryAction),
@@ -254,18 +320,83 @@ pub enum Task {
 }
 pub enum Output {
     Data(Data),
+    Discovery(crate::services::Discovery),
+    Checked {
+        report: Box<crate::services::CheckReport>,
+        standalone: bool,
+    },
+    Profiles {
+        report: Box<crate::services::CheckReport>,
+        requested: Vec<String>,
+        standalone: bool,
+        apply: bool,
+    },
     Selected(Option<PathBuf>, Data),
     Preview(Pending),
     Completed(Completion),
 }
+#[cfg(test)]
 pub fn perform(
     task: Task,
     host: &HostContext,
     repository: Option<PathBuf>,
     observer: impl FnMut(&Event) -> Result<()>,
 ) -> Result<Output> {
+    perform_scoped(task, host, repository, &[], observer)
+}
+pub fn perform_scoped(
+    task: Task,
+    host: &HostContext,
+    repository: Option<PathBuf>,
+    requested: &[String],
+    observer: impl FnMut(&Event) -> Result<()>,
+) -> Result<Output> {
     match task {
-        Task::Refresh => load(host, repository.as_deref()).map(Output::Data),
+        Task::Refresh => load_scoped(host, repository.as_deref(), requested).map(Output::Data),
+        Task::Check {
+            manifest,
+            requested,
+        } => {
+            let local = LocalConfig::load(host)?;
+            let standalone = manifest.is_some();
+            let path = match manifest {
+                Some(path) => path,
+                None => local
+                    .select_repository(repository.as_deref())?
+                    .join("dort.toml"),
+            };
+            let report = Box::new(crate::services::check_manifest(
+                host, &local, path, &requested,
+            )?);
+            Ok(Output::Checked { report, standalone })
+        }
+        Task::Profiles {
+            manifest,
+            requested,
+            apply,
+        } => {
+            let local = LocalConfig::load(host)?;
+            let standalone = manifest.is_some();
+            let path = match manifest {
+                Some(path) => path,
+                None => local
+                    .select_repository(repository.as_deref())?
+                    .join("dort.toml"),
+            };
+            let report = Box::new(crate::services::check_manifest(
+                host, &local, path, &requested,
+            )?);
+            Ok(Output::Profiles {
+                report,
+                requested,
+                standalone,
+                apply,
+            })
+        }
+        Task::Discover => {
+            let local = LocalConfig::load(host)?;
+            crate::services::discover(host, &local, repository.as_deref()).map(Output::Discovery)
+        }
         Task::Select(explicit) => {
             let local = LocalConfig::load(host)?;
             let root = local.select_repository(explicit.as_deref())?;
@@ -275,15 +406,15 @@ pub fn perform(
                     "repository selection must be an existing directory".into(),
                 ));
             }
-            let data = load(host, Some(&root))?;
+            let data = load_scoped(host, Some(&root), &[])?;
             Ok(Output::Selected(explicit.map(|_| root), data))
         }
         Task::Init { root, git } => BootstrapPreview::prepare(host, &root, &git)
             .map(|p| Output::Preview(Pending::Init(Box::new(p)))),
         Task::Files(request) => {
             let local = LocalConfig::load(host)?;
-            let root = local.select_repository(repository.as_deref())?;
-            let snapshot = planner::observe(host, &root, &local.active_profiles, request)?;
+            let snapshot =
+                crate::services::observe(host, &local, repository.as_deref(), requested, request)?;
             Ok(Output::Preview(Pending::Files(Box::new(planner::plan(
                 snapshot,
             )))))

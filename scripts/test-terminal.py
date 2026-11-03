@@ -260,6 +260,45 @@ def run():
         assert not list(home.iterdir()), "Session selection persisted configuration"
         print("PASS explicit session-only repository selection")
 
+        standalone = base / "standalone-q?.toml"
+        standalone.write_text("schema=1\n[profiles]\navailable=['dev']\n")
+        with Session([binary, "tui"], env) as session:
+            session.wait(b"loaded.")
+            session.send(b"v")
+            session.wait(b"Manifest path >")
+            session.send(os.fsencode(standalone) + b"\r\r")
+            session.wait(b"Structural check passed")
+            session.send(b"v\t\r")  # retained Check button -> Profiles
+            session.wait(b"Profiles | standalone manifest")
+            session.send(b"\x1b[B\r\x1b[B\r")  # dev toggle, Apply
+            session.wait(b"Standalone profile additions validated")
+            session.send(b"\x1b[Z\r")  # previous field: Check
+            session.wait(b"Structural check passed")
+            session.send(b"q")
+            session.finish()
+        assert not (home / ".config").exists() and not (home / ".local").exists()
+        print("PASS independent standalone check and nonpersistent profile additions")
+
+        candidate = home / ".q?config"
+        candidate.write_text("private-body-marker\n")
+        with Session([binary, "tui"], env) as session:
+            session.wait(b"loaded.")
+            session.send(b"f")
+            session.wait(b"metadata candidate(s)")
+            session.send(b"\r")
+            session.wait(b"TARGET >")
+            session.send(b"\t\t\t\r")  # fields -> Review, no repository selected
+            session.wait(b"Read failed:")
+            session.send(b"\x1b")
+            session.settle()
+            session.wait(b".q?config")
+            assert b"private-body-marker" not in session.data
+            session.send(b"\x03")
+            session.finish()
+        assert not (home / ".config").exists() and not (home / ".local").exists()
+        candidate.unlink()
+        print("PASS repository-independent discovery and retained adoption refusal")
+
         # A deterministic fake executable implements only the fixed bootstrap calls.
         # /bin/mkdir writes exclusively inside the private disposable stage.
         bin_dir = base / "bin"
@@ -372,6 +411,67 @@ def run():
         assert (repo / "source").read_text() == "ordinary settings\n"
         print("PASS approved apply and clean exit")
 
+        with Session([binary, "tui"], env) as session:
+            session.wait(b"loaded.")
+            session.send(b"2/q?/\x1b")
+            session.settle()
+            session.wait(b"0 shown")
+            session.send(b"a")
+            session.wait(b"Preview (metadata only)")
+            session.wait(b"display filters never narrow")
+            session.send(b"\x1b")
+            session.settle()
+            session.send(b"q")
+            session.finish()
+        assert target.is_symlink()
+        print("PASS display-only file search and full-scope apply preview")
+
+        candidate = home / ".q?config"
+        candidate.write_text("ordinary adoption settings\n")
+        with Session([binary, "tui"], env) as session:
+            session.wait(b"loaded.")
+            session.send(b"o")
+            session.wait(b"TARGET >")
+            session.send(b"~/.q?config\rconfig\rfiles/config\r")
+            session.send(b"\r")  # Review button, not an ordinary field
+            session.wait(b"Preview (metadata only)")
+            session.send(b"\x1b")
+            session.settle()
+            assert not candidate.is_symlink() and not (repo / "files/config").exists()
+            session.send(b"\r")  # retained Review -> fresh preview
+            session.settle()
+            session.send(b"\r")
+            session.wait(b"Confirm")
+            session.send(b"yes\r")
+            session.wait(b"Operation completed.")
+            session.send(b"q")
+            session.finish()
+        assert candidate.is_symlink() and candidate.resolve() == repo / "files/config"
+        assert (repo / "files/config").read_text() == "ordinary adoption settings\n"
+        print("PASS manual adoption retained draft, preview/back and explicit approval")
+
+        with Session([binary, "tui"], env) as session:
+            session.wait(b"loaded.")
+            session.send(b"2/notconfig\x1b")
+            session.settle()
+            session.send(b" /delete managed link: enter\r")
+            session.wait(b"Exact ID >")
+            session.send(b"config\r\r")
+            session.wait(b"Preview (metadata only)")
+            session.send(b"\r")
+            session.wait(b"Separate deletion acknowledgement")
+            session.send(b"yes\r")
+            session.settle()
+            assert candidate.is_symlink(), "Literal yes bypassed exact-ID acknowledgement"
+            session.send(b"\x7f\x7f\x7fconfig\ryes\r")
+            session.wait(b"Operation completed.")
+            session.send(b"q")
+            session.finish()
+        assert not candidate.exists() and not candidate.is_symlink()
+        assert (repo / "files/config").read_text() == "ordinary adoption settings\n"
+        assert target.is_symlink()
+        print("PASS exact-ID link deletion outside display filter and separate yes")
+
         for mode, code in [("normal", 0), ("error", 0), ("panic", 101)]:
             with Session(
                 [probe, "--exact", "tui::tests::terminal_cleanup_probe", "--nocapture"],
@@ -379,7 +479,7 @@ def run():
             ) as session:
                 session.finish(code)
             print("PASS terminal cleanup", mode)
-    print("13 PTY cases passed (disposable HOME, no installed Git requirement)")
+    print("18 PTY cases passed (disposable HOME, no installed Git requirement)")
 
 
 if __name__ == "__main__":

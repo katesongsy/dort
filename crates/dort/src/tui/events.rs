@@ -16,12 +16,13 @@ impl Worker {
         task: Task,
         host: HostContext,
         repository: Option<PathBuf>,
+        requested: Vec<String>,
     ) -> std::io::Result<Self> {
         let (sender, progress) = mpsc::sync_channel(32);
         let handle = thread::Builder::new()
             .name("dort-tui-service".into())
             .spawn(move || {
-                actions::perform(task, &host, repository, |event| {
+                actions::perform_scoped(task, &host, repository, &requested, |event| {
                     // Dropped/coalesced display updates never interrupt an approved write.
                     let _ = sender.try_send(format!(
                         "Transaction {} | {:?} {}",

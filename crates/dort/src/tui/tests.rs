@@ -61,6 +61,58 @@ pub(super) fn render(app: &App, width: u16, height: u16) -> String {
         .join("\n")
 }
 #[test]
+fn compact_forms_and_profile_picker_always_show_focused_control() {
+    use super::shell::{Form, Overlay};
+    let mut app = App::new(false);
+    app.shell.overlay = Some(Overlay::Form(Form::Adopt));
+    let prefixes = [
+        "TARGET",
+        "ID",
+        "SOURCE",
+        "Review",
+        "Choose",
+        "Create/attach",
+        "Discard",
+    ];
+    for (i, prefix) in prefixes.iter().enumerate() {
+        app.shell.adoption.focused = i;
+        let screen = render(&app, 48, 14);
+        assert!(
+            screen.contains(&format!("> {prefix}")),
+            "focused control {i} not visible: {screen}"
+        );
+    }
+    app.shell.adoption.target = "é".repeat(2048);
+    app.shell.adoption.focused = 0;
+    app.key(key(KeyCode::Char('é')), 80, 24);
+    assert_eq!(app.shell.adoption.target.len(), 4096);
+    let screen = render(&app, 48, 14);
+    assert!(screen.contains("..."));
+    app.shell.overlay = Some(Overlay::Form(Form::Check));
+    for (i, prefix) in [
+        "Manifest path",
+        "Check manifest",
+        "Temporary profiles",
+        "Discard",
+    ]
+    .iter()
+    .enumerate()
+    {
+        app.shell.manifest_focused = i;
+        assert!(render(&app, 48, 14).contains(&format!("> {prefix}")));
+    }
+    app.shell.overlay = Some(Overlay::Form(Form::RemoveId));
+    app.shell.unmanage_focused = 1;
+    assert!(render(&app, 48, 14).contains("> Review"));
+    app.shell.overlay = None;
+    app.tab = Tab::Overview;
+    app.key(key(KeyCode::Left), 80, 24);
+    assert!(app.tab == Tab::Checks);
+    app.key(key(KeyCode::Right), 80, 24);
+    assert!(app.tab == Tab::Overview);
+}
+
+#[test]
 fn small_layout_snapshot_disables_approval() {
     let mut app = App::new(false);
     assert_eq!(
@@ -95,6 +147,7 @@ fn navigation_and_metadata_escaping() {
     let mut app = App::new(true);
     app.complete(Ok(Output::Data(Data {
         overview: "no repository\n\u{1b}[31m\u{202e}".into(),
+        files_error: None,
         repository: None,
         known_roots: vec![],
         profiles: vec![],
@@ -132,6 +185,7 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     assert!(app.tab == Tab::Files && app.shell.focus == Focus::Actions);
     app.key(key(KeyCode::BackTab), 80, 24);
     assert!(app.shell.focus == Focus::Content);
+    app.key(key(KeyCode::Char(' ')), 80, 24);
     app.key(key(KeyCode::Char('/')), 80, 24);
     for c in "q?/".chars() {
         app.key(key(KeyCode::Char(c)), 80, 24);
@@ -172,6 +226,11 @@ fn busy_shell_cannot_change_scope_or_toggle_mode_or_start_another_job() {
         KeyCode::Char('/'),
         KeyCode::Enter,
         KeyCode::Char('a'),
+        KeyCode::Char('t'),
+        KeyCode::Char('c'),
+        KeyCode::Char('v'),
+        KeyCode::Char('f'),
+        KeyCode::Char('o'),
     ] {
         assert!(app.key(key(code), 80, 24).is_none());
     }
@@ -187,6 +246,7 @@ fn busy_shell_cannot_change_scope_or_toggle_mode_or_start_another_job() {
 fn refresh_preserves_selected_identity_and_clamps_if_it_disappears() {
     let data = |ids: &[&str]| Data {
         overview: String::new(),
+        files_error: None,
         repository: None,
         known_roots: vec![],
         profiles: vec![],
@@ -226,6 +286,7 @@ fn completion_keeps_noop_result_visible_through_refresh_and_read_failure() {
     app.start(false);
     app.complete(Ok(Output::Data(Data {
         overview: "fresh observations".into(),
+        files_error: None,
         repository: None,
         known_roots: vec![],
         profiles: vec![],

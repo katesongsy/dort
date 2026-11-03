@@ -1,6 +1,7 @@
 mod actions;
 mod app;
 mod events;
+mod inventory;
 mod shell;
 #[cfg(test)]
 mod tests;
@@ -84,8 +85,8 @@ fn run_loop(
                 *worker = None;
                 // A deferred quit must not hide a failure before it could be displayed.
                 let output = match output {
-                    Err(error) if app.exit_requested => return Err(error),
-                    other => other.map_err(|error| error.to_string()),
+                    Err(error) if app.exit_requested => return Err(actions::exit_error(error)),
+                    other => other.map_err(|error| actions::diagnostic(&error)),
                 };
                 if let Some(task) = app.complete(output) {
                     launch(task, host, &mut app, worker)?;
@@ -121,8 +122,15 @@ fn launch(
     let writing = matches!(task, Task::Execute(_));
     let completed = matches!(task, Task::Refresh) && app.status.starts_with("Operation completed.");
     debug_assert!(worker.is_none(), "only one owned worker at a time");
-    *worker =
-        Some(Worker::start(task, host.clone(), app.repository.clone()).map_err(terminal_error)?);
+    *worker = Some(
+        Worker::start(
+            task,
+            host.clone(),
+            app.repository.clone(),
+            app.requested_profiles.clone(),
+        )
+        .map_err(terminal_error)?,
+    );
     app.start(writing);
     if completed {
         app.status = "Operation completed. Refreshing observations...".into();

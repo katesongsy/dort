@@ -1,6 +1,6 @@
 use super::{
     actions::{Data, Output, Pending, Task},
-    shell::{Action, Focus, Form, Intent, Overlay, Shell},
+    shell::{Action, Focus, Form, Intent, Overlay, ProfilePicker, Shell},
 };
 use dort_core::{
     bootstrap::RecoveryAction,
@@ -14,14 +14,19 @@ pub enum Tab {
     Overview,
     Files,
     Recovery,
+    Checks,
 }
 impl Tab {
     pub fn next(self) -> Self {
         match self {
             Self::Overview => Self::Files,
             Self::Files => Self::Recovery,
-            Self::Recovery => Self::Overview,
+            Self::Recovery => Self::Checks,
+            Self::Checks => Self::Overview,
         }
+    }
+    pub fn previous(self) -> Self {
+        self.next().next().next()
     }
 }
 pub struct Preview {
@@ -43,6 +48,12 @@ pub struct App {
     pub git: Result<PathBuf, String>,
     pub result: Option<String>,
     pub data: Option<Data>,
+    pub discovering: bool,
+    pub inventory: super::inventory::Inventory,
+    pub discovery: Option<crate::services::Discovery>,
+    pub candidate_selected: usize,
+    pub requested_profiles: Vec<String>,
+    pub check: Option<(Box<crate::services::CheckReport>, bool)>,
     pub selected: usize,
     pub details_scroll: u16,
     pub preview: Option<Preview>,
@@ -67,6 +78,12 @@ impl App {
             git: Err("Git unavailable; install Git separately and restart Dort".into()),
             result: None,
             data: None,
+            discovering: false,
+            inventory: Default::default(),
+            discovery: None,
+            candidate_selected: 0,
+            requested_profiles: vec![],
+            check: None,
             selected: 0,
             details_scroll: 0,
             preview: None,
@@ -121,6 +138,80 @@ impl App {
                     self.status = "Operation completed. Observations refreshed.".into();
                 }
             }
+            Ok(Output::Checked { report, standalone }) => {
+                self.check = Some((report, standalone));
+                self.tab = Tab::Checks;
+                self.shell.overlay = None;
+                self.details_scroll = 0;
+                self.status =
+                    "Structural check passed; live files and installed tools not inspected.".into();
+            }
+            Ok(Output::Profiles {
+                report,
+                requested,
+                standalone,
+                apply,
+            }) => {
+                self.preview = None;
+                self.confirmation = None;
+                if apply {
+                    if standalone {
+                        self.shell.check_profiles = requested;
+                        self.check = Some((report, true));
+                        self.shell.overlay = Some(Overlay::Form(Form::Check));
+                    } else {
+                        self.requested_profiles = requested;
+                        self.shell.overlay = None;
+                        if self
+                            .check
+                            .as_ref()
+                            .is_some_and(|(_, standalone)| !standalone)
+                        {
+                            self.check = None;
+                        }
+                        self.status = "Temporary profile additions changed; refreshing full active scope. Configuration unchanged.".into();
+                        if !self.quit {
+                            return Some(Task::Refresh);
+                        }
+                    }
+                    self.status =
+                        "Standalone profile additions validated; configuration unchanged.".into();
+                } else {
+                    self.shell.scroll = 0;
+                    self.shell.overlay = Some(Overlay::Profiles(Box::new(ProfilePicker {
+                        report,
+                        requested,
+                        standalone,
+                        selected: 0,
+                    })));
+                }
+            }
+            Ok(Output::Discovery(discovery)) => {
+                let old_path = self
+                    .discovery
+                    .as_ref()
+                    .and_then(|d| d.report.candidates.get(self.candidate_selected))
+                    .map(|c| &c.entry.path);
+                let position = old_path.and_then(|path| {
+                    discovery
+                        .report
+                        .candidates
+                        .iter()
+                        .position(|c| &c.entry.path == path)
+                });
+                if old_path.is_some() && position.is_none() {
+                    self.status =
+                        "Selected candidate disappeared; showing nearest remaining row.".into();
+                } else {
+                    self.status =
+                        "Metadata discovery loaded; candidates are not a safety guarantee.".into();
+                }
+                self.candidate_selected = position
+                    .unwrap_or(self.candidate_selected)
+                    .min(discovery.report.candidates.len().saturating_sub(1));
+                self.discovery = Some(discovery);
+                self.clamp_file_selection();
+            }
             Ok(Output::Selected(repository, data)) => {
                 self.origin = if repository.is_some() {
                     "session choice"
@@ -128,13 +219,16 @@ impl App {
                     "registered active"
                 };
                 self.repository = repository;
+                self.reset_repository_scope();
+                self.discovery = None;
+                self.candidate_selected = 0;
                 self.result = None;
                 self.data = None;
                 self.selected = 0;
                 self.details_scroll = 0;
                 self.preview = None;
                 self.confirmation = None;
-                self.shell.overlay = None;
+                self.shell.back();
                 self.replace_data(data);
                 self.status =
                     "Repository selected for this session only; configuration unchanged.".into();
@@ -149,18 +243,24 @@ impl App {
                     });
                     self.status = "Review effects; Enter opens confirmation, Esc dismisses.".into();
                 }
-                Err(error) => self.status = error.to_string(),
+                Err(error) => self.status = super::actions::diagnostic(&error),
             },
             Ok(Output::Completed(completion)) => {
+                self.discovery = None;
                 if let Some(root) = completion.repository {
                     self.repository = Some(root);
+                    self.reset_repository_scope();
                     self.origin = "approved create/attach";
-                    self.tab = Tab::Overview;
+                    self.tab = if self.shell.return_to_adopt {
+                        Tab::Files
+                    } else {
+                        Tab::Overview
+                    };
                     self.data = None;
                     self.selected = 0;
                     self.details_scroll = 0;
                 }
-                self.shell.overlay = None;
+                self.shell.back();
                 self.result = Some(format!(
                     "{} completed.\n{}",
                     completion.operation,
@@ -183,7 +283,7 @@ impl App {
         if interrupt
             || (key.code == KeyCode::Char('q')
                 && self.confirmation.is_none()
-                && (self.preview.is_some() || !self.shell.text_entry()))
+                && (self.preview.is_some() || !self.text_entry()))
         {
             if self.busy {
                 self.exit_requested = true;
@@ -196,9 +296,16 @@ impl App {
         self.resize(width, height);
         if width < 48 || height < 14 {
             if key.code == KeyCode::Esc {
-                self.preview = None;
-                self.shell.overlay = None;
-                self.error = None;
+                if self.error.is_some() {
+                    self.error = None;
+                } else if self.preview.is_some() {
+                    self.preview = None;
+                } else if self.shell.overlay.is_some() {
+                    self.shell.back();
+                } else {
+                    self.inventory.search_mut(self.discovering).editing = false;
+                    self.inventory.details = false;
+                }
             }
             self.status =
                 "Resize to at least 48x14; no approval is accepted in a small layout.".into();
@@ -214,7 +321,7 @@ impl App {
             }
             if matches!(key.code, KeyCode::Left | KeyCode::Right) {
                 self.tab = if key.code == KeyCode::Left {
-                    self.tab.next().next()
+                    self.tab.previous()
                 } else {
                     self.tab.next()
                 };
@@ -301,6 +408,12 @@ impl App {
             }
             return None;
         }
+        if self.tab == Tab::Files && self.inventory.search(self.discovering).editing {
+            self.inventory.search_mut(self.discovering).key(key);
+            self.clamp_file_selection();
+            self.details_scroll = 0;
+            return None;
+        }
         let opens_overlay = matches!(key.code, KeyCode::Char('?' | ' ' | '/' | 'p' | 'n'))
             || (key.code == KeyCode::Enter && self.shell.focus == Focus::Actions);
         if !matches!(key.code, KeyCode::PageDown | KeyCode::PageUp) && !opens_overlay {
@@ -316,7 +429,7 @@ impl App {
             }
             KeyCode::Right | KeyCode::Left => {
                 self.tab = if key.code == KeyCode::Left {
-                    self.tab.next().next()
+                    self.tab.previous()
                 } else {
                     self.tab.next()
                 };
@@ -328,11 +441,17 @@ impl App {
                 self.selected = 0;
             }
             KeyCode::Esc => {
+                self.inventory.details = false;
                 self.shell.focus = Focus::Content;
                 self.result = None;
             }
             KeyCode::Char(' ') => self.shell.open_actions(false),
+            KeyCode::Char('/') if self.tab == Tab::Files && self.shell.focus == Focus::Content => {
+                self.inventory.search_mut(self.discovering).editing = true
+            }
             KeyCode::Char('/') => self.shell.open_actions(true),
+            KeyCode::Delete if self.tab == Tab::Files => return self.activate(Action::ClearFilter),
+            KeyCode::Char('i') if self.tab == Tab::Files => return self.activate(Action::Inspect),
             KeyCode::Char('p') => return self.activate(Action::Choose),
             KeyCode::Char('n') => return self.activate(Action::Init),
             KeyCode::Char('1') => {
@@ -340,6 +459,7 @@ impl App {
                 self.selected = 0;
             }
             KeyCode::Char('2') => {
+                self.discovering = false;
                 self.tab = Tab::Files;
                 self.selected = 0;
             }
@@ -347,8 +467,21 @@ impl App {
                 self.tab = Tab::Recovery;
                 self.selected = 0;
             }
+            KeyCode::Char('4') => {
+                self.tab = Tab::Checks;
+                self.details_scroll = 0;
+            }
+            KeyCode::Char('c') => return self.activate(Action::CheckCurrent),
+            KeyCode::Char('v') => return self.activate(Action::CheckStandalone),
+            KeyCode::Char('t') => return self.activate(Action::Profiles),
             KeyCode::Char('?') => return self.activate(Action::Help),
-            KeyCode::Char('r') => return Some(Task::Refresh),
+            KeyCode::Char('r') => return Some(self.refresh_task()),
+            KeyCode::Char('f') => return self.activate(Action::Discover),
+            KeyCode::Char('o') => return self.activate(Action::Adopt),
+            KeyCode::Enter if self.tab == Tab::Files && self.discovering => self.adopt_candidate(),
+            KeyCode::Enter if self.tab == Tab::Files => return self.activate(Action::Inspect),
+            KeyCode::Down if self.tab == Tab::Files => self.move_file_selection(false),
+            KeyCode::Up if self.tab == Tab::Files => self.move_file_selection(true),
             KeyCode::Down => {
                 self.selected = self
                     .selected
@@ -372,6 +505,7 @@ impl App {
             }
             _ => (),
         }
+        self.clamp_file_selection();
         None
     }
     pub fn resize(&mut self, width: u16, height: u16) {
@@ -404,20 +538,56 @@ impl App {
         self.selected = position
             .unwrap_or(self.selected)
             .min(self.row_count().saturating_sub(1));
+        self.clamp_file_selection();
     }
     fn intent(&mut self, intent: Intent) -> Option<Task> {
         match intent {
-            Intent::Action(action) => {
-                self.shell.overlay = None;
-                self.activate(action)
-            }
+            Intent::Action(action) => self.activate(action),
             Intent::Active => Some(Task::Select(None)),
+            Intent::ApplyProfiles {
+                manifest,
+                requested,
+            } => Some(Task::Profiles {
+                manifest,
+                requested,
+                apply: true,
+            }),
+            Intent::Submit(Form::Check) => self.check_task(true, false),
+            Intent::Submit(form @ (Form::KeepId | Form::RemoveId)) => {
+                if self.shell.unmanage_id.is_empty() {
+                    self.status =
+                        "Enter an exact mapping ID; filters never limit this input.".into();
+                    return None;
+                }
+                Some(Task::Files(Request::Unmanage {
+                    id: self.shell.unmanage_id.clone(),
+                    mode: if form == Form::KeepId {
+                        UnmanageMode::Keep
+                    } else {
+                        UnmanageMode::Remove
+                    },
+                }))
+            }
             Intent::Known(index) => self
                 .data
                 .as_ref()?
                 .known_roots
                 .get(index)
                 .map(|root| Task::Select(Some(root.clone()))),
+            Intent::Submit(Form::Adopt) => {
+                let draft = &self.shell.adoption;
+                if draft.target.is_empty() || draft.id.is_empty() || draft.source.is_empty() {
+                    self.status =
+                        "Enter TARGET, ID and repository-relative SOURCE; draft retained.".into();
+                    return None;
+                }
+                // The core owns all path/kind/sensitivity/mapping policy.
+                Some(Task::Files(crate::services::adopt_request(
+                    std::path::Path::new(&draft.target),
+                    &draft.id,
+                    std::path::Path::new(&draft.source),
+                )))
+            }
             Intent::Submit(form) => {
                 let draft = self.shell.draft(form);
                 if draft.is_empty() {
@@ -429,6 +599,7 @@ impl App {
                     &self.launch_directory,
                 );
                 match form {
+                    Form::Adopt | Form::Check | Form::KeepId | Form::RemoveId => unreachable!(),
                     Form::Choose => Some(Task::Select(Some(root))),
                     Form::Init => match &self.git {
                         Ok(git) => Some(Task::Init {
@@ -449,11 +620,49 @@ impl App {
     }
     fn activate(&mut self, action: Action) -> Option<Task> {
         self.shell.scroll = 0;
+        if matches!(self.shell.overlay, Some(Overlay::Form(Form::Adopt)))
+            && matches!(action, Action::Choose | Action::Init)
+        {
+            self.shell.return_to_adopt = true;
+        }
+        self.shell.overlay = None;
         match action {
-            Action::Destination(tab) => { self.tab = tab; self.selected = 0; self.shell.focus = Focus::Content; }
+            Action::Destination(tab) => { self.tab = tab; self.selected = 0; self.shell.focus = Focus::Content; if tab == Tab::Files { self.discovering = false; } }
             Action::Choose => self.shell.overlay = Some(Overlay::Repositories { selected: 0 }),
             Action::Init => self.shell.overlay = Some(Overlay::Form(Form::Init)),
-            Action::Refresh => return Some(Task::Refresh),
+            Action::Discover => {
+                self.tab = Tab::Files;
+                self.discovering = true;
+                self.shell.focus = Focus::Content;
+                return Some(Task::Discover);
+            }
+            Action::Adopt => {
+                self.tab = Tab::Files;
+                self.shell.overlay = Some(Overlay::Form(Form::Adopt));
+            }
+            Action::KeepId | Action::RemoveId => {
+                self.tab = Tab::Files;
+                self.discovering = false;
+                self.shell.unmanage_focused = 0;
+                self.shell.overlay = Some(Overlay::Form(if matches!(action, Action::KeepId) { Form::KeepId } else { Form::RemoveId }));
+            }
+            Action::ClearFilter => {
+                self.inventory.search_mut(self.discovering).query.clear();
+                self.clamp_file_selection();
+                self.status = "File display filter cleared; apply scope was never narrowed.".into();
+            }
+            Action::Inspect if self.tab == Tab::Files => {
+                self.inventory.details = true;
+                self.details_scroll = 0;
+            }
+            Action::Profiles => return self.check_task(false, true),
+            Action::CheckCurrent => return self.check_task(false, false),
+            Action::CheckStandalone => { self.tab = Tab::Checks; self.shell.overlay = Some(Overlay::Form(Form::Check)); }
+            Action::StandaloneProfiles => {
+                self.shell.overlay = Some(Overlay::Form(Form::Check));
+                return self.check_task(true, true);
+            }
+            Action::Refresh => return Some(self.refresh_task()),
             Action::PreviewOnly => {
                 if self.preview_only_locked { self.status = "--dry-run locks this session to preview-only.".into(); }
                 else { self.dry_run = !self.dry_run; self.status = "Preview-only mode changed; approval always requires a fresh preview.".into(); }
@@ -461,7 +670,11 @@ impl App {
             Action::Help => self.shell.overlay = Some(Overlay::Help),
             Action::Quit => self.quit = true,
             Action::Apply if self.data.as_ref().and_then(|d| d.repository.as_ref()).is_some() => return Some(Task::Files(Request::Apply)),
-            Action::Keep | Action::Remove if self.tab == Tab::Files => {
+            Action::Keep | Action::Remove if self.tab == Tab::Files && !self.discovering => {
+                if !self.visible_file_rows().contains(&self.selected) {
+                    self.status = "No displayed mapping selected. Use Enter exact mapping ID in Actions.".into();
+                    return None;
+                }
                 if let Some((id, _)) = self.data.as_ref().and_then(|data| data.files.get(self.selected)) {
                     return Some(Task::Files(Request::Unmanage {
                         id: id.clone(), mode: if matches!(action, Action::Keep) { UnmanageMode::Keep } else { UnmanageMode::Remove },
@@ -482,7 +695,167 @@ impl App {
             }
             _ => self.status = "Action unavailable: choose a repository, file in Files, or transaction in Recovery as labeled.".into(),
         }
+        self.clamp_file_selection();
         None
+    }
+    pub fn text_entry(&self) -> bool {
+        self.shell.text_entry()
+            || (self.shell.overlay.is_none()
+                && self.tab == Tab::Files
+                && self.inventory.search(self.discovering).editing)
+    }
+    pub fn file_selection(&self) -> usize {
+        if self.discovering {
+            self.candidate_selected
+        } else {
+            self.selected
+        }
+    }
+    pub fn visible_file_rows(&self) -> Vec<usize> {
+        let search = self.inventory.search(self.discovering);
+        if self.discovering {
+            self.discovery
+                .as_ref()
+                .map(|d| {
+                    d.report
+                        .candidates
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, c)| {
+                            search.matches(c.entry.path.to_str().expect("validated candidate"))
+                        })
+                        .map(|(i, _)| i)
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            self.data
+                .as_ref()
+                .map(|d| {
+                    d.files
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, row)| search.matches(&row.0) || search.matches(&row.1))
+                        .map(|(i, _)| i)
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+    }
+    fn clamp_file_selection(&mut self) {
+        if self.tab != Tab::Files {
+            return;
+        }
+        let visible = self.visible_file_rows();
+        let old = self.file_selection();
+        if !visible.contains(&old)
+            && let Some(index) = visible.iter().min_by_key(|&&index| index.abs_diff(old))
+        {
+            if self.discovering {
+                self.candidate_selected = *index;
+            } else {
+                self.selected = *index;
+            }
+        }
+    }
+    fn move_file_selection(&mut self, backwards: bool) {
+        let visible = self.visible_file_rows();
+        let position = visible
+            .iter()
+            .position(|&i| i == self.file_selection())
+            .unwrap_or(0);
+        let next = if backwards {
+            position.saturating_sub(1)
+        } else {
+            position
+                .saturating_add(1)
+                .min(visible.len().saturating_sub(1))
+        };
+        if let Some(&index) = visible.get(next) {
+            if self.discovering {
+                self.candidate_selected = index;
+            } else {
+                self.selected = index;
+            }
+        }
+    }
+    fn reset_repository_scope(&mut self) {
+        self.requested_profiles.clear();
+        if self
+            .check
+            .as_ref()
+            .is_some_and(|(_, standalone)| !standalone)
+        {
+            self.check = None;
+        }
+        self.preview = None;
+        self.confirmation = None;
+    }
+    fn check_task(&mut self, standalone: bool, profiles: bool) -> Option<Task> {
+        let manifest = if standalone {
+            if self.shell.manifest_draft.is_empty() {
+                self.shell.overlay = Some(Overlay::Form(Form::Check));
+                self.status = "Enter a standalone manifest path; draft retained.".into();
+                return None;
+            }
+            Some(crate::services::resolve_root(
+                std::path::Path::new(&self.shell.manifest_draft),
+                &self.launch_directory,
+            ))
+        } else {
+            None
+        };
+        let requested = if standalone {
+            self.shell.check_profiles.clone()
+        } else {
+            self.requested_profiles.clone()
+        };
+        Some(if profiles {
+            Task::Profiles {
+                manifest,
+                requested,
+                apply: false,
+            }
+        } else {
+            Task::Check {
+                manifest,
+                requested,
+            }
+        })
+    }
+    fn refresh_task(&self) -> Task {
+        if self.tab == Tab::Files && self.discovering {
+            Task::Discover
+        } else if self.tab == Tab::Checks {
+            if let Some((report, standalone)) = &self.check {
+                Task::Check {
+                    manifest: standalone.then(|| report.manifest.clone()),
+                    requested: if *standalone {
+                        self.shell.check_profiles.clone()
+                    } else {
+                        self.requested_profiles.clone()
+                    },
+                }
+            } else {
+                Task::Refresh
+            }
+        } else {
+            Task::Refresh
+        }
+    }
+    fn adopt_candidate(&mut self) {
+        if !self.visible_file_rows().contains(&self.candidate_selected) {
+            return;
+        }
+        if let Some(candidate) = self
+            .discovery
+            .as_ref()
+            .and_then(|d| d.report.candidates.get(self.candidate_selected))
+        {
+            self.shell.adoption.suggest(&candidate.entry.path);
+            self.shell.scroll = 0;
+            self.shell.overlay = Some(Overlay::Form(Form::Adopt));
+        }
     }
     fn row_count(&self) -> usize {
         self.data.as_ref().map_or(0, |data| match self.tab {
@@ -525,7 +898,10 @@ impl App {
                     self.confirmation = None;
                     match pending.approve(ack.as_deref()) {
                         Ok(approval) => return Some(Task::Execute(approval)),
-                        Err(error) => self.status = format!("Approval refused: {error}"),
+                        Err(error) => {
+                            self.status =
+                                format!("Approval refused: {}", super::actions::diagnostic(&error))
+                        }
                     }
                 } else {
                     self.status = "Type literal yes to approve, or Esc to cancel.".into();

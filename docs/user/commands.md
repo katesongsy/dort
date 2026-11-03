@@ -17,7 +17,7 @@ Other commands require a supported host and HOME. Terminal invocation without a 
 
 ## Interactive interface
 
-The interface provides Overview/Welcome, guided local create/attach, session repository selection, active Files and all-repository Recovery. Space opens searchable Actions; `?` opens Help/About.
+The interface provides Overview/Welcome, guided local create/attach, session repository/profile selection, Files discovery/adoption/apply/unmanage, structural Checks and all-repository Recovery. Space opens searchable Actions; `?` opens Help/About.
 
 ```sh
 dort                       # terminal only; same as dort tui
@@ -25,18 +25,22 @@ dort --repo /absolute/path/to/dotfiles tui
 dort --dry-run tui         # inspection/previews only; confirmation disabled
 ```
 
-All three standard streams must be terminals. TUI entry rejects `--json`, `--yes` and `--confirm-remove`; no flags silently approve TUI writes. Use explicit CLI subcommands for automation. Startup observes only: it does not create missing configuration/state, acquire a lock or replay recovery. Without a repository, Welcome offers Choose repository and Create/attach; Recovery still diagnoses all retained local transactions. Discovery/adoption, Git inspection and additional profile selection are not available in this interface.
+All three standard streams must be terminals. TUI entry rejects `--json`, `--yes` and `--confirm-remove`; no flags silently approve TUI writes. Use explicit CLI subcommands for automation. Startup observes only: it does not create missing configuration/state, acquire a lock or replay recovery. Without a repository, Welcome offers Choose repository and Create/attach; Recovery still diagnoses all retained local transactions. Discovery and standalone manifest checks work without a repository. Git inspection is not available in this interface.
 
 | Key | Action |
 | --- | --- |
-| Left / Right, `1`, `2`, `3` | Change destination: Overview, Files, Recovery. |
+| Left / Right, `1`, `2`, `3`, `4` | Change destination: Overview, Files, Recovery, Checks. |
 | Tab / Shift-Tab | Cycle focus: Content, Actions, Destinations. Enter activates the focused control. |
-| Space, `/` | Open Actions; `/` starts action search. Esc leaves search; Delete outside search text clears the filter. |
+| Space, `/` | Space opens Actions; `/` searches Actions there. In Files content, `/` searches the displayed inventory/candidates. Esc leaves search, retaining its filter; Delete outside text clears it. |
 | `?` | Help/About; Esc returns to the prior destination/focus. |
 | `p`, `n` | Choose repository (session only), create/attach local repository. |
 | Up / Down | Select an active file or retained transaction. |
-| PgUp / PgDn | Scroll view details; in previews, scroll the report. |
+| PgUp / PgDn | Scroll view/form details; in previews, scroll the report. |
+| `i`, Enter (managed Files) | Inspect selected file metadata. Wide layouts show list/details together; compact layouts use Esc to return to the list. |
 | `r` | Refresh read-only observations/history. |
+| `f`, `o` | Discover file metadata; open retained manual adoption form. Enter on a discovery candidate opens an editable draft. |
+| `t` | Temporary repository profile additions; cannot remove mandatory contributors. |
+| `c`, `v` | Check current repository manifest; open standalone manifest check form. |
 | `a` | Preview apply (Overview / Files). |
 | `k` / `d` | Preview unmanage-and-keep / delete managed link for the selected file. Both retain its repository source. |
 | `b` | Preview guarded schema-1/2 rollback of the selected transaction. |
@@ -44,14 +48,22 @@ All three standard streams must be terminals. TUI entry rejects `--json`, `--yes
 | Left / Right (preview) | Scroll long report lines horizontally. |
 | Enter (preview) | Open confirmation, unless blocked, dry-run or smaller than 48×14. |
 | Esc | Confirmation → preview → retained form → invoking destination; errors/help return to their prior scope. No execution is started. |
-| Ctrl-U (path form) | Discard that form's draft. Backspace edits; Enter selects or prepares a preview. |
+| Ctrl-U (text field) | Clear current field. Backspace edits; Tab/Shift-Tab moves between fields/buttons. Enter advances adoption/check fields, then activates the focused Review/Check button. |
 | `q` / Ctrl-C | Quit outside text entry / anywhere; an active worker finishes first. Printable `q`, `?`, `/` are text in forms/search. |
 
-Review the full scrollable preview before Enter. Type literal `yes` and Enter to execute. Deletion first requires its exact file ID in a separate acknowledgement, then `yes`; typing yes alone cannot delete a link. Execution independently revalidates under the same application lock as the CLI. Read-only inspection remains available while another process holds that lock. During work, destination navigation, Help, scrolling, redraw/resize and exit requests stay responsive; scope changes and new jobs are disabled. Only one service worker runs at a time. Shrinking below 48×14 clears confirmation text and the deletion acknowledgement; growing requires both again.
+Review the full scrollable preview before Enter. Type literal `yes` and Enter to execute. Deletion first requires its exact file ID in a separate acknowledgement, then `yes`; typing yes alone cannot delete a link. Execution independently revalidates under the same application lock as the CLI. Read-only inspection remains available while another process holds that lock. During work, destination navigation, Help, scrolling, redraw/resize and exit requests stay responsive; scope changes and new jobs are disabled. Only one service worker runs at a time. Forms/pickers keep the focused control visible at compact sizes; long field values show an escaped tail with full input available below through PgDn. Shrinking below 48×14 clears confirmation text and the deletion acknowledgement; growing requires both again.
 
 **Choose repository:** select a known root, return to the registered active root, or enter an exact directory path. Selection is session-only: no registration/configuration write or upward repository search occurs. The header shows selection origin and profiles; Overview reports registration or observation errors. An unregistered root can be inspected but requires approved attachment before writing. History always includes all repositories.
 
-**Create/attach:** enter a destination, review the resolved path and press Enter for a read-only preview. Relative input resolves from the directory where Dort was launched; no tilde/environment expansion occurs. An absent destination creates a minimal repository; an existing valid Git root with `dort.toml` is attached. The existing parent must be safe; arbitrary existing directories are refused. Git is resolved at startup; if unavailable, install it separately and restart Dort. Esc/error retains the input in memory; nothing is saved on exit. Only preview approval with literal `yes` persists registration/selection. On success the session switches to that root and Overview shows the transaction ID. Other operations retain their transaction ID or explicit no-op result through refresh; Esc clears the result.
+**Create/attach:** enter a destination, review the resolved path and press Enter for a read-only preview. Relative input resolves from the directory where Dort was launched; no tilde/environment expansion occurs. An absent destination creates a minimal repository; an existing valid Git root with `dort.toml` is attached. The existing parent must be safe; arbitrary existing directories are refused. Git is resolved at startup; if unavailable, install it separately and restart Dort. Esc/error retains the input in memory; nothing is saved on exit. Only preview approval with literal `yes` persists registration/selection. On success the session switches to that root and Overview shows the transaction ID, or returns to an invoking adoption draft. Other operations retain their transaction ID or explicit no-op result through refresh; Esc clears the result.
+
+**Discover/adopt:** `f` opens bounded metadata candidates, with kind/link/eligibility hints, warnings and the heuristic notice. A selected repository protects its containers; an invalid selected root is an error, not unscoped discovery. Enter on a candidate fills editable TARGET/ID/SOURCE suggestions; `o` opens the retained manual draft. Tab/Shift-Tab selects fields or buttons, and Enter on Review requests a fresh read-only preview. SOURCE is repository-relative. The new link mapping belongs to `base`; requested profiles do not change its membership. Choose/Create/attach buttons preserve all adoption input and return after selection/attachment. Esc/errors retain drafts in memory; Discard clears the draft. Core path/kind/sensitivity/collision refusals remain authoritative. No candidate/file contents are displayed: review content privately before adoption.
+
+**Managed inventory:** `2` shows the active mappings with source/destination kinds, drift and blockers in details. Invalid observation is reported as unavailable, never as a healthy empty inventory. `/` filters display only; `a` always previews the complete active-profile scope, even with no displayed matches. Esc leaves search without clearing the filter; Delete or Actions → Clear file display filter removes it. Refresh preserves selected identity where present. Actions → Keep local file: enter exact mapping ID / Delete managed link: enter exact mapping ID accepts a valid ID even outside the current filter. Enter advances the ID field to Review; only the subsequent preview can proceed to approval. Both modes retain repository sources; deletion still needs exact-ID acknowledgement and literal yes.
+
+**Profiles:** `t` opens known repository profiles, labeling mandatory base/default/platform/local contributors and optional session additions. Up/Down selects; Space/Enter toggles optional names; select Apply and Enter to validate the new union. Esc leaves scope unchanged. Mandatory contributors cannot be unchecked. Profile additions affect complete inventory/plans/repository checks and never persist; choosing a repository resets these additions.
+
+**Checks:** `c` checks the current repository manifest. `v` opens an independent standalone path draft; enter a path, then activate Check. Its Temporary profiles button uses separate draft additions, still unioned with local/base/default/platform profiles. Standalone checks require no repository, registration or Git; relative paths resolve from the launch directory. Results include schema, effective profiles, selected counts, dependency order and unsupported capabilities, explicitly without live-file/tool inspection. Errors retain the path/additions; Discard clears them.
 
 Actions includes a session preview-only switch; it cannot change mode during a preview/worker. An entry `--dry-run` locks the entire session to preview-only and cannot be switched off.
 
