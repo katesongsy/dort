@@ -101,6 +101,62 @@ impl Fixture {
 }
 
 #[test]
+fn unavailable_or_existing_backup_storage_stops_before_live_mutations() {
+    for deny_writes in [false, true] {
+        if deny_writes && rustix::process::geteuid().is_root() {
+            eprintln!("SKIP permission-denied backup case: root bypasses mode bits");
+            continue;
+        }
+        let f = Fixture::new();
+        let mut mutations = 0;
+        let result = adoption::execute(
+            &f.home.host,
+            &f.lock,
+            approval(&f.home.host, &f.repo),
+            |event| {
+                if event.boundary == Boundary::Mutation {
+                    mutations += 1;
+                } else if event.sequence == 0 {
+                    if deny_writes {
+                        fs::set_permissions(f.txpath(), fs::Permissions::from_mode(0o500)).unwrap();
+                    } else {
+                        // Immutable creation must not overwrite even a private existing file.
+                        let path = f.txpath().join("manifest.backup");
+                        fs::write(&path, b"partial-private-backup").unwrap();
+                        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+                    }
+                }
+                Ok(())
+            },
+        );
+        fs::set_permissions(f.txpath(), fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(matches!(result, Err(Error::Io { .. })), "{result:?}");
+        assert_eq!(mutations, 0);
+        assert_eq!(
+            fs::read(f.home.host.home.join(".editorrc")).unwrap(),
+            CONTENT
+        );
+        assert_eq!(
+            fs::read_to_string(f.repo.join("dort.toml")).unwrap(),
+            ORIGINAL
+        );
+        assert!(!f.repo.join("files").exists());
+        if !deny_writes {
+            assert_eq!(
+                fs::read(f.txpath().join("manifest.backup")).unwrap(),
+                b"partial-private-backup"
+            );
+        }
+        let diagnosis = journal::diagnose(&f.home.host).unwrap();
+        assert_eq!(diagnosis[0].phase, Some(Phase::Preparing));
+        assert!(diagnosis[0].blocks_writes());
+        // Only explicit recovery terminates the private-only preparation.
+        adoption::rollback(&f.home.host, &f.lock, &f.id, &f.transaction(), |_| Ok(())).unwrap();
+        f.restored();
+    }
+}
+
+#[test]
 fn complete_adoption_retains_comments_modes_inodes_backups_and_explicitly_rolls_back() {
     let f = Fixture::new();
     let host = &f.home.host;
@@ -698,11 +754,13 @@ fn another_context_lock_or_an_unregistered_repository_cannot_authorize_adoption(
 #[test]
 fn different_filesystem_state_has_no_cross_device_copy_fallback() {
     let Ok(state) = tempfile::tempdir_in("/dev/shm") else {
+        eprintln!("SKIP cross-device case: /dev/shm is unavailable");
         return;
     };
     let f = support::TestHome::new();
     let repo = f.repository("repository");
     if fs::metadata(state.path()).unwrap().dev() == fs::metadata(&repo).unwrap().dev() {
+        eprintln!("SKIP cross-device case: fixture devices are identical");
         return;
     }
     let host = HostContext::new(

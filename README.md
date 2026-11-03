@@ -6,13 +6,15 @@ Dort is a Git-native developer environment manager. It is designed to reconcile 
 
 ## Current status
 
-**Experimental CLI and minimal TUI (A0–A11).** Dort provides strict manifest validation, profile/dependency resolution, bounded discovery, descriptor-safe observation, pure previews, hardened read-only Git status/diff, local repository init/attach, and approved adoption, link apply, unmanage and guarded recovery with immutable journals.
+**Experimental CLI and TUI.** Dort provides strict manifest validation, profile/dependency resolution, bounded discovery, descriptor-safe observation, pure previews, hardened read-only Git status/diff, local repository init/attach, and approved adoption, link apply, unmanage and guarded recovery with immutable journals.
 
 A Ratatui interface provides Overview, active Files, Recovery, previews, explicit approval and responsive progress over the same core services. Package-manager execution, remote cloning/sync, Git staging/commit/push, templates and secrets are **not implemented**. A successful preview is not permission or an executable artifact for a later write. The executor is tested only against disposable homes; this is not yet a production-ready dotfile manager.
 
 ## Documentation
 
-- [User guide](docs/README.md): [getting started](docs/getting-started.md), [manifest guide](docs/manifest.md), [commands](docs/commands.md), and [safety/troubleshooting](docs/safety.md).
+- [User guide](docs/user/README.md): [getting started](docs/user/getting-started.md), [manifest guide](docs/user/manifest.md), [commands](docs/user/commands.md), and [safety/troubleshooting](docs/user/safety.md).
+- [Documentation index](docs/README.md): end-user guides and maintained technical references.
+- [Validation methods](docs/validation.md): test infrastructure, isolation and interpretation of results.
 - [Architecture](ARCHITECTURE.md): module boundaries, data flow, journal/recovery contracts and limitations.
 - [Contributor/agent instructions](AGENTS.md): development checks and documentation-maintenance rules.
 - [Changelog](CHANGLOG.md): generated with git-cliff from committed Git history (uncommitted work is excluded).
@@ -52,7 +54,7 @@ Run `dort` (no arguments) or `dort tui` in a terminal. `--repo PATH` overrides t
 
 Overview shows repository/profiles/drift and journal write blockers. Files supports previewing apply and both unmanage modes; Recovery supports schema-1/2 rollback and schema-3 resume/abandon. Press `?` for help, `Tab` to change views, `a` to preview apply, and `q` to exit. Review the scrollable preview, press Enter, then type literal `yes`; link deletion first requires its exact file ID in a separate acknowledgement. Esc dismisses previews/confirmations without writing. Approved writes finish before q/Ctrl-C exits; terminal errors wait for the worker, never detach it or auto-undo. Errors and panics restore the terminal where the OS still permits cleanup.
 
-This minimal interface requires 48×14 for approval, shows active profiles only, and leaves init/attach, discovery/adoption and Git inspection to the CLI. Without a selected repository, Overview explains initialization and Recovery remains accessible. No startup replay occurs. See [keys and behavior](docs/commands.md#interactive-interface) and [terminal safety](docs/safety.md#terminal-and-interruption).
+This minimal interface requires 48×14 for approval, shows active profiles only, and leaves init/attach, discovery/adoption and Git inspection to the CLI. Without a selected repository, Overview explains initialization and Recovery remains accessible. No startup replay occurs. See [keys and behavior](docs/user/commands.md#interactive-interface) and [terminal safety](docs/user/safety.md#terminal-and-interruption).
 
 ## Read-only Git inspection
 
@@ -71,7 +73,7 @@ Status and default diff reports contain metadata only. Diff compares tracked wor
 
 Git runs with a cleared environment, fixed safe arguments, no optional locks/index refresh, hooks, external diff/textconv, fsmonitor or submodule recursion. Configured content filters and partial-clone/promisor settings are conservatively refused, even when unused/false. Each child has a 10-second deadline and a combined 4 MiB stdout/stderr limit; errors never echo Git stderr or partial output. These inspection commands have no fallback, network, merge or write operation. This is hardening, **not OS sandboxing or protection from a malicious same-user configuration race**. Git reads repository-controlled configuration/includes/attributes/object paths using Git's own filesystem access, not Dort's no-follow observer.
 
-`--repo` must identify the exact non-bare working-tree root (linked worktrees supported), with no manifest/registration requirement. Reports are not globally atomic; summary and explicit patch are separate reads. See [command details](docs/commands.md#git-inspection) and [Git safety/troubleshooting](docs/safety.md#git-inspection-boundary).
+`--repo` must identify the exact non-bare working-tree root (linked worktrees supported), with no manifest/registration requirement. Reports are not globally atomic; summary and explicit patch are separate reads. See [command details](docs/user/commands.md#git-inspection) and [Git safety/troubleshooting](docs/user/safety.md#git-inspection-boundary).
 
 ## File discovery and previews
 
@@ -105,7 +107,7 @@ Filename/content sensitivity checks are deliberately conservative heuristics, no
 
 ## Approved local mutations (experimental)
 
-Try these only in a [disposable HOME](docs/getting-started.md) first:
+Try these only in a [disposable HOME](docs/user/getting-started.md) first:
 
 ```sh
 # Explicit path: absent destination under an existing safe parent, or valid Git+dort.toml root.
@@ -125,7 +127,7 @@ dort history
 # dort rollback REPOSITORY_ID TRANSACTION_ID --dry-run
 ```
 
-`files adopt`/`files unmanage` alias `add`/`remove`. Both unmanage modes retain sources. Interactive confirmation is available only with terminal stdin/stdout/stderr and without `--json`; `--yes` bypasses it, not validation or separate link-removal acknowledgement. Dry runs never prompt or create state, locks or artifacts. See [commands](docs/commands.md) for recovery and JSON details. On any failed write, inspect `history`: effects may be partially published, never automatically undone.
+`files adopt`/`files unmanage` alias `add`/`remove`. Both unmanage modes retain sources. Interactive confirmation is available only with terminal stdin/stdout/stderr and without `--json`; `--yes` bypasses it, not validation or separate link-removal acknowledgement. Dry runs never prompt or create state, locks or artifacts. See [commands](docs/user/commands.md) for recovery and JSON details. On any failed write, inspect `history`: effects may be partially published, never automatically undone.
 
 ## Manifest basics
 
@@ -209,7 +211,7 @@ For file lifecycle (schemas 1/2), durable phases are `preparing → running → 
 
 Rollback preflights all source, manifest, destination, staged-object and parent guards before changing anything, then rechecks around each inverse. Edits through the live source link, replacement files, changed parent identities/permissions, extra files in newly created directories or damaged backups stop recovery instead of overwriting user work. An interrupted rename can be recognized from the persisted intent and retained object identity/content; uncertain states are refused. Interrupted rollback can itself be resumed explicitly. Failed calls leave durable state for diagnosis, never silently auto-undo.
 
-The lock coordinates Dort writers, not arbitrary editors or a malicious same-user process. Descriptor-relative no-follow operations avoid traversing substituted symlink parents, but these checks are not filesystem-wide isolation. The tests exercise process exits at durable boundaries and simulated torn records, **not real power-loss/filesystem fault injection**. Retention/scan bounds and lack of garbage collection are further prototype limits.
+The lock coordinates Dort writers, not arbitrary editors or a malicious same-user process. Descriptor-relative no-follow operations avoid traversing substituted symlink parents, but these checks are not filesystem-wide isolation. The ordinary tests exercise process exits at durable boundaries and simulated torn records. A separately approved, opt-in Linux VM harness additionally exercises real ENOSPC and partial checkpoint writes, **not failing fsync or real power loss**. Retention/scan bounds and lack of garbage collection are further prototype limits.
 
 ## Development
 
@@ -217,15 +219,22 @@ The lock coordinates Dort writers, not arbitrary editors or a malicious same-use
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
+cargo build --workspace --locked
+python3 scripts/check-docs.py --self-test
+python3 scripts/check-docs.py
+python3 scripts/test-terminal.py
+git diff --check
 ```
 
-Local validation on macOS ARM64: **150 tests pass**, formatting passes, and Clippy passes with warnings denied. Cross-platform CI is configured but has not been run locally. Linux additionally exercises FIFO observation, real non-UTF-8 directory/link entries (APFS rejects such filenames at creation), and cross-device refusal when a separate `/dev/shm` filesystem is available.
+The Python gates require Python 3 (standard library only). PTY tests use disposable child environments and do not require installed Git. CI requires non-root permission fixtures and distinct Linux cross-device fixture filesystems; optional skips are visible in test output.
 
-Integration tests use disposable homes/repositories and isolated child-process environments. Coverage includes symlink parents/loops, racing terminal substitution, hard links/special files, sensitive exclusions, observation limits, profile overrides, deterministic/no-op/blocked plans, both unmanage preview modes, every adoption/apply/unmanage/recovery checkpoint and post-mutation error boundary, child-process crash/recovery and lock release for forward and inverse lifecycle work, schema-1 compatibility, no-journal repeated apply, separate removal acknowledgement, focused manifest edits, shared destination parents, source preservation, CLI history diagnosis without replay, malformed/checksum/schema/backup failures, stale approvals, source/user-edit rollback guards, and CLI no-write/content-redaction assertions. Git coverage adds unborn/dirty/detached/conflicted repositories, unusual/rename paths, linked worktrees, binary markers, helper non-execution, filter/partial-clone refusal, bounded subprocess failures, explicit patch disclosure/escaping, and unchanged index/config/source identities/bytes. CLI Git tests use fake executables; optional core integration tests use installed Git against disposable fixtures only. A10 adds bootstrap checkpoint/mutation process exits and explicit recovery, config backup/exchange/value redaction, unsafe/stale/torn-state guards, head-bound rollback previews, CLI approval/removal-ack/lock/dry-run checks and the isolated create/adopt/apply/unmanage workflow. The documented CLI walkthrough and five real-terminal consent/no-prompt cases were exercised locally. A11 adds small-layout/confirmation snapshots, no-write cancellation/dry-run, shared-service apply/keep/remove/recovery, stale approval/lock checks and worker joining/input responsiveness. Nine additional PTY cases check TUI entry/exit, small screens, confirmation cancellation, dry-run approval refusal, approved apply and terminal-session cleanup on normal return, synthetic error and panic. They never install packages or mutate the developer's configuration. CI is configured for Ubuntu x86_64/ARM64 and macOS Intel/Apple Silicon; local validation does not establish that all CI platforms have passed.
+See [validation methods](docs/validation.md) for test coverage, fixture prerequisites, terminal/storage harnesses and evidence limits. CI is configured for Ubuntu x86_64/ARM64 and macOS Intel/Apple Silicon; local success and an earlier CI run do not establish that a changed candidate passed all platforms.
+
+Integration tests use disposable canonical homes/repositories and isolated child environments. They cover observation/planning guards, approved journalled lifecycle/bootstrap/recovery, concurrency, source preservation, no-op apply, Git hardening and CLI/TUI approval/terminal behavior. CLI Git fixtures do not require installed Git; optional core real-Git fixtures announce skips. Mounted-volume fault injection is opt-in, requires separately approved disposable infrastructure and never belongs on a workstation or in ordinary CI.
 
 ### Maintaining documentation and history
 
-Keep this README, `ARCHITECTURE.md`, end-user `docs/`, and `AGENTS.md` aligned with implementation changes. The changelog filename is intentionally `CHANGLOG.md`.
+Keep this README, `ARCHITECTURE.md`, maintained technical notes in `docs/`, end-user guides in `docs/user/`, and `AGENTS.md` aligned with implementation changes. The changelog filename is intentionally `CHANGLOG.md`.
 
 Generate history with pinned git-cliff **2.14.2** (local installation stays ignored):
 
@@ -237,11 +246,13 @@ scripts/changelog.sh --check
 
 The script uses `cliff.toml`, local committed history and no remote metadata or command hooks. It never installs tools, commits, pushes or creates tags. Regenerate after authorized implementation commits; generated-only commits should use `chore(changelog): regenerate history` to avoid self-referential entries. Full history/tags are required; see [AGENTS.md](AGENTS.md#changelog-maintenance).
 
-## Roadmap
+## Documentation layout
 
-Implementation specs and planning notes are transient local artifacts in ignored `specs/`; they are not required to build or test Dort. Implemented behaviour is documented in this README, tracked end-user `docs/`, and `ARCHITECTURE.md`. The new `docs/` is public documentation, not the ignored implementation notes.
+- `docs/user/`: tracked end-user documentation for available commands, manifests, workflows, safety and troubleshooting; no development content.
+- `docs/`: maintained technical references about the current system and a documentation index, not temporary feature plans or release worklists.
+- `specs/`: ignored feature specifications, interim decisions, roadmaps, implementation plans and candidate-specific release/evidence notes. These may become obsolete after implementation; do not commit them or require/link them from tracked docs, code, tests or builds.
 
-Public write/approval commands (A10) and the minimal TUI (A11) are implemented experimentally; the next slice is the broader failure-matrix/platform/release gate (A12). Filesystem lifecycle/bootstrap execution is sandbox-tested, not a production deployment guarantee. The broader roadmap adds tools, unified setup, generated/secret configuration, safe Git synchronisation, and the full TUI.
+Keep current behavior documented as it changes. Promote enduring technical facts from completed work into maintained references, rather than retaining completed task lists in source control.
 
 ## License
 

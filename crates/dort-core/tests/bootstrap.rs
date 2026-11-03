@@ -593,12 +593,14 @@ fn cross_device_bootstrap_refuses_before_repository_or_registration_publication(
     };
     let mut t = TestHome::new();
     let Ok(other) = tempfile::tempdir_in("/dev/shm") else {
+        eprintln!("SKIP cross-device case: /dev/shm is unavailable");
         return;
     };
     let other_path = other.path().canonicalize().unwrap();
     if std::fs::metadata(&other_path).unwrap().dev()
         == std::fs::metadata(t.sandbox.path()).unwrap().dev()
     {
+        eprintln!("SKIP cross-device case: fixture devices are identical");
         return;
     }
     t.host.state_dir = other_path.join("dort");

@@ -31,6 +31,27 @@ fn regular_snapshots_hash_without_exposing_contents_and_change_with_edits() {
 }
 
 #[test]
+fn unreadable_regular_file_fails_checked_reads_without_disclosing_content() {
+    if rustix::process::geteuid().is_root() {
+        eprintln!("SKIP unreadable-file case: root bypasses mode bits");
+        return;
+    }
+    let home = TestHome::new();
+    let path = home.host.home.join("ordinary");
+    fs::write(&path, "UNREADABLE-CONTENT-SENTINEL").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    let result = observation::inspect(&path, true);
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let error = result.unwrap_err();
+    assert!(!error.to_string().contains("UNREADABLE-CONTENT-SENTINEL"));
+    assert_eq!(
+        fs::read_to_string(path).unwrap(),
+        "UNREADABLE-CONTENT-SENTINEL"
+    );
+    assert!(!home.host.state_dir.exists());
+}
+
+#[test]
 fn racing_terminal_symlink_substitution_never_reads_the_referent() {
     use sha2::{Digest, Sha256};
     let home = TestHome::new();

@@ -7,7 +7,7 @@ These repository instructions apply to all files unless a more specific instruct
 - Read [README.md](README.md) and [ARCHITECTURE.md](ARCHITECTURE.md) before changing behaviour.
 - Dort is a Rust workspace: `crates/dort-core` owns UI-independent services; `crates/dort` owns the Clap CLI, minimal Ratatui interface and presentation.
 - The experimental CLI exposes approved local init/attach, regular-file adoption, link apply, unmanage and guarded recovery. Keep discovery/checks/plans/status/history/Git inspection read-only. Do not add provider execution, cloning/sync, Git staging/commit/push or unrelated writes.
-- The approved minimal TUI exposes Overview, active Files (apply/unmanage) and Recovery through shared services. Keep init/attach, discovery/adoption and Git inspection CLI-only for this slice. Do not add provider execution or change journal/schema/security contracts without explicit agreement.
+- The current minimal TUI exposes Overview, active Files (apply/unmanage) and Recovery; it is only a delivered foundation. The accepted v0.1 boundary is **TUI-first, polished and complete for every supported CLI workflow**. The interim parity/UX roadmap belongs in ignored `specs/`, not tracked documentation. Before release, add guided init/attach, repository/profile selection, discovery/adoption, checks/diagnostics and read-only Git through shared services before release. No supported task may be completed by a CLI handoff; JSON/automatic-approval flags remain CLI automation concerns. Do not add provider execution or change journal/schema/security/cancellation contracts without explicit agreement. Explicit TUI patch rendering needs its separate disclosure decision before implementation.
 - Keep existing uncommitted work intact. Do not commit, push, tag or release unless requested.
 
 ## Required documentation maintenance
@@ -18,13 +18,17 @@ Update documentation in the same change as the behaviour it describes:
 | --- | --- |
 | `README.md` | Status, build requirements, navigation, commands, limitations or roadmap change. |
 | `ARCHITECTURE.md` | Module boundaries, data flow, persistence/schema contracts, safety guarantees or architectural limitations change. |
-| `docs/` | User-visible commands, flags, manifests, workflows, output/exit codes or troubleshooting change. |
+| `docs/user/` | End-user commands, flags, manifests, workflows, output/exit codes, safety or troubleshooting change. |
+| `docs/` | Durable technical notes about the current architecture, contracts, internals, validation methods or other maintained system facts change. |
 | `AGENTS.md` | Contributor workflow, tooling, validation or standing project constraints change. |
 | `CHANGLOG.md` | Authorized commits add history; regenerate with git-cliff, never hand-edit generated entries. |
 
-- `docs/` is tracked, end-user documentation. Keep examples usable and distinguish previews from execution.
-- `specs/` contains ignored, transient implementation notes. Never commit it or require it in builds, tests, runtime code or tracked documentation links.
-- Do not describe planned features as shipped. State local validation separately from unobserved remote CI.
+- `docs/user/` is tracked **end-user-only** documentation: installation/build-for-use, current CLI/TUI usage, configuration, workflows, safety and troubleshooting. Do not include contributor instructions, test infrastructure, development status, slice IDs, feature plans, roadmaps or release checklists there. Keep examples usable and distinguish previews from execution.
+- `docs/` (outside `docs/user/`) holds the documentation index and tracked **durable technical references**. Describe the current system and keep notes maintained; do not store temporary feature designs, implementation schedules, unfinished task lists, candidate-specific test counts/run IDs or release worklists there. Root `README.md`/`ARCHITECTURE.md`/`AGENTS.md` remain maintained project entry points.
+- `specs/` holds **ignored, transient feature specifications, interim decisions/designs, roadmaps, implementation plans and candidate-specific release/evidence checklists**. These can become stale or be discarded after the feature is done; do not keep them in source control. Never require/link them from tracked docs, code, tests or builds.
+- After implementation, promote only enduring, implemented technical facts into `docs/`/`ARCHITECTURE.md` and user-facing behavior into `docs/user/`; do not copy completed task lists into maintained documentation. Move obsolete planning notes out of public docs rather than retaining them as a public archive.
+- Do not describe planned features as shipped. Every later CLI capability needs a usable TUI workflow in the same milestone. State local validation separately from unobserved remote CI, recording transient evidence in ignored planning/artifact locations.
+- Scan maintained Markdown recursively, including `docs/user/`, with the documentation checker. Moving a page requires updating relative links in root documents, nested guides and local planning notes; tracked pages must never link into ignored `specs/`.
 - Keep relative links valid. Keep the requested spelling `CHANGLOG.md`; do not create a competing `CHANGELOG.md`.
 
 ## Rust workflow
@@ -40,8 +44,13 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 cargo build --workspace --locked
+python3 scripts/check-docs.py --self-test
+python3 scripts/check-docs.py
+python3 scripts/test-terminal.py
 git diff --check
 ```
+
+The Python gates use the standard library; terminal tests discover fresh Cargo artifacts and operate only on disposable fixtures. CI runs all four runtime platforms, exposes optional skip messages, requires non-root permission tests and distinct Linux cross-device fixtures, and rejects tracked-file changes. See [validation methods](docs/validation.md) for maintained coverage, isolation and harness guidance; candidate-specific evidence and remaining release blockers belong in ignored planning notes. Do not equate an earlier commit's CI result with validation of new work. Real ENOSPC/power-loss or mounted-volume fault injection needs a separately approved disposable environment; never fill a workstation disk or automate real-home smoke tests. `scripts/test-storage-vm.py` is an opt-in launcher restricted to the reviewed `lima-a12` guest with an administrative approval marker, no host shares and a verified 128 MiB ext4 loop image. Its Linux Rust probe is ignored by ordinary tests. Do not create the marker on a workstation, add privileged fault injection to normal CI, enlarge the volume or infer failing-sync/power-loss safety from ENOSPC results.
 
 ## Filesystem and recovery invariants
 

@@ -183,6 +183,55 @@ fn event_count(mode: Option<UnmanageMode>, rollback: bool) -> usize {
 }
 
 #[test]
+fn backup_write_failure_keeps_apply_keep_and_remove_live_inputs_unchanged() {
+    for mode in modes() {
+        for deny_writes in [false, true] {
+            if deny_writes && rustix::process::geteuid().is_root() {
+                eprintln!("SKIP permission-denied backup case: root bypasses mode bits");
+                continue;
+            }
+            let f = Fixture::new(mode);
+            let destination = f.home.host.home.join(".a");
+            let inode = fs::metadata(&destination).unwrap().ino();
+            let mut mutations = 0;
+            let result = f.execute(|event| {
+                if event.boundary == Boundary::Mutation {
+                    mutations += 1;
+                } else if event.sequence == 0 {
+                    if deny_writes {
+                        fs::set_permissions(f.txpath(), fs::Permissions::from_mode(0o500)).unwrap();
+                    } else {
+                        let path = f.txpath().join("backup-0000");
+                        fs::write(&path, b"partial-private-backup").unwrap();
+                        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+                    }
+                }
+                Ok(())
+            });
+            fs::set_permissions(f.txpath(), fs::Permissions::from_mode(0o700)).unwrap();
+            assert!(matches!(result, Err(Error::Io { .. })), "{result:?}");
+            assert_eq!(mutations, 0);
+            assert_eq!(fs::metadata(destination).unwrap().ino(), inode);
+            assert_eq!(
+                fs::read_to_string(f.repo.join("dort.toml")).unwrap(),
+                ORIGINAL
+            );
+            if !deny_writes {
+                assert_eq!(
+                    fs::read(f.txpath().join("backup-0000")).unwrap(),
+                    b"partial-private-backup"
+                );
+            }
+            let diagnosis = journal::diagnose(&f.home.host).unwrap();
+            assert_eq!(diagnosis[0].phase, Some(Phase::Preparing));
+            assert!(diagnosis[0].blocks_writes());
+            f.rollback(|_| Ok(())).unwrap();
+            f.restored();
+        }
+    }
+}
+
+#[test]
 fn apply_batches_shared_parents_backups_and_repeated_apply_is_a_true_noop() {
     let f = Fixture::new(None);
     let old_inode = fs::metadata(f.home.host.home.join(".a")).unwrap().ino();
@@ -828,12 +877,14 @@ fn wrong_lock_and_unregistered_repository_are_refused_before_journalling() {
 #[test]
 fn separate_filesystems_are_refused_without_live_mutations_when_available() {
     let Ok(other) = tempfile::tempdir_in("/dev/shm") else {
+        eprintln!("SKIP cross-device case: /dev/shm is unavailable");
         return;
     };
     let home = support::TestHome::new();
     let repo = other.path().canonicalize().unwrap().join("repo");
     fs::create_dir_all(repo.join(".git")).unwrap();
     if fs::metadata(&repo).unwrap().dev() == fs::metadata(&home.host.home).unwrap().dev() {
+        eprintln!("SKIP cross-device case: fixture devices are identical");
         return;
     }
     fs::write(

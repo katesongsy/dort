@@ -17,6 +17,8 @@ Other commands require a supported host and HOME. Terminal invocation without a 
 
 ## Interactive interface
 
+The current interface provides Overview, active Files and Recovery. Other operations remain available through the CLI as described below.
+
 ```sh
 dort                       # terminal only; same as dort tui
 dort --repo /absolute/path/to/dotfiles tui

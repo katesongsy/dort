@@ -14,6 +14,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install pinned Rust toolchain
@@ -22,4 +23,28 @@ jobs:
           rustup default 1.99.1
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked
+      - name: Runtime platform evidence
+        run: |
+          uname -sm
+          rustc -Vv
+          git --version
+          python3 --version
+      - name: Required filesystem fixture prerequisites
+        run: |
+          python3 - <<'PY'
+          import os, sys, tempfile
+          assert os.geteuid() != 0, "Permission tests require a non-root runner"
+          if sys.platform == "linux":
+              with tempfile.TemporaryDirectory() as ordinary, tempfile.TemporaryDirectory(dir="/dev/shm") as other:
+                  assert os.stat(ordinary).st_dev != os.stat(other).st_dev, "Cross-device tests require distinct filesystems"
+          PY
+      - run: cargo test --workspace --locked -- --nocapture
+      - run: cargo build --workspace --locked
+      - name: Public documentation gate
+        run: |
+          python3 scripts/check-docs.py --self-test
+          python3 scripts/check-docs.py
+      - name: Disposable terminal lifecycle gate
+        run: python3 scripts/test-terminal.py
+      - run: git diff --exit-code
+      - run: git diff --check

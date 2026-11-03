@@ -82,7 +82,7 @@ macos = { provider = "brew", package = "git" }
 ubuntu = { provider = "apt", package = "git" }
 ```
 
-This declares intent only: Dort does not inspect or install Git. Supported provider names in the schema are `brew`, `apt`, `mise` and `npm`. Packages/versions are validated for the provider; brew/apt currently allow only omitted or `latest` versions. See the [tracked example](../examples/dort.toml) for mise/npm declarations.
+This declares intent only: Dort does not inspect or install Git. Supported provider names in the schema are `brew`, `apt`, `mise` and `npm`. Packages/versions are validated for the provider; brew/apt currently allow only omitted or `latest` versions. See the [example manifest](../../examples/dort.toml) for mise/npm declarations.
 
 Tool `requires` must name declared tools, and dependency cycles are rejected. An npm install definition must explicitly name its runtime via `runtime_tool`; that runtime also becomes a dependency.
 

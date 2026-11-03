@@ -94,7 +94,13 @@ Rollback is explicit for schemas 1/2 and bound to a fresh guarded preview/journa
 
 Bootstrap first stages/syncs a minimal repository privately, then records intent before no-replace repository publication and atomic registration publication/exchange. Configuration backups/retained originals can contain local variable values; they are private, not encrypted. The three locations must share a filesystem. Interruption blocks new writes until explicit guarded resume/abandon; incomplete private preparation can only be abandoned/retried. **Abandon never deletes a published repository, undoes registration or removes retained artifacts.** Edited/substituted repositories/configuration/parents stop recovery. Malformed chains require manual diagnosis. No automatic startup cleanup/replay occurs.
 
-The application lock coordinates Dort writers only, not editors or malicious same-user processes. No-follow access is not full filesystem isolation. Tests use disposable homes and process exits at durable boundaries; they do not establish real power-loss safety.
+The application lock coordinates Dort writers only, not editors or malicious same-user processes. No-follow access is not full filesystem isolation, and the recovery protocol does not promise safety after every power or storage failure.
+
+## Reliability limits
+
+Dort remains experimental. Repository sources, destinations and state must share a filesystem supporting atomic no-replace/exchange renames; there is no cross-device fallback. Individual publications are atomic, not an entire multi-path transaction. Disk exhaustion, interruption or power loss may leave incomplete work or a malformed checkpoint that requires manual diagnosis. Automatic recovery cannot safely discard a torn immutable tail.
+
+Keep independent backups and start with a disposable environment. If a write fails, preserve journals/backups/originals, inspect history and use only the guarded recovery actions described above. Never fill your disk, weaken permissions or try recovery against real dotfiles merely to work around a blocker.
 
 ## Reporting a problem
 
