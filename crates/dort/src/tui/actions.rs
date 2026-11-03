@@ -297,6 +297,7 @@ impl Approved {
 }
 
 pub enum Task {
+    Git(super::git::Read),
     Refresh,
     Discover,
     Check {
@@ -319,6 +320,7 @@ pub enum Task {
     Execute(Approved),
 }
 pub enum Output {
+    Git(super::git::Report),
     Data(Data),
     Discovery(crate::services::Discovery),
     Checked {
@@ -352,6 +354,7 @@ pub fn perform_scoped(
     observer: impl FnMut(&Event) -> Result<()>,
 ) -> Result<Output> {
     match task {
+        Task::Git(read) => read.perform().map(Output::Git),
         Task::Refresh => load_scoped(host, repository.as_deref(), requested).map(Output::Data),
         Task::Check {
             manifest,

@@ -1,6 +1,9 @@
 mod actions;
 mod app;
 mod events;
+mod git;
+#[cfg(test)]
+mod git_tests;
 mod inventory;
 mod shell;
 #[cfg(test)]

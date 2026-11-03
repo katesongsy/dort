@@ -15,6 +15,7 @@ pub enum Tab {
     Files,
     Recovery,
     Checks,
+    Git,
 }
 impl Tab {
     pub fn next(self) -> Self {
@@ -22,11 +23,12 @@ impl Tab {
             Self::Overview => Self::Files,
             Self::Files => Self::Recovery,
             Self::Recovery => Self::Checks,
-            Self::Checks => Self::Overview,
+            Self::Checks => Self::Git,
+            Self::Git => Self::Overview,
         }
     }
     pub fn previous(self) -> Self {
-        self.next().next().next()
+        self.next().next().next().next()
     }
 }
 pub struct Preview {
@@ -46,6 +48,7 @@ pub struct App {
     pub origin: &'static str,
     pub launch_directory: PathBuf,
     pub git: Result<PathBuf, String>,
+    pub git_view: super::git::State,
     pub result: Option<String>,
     pub data: Option<Data>,
     pub discovering: bool,
@@ -76,6 +79,7 @@ impl App {
             origin: "registered active",
             launch_directory: PathBuf::from("/"),
             git: Err("Git unavailable; install Git separately and restart Dort".into()),
+            git_view: super::git::State::new(),
             result: None,
             data: None,
             discovering: false,
@@ -117,6 +121,7 @@ impl App {
         }
         match result {
             Err(error) => {
+                self.git_view.failed();
                 self.details_scroll = 0;
                 self.status = if writing {
                     format!(
@@ -128,6 +133,13 @@ impl App {
                     )
                 };
                 self.error = Some(self.status.clone());
+            }
+            Ok(Output::Git(report)) => {
+                self.git_view.accept(
+                    report,
+                    self.tab == Tab::Git && !self.quit && self.shell.overlay.is_none(),
+                );
+                self.status = "Git read completed. Summaries are metadata-only; patch viewing requires a new confirmation.".into();
             }
             Ok(Output::Data(data)) => {
                 self.replace_data(data);
@@ -285,6 +297,7 @@ impl App {
                 && self.confirmation.is_none()
                 && (self.preview.is_some() || !self.text_entry()))
         {
+            self.git_view.discard_patch();
             if self.busy {
                 self.exit_requested = true;
                 self.status = "Exit requested; waiting for the active worker. Approved writes are not cancelled.".into();
@@ -313,6 +326,7 @@ impl App {
         }
         if self.busy {
             if key.code == KeyCode::Char('?') {
+                self.git_view.discard_patch();
                 self.shell.scroll = 0;
                 self.shell.overlay = Some(Overlay::Help);
             }
@@ -326,6 +340,7 @@ impl App {
                     self.tab.next()
                 };
                 self.selected = 0;
+                self.git_view.discard_patch();
             }
             let scroll = if self.shell.overlay.is_some() {
                 &mut self.shell.scroll
@@ -408,6 +423,38 @@ impl App {
             }
             return None;
         }
+        if self.tab == Tab::Git
+            && (self.shell.focus == Focus::Content
+                || self.git_view.text_entry()
+                || self.git_view.sensitive())
+        {
+            if self.git_view.editing_root
+                && key.code == KeyCode::Enter
+                && let Err(error) = &self.git
+            {
+                self.error = Some(format!(
+                    "{error}\nInstall Git separately and restart Dort. Draft retained."
+                ));
+                return None;
+            }
+            if let Some(task) = self.git_view.key(key, &self.launch_directory, &self.git) {
+                return task;
+            }
+            let action = match key.code {
+                KeyCode::Char('g') => Some(Action::GitRoot),
+                KeyCode::Char('z') => Some(Action::GitStatus),
+                KeyCode::Char('u') => Some(Action::GitUnstaged),
+                KeyCode::Char('s') => Some(Action::GitStaged),
+                KeyCode::Char('w') => Some(Action::GitPatch),
+                KeyCode::Char('r') => Some(Action::GitRefresh),
+                _ => None,
+            };
+            if let Some(action) = action {
+                return self.activate(action);
+            }
+        }
+        // Any outer-shell navigation/action drops a disclosed patch reference.
+        self.git_view.discard_patch();
         if self.tab == Tab::Files && self.inventory.search(self.discovering).editing {
             self.inventory.search_mut(self.discovering).key(key);
             self.clamp_file_selection();
@@ -471,11 +518,12 @@ impl App {
                 self.tab = Tab::Checks;
                 self.details_scroll = 0;
             }
+            KeyCode::Char('5') => return self.activate(Action::Destination(Tab::Git)),
             KeyCode::Char('c') => return self.activate(Action::CheckCurrent),
             KeyCode::Char('v') => return self.activate(Action::CheckStandalone),
             KeyCode::Char('t') => return self.activate(Action::Profiles),
             KeyCode::Char('?') => return self.activate(Action::Help),
-            KeyCode::Char('r') => return Some(self.refresh_task()),
+            KeyCode::Char('r') => return self.activate(Action::Refresh),
             KeyCode::Char('f') => return self.activate(Action::Discover),
             KeyCode::Char('o') => return self.activate(Action::Adopt),
             KeyCode::Enter if self.tab == Tab::Files && self.discovering => self.adopt_candidate(),
@@ -511,6 +559,7 @@ impl App {
     pub fn resize(&mut self, width: u16, height: u16) {
         if width < 48 || height < 14 {
             self.confirmation = None;
+            self.git_view.resize();
         }
     }
     fn replace_data(&mut self, data: Data) {
@@ -533,6 +582,11 @@ impl App {
         });
         if had_selection && position.is_none() {
             self.status = "Selected item disappeared; showing the nearest remaining row.".into();
+        }
+        let git_default = data.repository.clone().or(self.repository.clone());
+        if self.git_view.follows_files && self.git_view.root != git_default {
+            self.git_view.scope_changed();
+            self.git_view.root = git_default;
         }
         self.data = Some(data);
         self.selected = position
@@ -626,7 +680,34 @@ impl App {
             self.shell.return_to_adopt = true;
         }
         self.shell.overlay = None;
+        self.git_view.discard_patch();
         match action {
+            Action::GitRoot => {
+                self.tab = Tab::Git;
+                self.shell.focus = Focus::Content;
+                self.git_view.editing_root = true;
+            }
+            Action::GitDefault => {
+                self.git_view.scope_changed();
+                self.git_view.root = None;
+                self.git_view.follows_files = true;
+                return self.git_task();
+            }
+            Action::GitStatus | Action::GitUnstaged | Action::GitStaged => {
+                self.git_view.choose(match action {
+                    Action::GitStatus => super::git::Comparison::Status,
+                    Action::GitUnstaged => super::git::Comparison::Unstaged,
+                    _ => super::git::Comparison::Staged,
+                });
+                return self.git_task();
+            }
+            Action::GitRefresh => return self.git_task(),
+            Action::GitPatch => {
+                self.tab = Tab::Git;
+                self.shell.focus = Focus::Content;
+                self.git_view.confirm_patch();
+                self.status = "Patch viewing needs a loaded Unstaged or Staged summary. Type literal view patch in its warning to disclose once.".into();
+            }
             Action::Destination(tab) => { self.tab = tab; self.selected = 0; self.shell.focus = Focus::Content; if tab == Tab::Files { self.discovering = false; } }
             Action::Choose => self.shell.overlay = Some(Overlay::Repositories { selected: 0 }),
             Action::Init => self.shell.overlay = Some(Overlay::Form(Form::Init)),
@@ -662,6 +743,7 @@ impl App {
                 self.shell.overlay = Some(Overlay::Form(Form::Check));
                 return self.check_task(true, true);
             }
+            Action::Refresh if self.tab == Tab::Git => return self.git_task(),
             Action::Refresh => return Some(self.refresh_task()),
             Action::PreviewOnly => {
                 if self.preview_only_locked { self.status = "--dry-run locks this session to preview-only.".into(); }
@@ -700,6 +782,7 @@ impl App {
     }
     pub fn text_entry(&self) -> bool {
         self.shell.text_entry()
+            || (self.tab == Tab::Git && self.git_view.text_entry())
             || (self.shell.overlay.is_none()
                 && self.tab == Tab::Files
                 && self.inventory.search(self.discovering).editing)
@@ -780,6 +863,11 @@ impl App {
         }
     }
     fn reset_repository_scope(&mut self) {
+        self.git_view.discard_patch();
+        if self.git_view.follows_files {
+            self.git_view.scope_changed();
+            self.git_view.root = None;
+        }
         self.requested_profiles.clear();
         if self
             .check
@@ -822,6 +910,33 @@ impl App {
                 requested,
             }
         })
+    }
+    fn git_task(&mut self) -> Option<Task> {
+        self.tab = Tab::Git;
+        self.shell.focus = Focus::Content;
+        let root = if self.git_view.follows_files {
+            self.data
+                .as_ref()
+                .and_then(|d| d.repository.clone())
+                .or(self.repository.clone())
+        } else {
+            self.git_view.root.clone()
+        };
+        let Some(root) = root else {
+            self.git_view.editing_root = true;
+            self.status =
+                "Choose an exact Git-only root; no manifest or registration required.".into();
+            return None;
+        };
+        match &self.git {
+            Ok(executable) => Some(self.git_view.request(root, executable.clone())),
+            Err(error) => {
+                self.error = Some(format!(
+                    "{error}\nInstall Git separately and restart Dort. Git root draft retained."
+                ));
+                None
+            }
+        }
     }
     fn refresh_task(&self) -> Task {
         if self.tab == Tab::Files && self.discovering {

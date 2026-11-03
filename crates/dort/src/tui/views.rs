@@ -21,7 +21,7 @@ pub fn safe(text: &str) -> String {
     }
     escaped
 }
-const HELP: &str = "Left/Right or 1/2/3/4: Overview / Files / Recovery / Checks\nTab / Shift-Tab: focus Destinations, Content, Actions\nEnter: activate focused control | Space: Actions\n/: search Files content, or Actions when open | Delete: clear filter\np: choose repository for session | n: create/attach\nr: refresh observations and all-repository history\na: preview apply (Overview / Files)\nk / d: keep local file / delete managed link in Files\ni: file metadata details | Actions: enter exact mapping ID\nFile filters are display-only; apply always uses full active scope\nb: preview rollback in Recovery | s / x: resume / abandon\nPreview: arrows / PgUp/PgDn scroll; Enter continue\nConfirmation: exact file ID for deletion, then literal yes\nEsc: confirmation -> preview -> retained form -> destination\nForms/search: printable q ? / are text; Backspace edits\nCtrl-U in a form: discard its draft | PgUp/PgDn: scroll\nq outside text / Ctrl-C anywhere: exit, joining worker\nNo automatic replay/rollback, network, staging or commits.\nf: Discover metadata | o: retained manual adoption form\nDiscover: Enter opens selected candidate as an editable draft\nAdoption: Tab/Shift-Tab fields/buttons; Enter advances fields\nt: temporary repository profiles | c: check repository manifest\nv: standalone manifest check (independent scope/profiles)\nProfiles union: base/default/platform/local plus temporary additions\nGit inspection is not available in this interface.\nEsc: return to previous destination and focus.";
+const HELP: &str = "Left/Right or 1/2/3/4/5: Overview / Files / Recovery / Checks / Git\nTab / Shift-Tab: focus Destinations, Content, Actions\nEnter: activate focused control | Space: Actions\n/: search Files content, or Actions when open | Delete: clear filter\np: choose repository for session | n: create/attach\nr: refresh observations and all-repository history\na: preview apply (Overview / Files)\nk / d: keep local file / delete managed link in Files\ni: file metadata details | Actions: enter exact mapping ID\nFile filters are display-only; apply always uses full active scope\nb: preview rollback in Recovery | s / x: resume / abandon\nPreview: arrows / PgUp/PgDn scroll; Enter continue\nConfirmation: exact file ID for deletion, then literal yes\nEsc: confirmation -> preview -> retained form -> destination\nForms/search: printable q ? / are text; Backspace edits\nCtrl-U in a form: discard its draft | PgUp/PgDn: scroll\nq outside text / Ctrl-C anywhere: exit, joining worker\nNo automatic replay/rollback, network, staging or commits.\nf: Discover metadata | o: retained manual adoption form\nDiscover: Enter opens selected candidate as an editable draft\nAdoption: Tab/Shift-Tab fields/buttons; Enter advances fields\nt: temporary repository profiles | c: check repository manifest\nv: standalone manifest check (independent scope/profiles)\nProfiles union: base/default/platform/local plus temporary additions\nGit: g exact root | z Status | u Unstaged | s Staged\nr metadata refresh | / search | i details | w View patch content\nPatch: warning + literal view patch, once; Esc drops content\nEsc: return to previous destination and focus.";
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -49,9 +49,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Tab::Files => "Files",
         Tab::Recovery => "Recovery",
         Tab::Checks => "Checks",
+        Tab::Git => "Git",
     };
     frame.render_widget(Paragraph::new(safe(&format!(
-        "Dort | 1 Overview  2 Files  3 Recovery  4 Checks | [Actions: Space]\nRepository: {scope}\n{}{} | Profiles: {:?}\n{destination} | Focus: {} | ? Help | p Choose | n Create/attach", app.origin,
+        "Dort | 1 Overview  2 Files  3 Recovery  4 Checks  5 Git | [Actions: Space]\nRepository: {scope}\n{}{} | Profiles: {:?}\n{destination} | Focus: {} | ? Help | p Choose | n Create/attach", app.origin,
         if app.dry_run { " | DRY RUN / PREVIEW ONLY" } else { "" }, app.data.as_ref().map(|d| d.profiles.as_slice()).unwrap_or_default(), app.shell.focus.label()
     ))).style(Style::default().fg(Color::Cyan)), rows[0]);
     let body = if let Some(error) = &app.error {
@@ -72,6 +73,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
         None
     } else if let Some(overlay) = &app.shell.overlay {
         Some(overlay_text(app, overlay, rows[1].height, rows[1].width))
+    } else if app.tab == Tab::Git {
+        app.git_view.draw(frame, rows[1]);
+        None
     } else if app.tab == Tab::Files {
         draw_files(frame, rows[1], app);
         None
@@ -84,7 +88,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         body.push_str(&match app.tab {
             Tab::Overview => app.data.as_ref().map(|d| d.overview.clone()).unwrap_or_else(|| "Loading...".into()),
             Tab::Checks => check_text(app),
-            Tab::Files => unreachable!(),
+            Tab::Files | Tab::Git => unreachable!(),
             Tab::Recovery => app.data.as_ref().map(|d| {
                 let mut text = format!("All repositories: {} transaction(s)\nb rollback | s resume | x abandon\n",d.history.len());
                 if let Some(error) = &d.history_error { text.push_str(&format!("Diagnosis failed: {error}\n")); }
@@ -124,6 +128,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
     );
     let footer = if app.preview.is_some() {
         "Preview: arrows/PgUp/PgDn scroll | Enter continue\nEsc back (no write) | q quit | Ctrl-C waits for worker"
+    } else if app.tab == Tab::Git && app.shell.overlay.is_none() {
+        "g root | z Status | u Unstaged | s Staged | r refresh\n/ search | i details | w View patch content | Esc back"
     } else if app.text_entry() {
         "Text: Enter advance/select | Backspace / Ctrl-U edit\nTab/Shift-Tab fields | Esc back | Ctrl-C quit"
     } else if app.tab == Tab::Files && app.shell.overlay.is_none() {
@@ -324,7 +330,7 @@ fn draw_files(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-fn short_field(label: &str, value: &str, width: u16) -> String {
+pub(super) fn short_field(label: &str, value: &str, width: u16) -> String {
     let escaped = safe(&format!("{value:?}"));
     let available = usize::from(width.saturating_sub(6))
         .saturating_sub(label.len())

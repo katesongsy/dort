@@ -309,10 +309,52 @@ def run():
             "init) /bin/mkdir .git || exit 90; "
             "printf 'ref: refs/heads/main\\n' > .git/HEAD; exit 0;;\n"
             "config) exit 1;;\nrev-parse) pwd -P; exit 0;;\n"
-            "status) printf '# branch.head main\\000'; exit 0;;\n"
+            "status) printf '# branch.head main\\000? q?name\\000'; exit 0;;\n"
+            "diff) case \" $* \" in *\" --patch \"*) "
+            f"printf x >> '{base / 'patch-calls'}'; "
+            "printf 'PRIVATE-PATCH\\033[31m\\n';; "
+            "*) printf ':100644 100644 0000000000000000000000000000000000000000 "
+            "0000000000000000000000000000000000000000 M\\000q?name\\000';; "
+            "esac; exit 0;;\n"
             "esac\ndone\nexit 94\n"
         )
         git.chmod(0o700)
+        git_only = base / "git-only"
+        git_only.mkdir(mode=0o700)
+        with Session([binary, "tui"], dict(env, PATH=str(bin_dir))) as session:
+            session.wait(b"loaded.")
+            session.send(b"5g" + os.fsencode(git_only) + b"\r")
+            session.wait(b"Git read completed")
+            session.wait(b"q?name")
+            session.send(b"/q?/\x1b")  # literal text, no quit/help/actions
+            session.wait(b"0 displayed")
+            session.send(b"\x1b[3~u")  # clear display filter; unstaged summary
+            session.wait(b"Unstaged (worktree vs index)")
+            session.wait(b"1 entries")
+            assert not (base / "patch-calls").exists(), "Summary prefetched a patch"
+            assert b"PRIVATE-PATCH" not in session.data
+            session.send(b"wyes\r")
+            session.wait(b"May expose secrets")
+            session.settle()
+            assert not (base / "patch-calls").exists(), "yes bypassed disclosure phrase"
+            session.send(b"\x1b")
+            session.wait(b"1 entries")
+            session.send(b"wview patch\r")
+            session.wait(b"PRIVATE-PATCH\\x1b[31m")
+            session.send(b"\x1b")
+            session.wait(b"1 entries")
+            session.send(b"r")
+            session.wait(b"Git read completed")
+            session.settle()
+            assert b"PRIVATE-PATCH" not in session.screen.text()
+            assert (base / "patch-calls").read_text() == "x", "Refresh re-fetched patch"
+            session.send(b"s")
+            session.wait(b"Staged (index vs HEAD")
+            session.send(b"q")
+            session.finish()
+        assert not list(home.iterdir()) and not list(git_only.iterdir())
+        print("PASS independent Git root, metadata search/summaries and one-view patch disclosure")
+
         created = base / "created"
         for intent in ("create", "attach"):
             onboarding_home = base / f"home-{intent}"
@@ -479,7 +521,7 @@ def run():
             ) as session:
                 session.finish(code)
             print("PASS terminal cleanup", mode)
-    print("18 PTY cases passed (disposable HOME, no installed Git requirement)")
+    print("19 PTY cases passed (disposable HOME, no installed Git requirement)")
 
 
 if __name__ == "__main__":
