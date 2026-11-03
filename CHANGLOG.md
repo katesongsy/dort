@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tui:** complete local file workflows and manifest checks ([809ab5c](https://github.com/katesongsy/dort/commit/809ab5c17e1401fffa2d0fae164f410c9df14230))
+
 - **tui:** add discoverable actions and guided repository onboarding ([30f8633](https://github.com/katesongsy/dort/commit/30f863358f9c228866533301172693f32db57ce2))
 
 - **tui:** add guarded file and recovery workflows with responsive progress ([352b0a1](https://github.com/katesongsy/dort/commit/352b0a1cfbdf82af677afd725709b7ed0155900f))
