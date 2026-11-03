@@ -1,6 +1,7 @@
 mod actions;
 mod app;
 mod events;
+mod shell;
 #[cfg(test)]
 mod tests;
 mod views;
@@ -30,8 +31,21 @@ fn terminal_error(source: std::io::Error) -> Error {
         source,
     }
 }
-pub fn run(host: HostContext, repository: Option<PathBuf>, dry_run: bool) -> Result<()> {
-    terminal_session(|terminal, worker| run_loop(terminal, &host, repository, dry_run, worker))
+pub fn run(
+    host: HostContext,
+    repository: Option<PathBuf>,
+    dry_run: bool,
+    launch_directory: PathBuf,
+    git: std::result::Result<PathBuf, String>,
+) -> Result<()> {
+    let mut app = App::new(dry_run);
+    if repository.is_some() {
+        app.origin = "--repo override";
+    }
+    app.repository = repository.map(|root| crate::services::resolve_root(&root, &launch_directory));
+    app.launch_directory = launch_directory;
+    app.git = git;
+    terminal_session(|terminal, worker| run_loop(terminal, &host, app, worker))
 }
 fn terminal_session(
     action: impl FnOnce(&mut DefaultTerminal, &mut Option<Worker>) -> Result<()>,
@@ -49,12 +63,10 @@ fn terminal_session(
 fn run_loop(
     terminal: &mut DefaultTerminal,
     host: &HostContext,
-    repository: Option<PathBuf>,
-    dry_run: bool,
+    mut app: App,
     worker: &mut Option<Worker>,
 ) -> Result<()> {
-    let mut app = App::new(dry_run);
-    launch(Task::Refresh, host, &repository, &mut app, worker)?;
+    launch(Task::Refresh, host, &mut app, worker)?;
     loop {
         if let Some(active) = worker.as_mut() {
             if let Some(progress) = active.progress()
@@ -76,7 +88,7 @@ fn run_loop(
                     other => other.map_err(|error| error.to_string()),
                 };
                 if let Some(task) = app.complete(output) {
-                    launch(task, host, &repository, &mut app, worker)?;
+                    launch(task, host, &mut app, worker)?;
                 }
             }
         }
@@ -91,10 +103,10 @@ fn run_loop(
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     let size = terminal.size().map_err(terminal_error)?;
                     if let Some(task) = app.key(key, size.width, size.height) {
-                        launch(task, host, &repository, &mut app, worker)?;
+                        launch(task, host, &mut app, worker)?;
                     }
                 }
-                Event::Resize(_, _) => (),
+                Event::Resize(width, height) => app.resize(width, height),
                 _ => (),
             }
         }
@@ -103,13 +115,14 @@ fn run_loop(
 fn launch(
     task: Task,
     host: &HostContext,
-    repository: &Option<PathBuf>,
     app: &mut App,
     worker: &mut Option<Worker>,
 ) -> Result<()> {
     let writing = matches!(task, Task::Execute(_));
     let completed = matches!(task, Task::Refresh) && app.status.starts_with("Operation completed.");
-    *worker = Some(Worker::start(task, host.clone(), repository.clone()).map_err(terminal_error)?);
+    debug_assert!(worker.is_none(), "only one owned worker at a time");
+    *worker =
+        Some(Worker::start(task, host.clone(), app.repository.clone()).map_err(terminal_error)?);
     app.start(writing);
     if completed {
         app.status = "Operation completed. Refreshing observations...".into();

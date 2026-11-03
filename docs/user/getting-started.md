@@ -91,9 +91,9 @@ In the same disposable demo shell, with terminal stdin/stdout/stderr:
 demo_dort --dry-run tui
 ```
 
-Overview, active Files and Recovery use the same services as the CLI. Press `?` for keys, `Tab` to switch views and `q` to exit. `a` previews apply; Enter cannot approve while `--dry-run` is set. After the keep step above, there are no active mappings; Recovery still shows retained history.
+Overview, active Files and Recovery use the same services as the CLI. Press Space for Actions, `?` for keys, Left/Right or `1`/`2`/`3` to switch destinations, Tab/Shift-Tab to change focus and `q` to exit outside text entry. `a` previews apply; Enter cannot approve while `--dry-run` is set. After the keep step above, there are no active mappings; Recovery still shows retained history.
 
-To try interactive mutations, omit `--dry-run` **only within the disposable demo**. Review the scrollable preview, Enter, then type `yes`; deleting a managed link additionally asks for its exact ID first. Esc cancels before execution. q/Ctrl-C after approval waits for the write to finish. Plain terminal `dort` also opens the interface; explicit CLI commands remain available for init/adoption/Git and scripting. See [interactive keys](commands.md#interactive-interface).
+To try interactive mutations, omit `--dry-run` **only within the disposable demo**. Review the scrollable preview, Enter, then type `yes`; deleting a managed link additionally asks for its exact ID first. Esc cancels before execution. q/Ctrl-C after approval waits for the write to finish. Plain terminal `dort` also opens the interface. Actions → Choose repository selects a known root or an exact path for this session without saving configuration. Actions → Create/attach opens a retained path form and read-only preview; only literal-yes approval persists registration, then switches Overview to that repository. Try a new absent path under the disposable demo directory; relative paths resolve from the launch directory, not HOME. In path/search fields `q`, `?`, `/` are text; Ctrl-C exits. CLI commands remain available for adoption/Git and scripting. See [interactive keys](commands.md#interactive-interface).
 
 ## Use an existing environment repository
 

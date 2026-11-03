@@ -265,7 +265,13 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
         if cli.json || cli.yes || cli.confirm_remove.is_some() || !interactive(cli) {
             return Err(Error::Invalid("TUI requires terminal stdin/stdout/stderr, without --json/--yes/--confirm-remove; use --help or an explicit CLI command".into()));
         }
-        crate::tui::run(HostContext::from_env()?, cli.repo.clone(), cli.dry_run)?;
+        crate::tui::run(
+            HostContext::from_env()?,
+            cli.repo.clone(),
+            cli.dry_run,
+            crate::environment::launch_directory()?,
+            crate::environment::resolve_git().map_err(|error| error.to_string()),
+        )?;
         return Ok(ExitCode::SUCCESS);
     }
     let host = HostContext::from_env()?;
@@ -297,16 +303,11 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
             let root = if path.is_absolute() {
                 path.clone()
             } else {
-                std::env::current_dir()
-                    .map_err(|source| Error::Io {
-                        operation: "resolve current directory",
-                        path: path.clone(),
-                        source,
-                    })?
-                    .join(path)
+                crate::services::resolve_root(path, &crate::environment::launch_directory()?)
             };
-            let git = resolve_git()?;
-            let report = bootstrap::preview(&host, &root, &git)?;
+            let git = crate::environment::resolve_git()?;
+            let preview = crate::services::BootstrapPreview::prepare(&host, &root, &git)?;
+            let report = &preview.report;
             if cli.dry_run {
                 print_git_json(&report)?;
             } else {
@@ -314,9 +315,7 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                     print_git_json(&report)?;
                 }
                 approve(cli)?;
-                let approval = bootstrap::Approval::from_preview(report)?;
-                let lock = WriterLock::acquire(&host)?;
-                let tid = bootstrap::execute(&host, &lock, approval, &git, |_| Ok(()))?;
+                let tid = preview.approve()?.execute(&host, |_| Ok(()))?;
                 print_git_json(
                     &serde_json::json!({"schema":1,"operation":"init","completed":true,"repository":root,"transaction_id":tid}),
                 )?;
@@ -456,7 +455,7 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                         Error::NoRepository => Error::NoRepository,
                         _ => Error::Invalid("could not resolve Git repository root".into()),
                     })?;
-            let backend = git::Git::new(resolve_git()?)?;
+            let backend = git::Git::new(crate::environment::resolve_git()?)?;
             match command {
                 GitCommand::Status => {
                     let report = backend.status(&root)?;
@@ -855,27 +854,6 @@ fn requested_profiles(local: &LocalConfig, requested: &[String]) -> Vec<String> 
         .chain(requested)
         .cloned()
         .collect()
-}
-
-// Environment discovery belongs to the application boundary, not the core.
-// Ignore empty/relative PATH entries so a repository-local `git` is not selected.
-fn resolve_git() -> dort_core::Result<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-    if let Some(path) = std::env::var_os("PATH") {
-        for directory in std::env::split_paths(&path).filter(|p| p.is_absolute()) {
-            let candidate = directory.join("git");
-            if let Ok(metadata) = candidate.metadata()
-                && metadata.is_file()
-                && metadata.permissions().mode() & 0o111 != 0
-                && let Ok(absolute) = candidate.canonicalize()
-            {
-                return Ok(absolute);
-            }
-        }
-    }
-    Err(Error::Invalid(
-        "Git executable not found in absolute PATH entries; install Git separately".into(),
-    ))
 }
 
 // ASCII-only JSON protects terminals from C1/bidi controls while preserving the

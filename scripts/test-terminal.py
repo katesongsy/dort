@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Disposable POSIX PTY checks; Python stdlib only, no Git or real HOME access."""
 
+import codecs
 import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import signal
 import struct
@@ -37,11 +39,78 @@ def artifact(arguments, kind):
     raise AssertionError("Cargo did not report the required executable")
 
 
+class Screen:
+    """Small bounded VT view for Ratatui's cursor-addressed differential draws.
+
+    Raw byte markers alone miss labels when unchanged cells are not re-emitted.
+    Only the cursor/erase operations used by these fixed-size fixtures are needed;
+    styling and terminal modes do not affect the text assertions.
+    """
+
+    def __init__(self, size):
+        self.rows, self.columns = size
+        self.cells = [[" "] * self.columns for _ in range(self.rows)]
+        self.row = self.column = 0
+        self.pending = ""
+        self.decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+
+    def feed(self, data):
+        self.pending += self.decoder.decode(data)
+        while self.pending:
+            if self.pending.startswith("\x1b"):
+                match = re.match(r"\x1b\[([0-?]*)([ -/]*)([@-~])", self.pending)
+                if not match:
+                    # A CSI may be split across PTY reads.
+                    if self.pending == "\x1b" or self.pending.startswith("\x1b["):
+                        break
+                    self.pending = self.pending[2:]
+                    continue
+                arguments, _, command = match.groups()
+                self.pending = self.pending[match.end():]
+                if arguments.startswith("?"):
+                    continue
+                values = [int(value or 0) for value in arguments.split(";")]
+                amount = values[0] or 1
+                if command in "Hf":
+                    self.row = min(self.rows - 1, amount - 1)
+                    self.column = min(self.columns - 1, (values[1] or 1) - 1 if len(values) > 1 else 0)
+                elif command == "A":
+                    self.row = max(0, self.row - amount)
+                elif command == "B":
+                    self.row = min(self.rows - 1, self.row + amount)
+                elif command == "C":
+                    self.column = min(self.columns - 1, self.column + amount)
+                elif command == "D":
+                    self.column = max(0, self.column - amount)
+                elif command == "G":
+                    self.column = min(self.columns - 1, amount - 1)
+                elif command == "J" and values[0] in (2, 3):
+                    self.cells = [[" "] * self.columns for _ in range(self.rows)]
+                elif command == "K":
+                    start = 0 if values[0] in (1, 2) else self.column
+                    end = self.column + 1 if values[0] == 1 else self.columns
+                    self.cells[self.row][start:end] = [" "] * (end - start)
+                continue
+            character, self.pending = self.pending[0], self.pending[1:]
+            if character == "\r":
+                self.column = 0
+            elif character == "\n":
+                self.row = min(self.rows - 1, self.row + 1)
+            elif character >= " ":
+                self.cells[self.row][self.column] = character
+                self.column = min(self.columns - 1, self.column + 1)
+        assert len(self.pending) < 256, "Unbounded terminal escape sequence"
+
+    def text(self):
+        return "\n".join("".join(row) for row in self.cells).encode()
+
+
 class Session:
     def __init__(self, arguments, env, size=(24, 80)):
         self.master, self.slave = pty.openpty()
         self.before = termios.tcgetattr(self.slave)
         self.data = b""
+        self.screen = Screen(size)
         self.code = None
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", *size, 0, 0))
         self.status_r, status_w = os.pipe()
@@ -92,18 +161,20 @@ class Session:
                 self.code = int(status)
             else:
                 try:
-                    self.data += os.read(fd, 65536)
+                    data = os.read(fd, 65536)
+                    self.data += data
+                    self.screen.feed(data)
                 except OSError:
                     pass
                 assert len(self.data) <= 1024 * 1024, "PTY output exceeded test bound"
 
     def wait(self, marker):
         deadline = time.monotonic() + TIMEOUT
-        while marker not in self.data and time.monotonic() < deadline:
+        while marker not in self.screen.text() and time.monotonic() < deadline:
             self.pump()
             if self.code is not None:
                 break
-        assert marker in self.data, "Expected terminal state was not rendered"
+        assert marker in self.screen.text(), "Expected terminal state was not rendered"
 
     def settle(self):
         deadline = time.monotonic() + 0.2
@@ -135,6 +206,11 @@ class Session:
 
 
 def run():
+    screen = Screen((2, 20))
+    screen.feed(b"Git executes\x1b[")
+    screen.feed(b"1;11Hable\x1b[2;1Hlabel")
+    assert b"Git executable" in screen.text()
+    assert b"label" in screen.text()
     binary = artifact(["build", "-p", "dort"], "binary")
     probe = artifact(["test", "-p", "dort", "--bin", "dort", "--no-run"], "test")
     with tempfile.TemporaryDirectory(prefix="dort-terminal-") as temporary:
@@ -154,6 +230,83 @@ def run():
                 session.finish()
             assert not list(home.iterdir()), "Read-only TUI startup created state"
             print("PASS entry/exit", args, size)
+
+        # Text fields must consume shortcut letters, and a missing prerequisite
+        # must return to the retained draft without creating state.
+        with Session([binary, "tui"], env) as session:
+            session.wait(b"loaded.")
+            session.send(b"n")
+            session.wait(b"Path >")
+            session.send(b"q?/\r")
+            session.wait(b"Git executable not found")
+            session.send(b"\x1b")
+            session.settle()
+            session.send(b"\x03")
+            session.finish()
+        assert not list(home.iterdir()), "A rejected onboarding read created state"
+        print("PASS retained text draft and missing Git refusal")
+
+        unregistered = base / "unregistered"
+        unregistered.mkdir(mode=0o700)
+        (unregistered / "dort.toml").write_text("schema=1\n")
+        with Session([binary, "tui"], env) as session:
+            session.wait(b"loaded.")
+            session.send(b"p\r")
+            session.wait(b"Path >")
+            session.send(os.fsencode(unregistered) + b"\r")
+            session.wait(b"configuration unchanged.")
+            session.send(b"q")
+            session.finish()
+        assert not list(home.iterdir()), "Session selection persisted configuration"
+        print("PASS explicit session-only repository selection")
+
+        # A deterministic fake executable implements only the fixed bootstrap calls.
+        # /bin/mkdir writes exclusively inside the private disposable stage.
+        bin_dir = base / "bin"
+        bin_dir.mkdir(mode=0o700)
+        git = bin_dir / "git"
+        git.write_text(
+            "#!/bin/sh\nfor arg do\ncase \"$arg\" in\n"
+            "init) /bin/mkdir .git || exit 90; "
+            "printf 'ref: refs/heads/main\\n' > .git/HEAD; exit 0;;\n"
+            "config) exit 1;;\nrev-parse) pwd -P; exit 0;;\n"
+            "status) printf '# branch.head main\\000'; exit 0;;\n"
+            "esac\ndone\nexit 94\n"
+        )
+        git.chmod(0o700)
+        created = base / "created"
+        for intent in ("create", "attach"):
+            onboarding_home = base / f"home-{intent}"
+            onboarding_home.mkdir(mode=0o700)
+            onboarding_env = dict(
+                env, HOME=str(onboarding_home), PATH=str(bin_dir),
+                XDG_CONFIG_HOME=str(onboarding_home / ".config"),
+                XDG_STATE_HOME=str(onboarding_home / ".local/state"),
+            )
+            with Session([binary, "tui"], onboarding_env) as session:
+                session.wait(b"loaded.")
+                session.send(b"n")
+                session.wait(b"Path >")
+                session.send(os.fsencode(created) + b"\r")
+                session.wait(b"Preview (metadata only)")
+                session.send(b"\x1b")
+                session.settle()
+                assert not list(onboarding_home.iterdir()), "Preview/back created local state"
+                if intent == "create":
+                    assert not created.exists(), "Preview created repository"
+                session.send(b"\r")  # retained draft -> fresh preview
+                session.settle()
+                session.send(b"\r")
+                session.wait(b"Confirm")
+                session.send(b"yes\r")
+                session.wait(b"Operation completed.")
+                session.send(b"q")
+                session.finish()
+            assert (created / ".git/HEAD").is_file()
+            assert (created / "dort.toml").read_text() == "schema = 1\n"
+            config_text = (onboarding_home / ".config/dort/local.toml").read_text()
+            assert str(created) in config_text and "active_repository" in config_text
+            print("PASS guided", intent, "with preview/back, explicit approval and clean exit")
 
         # An explicit fixture registration, equivalent to the Rust TestHome helper.
         # A dummy Git marker suffices for file services; no Git executable is needed.
@@ -226,7 +379,7 @@ def run():
             ) as session:
                 session.finish(code)
             print("PASS terminal cleanup", mode)
-    print("9 PTY cases passed (disposable HOME, no installed Git requirement)")
+    print("13 PTY cases passed (disposable HOME, no installed Git requirement)")
 
 
 if __name__ == "__main__":

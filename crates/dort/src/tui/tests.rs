@@ -1,5 +1,5 @@
 use super::{
-    actions::{Data, Output},
+    actions::{Completion, Data, Output},
     app::{App, Tab},
     views,
 };
@@ -80,7 +80,14 @@ fn quit_during_work_waits_for_completion() {
     assert!(app.exit_requested);
     assert!(!app.quit);
     assert!(app.key(key(KeyCode::Char('a')), 80, 24).is_none());
-    assert!(app.complete(Ok(Output::Completed)).is_none());
+    assert!(
+        app.complete(Ok(Output::Completed(Completion {
+            operation: "test",
+            transaction_id: None,
+            repository: None
+        })))
+        .is_none()
+    );
     assert!(app.quit);
 }
 #[test]
@@ -88,6 +95,9 @@ fn navigation_and_metadata_escaping() {
     let mut app = App::new(true);
     app.complete(Ok(Output::Data(Data {
         overview: "no repository\n\u{1b}[31m\u{202e}".into(),
+        repository: None,
+        known_roots: vec![],
+        profiles: vec![],
         files: vec![],
         history: vec![],
         history_error: None,
@@ -95,9 +105,142 @@ fn navigation_and_metadata_escaping() {
     let screen = render(&app, 80, 24);
     assert!(screen.contains("DRY RUN"));
     assert!(screen.contains("\\u{1b}[31m\\u{202e}"));
-    app.key(key(KeyCode::Tab), 80, 24);
+    app.key(key(KeyCode::Right), 80, 24);
     assert!(app.tab == Tab::Files);
     app.key(key(KeyCode::Down), 80, 24);
     assert_eq!(app.selected, 0);
     assert!(render(&app, 48, 14).contains("0 active mapping(s)"));
+}
+
+#[test]
+fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
+    use super::shell::{Focus, Overlay};
+    let mut app = App::new(false);
+    app.tab = Tab::Files;
+    app.key(key(KeyCode::Tab), 80, 24);
+    assert!(app.shell.focus == Focus::Actions);
+    app.key(key(KeyCode::Enter), 80, 24);
+    assert!(render(&app, 80, 24).contains("Choose repository (session only)"));
+    app.key(key(KeyCode::Esc), 80, 24);
+    app.details_scroll = 3;
+    app.key(key(KeyCode::Char('?')), 80, 24);
+    assert!(render(&app, 100, 40).contains("Help / About"));
+    app.key(key(KeyCode::PageDown), 80, 24);
+    assert_eq!(app.shell.scroll, 4);
+    app.key(key(KeyCode::Esc), 80, 24);
+    assert_eq!(app.details_scroll, 3);
+    assert!(app.tab == Tab::Files && app.shell.focus == Focus::Actions);
+    app.key(key(KeyCode::BackTab), 80, 24);
+    assert!(app.shell.focus == Focus::Content);
+    app.key(key(KeyCode::Char('/')), 80, 24);
+    for c in "q?/".chars() {
+        app.key(key(KeyCode::Char(c)), 80, 24);
+    }
+    assert!(!app.quit);
+    assert!(matches!(&app.shell.overlay, Some(Overlay::Actions { query, .. }) if query == "q?/"));
+    app.key(key(KeyCode::Esc), 80, 24); // leave search, retain query
+    app.key(key(KeyCode::Delete), 80, 24);
+    assert!(matches!(&app.shell.overlay, Some(Overlay::Actions { query, .. }) if query.is_empty()));
+    app.key(key(KeyCode::Esc), 80, 24);
+    app.key(key(KeyCode::Char('n')), 80, 24);
+    for c in "q?/".chars() {
+        app.key(key(KeyCode::Char(c)), 80, 24);
+    }
+    assert!(!app.quit);
+    assert_eq!(app.shell.init_draft, "q?/");
+    app.resize(40, 10);
+    app.resize(80, 24);
+    assert_eq!(app.shell.init_draft, "q?/");
+    app.key(key(KeyCode::Esc), 80, 24);
+    assert!(app.tab == Tab::Files);
+    app.key(key(KeyCode::Char('n')), 80, 24);
+    app.key(
+        KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        80,
+        24,
+    );
+    assert!(app.shell.init_draft.is_empty());
+}
+
+#[test]
+fn busy_shell_cannot_change_scope_or_toggle_mode_or_start_another_job() {
+    let mut app = App::new(false);
+    app.start(true);
+    for code in [
+        KeyCode::Char('n'),
+        KeyCode::Char('p'),
+        KeyCode::Char('/'),
+        KeyCode::Enter,
+        KeyCode::Char('a'),
+    ] {
+        assert!(app.key(key(code), 80, 24).is_none());
+    }
+    assert!(app.shell.overlay.is_none() && app.repository.is_none());
+    app.key(key(KeyCode::Char('?')), 80, 24);
+    assert!(render(&app, 80, 40).contains("Help / About"));
+    app.key(key(KeyCode::Esc), 80, 24);
+    assert!(app.shell.overlay.is_none());
+    assert!(!app.dry_run);
+}
+
+#[test]
+fn refresh_preserves_selected_identity_and_clamps_if_it_disappears() {
+    let data = |ids: &[&str]| Data {
+        overview: String::new(),
+        repository: None,
+        known_roots: vec![],
+        profiles: vec![],
+        files: ids
+            .iter()
+            .map(|id| (id.to_string(), String::new()))
+            .collect(),
+        history: vec![],
+        history_error: None,
+    };
+    let mut app = App::new(false);
+    app.tab = Tab::Files;
+    app.complete(Ok(Output::Data(data(&["a", "b", "c"]))));
+    app.selected = 1;
+    app.complete(Ok(Output::Data(data(&["c", "a", "b"]))));
+    assert_eq!(app.selected, 2);
+    app.complete(Ok(Output::Data(data(&["a"]))));
+    assert_eq!(app.selected, 0);
+    assert!(app.status.contains("disappeared"));
+}
+
+#[test]
+fn completion_keeps_noop_result_visible_through_refresh_and_read_failure() {
+    let mut app = App::new(false);
+    let refresh = app.complete(Ok(Output::Completed(Completion {
+        operation: "File operation",
+        transaction_id: None,
+        repository: None,
+    })));
+    assert!(matches!(refresh, Some(super::actions::Task::Refresh)));
+    assert!(
+        app.result
+            .as_ref()
+            .unwrap()
+            .contains("no transaction created")
+    );
+    app.start(false);
+    app.complete(Ok(Output::Data(Data {
+        overview: "fresh observations".into(),
+        repository: None,
+        known_roots: vec![],
+        profiles: vec![],
+        files: vec![],
+        history: vec![],
+        history_error: None,
+    })));
+    assert!(render(&app, 80, 24).contains("no transaction created"));
+    app.start(false);
+    app.complete(Err("later read failure".into()));
+    assert!(
+        app.result
+            .as_ref()
+            .unwrap()
+            .contains("no transaction created")
+    );
+    assert!(!app.error.as_ref().unwrap().contains("partial effects"));
 }

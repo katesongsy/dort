@@ -17,7 +17,7 @@ Other commands require a supported host and HOME. Terminal invocation without a 
 
 ## Interactive interface
 
-The current interface provides Overview, active Files and Recovery. Other operations remain available through the CLI as described below.
+The interface provides Overview/Welcome, guided local create/attach, session repository selection, active Files and all-repository Recovery. Space opens searchable Actions; `?` opens Help/About.
 
 ```sh
 dort                       # terminal only; same as dort tui
@@ -25,11 +25,15 @@ dort --repo /absolute/path/to/dotfiles tui
 dort --dry-run tui         # inspection/previews only; confirmation disabled
 ```
 
-All three standard streams must be terminals. TUI entry rejects `--json`, `--yes` and `--confirm-remove`; no flags silently approve TUI writes. Use explicit CLI subcommands for automation. Startup observes only: it does not create missing configuration/state, acquire a lock or replay recovery. Without a repository, Overview explains `init PATH`; Recovery still diagnoses all retained local transactions. Init/attach, discovery/adoption, Git inspection and additional profile selection remain CLI-only.
+All three standard streams must be terminals. TUI entry rejects `--json`, `--yes` and `--confirm-remove`; no flags silently approve TUI writes. Use explicit CLI subcommands for automation. Startup observes only: it does not create missing configuration/state, acquire a lock or replay recovery. Without a repository, Welcome offers Choose repository and Create/attach; Recovery still diagnoses all retained local transactions. Discovery/adoption, Git inspection and additional profile selection are not available in this interface.
 
 | Key | Action |
 | --- | --- |
-| `Tab`, `1`, `2`, `3`, `?` | Next view, Overview, Files, Recovery, Help. |
+| Left / Right, `1`, `2`, `3` | Change destination: Overview, Files, Recovery. |
+| Tab / Shift-Tab | Cycle focus: Content, Actions, Destinations. Enter activates the focused control. |
+| Space, `/` | Open Actions; `/` starts action search. Esc leaves search; Delete outside search text clears the filter. |
+| `?` | Help/About; Esc returns to the prior destination/focus. |
+| `p`, `n` | Choose repository (session only), create/attach local repository. |
 | Up / Down | Select an active file or retained transaction. |
 | PgUp / PgDn | Scroll view details; in previews, scroll the report. |
 | `r` | Refresh read-only observations/history. |
@@ -39,10 +43,17 @@ All three standard streams must be terminals. TUI entry rejects `--json`, `--yes
 | `s` / `x` | Preview schema-3 bootstrap resume / abandon. Abandon retains published data/artifacts. |
 | Left / Right (preview) | Scroll long report lines horizontally. |
 | Enter (preview) | Open confirmation, unless blocked, dry-run or smaller than 48×14. |
-| Esc | Dismiss a preview, confirmation or error; no execution is started. |
-| `q` / Ctrl-C | Quit; an active worker finishes first. |
+| Esc | Confirmation → preview → retained form → invoking destination; errors/help return to their prior scope. No execution is started. |
+| Ctrl-U (path form) | Discard that form's draft. Backspace edits; Enter selects or prepares a preview. |
+| `q` / Ctrl-C | Quit outside text entry / anywhere; an active worker finishes first. Printable `q`, `?`, `/` are text in forms/search. |
 
-Review the full scrollable preview before Enter. Type literal `yes` and Enter to execute. Deletion first requires its exact file ID in a separate acknowledgement, then `yes`; typing yes alone cannot delete a link. Execution independently revalidates under the same application lock as the CLI. Read-only inspection remains available while another process holds that lock. During work, Tab navigation, redraw/resize and exit requests stay responsive; only one service worker runs at a time.
+Review the full scrollable preview before Enter. Type literal `yes` and Enter to execute. Deletion first requires its exact file ID in a separate acknowledgement, then `yes`; typing yes alone cannot delete a link. Execution independently revalidates under the same application lock as the CLI. Read-only inspection remains available while another process holds that lock. During work, destination navigation, Help, scrolling, redraw/resize and exit requests stay responsive; scope changes and new jobs are disabled. Only one service worker runs at a time. Shrinking below 48×14 clears confirmation text and the deletion acknowledgement; growing requires both again.
+
+**Choose repository:** select a known root, return to the registered active root, or enter an exact directory path. Selection is session-only: no registration/configuration write or upward repository search occurs. The header shows selection origin and profiles; Overview reports registration or observation errors. An unregistered root can be inspected but requires approved attachment before writing. History always includes all repositories.
+
+**Create/attach:** enter a destination, review the resolved path and press Enter for a read-only preview. Relative input resolves from the directory where Dort was launched; no tilde/environment expansion occurs. An absent destination creates a minimal repository; an existing valid Git root with `dort.toml` is attached. The existing parent must be safe; arbitrary existing directories are refused. Git is resolved at startup; if unavailable, install it separately and restart Dort. Esc/error retains the input in memory; nothing is saved on exit. Only preview approval with literal `yes` persists registration/selection. On success the session switches to that root and Overview shows the transaction ID. Other operations retain their transaction ID or explicit no-op result through refresh; Esc clears the result.
+
+Actions includes a session preview-only switch; it cannot change mode during a preview/worker. An entry `--dry-run` locks the entire session to preview-only and cannot be switched off.
 
 Esc does **not** interrupt an approved write. q/Ctrl-C requests exit after it finishes, including on a small screen. Input/render errors restore the terminal then wait for the worker; no write is detached or automatically rolled back. A failed write may leave durable partial effects: dismiss the error, refresh Recovery, and explicitly preview the appropriate recovery action. Panics restore the terminal where cleanup is possible; forced termination cannot guarantee this. See [terminal/interruption safety](safety.md#terminal-and-interruption).
 

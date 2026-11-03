@@ -68,13 +68,17 @@ mod tests {
                 progress_sender.send("durable checkpoint".into()).unwrap();
                 wait.recv().unwrap();
                 done.send(()).unwrap();
-                Ok(Output::Completed)
+                Ok(Output::Completed(actions::Completion {
+                    operation: "test",
+                    transaction_id: None,
+                    repository: None,
+                }))
             })),
             progress,
         };
         let mut app = App::new(false);
         app.start(true);
-        app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), 80, 24);
+        app.key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), 80, 24);
         assert!(app.tab == Tab::Files);
         app.key(
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),

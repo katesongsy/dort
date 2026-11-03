@@ -1,11 +1,55 @@
 //! Shared application dispatch; presentation must obtain approval before calling.
 use dort_core::{
-    Result, adoption,
+    Result, adoption, bootstrap,
     context::HostContext,
     lifecycle,
     planner::{Plan, Request, UnmanageMode},
     state::WriterLock,
 };
+
+use std::path::{Path, PathBuf};
+
+pub fn resolve_root(path: &Path, launch_directory: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_owned()
+    } else {
+        launch_directory.join(path)
+    }
+}
+
+/// Own the actual preview and its executable binding, never a serialized report.
+pub struct BootstrapPreview {
+    pub report: bootstrap::Preview,
+    git: PathBuf,
+}
+impl BootstrapPreview {
+    pub fn prepare(host: &HostContext, root: &Path, git: &Path) -> Result<Self> {
+        Ok(Self {
+            report: bootstrap::preview(host, root, git)?,
+            git: git.to_owned(),
+        })
+    }
+    pub fn approve(self) -> Result<BootstrapApproval> {
+        Ok(BootstrapApproval {
+            approval: bootstrap::Approval::from_preview(self.report)?,
+            git: self.git,
+        })
+    }
+}
+pub struct BootstrapApproval {
+    approval: bootstrap::Approval,
+    git: PathBuf,
+}
+impl BootstrapApproval {
+    pub fn execute(
+        self,
+        host: &HostContext,
+        observer: impl FnMut(&adoption::Event) -> Result<()>,
+    ) -> Result<String> {
+        let lock = WriterLock::acquire(host)?;
+        bootstrap::execute(host, &lock, self.approval, &self.git, observer)
+    }
+}
 
 pub enum FileApproval {
     Adopt(adoption::Approval),
