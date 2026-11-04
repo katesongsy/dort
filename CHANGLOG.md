@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tui:** render typed recovery transactions and contextual actions ([b73f503](https://github.com/katesongsy/dort/commit/b73f50305f690d52b43736a47d905675272a04a7))
+
 - **tui:** add typed overview and checks dashboards ([1334159](https://github.com/katesongsy/dort/commit/133415987b64672d13235f92480bcf7267fbcb07))
 
 - **tui:** introduce styled workbench and structured file workflows ([b3d514b](https://github.com/katesongsy/dort/commit/b3d514be2c297ea2624651cf93a5b9c349a95ec4))
