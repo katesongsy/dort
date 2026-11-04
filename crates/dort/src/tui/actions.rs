@@ -99,7 +99,7 @@ pub fn load_scoped(
                         "{error}\nChoose repository or Create/attach in Actions."
                     ));
                     overview.push_str(&format!(
-                        "{error}\nWelcome: open Actions to Choose repository or Create/attach.\n"
+                        "{error}\nChoose repository or Create/attach in Actions.\n"
                     ));
                 }
                 Ok(root) => {
@@ -158,7 +158,10 @@ pub fn load_scoped(
             }
         }
     }
-    overview.push_str("\nActions: Choose repository | Create/attach | Discover files | Check standalone manifest | Profiles | Preview apply\nNo tool execution, templates, secrets, network, staging or commits.\nPreviews never authorize execution. Failed writes may retain partial effects.\n");
+    if selected.is_none() {
+        overview.insert_str(0, "Welcome | manage local files with previews\nn: Create/attach | p: Choose repository\nf: Discover files | v: Check a manifest\nSpace: searchable Actions | ?: Help\n3: Recovery | 4 then j: host Diagnostics\n\n");
+    }
+    overview.push_str("\nNext: 2 Files (inspect/discover/adopt) | 5 Git (metadata only)\na: Preview full-scope apply | t: Temporary profiles | c: Check manifest\nSpace: all labeled Actions | PgUp/PgDn: details | Home: report start\nNo tool execution, templates, secrets, network, staging or commits.\nPreviews never authorize execution. Failed writes may retain partial effects.\n");
     Ok(Data {
         overview,
         repository: selected,

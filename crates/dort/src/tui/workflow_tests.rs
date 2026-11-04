@@ -106,6 +106,53 @@ fn approve(app: &mut App) -> Task {
     key(app, KeyCode::Enter).expect("explicit confirmation produces approved task")
 }
 #[test]
+fn welcome_next_steps_are_visible_at_the_floor_without_creating_state() {
+    let fixture = Fixture::new(false);
+    let mut app = App::new(false);
+    app.complete(Ok(Output::Data(
+        actions::load(&fixture.host, None).unwrap(),
+    )));
+    let screen = super::tests::render(&app, 48, 14);
+    assert!(screen.contains("Welcome | manage local files"));
+    assert!(screen.contains("n: Create/attach | p: Choose repository"));
+    assert!(screen.contains("f: Discover files | v: Check a manifest"));
+    assert!(!fixture.host.state_dir.exists());
+    assert!(!fixture.host.config_dir.exists());
+}
+
+#[test]
+fn preview_scroll_is_bounded_by_escaped_metadata_and_resets_on_home() {
+    let fixture = Fixture::new(false);
+    let mut app = App::new(true);
+    app.complete(Ok(fixture.prepare(Request::Apply)));
+    // Exercise only presentation offsets; retain the real opaque core preview.
+    app.preview.as_mut().unwrap().text = format!("{}\n{}\nEND", "é".repeat(20), "row\n".repeat(30));
+    for _ in 0..100 {
+        app.key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), 48, 14);
+        app.key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), 48, 14);
+    }
+    let p = app.preview.as_ref().unwrap();
+    assert_eq!(p.horizontal, 120 - 46); // Each é becomes six ASCII escape bytes.
+    assert_eq!(p.scroll, 33 - 3);
+    app.key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), 48, 14);
+    assert_eq!(app.preview.as_ref().unwrap().horizontal, 120 - 46 - 8);
+    app.resize(140, 60);
+    let p = app.preview.as_ref().unwrap();
+    assert_eq!((p.scroll, p.horizontal), (0, 0));
+    app.resize(48, 14);
+    app.key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), 48, 14);
+    app.key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), 48, 14);
+    app.key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE), 48, 14);
+    let p = app.preview.as_ref().unwrap();
+    assert_eq!((p.scroll, p.horizontal), (0, 0));
+    assert!(super::tests::render(&app, 48, 14).contains("\\u{e9}"));
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(app.confirmation.is_none()); // Scroll/reset never changes dry-run approval.
+    assert!(!fixture.host.state_dir.exists());
+    assert!(!fixture.host.config_dir.exists());
+}
+
+#[test]
 fn previews_cancellation_and_dry_run_never_create_state() {
     let fixture = Fixture::new(false);
     let mut app = App::new(false);
@@ -557,6 +604,86 @@ fn shrinking_clears_both_removal_ack_and_yes_until_fresh_confirmation() {
     let confirmation = app.confirmation.as_ref().unwrap();
     assert!(confirmation.removal_ack.is_none() && confirmation.input.is_empty());
     assert!(fixture.host.home.join(".editor").is_symlink());
+}
+
+#[test]
+fn discovery_marks_ineligible_entries_and_enter_preserves_existing_draft() {
+    let fixture = Fixture::new(false);
+    let config = fixture.host.home.join(".config");
+    fs::create_dir(&config).unwrap();
+    let directory = config.join("nvim");
+    fs::create_dir(&directory).unwrap();
+    let file = directory.join("init.lua");
+    fs::write(&file, "ordinary settings\n").unwrap();
+    let linked = config.join("hardlink");
+    fs::write(&linked, "ordinary settings\n").unwrap();
+    fs::hard_link(&linked, config.join("hardlink-peer")).unwrap();
+    let symlink = config.join("shortcut");
+    std::os::unix::fs::symlink(&file, &symlink).unwrap();
+    let mut app = onboarding_app(&fixture, false);
+    app.shell.adoption.target = "retained target".into();
+    app.shell.adoption.id = "retained-id".into();
+    app.shell.adoption.source = "retained/source".into();
+    let task = key(&mut app, KeyCode::Char('f')).unwrap();
+    run_task(&mut app, &fixture, task);
+    let index = app
+        .discovery
+        .as_ref()
+        .unwrap()
+        .report
+        .candidates
+        .iter()
+        .position(|c| c.entry.path == directory)
+        .unwrap();
+    app.candidate_selected = index;
+    for (width, height) in [(48, 14), (80, 24), (140, 40)] {
+        let screen = super::tests::render(&app, width, height);
+        assert!(screen.contains("> [not eligible]"));
+    }
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(app.shell.overlay.is_none());
+    assert!(app.status.contains("Directories cannot be adopted"));
+    assert_eq!(app.shell.adoption.target, "retained target");
+    assert_eq!(app.shell.adoption.id, "retained-id");
+    assert_eq!(app.shell.adoption.source, "retained/source");
+    for path in [&linked, &symlink] {
+        app.candidate_selected = app
+            .discovery
+            .as_ref()
+            .unwrap()
+            .report
+            .candidates
+            .iter()
+            .position(|c| c.entry.path == *path)
+            .unwrap();
+        assert!(super::tests::render(&app, 80, 24).contains("> [not eligible]"));
+        assert!(key(&mut app, KeyCode::Enter).is_none());
+        assert!(app.shell.overlay.is_none());
+        assert_eq!(app.shell.adoption.target, "retained target");
+    }
+    app.candidate_selected = index;
+    key(&mut app, KeyCode::Char('i'));
+    assert!(super::tests::render(&app, 140, 40).contains("Not eligible for adoption"));
+    key(&mut app, KeyCode::Esc);
+    app.candidate_selected = app
+        .discovery
+        .as_ref()
+        .unwrap()
+        .report
+        .candidates
+        .iter()
+        .position(|c| c.entry.path == file)
+        .unwrap();
+    assert!(super::tests::render(&app, 80, 24).contains("> [eligible hint]"));
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.shell.adoption.target, file.to_str().unwrap());
+    assert!(matches!(
+        app.shell.overlay,
+        Some(super::shell::Overlay::Form(super::shell::Form::Adopt))
+    ));
+    assert!(!fixture.host.state_dir.exists());
+    assert!(!fixture.host.config_dir.join("dort").exists());
+    assert!(directory.is_dir() && file.is_file());
 }
 
 #[test]

@@ -37,6 +37,25 @@ pub struct Preview {
     pub scroll: u16,
     pub horizontal: u16,
 }
+impl Preview {
+    fn clamp_scroll(&mut self, width: u16, height: u16) {
+        // The shell reserves nine rows; the preview border uses two more.
+        // Escaped report bytes are ASCII, so byte lengths equal terminal columns.
+        let escaped = super::views::safe(&self.text);
+        let lines = escaped.lines().count();
+        let columns = escaped.lines().map(str::len).max().unwrap_or(0);
+        self.scroll = self.scroll.min(
+            lines
+                .saturating_sub(usize::from(height.saturating_sub(11)))
+                .min(u16::MAX as usize) as u16,
+        );
+        self.horizontal = self.horizontal.min(
+            columns
+                .saturating_sub(usize::from(width.saturating_sub(2)))
+                .min(u16::MAX as usize) as u16,
+        );
+    }
+}
 pub struct Confirmation {
     pub input: String,
     pub removal_ack: Option<String>,
@@ -404,6 +423,9 @@ impl App {
             } else {
                 &mut self.details_scroll
             };
+            if key.code == KeyCode::Home {
+                *scroll = 0;
+            }
             if key.code == KeyCode::PageDown {
                 *scroll = scroll.saturating_add(4);
             }
@@ -443,6 +465,7 @@ impl App {
                     self.retry = None;
                     self.details_scroll = 0;
                 }
+                KeyCode::Home => self.details_scroll = 0,
                 KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(4),
                 KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(4),
                 _ => (),
@@ -454,6 +477,10 @@ impl App {
         }
         if let Some(preview) = &mut self.preview {
             match key.code {
+                KeyCode::Home => {
+                    preview.scroll = 0;
+                    preview.horizontal = 0;
+                }
                 KeyCode::Esc => {
                     self.preview = None;
                     self.status = "Preview dismissed; no writes.".into();
@@ -490,9 +517,15 @@ impl App {
                 }
                 _ => (),
             }
+            if let Some(preview) = &mut self.preview {
+                preview.clamp_scroll(width, height);
+            }
             return None;
         }
         if self.shell.overlay.is_some() {
+            if key.code == KeyCode::Home {
+                self.shell.scroll = 0;
+            }
             if key.code == KeyCode::PageDown {
                 self.shell.scroll = self.shell.scroll.saturating_add(4);
             }
@@ -672,6 +705,8 @@ impl App {
         if width < 48 || height < 14 {
             self.confirmation = None;
             self.git_view.resize();
+        } else if let Some(preview) = &mut self.preview {
+            preview.clamp_scroll(width, height);
         }
     }
     fn replace_data(&mut self, data: Data) {
@@ -1155,6 +1190,10 @@ impl App {
             .as_ref()
             .and_then(|d| d.report.candidates.get(self.candidate_selected))
         {
+            if !candidate.supported_for_adoption {
+                self.status = "Not eligible for adoption: select an owned, single-link regular file. Directories cannot be adopted; use i for details or o for a manual draft.".into();
+                return;
+            }
             self.shell.adoption.suggest(&candidate.entry.path);
             self.shell.scroll = 0;
             self.shell.overlay = Some(Overlay::Form(Form::Adopt));

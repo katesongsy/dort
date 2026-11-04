@@ -69,7 +69,7 @@ Private state uses owned directories/files without symlink traversal or hard lin
 | File exceeds observation limit | Checked regular-file reads are bounded to 16 MiB; large/generated data is outside this workflow. |
 | Discovery limit/warning | Discovery has a 4,096-name budget. Raced/unreadable nested subtrees produce warnings; an oversized root can fail the command. |
 
-On macOS, aliases such as `/var` may be symlinks. When supplying explicit state paths or temporary demo roots, resolve the physical path with `pwd -P` from inside that directory. Do not rewrite your real HOME/XDG setup merely to run a demo; use the [isolated walkthrough](getting-started.md#try-file-previews-without-using-your-own-configuration).
+On macOS, aliases such as `/var` may be symlinks. When supplying explicit state paths or temporary demo roots, resolve the physical path with `pwd -P` from inside that directory. Do not rewrite your real HOME/XDG setup merely to run a demo; use the [isolated walkthrough](getting-started.md#start-in-a-disposable-home).
 
 ## Recovery and write blockers
 

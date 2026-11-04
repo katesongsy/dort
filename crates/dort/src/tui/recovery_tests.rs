@@ -116,6 +116,41 @@ fn recovery_search_preserves_raw_identity_and_never_hides_global_blockers() {
     assert_eq!(app.history_search.query, "q?/");
 }
 #[test]
+fn compact_long_history_keeps_selected_row_and_global_blockers_visible() {
+    let mut app = App::new(false);
+    app.tab = Tab::Recovery;
+    let mut history: Vec<_> = (0..128)
+        .map(|i| {
+            let mut diagnosis = row(Some(2), Some(Phase::Completed), None, 'a');
+            diagnosis.transaction_id = format!("{i:08x}{}", "a".repeat(56));
+            diagnosis
+        })
+        .collect();
+    history.push(row(Some(3), Some(Phase::Preparing), None, 'b'));
+    app.complete(Ok(Output::Data(Data {
+        history,
+        ..Default::default()
+    })));
+    for _ in 0..120 {
+        key(&mut app, KeyCode::Down);
+    }
+    for (width, height) in [(48, 14), (80, 24), (140, 40), (48, 14)] {
+        app.resize(width, height);
+        let screen = render(&app, width, height);
+        assert!(screen.contains("> 00000078"));
+        assert_eq!(app.selected, 120);
+    }
+    let screen = render(&app, 48, 14);
+    assert!(screen.contains("All repositories: 129 | Blockers: 1"));
+    assert!(screen.contains("S2 Some(Completed) | terminal"));
+    app.history_search.query = "00000078".into();
+    assert!(render(&app, 48, 14).contains("Blockers: 1"));
+    assert!(
+        matches!(key(&mut app, KeyCode::Char('b')), Some(Task::Rollback(_, t)) if t.starts_with("00000078"))
+    );
+}
+
+#[test]
 fn unavailable_history_is_not_empty_or_an_actionable_stale_selection() {
     let mut app = App::new(false);
     app.tab = Tab::Recovery;

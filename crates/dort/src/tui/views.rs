@@ -21,7 +21,7 @@ pub fn safe(text: &str) -> String {
     }
     escaped
 }
-const HELP: &str = "Left/Right or 1/2/3/4/5: Overview / Files / Recovery / Checks / Git\nTab / Shift-Tab: focus Destinations, Content, Actions\nEnter: activate focused control | Space: Actions\n/: search Files/Recovery metadata, or Actions when open | Delete: clear filter\np: choose repository for session | n: create/attach\nr: refresh current observations/check/diagnosis (never execute)\na: preview apply (Overview / Files)\nk / d: keep local file / delete managed link in Files\ni: file metadata details | Actions: enter exact mapping ID\nFile filters are display-only; apply always uses full active scope\nRecovery i/Enter: full IDs and contextual action hints\nb: preview rollback in Recovery | s / x: resume / abandon\nErrors: r retry read/fresh preview; h independent Recovery\nPreview: arrows / PgUp/PgDn scroll; Enter continue\nConfirmation: exact file ID for deletion, then literal yes\nEsc: confirmation -> preview -> retained form -> destination\nForms/search: printable q ? / are text; Backspace edits\nCtrl-U in a form: discard its draft | PgUp/PgDn: scroll\nq outside text / Ctrl-C anywhere: exit, joining worker\nNo automatic replay/rollback, network, staging or commits.\nf: Discover metadata | o: retained manual adoption form\nDiscover: Enter opens selected candidate as an editable draft\nAdoption: Tab/Shift-Tab fields/buttons; Enter advances fields\nt: temporary repository profiles | c: check repository manifest\nv: standalone manifest check (independent scope/profiles)\nProfiles union: base/default/platform/local plus temporary additions\nGit: g exact root | z Status | u Unstaged | s Staged\nr metadata refresh | / search | i details | w View patch content\nPatch: warning + literal view patch, once; Esc drops content\nEsc: return to previous destination and focus.";
+const HELP: &str = "Left/Right or 1/2/3/4/5: Overview / Files / Recovery / Checks / Git\nTab / Shift-Tab: focus Destinations, Content, Actions\nEnter: activate focused control | Space: Actions\n/: search Files/Recovery metadata, or Actions when open | Delete: clear filter\np: choose repository for session | n: create/attach\nr: refresh current observations/check/diagnosis (never execute)\na: preview apply (Overview / Files)\nk / d: keep local file / delete managed link in Files\ni: file metadata details | Actions: enter exact mapping ID\nFile filters are display-only; apply always uses full active scope\nRecovery i/Enter: full IDs and contextual action hints\nb: preview rollback in Recovery | s / x: resume / abandon\nErrors: r retry read/fresh preview; h independent Recovery\nPreview: arrows / PgUp/PgDn scroll; Home resets; Enter continue\nConfirmation: exact file ID for deletion, then literal yes\nEsc: confirmation -> preview -> retained form -> destination\nForms/search: printable q ? / are text; Backspace edits\nCtrl-U in a form: clear current field | PgUp/PgDn: scroll\nHome: reset report/help scroll (not text fields)\nq outside text / Ctrl-C anywhere: exit, joining worker\nNo automatic replay/rollback, network, staging or commits.\nf: Discover metadata | o: retained manual adoption form\nDiscover: Enter opens eligible regular file as editable draft\nDirectories and other ineligible entries are metadata only\nAdoption: Tab/Shift-Tab fields/buttons; Enter advances fields\nt: temporary repository profiles | c: check repository manifest\nv: standalone manifest check (independent scope/profiles)\nProfiles union: base/default/platform/local plus temporary additions\nGit: g exact root | z Status | u Unstaged | s Staged\nr metadata refresh | / search | i details | w View patch content\nPatch: warning + literal view patch, once; Esc drops content\nEsc: return to previous destination and focus.";
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -51,10 +51,33 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Tab::Checks => "Checks",
         Tab::Git => "Git",
     };
-    frame.render_widget(Paragraph::new(safe(&format!(
-        "Dort | 1 Overview  2 Files  3 Recovery  4 Checks  5 Git | [Actions: Space]\nRepository: {scope}\n{}{} | Profiles: {:?}\n{destination} | Focus: {} | ? Help | p Choose | n Create/attach", app.origin,
-        if app.dry_run { " | DRY RUN / PREVIEW ONLY" } else { "" }, app.data.as_ref().map(|d| d.profiles.as_slice()).unwrap_or_default(), app.shell.focus.label()
-    ))).style(Style::default().fg(Color::Cyan)), rows[0]);
+    let header = if area.width < 80 {
+        format!(
+            "Dort | 1 Overview 2 Files 3 Recovery\n4 Checks 5 Git | Space Actions | ? Help\n{destination} | {}{}\n{}",
+            app.shell.focus.label(),
+            if app.dry_run { " | DRY RUN" } else { "" },
+            short_field("Repo", &scope, area.width),
+        )
+    } else {
+        format!(
+            "Dort | 1 Overview 2 Files 3 Recovery 4 Checks 5 Git\nRepository: {scope}\n{}{} | Profiles: {:?}\n{destination} | Focus: {} | Space Actions | ? Help | p Choose | n Create/attach",
+            app.origin,
+            if app.dry_run {
+                " | DRY RUN / PREVIEW ONLY"
+            } else {
+                ""
+            },
+            app.data
+                .as_ref()
+                .map(|d| d.profiles.as_slice())
+                .unwrap_or_default(),
+            app.shell.focus.label(),
+        )
+    };
+    frame.render_widget(
+        Paragraph::new(safe(&header)).style(Style::default().fg(Color::Cyan)),
+        rows[0],
+    );
     let body = if let Some(error) = &app.error {
         Some(format!(
             "{error}\n\nPgUp/PgDn: scroll | Esc: retained input/scope\nr: retry read/fresh preview (never replay approval)\nh: inspect all-repository Recovery\nAfter a failed write, r only refreshes; choose an action again for a new preview and confirmation."
@@ -93,7 +116,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 .unwrap_or_else(|| "Loading...".into()),
             Tab::Checks => check_text(app),
             Tab::Files | Tab::Git => unreachable!(),
-            Tab::Recovery => super::recovery::text(app, rows[1].height),
+            Tab::Recovery => super::recovery::text(app, rows[1].height, rows[1].width),
         });
         Some(body)
     };
@@ -126,7 +149,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let footer = if app.error.is_some() {
         "r retry read/fresh preview | h Recovery | Esc back\nFailed write: refresh only; never replay approval"
     } else if app.preview.is_some() {
-        "Preview: arrows/PgUp/PgDn scroll | Enter continue\nEsc back (no write) | q quit | Ctrl-C waits for worker"
+        "Arrows/PgUp/PgDn scroll | Home reset | Enter next\nEsc back (no write) | q quit | Ctrl-C waits for worker"
     } else if app.tab == Tab::Git && app.shell.overlay.is_none() {
         "g root | z Status | u Unstaged | s Staged | r refresh\n/ search | i details | w View patch content | Esc back"
     } else if app.text_entry() {
@@ -137,8 +160,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
         "j Diagnostics | m manifest result | c current check\nv standalone | r refresh | Space Actions | ? Help"
     } else if app.tab == Tab::Files && app.shell.overlay.is_none() {
         "/ search | Delete clear | i details | Space Actions\na full-scope apply | f discover | o adopt | q quit"
+    } else if app.shell.overlay.is_none() && app.tab == Tab::Overview {
+        "n create/attach | p choose | f discover | a apply\nSpace Actions | ? help | PgUp/PgDn | Home reset"
     } else {
-        "Tab/Shift-Tab focus | Enter choose | Space Actions\nEsc back | ? help | q quit | PgUp/PgDn details"
+        "Tab/Shift-Tab focus | Enter choose | Space Actions\nEsc back | ? help | q quit | PgUp/PgDn | Home reset"
     };
     frame.render_widget(Paragraph::new(footer), rows[3]);
     if let Some(confirmation) = &app.confirmation {
@@ -190,16 +215,21 @@ fn file_details(app: &App) -> String {
             .filter(|_| app.visible_file_rows().contains(&app.candidate_selected))
         {
             text.push_str(&format!(
-                "Path: {:?}\nKind: {:?} | Link: {:?}\nMetadata eligibility: {} (not approval)\n",
+                "Path: {:?}\nKind: {:?} | Link: {:?}\nMetadata eligibility: {} (not approval)\n{}\n",
                 candidate.entry.path,
                 candidate.entry.kind,
                 candidate.link_state,
-                candidate.supported_for_adoption
+                candidate.supported_for_adoption,
+                if candidate.supported_for_adoption {
+                    "Enter: editable adoption draft; preview checks remaining guards."
+                } else {
+                    "Not eligible for adoption. Directories, links and special files cannot be adopted; regular files must be owned, single-link and have no special permission bits."
+                }
             ));
         } else {
             text.push_str("No displayed selection. Clear filter or use manual adoption.\n");
         }
-        text.push_str("Enter: editable adoption draft | o: manual adoption\nBounded hidden HOME/.config scan; keys/caches/generated data excluded.\n");
+        text.push_str("i: details | o: manual adoption\nBounded hidden HOME/.config scan; keys/caches/generated data excluded.\n");
         text.push_str(report.sensitivity_notice);
         for warning in &report.warnings {
             text.push_str(&format!("\nWarning: {warning}"));
@@ -287,7 +317,12 @@ fn draw_files(frame: &mut Frame, area: Rect, app: &App) {
                         .as_ref()
                         .map(|d| {
                             format!(
-                                "{:?} [{:?}]",
+                                "{} {:?} [{:?}]",
+                                if d.report.candidates[index].supported_for_adoption {
+                                    "[eligible hint]"
+                                } else {
+                                    "[not eligible]"
+                                },
                                 d.report.candidates[index].entry.path,
                                 d.report.candidates[index].entry.kind
                             )
@@ -565,7 +600,7 @@ fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16) -> String
             text
         }
         Overlay::Help => format!(
-            "Dort {} | Help\nRecovery: / search all repositories; i/Enter full IDs and action hints\nChecks: j Diagnostics | m manifest result | Actions: About\n{HELP}",
+            "Dort {} | Help\nSpace: Actions | / there: search by label\n1..5: views | Tab: focus | Esc: back\n{HELP}\nChecks: j Diagnostics | m manifest result | Actions: About",
             env!("CARGO_PKG_VERSION")
         ),
         Overlay::About => format!(

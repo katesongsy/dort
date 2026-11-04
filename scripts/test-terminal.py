@@ -231,6 +231,52 @@ def run():
             assert not list(home.iterdir()), "Read-only TUI startup created state"
             print("PASS entry/exit", args, size)
 
+        # Text carries navigation/state meaning even with a low-color terminal.
+        with Session([binary, "--dry-run", "tui"], dict(env, TERM="vt100", NO_COLOR="1"), (14, 48)) as session:
+            session.wait(b"loaded.")
+            for label in [b"1 Overview", b"2 Files", b"3 Recovery", b"4 Checks", b"5 Git",
+                          b"DRY RUN", b"n: Create/attach", b"p: Choose repository"]:
+                session.wait(label)
+            session.send(b"?")
+            session.wait(b"Space: Actions")
+            session.send(b"\x1b[6~" * 30)
+            session.settle()
+            assert b"Space: Actions" not in session.screen.text()
+            session.send(b"\x1b[H")
+            session.wait(b"Space: Actions")
+            session.send(b"\x1b")
+            session.wait(b"n: Create/attach")
+            session.send(b"q")
+            session.finish()
+        assert not list(home.iterdir()), "Compact navigation/help created state"
+        print("PASS compact low-color navigation and Home help reset without state")
+
+        # A directory remains inspectable but cannot overwrite an adoption draft.
+        discovery_home = base / "discovery-home"
+        discovery_home.mkdir(mode=0o700)
+        (discovery_home / ".config" / "nvim").mkdir(parents=True, mode=0o700)
+        (discovery_home / ".config" / "nvim" / "init.lua").write_text("ordinary settings\n")
+        discovery_env = dict(env, HOME=str(discovery_home),
+                             XDG_CONFIG_HOME=str(discovery_home / ".config"),
+                             XDG_STATE_HOME=str(discovery_home / ".local/state"))
+        with Session([binary, "tui"], discovery_env, (24, 80)) as session:
+            session.wait(b"loaded.")
+            session.send(b"f")
+            session.wait(b"[not eligible]")
+            session.send(b"/nvim\x1b")
+            session.settle()
+            session.send(b"\r")
+            session.wait(b"Not eligible for adoption")
+            assert b"TARGET >" not in session.screen.text()
+            session.send(b"i")
+            session.wait(b"Directories, links and special files")
+            session.send(b"q")
+            session.finish()
+        assert not (discovery_home / ".config" / "dort").exists()
+        assert not (discovery_home / ".local").exists()
+        assert (discovery_home / ".config" / "nvim" / "init.lua").is_file()
+        print("PASS ineligible discovered directory remains inspectable without adoption or state")
+
         # Text fields must consume shortcut letters, and a missing prerequisite
         # must return to the retained draft without creating state.
         with Session([binary, "tui"], env) as session:
@@ -572,7 +618,7 @@ def run():
             ) as session:
                 session.finish(code)
             print("PASS terminal cleanup", mode)
-    print("21 PTY cases passed (disposable HOME, no installed Git requirement)")
+    print("23 PTY cases passed (disposable HOME, no installed Git requirement)")
 
 
 if __name__ == "__main__":

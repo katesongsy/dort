@@ -125,6 +125,91 @@ fn small_layout_snapshot_disables_approval() {
     assert!(app.quit);
 }
 #[test]
+fn compact_navigation_and_report_home_are_readable_without_color() {
+    let mut app = App::new(true);
+    for (width, height) in [(48, 14), (80, 24), (140, 40)] {
+        let screen = render(&app, width, height);
+        for label in [
+            "1 Overview",
+            "2 Files",
+            "3 Recovery",
+            "4 Checks",
+            "5 Git",
+            "Actions",
+            "DRY RUN",
+            "Content",
+        ] {
+            assert!(
+                screen.contains(label),
+                "missing textual {label} at {width}x{height}"
+            );
+        }
+    }
+    app.key(key(KeyCode::Char('?')), 48, 14);
+    for _ in 0..100 {
+        app.key(key(KeyCode::PageDown), 48, 14);
+    }
+    app.key(key(KeyCode::Home), 48, 14);
+    assert_eq!(app.shell.scroll, 0);
+    assert!(render(&app, 48, 14).contains("Space: Actions | / there: search by label"));
+    app.key(key(KeyCode::Esc), 48, 14);
+    app.complete(Err("long report\n".repeat(100)));
+    app.key(key(KeyCode::PageDown), 48, 14);
+    app.key(key(KeyCode::Home), 48, 14);
+    assert_eq!(app.details_scroll, 0);
+    app.error = None;
+    app.start(true);
+    app.key(key(KeyCode::Char('?')), 48, 14);
+    app.key(key(KeyCode::PageDown), 48, 14);
+    app.key(key(KeyCode::Home), 48, 14);
+    assert_eq!(app.shell.scroll, 0);
+    assert!(app.busy && !app.quit);
+}
+
+#[test]
+fn long_lists_keep_selection_visible_through_resize_and_form_back() {
+    use super::shell::Overlay;
+    let mut app = App::new(false);
+    app.complete(Ok(Output::Data(Data {
+        files: (0..128)
+            .map(|i| (format!("file-{i:03}"), format!("Full metadata {i}")))
+            .collect(),
+        known_roots: (0..200)
+            .map(|i| format!("/repository-{i:03}").into())
+            .collect(),
+        ..Default::default()
+    })));
+    app.tab = Tab::Files;
+    for _ in 0..120 {
+        app.key(key(KeyCode::Down), 80, 24);
+    }
+    for (width, height) in [(48, 14), (80, 24), (140, 40), (48, 14)] {
+        app.resize(width, height);
+        assert!(render(&app, width, height).contains("> file-120"));
+        assert_eq!(app.selected, 120);
+    }
+    app.key(key(KeyCode::Char('p')), 48, 14);
+    for _ in 0..201 {
+        app.key(key(KeyCode::Down), 48, 14);
+    }
+    assert!(render(&app, 48, 14).contains("> \"/repository-199\""));
+    app.key(key(KeyCode::Esc), 48, 14);
+    assert_eq!(app.selected, 120);
+    app.key(key(KeyCode::Char('o')), 48, 14);
+    app.shell.adoption.target = "q?/".repeat(100);
+    app.key(key(KeyCode::PageDown), 48, 14);
+    app.key(key(KeyCode::Tab), 48, 14);
+    assert_eq!(app.shell.scroll, 0);
+    assert!(render(&app, 48, 14).contains("> ID"));
+    app.resize(40, 10);
+    app.resize(48, 14);
+    assert_eq!(app.shell.adoption.target, "q?/".repeat(100));
+    assert!(matches!(app.shell.overlay, Some(Overlay::Form(_))));
+    app.key(key(KeyCode::Esc), 48, 14);
+    assert!(render(&app, 48, 14).contains("> file-120"));
+}
+
+#[test]
 fn quit_during_work_waits_for_completion() {
     let mut app = App::new(false);
     app.start(true);

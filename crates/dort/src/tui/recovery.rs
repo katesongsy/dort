@@ -63,7 +63,7 @@ pub fn details(row: &Diagnosis) -> String {
     )
 }
 
-pub fn text(app: &super::app::App, height: u16) -> String {
+pub fn text(app: &super::app::App, height: u16, width: u16) -> String {
     let Some(data) = &app.data else {
         return "Recovery diagnosis not loaded. r: read all-repository history".into();
     };
@@ -73,18 +73,43 @@ pub fn text(app: &super::app::App, height: u16) -> String {
         );
     }
     let visible = app.visible_history_rows();
-    let mut text = format!(
-        "All repositories: {} transactions | {} global write blockers\nShowing {} | / search | Delete clear | i/Enter details\nFilter: {:?}{}\n",
-        data.history.len(),
-        data.history.iter().filter(|r| r.blocks_writes()).count(),
-        visible.len(),
-        app.history_search.query,
-        if app.history_search.editing {
-            " (editing; Enter/Esc ends)"
-        } else {
-            ""
-        }
-    );
+    let compact_list = width < 80 && !app.history_details;
+    let mut text = if compact_list {
+        let summary = format!(
+            "All repositories: {} | Blockers: {}\n",
+            data.history.len(),
+            data.history.iter().filter(|r| r.blocks_writes()).count(),
+        );
+        let filter = format!(
+            "Showing {} | Filter{}: {:?}",
+            visible.len(),
+            if app.history_search.editing {
+                " [TEXT]"
+            } else {
+                ""
+            },
+            app.history_search.query,
+        );
+        summary
+            + &super::views::safe(&filter)
+                .chars()
+                .take(usize::from(width.saturating_sub(2)))
+                .collect::<String>()
+            + "\n"
+    } else {
+        format!(
+            "All repositories: {} transactions | {} global write blockers\nShowing {} | / search | Delete clear | i/Enter details\nFilter: {:?}{}\n",
+            data.history.len(),
+            data.history.iter().filter(|r| r.blocks_writes()).count(),
+            visible.len(),
+            app.history_search.query,
+            if app.history_search.editing {
+                " (editing; Enter/Esc ends)"
+            } else {
+                ""
+            }
+        )
+    };
     if app.history_details {
         if let Some(row) = app.history_selection() {
             text.push_str(&details(row));
@@ -98,7 +123,7 @@ pub fn text(app: &super::app::App, height: u16) -> String {
     } else if visible.is_empty() {
         text.push_str("No matches. Global blockers above are never filtered away.");
     } else {
-        let count = usize::from(height.saturating_sub(7)).max(1);
+        let count = usize::from(height.saturating_sub(if compact_list { 4 } else { 7 })).max(1);
         let position = visible.iter().position(|&i| i == app.selected).unwrap_or(0);
         for &index in visible
             .iter()
@@ -106,6 +131,25 @@ pub fn text(app: &super::app::App, height: u16) -> String {
             .take(count)
         {
             let row = &data.history[index];
+            if compact_list {
+                text.push_str(&format!(
+                    "{} {} S{} {:?} | {}\n",
+                    if index == app.selected { ">" } else { " " },
+                    row.transaction_id.get(..8).unwrap_or("invalid"),
+                    row.journal_schema
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "?".into()),
+                    row.phase,
+                    if row.problem.is_some() {
+                        "INTEGRITY!"
+                    } else if row.blocks_writes() {
+                        "BLOCKED"
+                    } else {
+                        "terminal"
+                    },
+                ));
+                continue;
+            }
             text.push_str(&format!(
                 "{} {} schema {:?} {:?} | {} checkpoints | {}\n",
                 if index == app.selected { ">" } else { " " },
