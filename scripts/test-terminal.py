@@ -586,6 +586,35 @@ def run():
         assert target.is_symlink() and (repo / "source").read_text() == "ordinary settings\n"
         print("PASS searchable all-repository history, full IDs and guarded rollback without transcription")
 
+        checkpoints = {str(path.relative_to(state)): hashlib.sha256(path.read_bytes()).digest()
+                       for path in state.rglob("*.json")}
+        with Session([binary, "--dry-run", "tui"], env, (14, 48)) as session:
+            session.wait(b"loaded.")
+            session.send(b"3/Completed\r")
+            session.wait(b"Blockers: 0")
+            session.wait(b"Showing 1")
+            session.wait(b"Completed")
+            session.send(b"\r")  # selected row inspects; never requests rollback
+            session.wait(b"Transaction details")
+            session.wait(b"Repository ID:")
+            session.send(b"\x1b[6~" * 2)
+            session.wait(b"Validated checkpoints:")
+            session.send(b"\x1b[H")
+            session.wait(b"Repository ID:")
+            session.send(b"\t\x1b[C\r")  # explicit contextual Rollback page button
+            session.wait(b"Rollback schema 2")
+            session.send(b"\r")
+            session.settle()
+            assert b"Confirm" not in session.data, "Dry-run Recovery opened approval"
+            session.send(b"\x1b")
+            session.wait(b"Transaction details")
+            session.send(b"q")
+            session.finish()
+        assert checkpoints == {str(path.relative_to(state)): hashlib.sha256(path.read_bytes()).digest()
+                               for path in state.rglob("*.json")}, "Recovery inspection/preview changed history"
+        assert target.is_symlink() and (repo / "source").read_text() == "ordinary settings\n"
+        print("PASS compact typed Recovery inspection, focused rollback preview and dry-run without writes")
+
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"2/q?/\x1b")
@@ -654,7 +683,7 @@ def run():
             ) as session:
                 session.finish(code)
             print("PASS terminal cleanup", mode)
-    print("24 PTY cases passed (disposable HOME, no installed Git requirement)")
+    print("25 PTY cases passed (disposable HOME, no installed Git requirement)")
 
 
 if __name__ == "__main__":

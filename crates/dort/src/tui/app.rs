@@ -1351,12 +1351,21 @@ impl App {
                 Action::Keep,
                 Action::Discover,
             ],
-            Tab::Recovery => vec![
-                Action::Inspect,
-                Action::Rollback,
-                Action::Resume,
-                Action::Abandon,
-            ],
+            Tab::Recovery => {
+                let mut actions = vec![Action::Inspect];
+                if let Some(row) = self.history_selection() {
+                    if super::recovery::rollback(row) {
+                        actions.push(Action::Rollback);
+                    }
+                    if super::recovery::resume(row) {
+                        actions.push(Action::Resume);
+                    }
+                    if super::recovery::abandon(row) {
+                        actions.push(Action::Abandon);
+                    }
+                }
+                actions
+            }
             Tab::Checks => vec![
                 Action::CheckCurrent,
                 Action::CheckStandalone,

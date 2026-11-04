@@ -2,7 +2,7 @@ use super::{
     actions::{Data, Output, Task},
     app::{App, Tab},
     recovery,
-    shell::{Focus, Overlay},
+    shell::{Action, Focus, Overlay},
     tests::render,
 };
 use dort_core::journal::{Diagnosis, Phase};
@@ -53,6 +53,13 @@ fn recovery_action_hints_reject_uncertain_terminal_and_preparing_resume() {
             ..Default::default()
         })));
         for (code, eligible) in [('b', rollback), ('s', resume), ('x', abandon)] {
+            let visible = app.page_actions().iter().any(|action| {
+                matches!(
+                    (code, action),
+                    ('b', Action::Rollback) | ('s', Action::Resume) | ('x', Action::Abandon)
+                )
+            });
+            assert_eq!(visible, eligible, "page buttons reflect typed eligibility");
             assert_eq!(key(&mut app, KeyCode::Char(code)).is_some(), eligible);
         }
     }
@@ -82,7 +89,7 @@ fn recovery_search_preserves_raw_identity_and_never_hides_global_blockers() {
         app.selected, 1,
         "returning to filtered history selects a displayed row"
     );
-    assert!(render(&app, 100, 30).contains("2 global write blockers"));
+    assert!(render(&app, 100, 30).contains("Blockers: 2"));
     key(&mut app, KeyCode::Enter);
     let text = render(&app, 140, 45);
     assert!(text.contains(&"b".repeat(64)));
@@ -142,7 +149,8 @@ fn compact_long_history_keeps_selected_row_and_global_blockers_visible() {
     }
     let screen = render(&app, 48, 14);
     assert!(screen.contains("All repositories: 129 | Blockers: 1"));
-    assert!(screen.contains("S2 Some(Completed) | terminal"));
+    assert!(screen.contains("Completed") && screen.contains("Terminal"));
+    assert!(screen.contains("SCM") && screen.contains("PHASE") && screen.contains("STATE"));
     app.history_search.query = "00000078".into();
     assert!(render(&app, 48, 14).contains("Blockers: 1"));
     assert!(
@@ -182,6 +190,35 @@ fn unavailable_history_is_not_empty_or_an_actionable_stale_selection() {
     assert!(seen.contains("Repository ID:"));
     assert!(seen.contains("Transaction ID:"));
     assert!(seen.contains("Validated checkpoints:"));
+}
+#[test]
+fn preparing_table_enter_inspects_then_the_visible_action_uses_raw_identity() {
+    let mut app = App::new(false);
+    app.tab = Tab::Recovery;
+    app.complete(Ok(Output::History {
+        rows: vec![row(Some(3), Some(Phase::Preparing), None, 'b')],
+        error: None,
+    }));
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(app.history_details && app.preview.is_none() && app.confirmation.is_none());
+    assert_eq!(app.page_actions().len(), 2);
+    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Right);
+    assert!(render(&app, 80, 24).contains("> [Review abandon"));
+    assert!(
+        matches!(key(&mut app, KeyCode::Enter), Some(Task::Bootstrap(r,t,dort_core::bootstrap::RecoveryAction::Abandon)) if r == "b".repeat(64) && t == "b".repeat(64))
+    );
+    assert!(app.preview.is_none() && app.confirmation.is_none());
+    // Discovery in the global palette still includes inapplicable operations.
+    app.shell.focus = Focus::Content;
+    key(&mut app, KeyCode::Char(' '));
+    key(&mut app, KeyCode::Char('/'));
+    for c in "resume".chars() {
+        key(&mut app, KeyCode::Char(c));
+    }
+    let screen = render(&app, 100, 30);
+    assert!(screen.contains("Resume unavailable"));
+    assert!(key(&mut app, KeyCode::Enter).is_none());
 }
 #[test]
 fn error_retry_never_retains_approval_and_failed_writes_offer_read_only_recovery() {

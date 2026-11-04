@@ -244,18 +244,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             Tab::Git => app.git_view.draw(frame, content[0]),
             Tab::Overview => super::observations::overview(frame, content[0], app),
             Tab::Checks => super::observations::checks(frame, content[0], app),
-            Tab::Recovery => ui::report(
-                frame,
-                content[0],
-                "Recovery · All repositories",
-                legacy_document(super::recovery::text(
-                    app,
-                    content[0].height,
-                    content[0].width,
-                )),
-                app.details_scroll,
-                app.shell.focus == Focus::Content,
-            ),
+            Tab::Recovery => super::recovery::draw(frame, content[0], app),
         }
         buttons(frame, content[1], app);
     }

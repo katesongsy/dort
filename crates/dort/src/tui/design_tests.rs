@@ -341,6 +341,140 @@ fn checked_dashboard_preserves_result_scope_union_and_limits_through_diagnostics
     assert!(render(&app, 80, 24).contains("Standalone manifest"));
     assert!(app.preview.is_none() && app.confirmation.is_none());
 }
+fn history_row(
+    schema: Option<u32>,
+    phase: Option<dort_core::journal::Phase>,
+    problem: Option<&str>,
+    id: char,
+) -> dort_core::journal::Diagnosis {
+    dort_core::journal::Diagnosis {
+        repository_id: id.to_string().repeat(64),
+        transaction_id: id.to_string().repeat(64),
+        journal_schema: schema,
+        phase,
+        valid_checkpoints: 7,
+        problem: problem.map(str::to_owned),
+    }
+}
+#[test]
+fn recovery_table_has_typed_columns_selection_and_integrity_styles_at_all_sizes() {
+    use dort_core::journal::Phase;
+    let mut app = App::new(false);
+    app.tab = Tab::Recovery;
+    app.complete(Ok(Output::History {
+        rows: vec![
+            history_row(None, None, Some("synthetic corrupt tail"), 'a'),
+            history_row(Some(3), Some(Phase::Preparing), None, 'b'),
+        ],
+        error: None,
+    }));
+    key(&mut app, KeyCode::Down);
+    for (w, h) in [(48, 14), (80, 24), (110, 24), (140, 40)] {
+        let b = buffer(&app, w, h);
+        locate(&b, "Blockers: 2");
+        for column in ["TX ID", "SCM", "PHASE", "STATE"] {
+            locate(&b, column);
+        }
+        let selected = locate(&b, "> bbbbbbbb");
+        let text: String = (0..w).map(|x| b[(x, selected.1)].symbol()).collect();
+        let byte = text.find("Preparing").unwrap();
+        let phase = (text[..byte].chars().count() as u16, selected.1);
+        assert_eq!(b[phase].bg, Color::Cyan);
+        assert_eq!(b[phase].fg, Color::Black);
+        assert!(
+            b[phase]
+                .modifier
+                .contains(Modifier::REVERSED | Modifier::BOLD)
+        );
+        let integrity = locate(&b, "INTEGRITY!");
+        assert_eq!(b[integrity].fg, Color::Red);
+        let focus = locate(&b, "Focus");
+        assert_eq!(b[focus].fg, Color::Cyan);
+        assert_eq!(app.selected, 1);
+        if w >= 110 {
+            locate(&b, "Transaction details");
+        }
+    }
+    app.history_search.editing = true;
+    app.history_search.query = format!("q?/{}\u{1b}needle", "é".repeat(50));
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
+        t.draw(|f| views::draw(f, &app)).unwrap();
+        let (x, y) = locate(t.backend().buffer(), "needle");
+        assert_eq!(t.get_cursor_position().unwrap(), (x + 6, y).into());
+        locate(t.backend().buffer(), "Filter > ...");
+        let screen = render(&app, w, h);
+        assert!(!screen.contains('\u{1b}') && !screen.contains('é'));
+        assert!(screen.contains("Blockers: 2"));
+    }
+}
+#[test]
+fn recovery_details_keep_full_ids_and_guards_inspectable_without_mutating_diagnosis() {
+    use dort_core::journal::Phase;
+    for (schema, phase, problem) in [
+        (Some(1), Some(Phase::Completed), None),
+        (Some(2), Some(Phase::RollingBack), None),
+        (Some(3), Some(Phase::Preparing), None),
+        (Some(3), Some(Phase::Running), None),
+        (Some(3), Some(Phase::Completed), None),
+        (None, None, Some("unsafe\u{1b}[31m tail")),
+    ] {
+        let mut app = App::new(false);
+        app.tab = Tab::Recovery;
+        app.complete(Ok(Output::History {
+            rows: vec![history_row(schema, phase, problem, 'a')],
+            error: None,
+        }));
+        let before = serde_json::to_value(&app.data.as_ref().unwrap().history).unwrap();
+        key(&mut app, KeyCode::Enter);
+        for (w, h) in [(48, 14), (80, 24), (110, 24), (140, 40)] {
+            let mut all = String::new();
+            let mut cells = String::new();
+            for offset in 0..55 {
+                app.details_scroll = offset;
+                all.push_str(&render(&app, w, h));
+                let b = buffer(&app, w, h);
+                let (x, y) = locate(&b, "Transaction details");
+                // The title begins two cells after its pane's left border.
+                for col in x - 1..w - 1 {
+                    cells.push_str(b[(col, y + 1)].symbol());
+                }
+                // Also join each full visible pane, including the final rows
+                // below the clamped scroll start at the end of the document.
+                for line in y + 1..h - 5 {
+                    for col in x - 1..w - 1 {
+                        all.push_str(b[(col, line)].symbol());
+                    }
+                }
+            }
+            all.push_str(&cells);
+            for value in [
+                "Repository ID: ",
+                "Transaction ID: ",
+                "Validated checkpoints: 7",
+                "Integrity:",
+                "Blocks new writes:",
+                "Core preview independently checks live paths and artifacts.",
+                "Schema-1 rollback withdraws its new source into private storage;",
+                "no garbage collection.",
+            ] {
+                assert!(all.contains(value), "full typed detail {value} at {w}x{h}");
+            }
+            assert!(all.contains(&"a".repeat(64)));
+            assert!(!all.contains('\u{1b}'));
+            app.details_scroll = u16::MAX;
+            let end = render(&app, w, h);
+            assert!(end.contains("Blockers:"));
+            key(&mut app, KeyCode::Home);
+            assert_eq!(app.details_scroll, 0);
+        }
+        assert_eq!(
+            before,
+            serde_json::to_value(&app.data.as_ref().unwrap().history).unwrap()
+        );
+        assert!(app.preview.is_none() && app.confirmation.is_none());
+    }
+}
 #[test]
 fn single_path_field_cannot_submit_until_the_visible_action_is_activated() {
     let mut app = App::new(false);
