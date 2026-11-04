@@ -236,9 +236,9 @@ fn quit_during_work_waits_for_completion() {
 fn navigation_and_metadata_escaping() {
     let mut app = App::new(true);
     app.complete(Ok(Output::Data(Data {
-        overview: "no repository\n\u{1b}[31m\u{202e}".into(),
+        overview: None,
         managed: vec![],
-        files_error: None,
+        files_error: Some("no repository\n\u{1b}[31m\u{202e}".into()),
         repository: None,
         known_roots: vec![],
         profiles: vec![],
@@ -246,9 +246,11 @@ fn navigation_and_metadata_escaping() {
         history: vec![],
         history_error: None,
     })));
+    app.details_scroll = 12;
     let screen = render(&app, 80, 24);
     assert!(screen.contains("DRY RUN"));
     assert!(screen.contains("\\u{1b}[31m\\u{202e}"));
+    app.data.as_mut().unwrap().files_error = None;
     app.key(key(KeyCode::Char('2')), 80, 24);
     assert!(app.tab == Tab::Files);
     app.key(key(KeyCode::Down), 80, 24);
@@ -336,7 +338,7 @@ fn busy_shell_cannot_change_scope_or_toggle_mode_or_start_another_job() {
 #[test]
 fn refresh_preserves_selected_identity_and_clamps_if_it_disappears() {
     let data = |ids: &[&str]| Data {
-        overview: String::new(),
+        overview: None,
         managed: vec![],
         files_error: None,
         repository: None,
@@ -377,7 +379,7 @@ fn completion_keeps_noop_result_visible_through_refresh_and_read_failure() {
     );
     app.start(false);
     app.complete(Ok(Output::Data(Data {
-        overview: "fresh observations".into(),
+        overview: None,
         managed: vec![],
         files_error: None,
         repository: None,

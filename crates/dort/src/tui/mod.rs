@@ -10,6 +10,7 @@ mod git;
 #[cfg(test)]
 mod git_tests;
 mod inventory;
+mod observations;
 mod recovery;
 #[cfg(test)]
 mod recovery_tests;

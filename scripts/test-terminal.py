@@ -235,7 +235,7 @@ def run():
         with Session([binary, "--dry-run", "tui"], dict(env, TERM="vt100", NO_COLOR="1"), (14, 48)) as session:
             session.wait(b"loaded.")
             for label in [b"1 Overview", b"2 Files", b"3 Recovery", b"4 Checks", b"5 Git",
-                          b"DRY RUN", b"n: Create/attach", b"p: Choose repository"]:
+                          b"DRY RUN", b"Create/attach", b"Choose repository", b"Discover files", b"Check a manifest"]:
                 session.wait(label)
             session.send(b"?")
             session.wait(b"Space: Actions")
@@ -245,7 +245,7 @@ def run():
             session.send(b"\x1b[H")
             session.wait(b"Space: Actions")
             session.send(b"\x1b")
-            session.wait(b"n: Create/attach")
+            session.wait(b"Create/attach")
             session.send(b"q")
             session.finish()
         assert not list(home.iterdir()), "Compact navigation/help created state"
@@ -314,6 +314,17 @@ def run():
             session.wait("Manifest path · Focus".encode())
             session.send(os.fsencode(standalone) + b"\r\r")
             session.wait(b"Structural check passed")
+            session.wait(b"Checks | Standalone manifest")
+            session.wait(b"Valid")
+            session.wait(b"live files and installed tools were not inspected")
+            session.send(b"\x1b[6~" * 3)
+            session.wait(b"Capability limits")
+            session.send(b"\x1b[H")
+            session.wait(b"Structural check only")
+            session.send(b"j")
+            session.wait(b"Checks | Diagnostics")
+            session.send(b"m")
+            session.wait(b"Checks | Standalone manifest")
             session.send(b"v\t\r")  # retained Check button -> Profiles
             session.wait(b"Profiles | standalone manifest")
             session.send(b"\x1b[B\r\x1b[B\r")  # dev toggle, Apply
@@ -341,6 +352,29 @@ def run():
             session.finish()
         assert not list(home.iterdir()), "Diagnostics/About created local state"
         print("PASS Diagnostics, About/version and scope-preserving return without state")
+
+        # Unavailable registry is distinct from a successfully observed empty history.
+        config = home / ".config" / "dort"
+        config.mkdir(parents=True, mode=0o700)
+        (config / "local.toml").write_text("selected_repository = 'private-config-marker'\ninvalid toml")
+        with Session([binary, "tui"], env, (14, 48)) as session:
+            session.wait(b"loaded.")
+            session.send(b"4j")
+            session.wait(b"Registry Unknown")
+            session.wait(b"History 0")
+            session.wait(b"Blocks: 0")
+            session.send(b"\x1b[6~")
+            session.wait(b"Configuration unavailable")
+            assert b"private-config-marker" not in session.data
+            session.send(b"\x1b[H")
+            session.wait(b"Diagnostics | Dort")
+            session.send(b"q")
+            session.finish()
+        assert not (home / ".local").exists(), "Unavailable Diagnostics created state"
+        (config / "local.toml").unlink()
+        config.rmdir()
+        config.parent.rmdir()
+        print("PASS compact typed Diagnostics unknown registry versus empty history, no source excerpts")
 
         candidate = home / ".q?config"
         candidate.write_text("private-body-marker\n")
@@ -620,7 +654,7 @@ def run():
             ) as session:
                 session.finish(code)
             print("PASS terminal cleanup", mode)
-    print("23 PTY cases passed (disposable HOME, no installed Git requirement)")
+    print("24 PTY cases passed (disposable HOME, no installed Git requirement)")
 
 
 if __name__ == "__main__":

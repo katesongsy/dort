@@ -134,8 +134,14 @@ fn welcome_next_steps_are_visible_at_the_floor_without_creating_state() {
     )));
     let screen = super::tests::render(&app, 48, 14);
     assert!(screen.contains("Welcome | manage local files"));
-    assert!(screen.contains("n: Create/attach | p: Choose repository"));
-    assert!(screen.contains("f: Discover files | v: Check a manifest"));
+    for label in [
+        "Create/attach",
+        "Choose repository",
+        "Discover files",
+        "Check a manifest",
+    ] {
+        assert!(screen.contains(label), "visible Welcome action: {label}");
+    }
     assert!(!fixture.host.state_dir.exists());
     assert!(!fixture.host.config_dir.exists());
 }
@@ -476,7 +482,16 @@ fn create_retains_input_on_back_then_approves_and_switches_session() {
     );
     assert_eq!(app.origin, "approved create/attach");
     run_task(&mut app, &fixture, refresh);
-    assert!(app.data.as_ref().unwrap().overview.contains("registered"));
+    assert_eq!(
+        app.data
+            .as_ref()
+            .unwrap()
+            .overview
+            .as_ref()
+            .unwrap()
+            .registered,
+        Some(true)
+    );
     let root = app.repository.as_ref().unwrap();
     assert!(root.join(".git/HEAD").is_file());
     assert_eq!(
@@ -532,7 +547,16 @@ fn attachment_uses_shared_bootstrap_and_session_picker_never_persists() {
     let task = submit_path(&mut app);
     run_task(&mut app, &fixture, task);
     assert_eq!(app.repository, Some(unregistered));
-    assert!(app.data.as_ref().unwrap().overview.contains("unregistered"));
+    assert_eq!(
+        app.data
+            .as_ref()
+            .unwrap()
+            .overview
+            .as_ref()
+            .unwrap()
+            .registered,
+        Some(false)
+    );
     assert_eq!(
         fs::read(fixture.host.local_config_path()).unwrap(),
         config_before
@@ -1337,6 +1361,54 @@ fn structural_check_reports_dependencies_and_capability_limits_without_observing
 }
 
 #[test]
+fn overview_summary_counts_match_the_shared_full_scope_plan_without_creating_state() {
+    let fixture = Fixture::new(false);
+    let data = actions::load(&fixture.host, Some(&fixture.root)).unwrap();
+    let local = dort_core::local::LocalConfig::load(&fixture.host).unwrap();
+    let plan = dort_core::planner::plan(
+        crate::services::observe(
+            &fixture.host,
+            &local,
+            Some(&fixture.root),
+            &[],
+            Request::Apply,
+        )
+        .unwrap(),
+    );
+    let observation = data.overview.as_ref().unwrap();
+    assert_eq!(observation.registered, Some(false));
+    assert_eq!(observation.registry_count, Some(0));
+    let counts = observation.files.as_ref().unwrap();
+    use dort_core::planner::Outcome;
+    assert_eq!(
+        counts.linked,
+        plan.files
+            .iter()
+            .filter(|f| matches!(f.outcome, Outcome::NoOp))
+            .count()
+    );
+    assert_eq!(
+        counts.changes,
+        plan.files
+            .iter()
+            .filter(|f| matches!(f.outcome, Outcome::Change))
+            .count()
+    );
+    assert_eq!(
+        counts.blocked,
+        plan.files
+            .iter()
+            .filter(|f| matches!(f.outcome, Outcome::Blocked))
+            .count()
+    );
+    assert_eq!(counts.plan_blocked, plan.has_blockers());
+    assert_eq!(
+        counts.linked + counts.changes + counts.blocked,
+        data.managed.len()
+    );
+    assert!(!fixture.host.config_dir.exists() && !fixture.host.state_dir.exists());
+}
+#[test]
 fn malformed_manifest_errors_never_render_source_lines() {
     let fixture = Fixture::new(false);
     fs::write(
@@ -1345,8 +1417,8 @@ fn malformed_manifest_errors_never_render_source_lines() {
     )
     .unwrap();
     let data = actions::load(&fixture.host, Some(&fixture.root)).unwrap();
-    assert!(data.overview.contains("Invalid TOML"));
-    assert!(!data.overview.contains("private-body-marker"));
+    assert!(data.overview.as_ref().unwrap().files.is_none());
+    assert!(data.files_error.as_ref().unwrap().contains("Invalid TOML"));
     assert!(
         !data
             .files_error
@@ -1378,7 +1450,14 @@ fn malformed_configuration_does_not_hide_independent_history() {
     let fixture = Fixture::new(true);
     fs::write(fixture.host.local_config_path(), "not a local config").unwrap();
     let data = actions::load(&fixture.host, None).unwrap();
-    assert!(data.overview.contains("Configuration unavailable:"));
+    assert!(
+        data.overview
+            .as_ref()
+            .unwrap()
+            .configuration_error
+            .is_some()
+    );
+    assert!(data.overview.as_ref().unwrap().registry_count.is_none());
     assert!(data.history_error.is_none());
     assert!(data.known_roots.is_empty());
 }

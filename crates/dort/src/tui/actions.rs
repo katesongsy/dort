@@ -34,9 +34,24 @@ fn entry_kind(entry: Option<&dort_core::observation::Entry>) -> &'static str {
         None => "Unavailable",
     }
 }
+/// Read-only summary facts, never reconstructed from human report strings.
+pub struct Overview {
+    pub host: HostContext,
+    pub registered: Option<bool>,
+    pub registry_count: Option<usize>,
+    pub configuration_error: Option<String>,
+    pub files: Option<FileCounts>,
+}
+#[derive(Default)]
+pub struct FileCounts {
+    pub linked: usize,
+    pub changes: usize,
+    pub blocked: usize,
+    pub plan_blocked: bool,
+}
 #[derive(Default)]
 pub struct Data {
-    pub overview: String,
+    pub overview: Option<Overview>,
     pub repository: Option<PathBuf>,
     pub known_roots: Vec<PathBuf>,
     pub profiles: Vec<String>,
@@ -77,23 +92,13 @@ pub fn load_scoped(
         Ok(rows) => (rows, None),
         Err(error) => (vec![], Some(diagnostic(&error))),
     };
-    let mut overview = format!(
-        "Experimental local-file manager\nHost: {:?} / {:?}\nWrite blockers: {}\n",
-        host.platform,
-        host.architecture,
-        if history_error.is_some() {
-            "unknown (diagnosis unavailable)".into()
-        } else {
-            history
-                .iter()
-                .filter(|d| d.blocks_writes())
-                .count()
-                .to_string()
-        }
-    );
-    if let Some(error) = &history_error {
-        overview.push_str(&format!("History diagnosis failed: {error}\n"));
-    }
+    let mut overview = Overview {
+        host: host.clone(),
+        registered: None,
+        registry_count: None,
+        configuration_error: None,
+        files: None,
+    };
     let local = LocalConfig::load(host);
     let mut files = vec![];
     let mut managed = vec![];
@@ -105,11 +110,10 @@ pub fn load_scoped(
         Err(error) => {
             let error = diagnostic(&error);
             files_error = Some(format!("Configuration unavailable: {error}"));
-            overview.push_str(&format!(
-                "Configuration unavailable: {error}\nRecovery remains available.\n"
-            ));
+            overview.configuration_error = Some(error);
         }
         Ok(local) => {
+            overview.registry_count = Some(local.repositories.len());
             known_roots = local
                 .repositories
                 .values()
@@ -121,20 +125,10 @@ pub fn load_scoped(
                     files_error = Some(format!(
                         "{error}\nChoose repository or Create/attach in Actions."
                     ));
-                    overview.push_str(&format!(
-                        "{error}\nChoose repository or Create/attach in Actions.\n"
-                    ));
                 }
                 Ok(root) => {
                     let registered = known_roots.contains(&root);
-                    overview.push_str(&format!(
-                        "Repository: {root:?}\nRegistration: {}\n",
-                        if registered {
-                            "registered"
-                        } else {
-                            "unregistered (attach before writing)"
-                        }
-                    ));
+                    overview.registered = Some(registered);
                     selected = Some(root.clone());
                     match crate::services::observe(
                         host,
@@ -146,20 +140,22 @@ pub fn load_scoped(
                         Err(error) => {
                             let error = diagnostic(&error);
                             files_error = Some(format!("File observation failed: {error}"));
-                            overview.push_str(&format!("File observation failed: {error}\n"));
                         }
                         Ok(snapshot) => {
                             profiles = snapshot.active_profiles.iter().cloned().collect();
-                            overview.push_str(&format!(
-                                "Effective profiles: {:?}\n",
-                                snapshot.active_profiles
-                            ));
                             let plan = planner::plan(snapshot);
-                            overview.push_str(&format!(
-                                "Active files: {}\nPlan blockers: {}\n",
-                                plan.files.len(),
-                                plan.has_blockers()
-                            ));
+                            let mut counts = FileCounts {
+                                plan_blocked: plan.has_blockers(),
+                                ..Default::default()
+                            };
+                            for file in &plan.files {
+                                match file.outcome {
+                                    planner::Outcome::NoOp => counts.linked += 1,
+                                    planner::Outcome::Change => counts.changes += 1,
+                                    planner::Outcome::Blocked => counts.blocked += 1,
+                                }
+                            }
+                            overview.files = Some(counts);
                             for (file, input) in plan.files.iter().zip(&plan.inputs.files) {
                                 managed.push(ManagedRow {
                                     id: file.id.clone(),
@@ -194,12 +190,8 @@ pub fn load_scoped(
             }
         }
     }
-    if selected.is_none() {
-        overview.insert_str(0, "Welcome | manage local files with previews\nn: Create/attach | p: Choose repository\nf: Discover files | v: Check a manifest\nSpace: searchable Actions | ?: Help\n3: Recovery | 4 then j: host Diagnostics\n\n");
-    }
-    overview.push_str("\nNext: 2 Files (inspect/discover/adopt) | 5 Git (metadata only)\na: Preview full-scope apply | t: Temporary profiles | c: Check manifest\nSpace: all labeled Actions | PgUp/PgDn: details | Home: report start\nNo tool execution, templates, secrets, network, staging or commits.\nPreviews never authorize execution. Failed writes may retain partial effects.\n");
     Ok(Data {
-        overview,
+        overview: Some(overview),
         repository: selected,
         known_roots,
         profiles,

@@ -242,39 +242,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
         match app.tab {
             Tab::Files => super::files::draw(frame, content[0], app),
             Tab::Git => app.git_view.draw(frame, content[0]),
-            Tab::Overview => {
-                let title = if root.is_none() {
-                    "Welcome · Local files, explicit previews"
-                } else {
-                    "Overview"
-                };
-                let text = app
-                    .data
-                    .as_ref()
-                    .map(|d| d.overview.clone())
-                    .unwrap_or_else(|| "Loading read-only observations...".into());
-                let text = app
-                    .result
-                    .as_ref()
-                    .map(|r| format!("{r}\n\n{text}"))
-                    .unwrap_or(text);
-                ui::report(
-                    frame,
-                    content[0],
-                    title,
-                    legacy_document(text),
-                    app.details_scroll,
-                    app.shell.focus == Focus::Content,
-                );
-            }
-            Tab::Checks => ui::report(
-                frame,
-                content[0],
-                "Checks",
-                legacy_document(views::check_text(app)),
-                app.details_scroll,
-                app.shell.focus == Focus::Content,
-            ),
+            Tab::Overview => super::observations::overview(frame, content[0], app),
+            Tab::Checks => super::observations::checks(frame, content[0], app),
             Tab::Recovery => ui::report(
                 frame,
                 content[0],
