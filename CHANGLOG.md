@@ -35,6 +35,10 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 - Implement read-only foundation and isolated local state APIs ([a85f3ed](https://github.com/katesongsy/dort/commit/a85f3edf932a281eeefae1341313b2f0bb872b29))
 
+### Fixes
+
+- **tui:** improve compact navigation and discovery eligibility ([57dc8d3](https://github.com/katesongsy/dort/commit/57dc8d3ea7429fee3ba5d54676a0b2aad0fab50c))
+
 ### Maintenance
 
 - init ([bc0198e](https://github.com/katesongsy/dort/commit/bc0198eae64ec98af0aa2bcd8a7bb6a8da1ee5c8))
