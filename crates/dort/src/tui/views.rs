@@ -21,7 +21,7 @@ pub fn safe(text: &str) -> String {
     }
     escaped
 }
-const HELP: &str = "Left/Right or 1/2/3/4/5: Overview / Files / Recovery / Checks / Git\nTab / Shift-Tab: focus Destinations, Content, Actions\nEnter: activate focused control | Space: Actions\n/: search Files content, or Actions when open | Delete: clear filter\np: choose repository for session | n: create/attach\nr: refresh observations and all-repository history\na: preview apply (Overview / Files)\nk / d: keep local file / delete managed link in Files\ni: file metadata details | Actions: enter exact mapping ID\nFile filters are display-only; apply always uses full active scope\nb: preview rollback in Recovery | s / x: resume / abandon\nPreview: arrows / PgUp/PgDn scroll; Enter continue\nConfirmation: exact file ID for deletion, then literal yes\nEsc: confirmation -> preview -> retained form -> destination\nForms/search: printable q ? / are text; Backspace edits\nCtrl-U in a form: discard its draft | PgUp/PgDn: scroll\nq outside text / Ctrl-C anywhere: exit, joining worker\nNo automatic replay/rollback, network, staging or commits.\nf: Discover metadata | o: retained manual adoption form\nDiscover: Enter opens selected candidate as an editable draft\nAdoption: Tab/Shift-Tab fields/buttons; Enter advances fields\nt: temporary repository profiles | c: check repository manifest\nv: standalone manifest check (independent scope/profiles)\nProfiles union: base/default/platform/local plus temporary additions\nGit: g exact root | z Status | u Unstaged | s Staged\nr metadata refresh | / search | i details | w View patch content\nPatch: warning + literal view patch, once; Esc drops content\nEsc: return to previous destination and focus.";
+const HELP: &str = "Left/Right or 1/2/3/4/5: Overview / Files / Recovery / Checks / Git\nTab / Shift-Tab: focus Destinations, Content, Actions\nEnter: activate focused control | Space: Actions\n/: search Files/Recovery metadata, or Actions when open | Delete: clear filter\np: choose repository for session | n: create/attach\nr: refresh current observations/check/diagnosis (never execute)\na: preview apply (Overview / Files)\nk / d: keep local file / delete managed link in Files\ni: file metadata details | Actions: enter exact mapping ID\nFile filters are display-only; apply always uses full active scope\nRecovery i/Enter: full IDs and contextual action hints\nb: preview rollback in Recovery | s / x: resume / abandon\nErrors: r retry read/fresh preview; h independent Recovery\nPreview: arrows / PgUp/PgDn scroll; Enter continue\nConfirmation: exact file ID for deletion, then literal yes\nEsc: confirmation -> preview -> retained form -> destination\nForms/search: printable q ? / are text; Backspace edits\nCtrl-U in a form: discard its draft | PgUp/PgDn: scroll\nq outside text / Ctrl-C anywhere: exit, joining worker\nNo automatic replay/rollback, network, staging or commits.\nf: Discover metadata | o: retained manual adoption form\nDiscover: Enter opens selected candidate as an editable draft\nAdoption: Tab/Shift-Tab fields/buttons; Enter advances fields\nt: temporary repository profiles | c: check repository manifest\nv: standalone manifest check (independent scope/profiles)\nProfiles union: base/default/platform/local plus temporary additions\nGit: g exact root | z Status | u Unstaged | s Staged\nr metadata refresh | / search | i details | w View patch content\nPatch: warning + literal view patch, once; Esc drops content\nEsc: return to previous destination and focus.";
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -57,7 +57,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     ))).style(Style::default().fg(Color::Cyan)), rows[0]);
     let body = if let Some(error) = &app.error {
         Some(format!(
-            "{error}\n\nPgUp/PgDn: scroll | Esc: return to retained input/scope"
+            "{error}\n\nPgUp/PgDn: scroll | Esc: retained input/scope\nr: retry read/fresh preview (never replay approval)\nh: inspect all-repository Recovery\nAfter a failed write, r only refreshes; choose an action again for a new preview and confirmation."
         ))
     } else if let Some(preview) = &app.preview {
         frame.render_widget(
@@ -86,17 +86,14 @@ pub fn draw(frame: &mut Frame, app: &App) {
             .map(|result| format!("{result}\nEsc clears result.\n\n"))
             .unwrap_or_default();
         body.push_str(&match app.tab {
-            Tab::Overview => app.data.as_ref().map(|d| d.overview.clone()).unwrap_or_else(|| "Loading...".into()),
+            Tab::Overview => app
+                .data
+                .as_ref()
+                .map(|d| d.overview.clone())
+                .unwrap_or_else(|| "Loading...".into()),
             Tab::Checks => check_text(app),
             Tab::Files | Tab::Git => unreachable!(),
-            Tab::Recovery => app.data.as_ref().map(|d| {
-                let mut text = format!("All repositories: {} transaction(s)\nb rollback | s resume | x abandon\n",d.history.len());
-                if let Some(error) = &d.history_error { text.push_str(&format!("Diagnosis failed: {error}\n")); }
-                let count = usize::from(rows[1].height.saturating_sub(11)).max(1);
-                for (i,row) in d.history.iter().enumerate().skip(app.selected.saturating_sub(count / 2)).take(count) { text.push_str(&format!("{} {} schema {:?} {:?}{}\n",if i == app.selected { ">" } else { " " }, row.transaction_id.get(..8).unwrap_or("invalid"),row.journal_schema,row.phase,if row.blocks_writes() { " BLOCKED" } else { "" })); }
-                if let Some(row) = d.history.get(app.selected) { text.push_str(&format!("\nRepository ID: {}\nTransaction ID: {}\nValidated checkpoints: {}\n{}",row.repository_id,row.transaction_id,row.valid_checkpoints,row.problem.as_deref().unwrap_or("History integrity is not a live-drift check."))); }
-                text
-            }).unwrap_or_default(),
+            Tab::Recovery => super::recovery::text(app, rows[1].height),
         });
         Some(body)
     };
@@ -126,12 +123,18 @@ pub fn draw(frame: &mut Frame, app: &App) {
             })),
         rows[2],
     );
-    let footer = if app.preview.is_some() {
+    let footer = if app.error.is_some() {
+        "r retry read/fresh preview | h Recovery | Esc back\nFailed write: refresh only; never replay approval"
+    } else if app.preview.is_some() {
         "Preview: arrows/PgUp/PgDn scroll | Enter continue\nEsc back (no write) | q quit | Ctrl-C waits for worker"
     } else if app.tab == Tab::Git && app.shell.overlay.is_none() {
         "g root | z Status | u Unstaged | s Staged | r refresh\n/ search | i details | w View patch content | Esc back"
     } else if app.text_entry() {
         "Text: Enter advance/select | Backspace / Ctrl-U edit\nTab/Shift-Tab fields | Esc back | Ctrl-C quit"
+    } else if app.tab == Tab::Recovery && app.shell.overlay.is_none() {
+        "/ search | i/Enter details | b rollback | s resume\nx abandon | r diagnosis | Esc list | Space Actions"
+    } else if app.tab == Tab::Checks && app.shell.overlay.is_none() {
+        "j Diagnostics | m manifest result | c current check\nv standalone | r refresh | Space Actions | ? Help"
     } else if app.tab == Tab::Files && app.shell.overlay.is_none() {
         "/ search | Delete clear | i details | Space Actions\na full-scope apply | f discover | o adopt | q quit"
     } else {
@@ -407,9 +410,15 @@ fn adoption_text(app: &App, height: u16, width: u16) -> String {
 }
 
 fn check_text(app: &App) -> String {
+    if app.showing_diagnostics {
+        return diagnostics_text(app);
+    }
     let mut text =
         "Checks | c: current repository | v: standalone manifest | t: repository profiles\n"
             .to_owned();
+    text.push_str(
+        "j: Diagnostics (host, paths, registry and write blockers) | m: manifest result\n",
+    );
     if let Some((report, standalone)) = &app.check {
         text.push_str(&format!("Scope: {}\nValid manifest: {:?}\nSchema: {}\nEffective profiles: {:?}\nSelected: {} tools, {} files\nTool dependency order: {:?}\n",
             if *standalone { "standalone manifest (independent of file repository)" } else { "current repository" },
@@ -421,6 +430,48 @@ fn check_text(app: &App) -> String {
     } else {
         text.push_str("Choose Current repository or Standalone manifest in Actions.\nStandalone needs no repository, registration or Git. No tool execution or file observation.");
     }
+    text
+}
+
+fn diagnostics_text(app: &App) -> String {
+    let Some(report) = &app.diagnostics else {
+        return "Diagnostics not loaded. j: read host, paths and registry metadata".into();
+    };
+    let host = &report.host;
+    let mut text = format!(
+        "Diagnostics | Dort {} | read-only\nPlatform: {:?} / {:?}\n",
+        env!("CARGO_PKG_VERSION"),
+        host.platform,
+        host.architecture
+    );
+    let paths = format!(
+        "HOME: {:?}\nConfig: {:?}\nState: {:?}\nSession file root: {:?}\nSelection origin: {}\nGit executable: {:?}\nGit session root: {:?} (follows file root: {})\n",
+        host.home,
+        host.config_dir,
+        host.state_dir,
+        app.data
+            .as_ref()
+            .and_then(|d| d.repository.as_ref())
+            .or(app.repository.as_ref()),
+        app.origin,
+        app.git,
+        app.git_view.root,
+        app.git_view.follows_files
+    );
+    match &report.registry {
+        Ok(registry) => text.push_str(&format!("Registered repositories: {}\nRegistered active ID: {:?}\n", registry.registered_repositories, registry.active_repository)),
+        Err(error) => text.push_str(&format!("Configuration unavailable: {error}\nRegistry count and active selection unknown (not zero).\n")),
+    }
+    match &report.history {
+        Ok((count, blockers)) => text.push_str(&format!(
+            "All-repository transactions: {count}\nGlobal write blockers: {blockers}\n"
+        )),
+        Err(error) => text.push_str(&format!(
+            "History unavailable: {error}\nGlobal write safety unknown.\n"
+        )),
+    }
+    text.push_str(&paths);
+    text.push_str("\nNo directories, locks or repairs created. No local variable values or file contents displayed.\nSupported: guarded local file workflows and recovery; structural checks; hardened read-only Git.\nUnavailable: providers, templates, secrets, cloning/sync, network and Git writes. Live files/tools not inspected by Diagnostics.\nGit requires separately installed trusted Git; missing Git does not disable other workflows.\nConfiguration errors: correct the reported configuration privately, then r to retry. Recovery remains independent.\nPgUp/PgDn: scroll | r refresh Diagnostics | m manifest result | Space: About / Help");
     text
 }
 
@@ -513,7 +564,14 @@ fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16) -> String
             text.push_str(&format!("\nFull path: {:?}\nRequested additions: {:?}\nRelative path base: {:?}\nTab/Shift-Tab fields/buttons; Enter advances/activates\nEsc back, retaining draft | Ctrl-U clear path | PgUp/PgDn scroll\nNo repository/registration/Git needed. Local profiles still contribute.\nStructural/dependency/capability check only; live files/tools not inspected.", app.shell.manifest_draft, app.shell.check_profiles, app.launch_directory));
             text
         }
-        Overlay::Help => format!("Dort {} | Help / About\n{HELP}", env!("CARGO_PKG_VERSION")),
+        Overlay::Help => format!(
+            "Dort {} | Help\nRecovery: / search all repositories; i/Enter full IDs and action hints\nChecks: j Diagnostics | m manifest result | Actions: About\n{HELP}",
+            env!("CARGO_PKG_VERSION")
+        ),
+        Overlay::About => format!(
+            "Dort {} | About\nGit-native developer environment manager\nExperimental guarded local workflows. MIT license.\n\nSupported hosts: macOS and Ubuntu, ARM64 / x86_64.\nLocal create/attach, discovery/adoption, link apply/unmanage, guarded recovery, structural checks and read-only Git.\n\nNot implemented: providers/package managers, templates, secrets, cloning/sync, network, Git staging/commit/push.\nPreviews are not authorization. Failed writes may retain partial effects; inspect Recovery. No automatic rollback/repair.\nGit patches require a separate one-view disclosure; not secret-proof.\nBackups are private, not encrypted. Process-exit tests do not prove power-loss safety.\n\nEsc/Enter: return to prior destination and focus | PgUp/PgDn: scroll",
+            env!("CARGO_PKG_VERSION")
+        ),
         Overlay::Actions {
             query,
             selected,
@@ -521,7 +579,34 @@ fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16) -> String
         } => {
             let entries: Vec<_> = shell::actions(query)
                 .iter()
-                .map(|action| action.label().to_owned())
+                .map(|action| {
+                    let eligibility = match action {
+                        shell::Action::Rollback => Some(
+                            app.tab == Tab::Recovery
+                                && app
+                                    .history_selection()
+                                    .is_some_and(super::recovery::rollback),
+                        ),
+                        shell::Action::Resume => Some(
+                            app.tab == Tab::Recovery
+                                && app.history_selection().is_some_and(super::recovery::resume),
+                        ),
+                        shell::Action::Abandon => Some(
+                            app.tab == Tab::Recovery
+                                && app
+                                    .history_selection()
+                                    .is_some_and(super::recovery::abandon),
+                        ),
+                        _ => None,
+                    };
+                    match eligibility {
+                        Some(true) => format!("{} [core preview required]", action.label()),
+                        Some(false) => {
+                            format!("{} [unavailable; inspect diagnosis]", action.label())
+                        }
+                        None => action.label().to_owned(),
+                    }
+                })
                 .collect();
             let mut text = window_rows(
                 if *searching {

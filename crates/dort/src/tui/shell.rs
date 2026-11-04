@@ -88,6 +88,7 @@ pub enum Overlay {
     },
     Form(Form),
     Profiles(Box<ProfilePicker>),
+    About,
     Help,
 }
 #[derive(Clone, Copy)]
@@ -120,6 +121,8 @@ pub enum Action {
     Resume,
     Abandon,
     PreviewOnly,
+    Diagnostics,
+    About,
     Help,
     Quit,
 }
@@ -152,13 +155,15 @@ impl Action {
             Self::Remove => "Delete managed link (select in Files)",
             Self::KeepId => "Keep local file: enter exact mapping ID",
             Self::RemoveId => "Delete managed link: enter exact mapping ID",
-            Self::ClearFilter => "Clear file display filter (does not change apply scope)",
-            Self::Inspect => "Inspect selected file metadata",
+            Self::ClearFilter => "Clear Files / Recovery display filter (not execution scope)",
+            Self::Inspect => "Inspect selected file / recovery transaction details",
             Self::Rollback => "Preview rollback (select in Recovery)",
             Self::Resume => "Preview bootstrap resume (select in Recovery)",
             Self::Abandon => "Preview bootstrap abandon (select in Recovery)",
             Self::PreviewOnly => "Toggle preview-only mode",
-            Self::Help => "Help / About",
+            Self::Diagnostics => "Diagnostics: host, paths and global write blockers",
+            Self::About => "About Dort: version, capabilities and limits",
+            Self::Help => "Help: workflows and safeguards",
             Self::Quit => "Quit (wait for worker)",
         }
     }
@@ -196,6 +201,8 @@ pub fn actions(query: &str) -> Vec<Action> {
         Action::GitStaged,
         Action::GitRefresh,
         Action::GitPatch,
+        Action::Diagnostics,
+        Action::About,
         Action::Help,
         Action::Quit,
     ]
@@ -299,7 +306,7 @@ impl Shell {
             self.scroll = 0;
         }
         match self.overlay.as_mut()? {
-            Overlay::Help => {
+            Overlay::Help | Overlay::About => {
                 if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?')) {
                     self.overlay = None;
                 }

@@ -77,6 +77,8 @@ On macOS, aliases such as `/var` may be symlinks. When supplying explicit state 
 dort --json recovery list
 ```
 
+In the TUI, Recovery (`3`) provides the same independent all-repository diagnosis, searchable metadata and unfiltered global blocker count. Select a row and press `i`/Enter for full IDs and contextual recovery actions; no hash transcription is needed. Checks → Diagnostics (`j`) reports host/registry metadata and labels unavailable configuration/history separately, never displaying local variable values. Errors offer `h` for Recovery and `r` for a read/fresh preview; after a failed write `r` only refreshes, never replays approval. Every new write needs a new preview and confirmation.
+
 This command never creates state, takes a write lock, repairs records or changes files. Exit 4 means at least one incomplete or malformed transaction blocks subsequent new writes, not that recovery has occurred.
 
 Adoption, link apply and unmanage are experimental shared core/CLI/TUI services. Their private journals retain immutable checksummed checkpoints, verified backups and prepared/original objects. Schema 1 remains adoption-specific; schema 2 covers apply/unmanage; dedicated schema 3 covers local bootstrap, without migrating existing records. They require repository/sources, destinations and state on one filesystem with atomic rename support. Ordinary backups are **not encrypted**. Individual operations are atomic; the full multi-path transaction is not.
@@ -89,7 +91,7 @@ If a transaction is incomplete:
 
 1. Stop new write attempts; retain the transaction directory, backups and originals. A failed call may have partially published effects.
 2. Collect `history` / `recovery list` output and the error; review paths before sharing.
-3. For schemas 1/2, inspect `rollback REPOSITORY_ID TRANSACTION_ID --dry-run`. For schema 3, inspect explicit `recovery resume` or `recovery abandon` with both IDs and `--dry-run`. Approve only after reviewing guards/effects; see [syntax](commands.md#explicit-recovery).
+3. In TUI Recovery, inspect the selected row's offered rollback/resume/abandon preview. Preparing bootstraps may only be abandoned before retrying Create/attach with a new transaction; terminal/uncertain bootstrap states cannot resume. Hints never bypass core guards. For schemas 1/2 in the CLI, inspect `rollback REPOSITORY_ID TRANSACTION_ID --dry-run`. For schema 3, inspect explicit `recovery resume` or `recovery abandon` with both IDs and `--dry-run`. Approve only after reviewing guards/effects; see [syntax](commands.md#explicit-recovery).
 4. If guards or integrity checks fail, seek maintainer assistance. Do not delete the journal, remove the lock inode or edit checksums to bypass a blocker. A truncated tail must not be silently discarded.
 
 Rollback is explicit for schemas 1/2 and bound to a fresh guarded preview/journal head, with independent revalidation under the lock. Apply/unmanage watch all selected sources, including no-op mappings, without writing them. Rollback preflights the entire transaction and refuses changed sources (including edits through a live link), destinations, parents, prepared objects, unexpected files in created directories or corrupted backups rather than overwriting user work. A malformed record requires manual diagnosis/repair, not speculative replay. There is no automatic startup rollback or garbage collector.

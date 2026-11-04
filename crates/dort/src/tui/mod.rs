@@ -5,6 +5,9 @@ mod git;
 #[cfg(test)]
 mod git_tests;
 mod inventory;
+mod recovery;
+#[cfg(test)]
+mod recovery_tests;
 mod shell;
 #[cfg(test)]
 mod tests;
@@ -122,6 +125,7 @@ fn launch(
     app: &mut App,
     worker: &mut Option<Worker>,
 ) -> Result<()> {
+    app.retry = task.retry_intent();
     let writing = matches!(task, Task::Execute(_));
     let completed = matches!(task, Task::Refresh) && app.status.starts_with("Operation completed.");
     debug_assert!(worker.is_none(), "only one owned worker at a time");

@@ -279,6 +279,23 @@ def run():
         assert not (home / ".config").exists() and not (home / ".local").exists()
         print("PASS independent standalone check and nonpersistent profile additions")
 
+        with Session([binary, "tui"], env) as session:
+            session.wait(b"loaded.")
+            session.send(b"4j")
+            session.wait(b"Diagnostics | Dort")
+            session.wait(b"Registered repositories: 0")
+            session.send(b"r")
+            session.wait(b"Read-only Diagnostics loaded")
+            session.send(b" /about\r")
+            session.wait(b"| About")
+            session.wait(b"Experimental guarded local workflows")
+            session.send(b"\x1b")
+            session.wait(b"Diagnostics | Dort")
+            session.send(b"q")
+            session.finish()
+        assert not list(home.iterdir()), "Diagnostics/About created local state"
+        print("PASS Diagnostics, About/version and scope-preserving return without state")
+
         candidate = home / ".q?config"
         candidate.write_text("private-body-marker\n")
         with Session([binary, "tui"], env) as session:
@@ -455,6 +472,40 @@ def run():
 
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
+            session.send(b"3/q?/\x1b")
+            session.wait(b"No matches")
+            session.send(b"\x1b[3~")  # clear display filter, no ID transcription
+            session.wait(b"Showing 1")
+            session.send(b"\r")
+            session.wait(b"Repository ID:")
+            session.wait(b"Transaction ID:")
+            session.send(b"b")
+            session.wait(b"Rollback schema 2")
+            session.wait(b"Inverse paths:")
+            session.send(b"\x1b")
+            session.wait(b"Showing 1")
+            assert target.is_symlink(), "Preview/back performed rollback"
+            session.send(b"b")
+            session.wait(b"Rollback schema 2")
+            session.send(b"\r")
+            session.wait(b"Confirm")
+            session.send(b"yes\r")
+            session.wait(b"Observations refreshed.")
+            assert not target.exists() and not target.is_symlink()
+            # A new action needs a new actual preview and confirmation.
+            session.send(b"1a")
+            session.wait(b"Preview (metadata only)")
+            session.send(b"\r")
+            session.wait(b"Confirm")
+            session.send(b"yes\r")
+            session.wait(b"Operation completed.")
+            session.send(b"q")
+            session.finish()
+        assert target.is_symlink() and (repo / "source").read_text() == "ordinary settings\n"
+        print("PASS searchable all-repository history, full IDs and guarded rollback without transcription")
+
+        with Session([binary, "tui"], env) as session:
+            session.wait(b"loaded.")
             session.send(b"2/q?/\x1b")
             session.settle()
             session.wait(b"0 shown")
@@ -521,7 +572,7 @@ def run():
             ) as session:
                 session.finish(code)
             print("PASS terminal cleanup", mode)
-    print("19 PTY cases passed (disposable HOME, no installed Git requirement)")
+    print("21 PTY cases passed (disposable HOME, no installed Git requirement)")
 
 
 if __name__ == "__main__":

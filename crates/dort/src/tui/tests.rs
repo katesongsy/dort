@@ -177,7 +177,7 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     app.key(key(KeyCode::Esc), 80, 24);
     app.details_scroll = 3;
     app.key(key(KeyCode::Char('?')), 80, 24);
-    assert!(render(&app, 100, 40).contains("Help / About"));
+    assert!(render(&app, 100, 40).contains("| Help"));
     app.key(key(KeyCode::PageDown), 80, 24);
     assert_eq!(app.shell.scroll, 4);
     app.key(key(KeyCode::Esc), 80, 24);
@@ -236,7 +236,7 @@ fn busy_shell_cannot_change_scope_or_toggle_mode_or_start_another_job() {
     }
     assert!(app.shell.overlay.is_none() && app.repository.is_none());
     app.key(key(KeyCode::Char('?')), 80, 24);
-    assert!(render(&app, 80, 40).contains("Help / About"));
+    assert!(render(&app, 80, 40).contains("| Help"));
     app.key(key(KeyCode::Esc), 80, 24);
     assert!(app.shell.overlay.is_none());
     assert!(!app.dry_run);

@@ -16,6 +16,23 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Shared doctor metadata; never includes local variable values.
+#[derive(Serialize)]
+pub struct DoctorReport {
+    pub host: HostContext,
+    pub registered_repositories: usize,
+    pub active_repository: Option<String>,
+    pub mode: &'static str,
+}
+pub fn doctor(host: &HostContext, local: &LocalConfig) -> DoctorReport {
+    DoctorReport {
+        host: host.clone(),
+        registered_repositories: local.repositories.len(),
+        active_repository: local.active_repository.clone(),
+        mode: "read-only foundation",
+    }
+}
+
 pub fn requested_profiles(local: &LocalConfig, requested: &[String]) -> Vec<String> {
     local
         .active_profiles

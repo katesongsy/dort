@@ -57,6 +57,11 @@ pub struct App {
     pub candidate_selected: usize,
     pub requested_profiles: Vec<String>,
     pub check: Option<(Box<crate::services::CheckReport>, bool)>,
+    pub diagnostics: Option<super::actions::Diagnostics>,
+    pub showing_diagnostics: bool,
+    pub history_search: super::inventory::Search,
+    pub history_details: bool,
+    pub retry: Option<super::actions::Retry>,
     pub selected: usize,
     pub details_scroll: u16,
     pub preview: Option<Preview>,
@@ -88,6 +93,11 @@ impl App {
             candidate_selected: 0,
             requested_profiles: vec![],
             check: None,
+            diagnostics: None,
+            showing_diagnostics: false,
+            history_search: Default::default(),
+            history_details: false,
+            retry: None,
             selected: 0,
             details_scroll: 0,
             preview: None,
@@ -119,6 +129,9 @@ impl App {
         if self.exit_requested {
             self.quit = true;
         }
+        if result.is_ok() {
+            self.retry = None;
+        }
         match result {
             Err(error) => {
                 self.git_view.failed();
@@ -132,7 +145,47 @@ impl App {
                         "Read failed: {error}\nNo operation was approved by this read. Esc returns to retained input/scope."
                     )
                 };
+                self.preview = None;
+                self.confirmation = None;
+                if writing {
+                    self.retry = None;
+                }
                 self.error = Some(self.status.clone());
+            }
+            Ok(Output::History { rows, error }) => {
+                let identity = self
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.history.get(self.selected))
+                    .map(|r| (r.repository_id.clone(), r.transaction_id.clone()));
+                let data = self.data.get_or_insert_with(Default::default);
+                data.history = rows;
+                data.history_error = error;
+                let position = identity.as_ref().and_then(|(r, t)| {
+                    data.history
+                        .iter()
+                        .position(|row| &row.repository_id == r && &row.transaction_id == t)
+                });
+                if data.history_error.is_some() {
+                    self.status = "Recovery diagnosis unavailable; global write safety unknown. r retries read-only diagnosis.".into();
+                } else if identity.is_some() && position.is_none() {
+                    self.status =
+                        "Selected transaction disappeared; showing nearest remaining row.".into();
+                } else {
+                    self.status = "All-repository diagnosis refreshed; journal integrity is not a live-drift check.".into();
+                }
+                self.selected = position
+                    .unwrap_or(self.selected)
+                    .min(data.history.len().saturating_sub(1));
+                self.clamp_history_selection();
+            }
+            Ok(Output::Diagnostics(report)) => {
+                self.diagnostics = Some(report);
+                self.showing_diagnostics = true;
+                self.tab = Tab::Checks;
+                self.shell.overlay = None;
+                self.details_scroll = 0;
+                self.status = "Read-only Diagnostics loaded; unavailable observations are labeled, never repaired.".into();
             }
             Ok(Output::Git(report)) => {
                 self.git_view.accept(
@@ -152,6 +205,7 @@ impl App {
             }
             Ok(Output::Checked { report, standalone }) => {
                 self.check = Some((report, standalone));
+                self.showing_diagnostics = false;
                 self.tab = Tab::Checks;
                 self.shell.overlay = None;
                 self.details_scroll = 0;
@@ -311,6 +365,7 @@ impl App {
             if key.code == KeyCode::Esc {
                 if self.error.is_some() {
                     self.error = None;
+                    self.retry = None;
                 } else if self.preview.is_some() {
                     self.preview = None;
                 } else if self.shell.overlay.is_some() {
@@ -318,6 +373,8 @@ impl App {
                 } else {
                     self.inventory.search_mut(self.discovering).editing = false;
                     self.inventory.details = false;
+                    self.history_search.editing = false;
+                    self.history_details = false;
                 }
             }
             self.status =
@@ -357,8 +414,33 @@ impl App {
         }
         if self.error.is_some() {
             match key.code {
+                KeyCode::Char('h') => {
+                    self.error = None;
+                    self.preview = None;
+                    self.confirmation = None;
+                    self.retry = None;
+                    self.tab = Tab::Recovery;
+                    self.shell.overlay = None;
+                    self.shell.focus = Focus::Content;
+                    self.details_scroll = 0;
+                    return Some(Task::History);
+                }
+                KeyCode::Char('r') => {
+                    self.error = None;
+                    self.preview = None;
+                    self.confirmation = None;
+                    self.details_scroll = 0;
+                    if let Some(intent) = self.retry.take() {
+                        return Some(intent.task());
+                    }
+                    if self.tab == Tab::Git {
+                        return self.git_task();
+                    }
+                    return Some(self.refresh_task());
+                }
                 KeyCode::Esc => {
                     self.error = None;
+                    self.retry = None;
                     self.details_scroll = 0;
                 }
                 KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(4),
@@ -455,6 +537,12 @@ impl App {
         }
         // Any outer-shell navigation/action drops a disclosed patch reference.
         self.git_view.discard_patch();
+        if self.tab == Tab::Recovery && self.history_search.editing {
+            self.history_search.key(key);
+            self.clamp_history_selection();
+            self.details_scroll = 0;
+            return None;
+        }
         if self.tab == Tab::Files && self.inventory.search(self.discovering).editing {
             self.inventory.search_mut(self.discovering).key(key);
             self.clamp_file_selection();
@@ -489,6 +577,7 @@ impl App {
             }
             KeyCode::Esc => {
                 self.inventory.details = false;
+                self.history_details = false;
                 self.shell.focus = Focus::Content;
                 self.result = None;
             }
@@ -496,7 +585,29 @@ impl App {
             KeyCode::Char('/') if self.tab == Tab::Files && self.shell.focus == Focus::Content => {
                 self.inventory.search_mut(self.discovering).editing = true
             }
+            KeyCode::Char('/')
+                if self.tab == Tab::Recovery && self.shell.focus == Focus::Content =>
+            {
+                self.history_search.editing = true
+            }
             KeyCode::Char('/') => self.shell.open_actions(true),
+            KeyCode::Delete if self.tab == Tab::Recovery => {
+                self.history_search.query.clear();
+                self.clamp_history_selection();
+            }
+            KeyCode::Char('i') | KeyCode::Enter if self.tab == Tab::Recovery => {
+                self.history_details = true;
+                self.details_scroll = 0;
+            }
+            KeyCode::Down if self.tab == Tab::Recovery => self.move_history_selection(false),
+            KeyCode::Up if self.tab == Tab::Recovery => self.move_history_selection(true),
+            KeyCode::Char('j') if self.tab == Tab::Checks => {
+                return self.activate(Action::Diagnostics);
+            }
+            KeyCode::Char('m') if self.tab == Tab::Checks => {
+                self.showing_diagnostics = false;
+                self.details_scroll = 0;
+            }
             KeyCode::Delete if self.tab == Tab::Files => return self.activate(Action::ClearFilter),
             KeyCode::Char('i') if self.tab == Tab::Files => return self.activate(Action::Inspect),
             KeyCode::Char('p') => return self.activate(Action::Choose),
@@ -554,6 +665,7 @@ impl App {
             _ => (),
         }
         self.clamp_file_selection();
+        self.clamp_history_selection();
         None
     }
     pub fn resize(&mut self, width: u16, height: u16) {
@@ -593,6 +705,7 @@ impl App {
             .unwrap_or(self.selected)
             .min(self.row_count().saturating_sub(1));
         self.clamp_file_selection();
+        self.clamp_history_selection();
     }
     fn intent(&mut self, intent: Intent) -> Option<Task> {
         match intent {
@@ -727,10 +840,19 @@ impl App {
                 self.shell.unmanage_focused = 0;
                 self.shell.overlay = Some(Overlay::Form(if matches!(action, Action::KeepId) { Form::KeepId } else { Form::RemoveId }));
             }
+            Action::ClearFilter if self.tab == Tab::Recovery => {
+                self.history_search.query.clear();
+                self.clamp_history_selection();
+                self.status = "Recovery display filter cleared; global blockers were never hidden.".into();
+            }
             Action::ClearFilter => {
                 self.inventory.search_mut(self.discovering).query.clear();
                 self.clamp_file_selection();
                 self.status = "File display filter cleared; apply scope was never narrowed.".into();
+            }
+            Action::Inspect if self.tab == Tab::Recovery => {
+                self.history_details = true;
+                self.details_scroll = 0;
             }
             Action::Inspect if self.tab == Tab::Files => {
                 self.inventory.details = true;
@@ -749,6 +871,8 @@ impl App {
                 if self.preview_only_locked { self.status = "--dry-run locks this session to preview-only.".into(); }
                 else { self.dry_run = !self.dry_run; self.status = "Preview-only mode changed; approval always requires a fresh preview.".into(); }
             }
+            Action::Diagnostics => { self.showing_diagnostics = true; self.tab = Tab::Checks; return Some(Task::Diagnostics); }
+            Action::About => self.shell.overlay = Some(Overlay::About),
             Action::Help => self.shell.overlay = Some(Overlay::Help),
             Action::Quit => self.quit = true,
             Action::Apply if self.data.as_ref().and_then(|d| d.repository.as_ref()).is_some() => return Some(Task::Files(Request::Apply)),
@@ -765,7 +889,17 @@ impl App {
                 self.status = "Choose a managed mapping in Files first.".into();
             }
             Action::Rollback | Action::Resume | Action::Abandon if self.tab == Tab::Recovery => {
-                if let Some(row) = self.data.as_ref().and_then(|data| data.history.get(self.selected)) {
+                if let Some(row) = self.history_selection() {
+                    let eligible = match action {
+                        Action::Rollback => super::recovery::rollback(row),
+                        Action::Resume => super::recovery::resume(row),
+                        _ => super::recovery::abandon(row),
+                    };
+                    if !eligible {
+                        self.history_details = true;
+                        self.status = "Action unavailable for this diagnosis. Inspect details; no automatic recovery. Refresh if history changed.".into();
+                        return None;
+                    }
                     let (r, t) = (row.repository_id.clone(), row.transaction_id.clone());
                     return Some(match action {
                         Action::Rollback => Task::Rollback(r, t),
@@ -778,11 +912,13 @@ impl App {
             _ => self.status = "Action unavailable: choose a repository, file in Files, or transaction in Recovery as labeled.".into(),
         }
         self.clamp_file_selection();
+        self.clamp_history_selection();
         None
     }
     pub fn text_entry(&self) -> bool {
         self.shell.text_entry()
             || (self.tab == Tab::Git && self.git_view.text_entry())
+            || (self.tab == Tab::Recovery && self.history_search.editing)
             || (self.shell.overlay.is_none()
                 && self.tab == Tab::Files
                 && self.inventory.search(self.discovering).editing)
@@ -860,6 +996,54 @@ impl App {
             } else {
                 self.selected = index;
             }
+        }
+    }
+    pub fn visible_history_rows(&self) -> Vec<usize> {
+        self.data
+            .as_ref()
+            .filter(|d| d.history_error.is_none())
+            .map(|d| {
+                d.history
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, row)| super::recovery::matches(&self.history_search, row))
+                    .map(|(i, _)| i)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+    pub fn history_selection(&self) -> Option<&dort_core::journal::Diagnosis> {
+        if !self.visible_history_rows().contains(&self.selected) {
+            return None;
+        }
+        self.data.as_ref()?.history.get(self.selected)
+    }
+    fn clamp_history_selection(&mut self) {
+        if self.tab != Tab::Recovery {
+            return;
+        }
+        let visible = self.visible_history_rows();
+        if !visible.contains(&self.selected)
+            && let Some(index) = visible.iter().min_by_key(|&&i| i.abs_diff(self.selected))
+        {
+            self.selected = *index;
+        }
+    }
+    fn move_history_selection(&mut self, backwards: bool) {
+        let visible = self.visible_history_rows();
+        let position = visible
+            .iter()
+            .position(|&i| i == self.selected)
+            .unwrap_or(0);
+        let next = if backwards {
+            position.saturating_sub(1)
+        } else {
+            position
+                .saturating_add(1)
+                .min(visible.len().saturating_sub(1))
+        };
+        if let Some(&index) = visible.get(next) {
+            self.selected = index;
         }
     }
     fn reset_repository_scope(&mut self) {
@@ -941,6 +1125,10 @@ impl App {
     fn refresh_task(&self) -> Task {
         if self.tab == Tab::Files && self.discovering {
             Task::Discover
+        } else if self.tab == Tab::Recovery {
+            Task::History
+        } else if self.tab == Tab::Checks && self.showing_diagnostics {
+            Task::Diagnostics
         } else if self.tab == Tab::Checks {
             if let Some((report, standalone)) = &self.check {
                 Task::Check {

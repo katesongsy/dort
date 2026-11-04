@@ -17,7 +17,7 @@ Other commands require a supported host and HOME. Terminal invocation without a 
 
 ## Interactive interface
 
-The interface provides Overview/Welcome, guided local create/attach, session repository/profile selection, Files discovery/adoption/apply/unmanage, structural Checks, all-repository Recovery and read-only Git inspection. Space opens searchable Actions; `?` opens Help/About.
+The interface provides Overview/Welcome, guided local create/attach, session repository/profile selection, Files discovery/adoption/apply/unmanage, structural Checks, all-repository Recovery and read-only Git inspection. Space opens searchable Actions; `?` opens Help, and Actions → About shows the build version and capability limits.
 
 ```sh
 dort                       # terminal only; same as dort tui
@@ -31,19 +31,22 @@ All three standard streams must be terminals. TUI entry rejects `--json`, `--yes
 | --- | --- |
 | Left / Right, `1`, `2`, `3`, `4`, `5` | Change destination: Overview, Files, Recovery, Checks, Git. |
 | Tab / Shift-Tab | Cycle focus: Content, Actions, Destinations. Enter activates the focused control. |
-| Space, `/` | Space opens Actions; `/` searches Actions there. In Files/Git content, `/` searches displayed metadata. Esc leaves search, retaining its filter; Delete outside text clears it. |
-| `?` | Help/About; Esc returns to the prior destination/focus. |
+| Space, `/` | Space opens Actions; `/` searches Actions there. In Files/Git/Recovery content, `/` searches displayed metadata. Esc leaves search, retaining its filter; Delete outside text clears it. |
+| `?` | Help; Esc returns to the prior destination/focus. About/version is in Actions. |
 | `p`, `n` | Choose repository (session only), create/attach local repository. |
 | Up / Down | Select an active file or retained transaction. |
 | PgUp / PgDn | Scroll view/form details; in previews, scroll the report. |
 | `i`, Enter (managed Files) | Inspect selected file metadata. Wide layouts show list/details together; compact layouts use Esc to return to the list. |
-| `r` | Refresh read-only observations/history, or the current Git metadata comparison (never a patch). |
+| `r` | Refresh observations/current check/Diagnostics, independent all-repository history in Recovery, or Git metadata (never a patch). In an error, retry the failed read/fresh preview; after a failed write, refresh only. |
 | `g`, `z`, `u`, `s` (Git content) | Choose exact Git-only root; Status; Unstaged; Staged. |
 | `w` (Git content) | View patch content: warning then literal `view patch` for one whole-comparison read. |
 | `i`, Enter (Git content) | Inspect selected metadata details; Esc returns to list. |
 | `f`, `o` | Discover file metadata; open retained manual adoption form. Enter on a discovery candidate opens an editable draft. |
 | `t` | Temporary repository profile additions; cannot remove mandatory contributors. |
 | `c`, `v` | Check current repository manifest; open standalone manifest check form. |
+| `j`, `m` (Checks) | Read host/registry Diagnostics; return to the manifest result. |
+| `i`, Enter (Recovery content) | Full transaction IDs, schema/phase, integrity, checkpoint count and contextual action hints. Esc returns to the list. |
+| `h` (error) | Open and refresh independent all-repository Recovery; no repair or replay. |
 | `a` | Preview apply (Overview / Files). |
 | `k` / `d` | Preview unmanage-and-keep / delete managed link for the selected file. Both retain its repository source. |
 | `b` | Preview guarded schema-1/2 rollback of the selected transaction. |
@@ -62,7 +65,7 @@ Review the full scrollable preview before Enter. Type literal `yes` and Enter to
 
 **Discover/adopt:** `f` opens bounded metadata candidates, with kind/link/eligibility hints, warnings and the heuristic notice. A selected repository protects its containers; an invalid selected root is an error, not unscoped discovery. Enter on a candidate fills editable TARGET/ID/SOURCE suggestions; `o` opens the retained manual draft. Tab/Shift-Tab selects fields or buttons, and Enter on Review requests a fresh read-only preview. SOURCE is repository-relative. The new link mapping belongs to `base`; requested profiles do not change its membership. Choose/Create/attach buttons preserve all adoption input and return after selection/attachment. Esc/errors retain drafts in memory; Discard clears the draft. Core path/kind/sensitivity/collision refusals remain authoritative. No candidate/file contents are displayed: review content privately before adoption.
 
-**Managed inventory:** `2` shows the active mappings with source/destination kinds, drift and blockers in details. Invalid observation is reported as unavailable, never as a healthy empty inventory. `/` filters display only; `a` always previews the complete active-profile scope, even with no displayed matches. Esc leaves search without clearing the filter; Delete or Actions → Clear file display filter removes it. Refresh preserves selected identity where present. Actions → Keep local file: enter exact mapping ID / Delete managed link: enter exact mapping ID accepts a valid ID even outside the current filter. Enter advances the ID field to Review; only the subsequent preview can proceed to approval. Both modes retain repository sources; deletion still needs exact-ID acknowledgement and literal yes.
+**Managed inventory:** `2` shows the active mappings with source/destination kinds, drift and blockers in details. Invalid observation is reported as unavailable, never as a healthy empty inventory. `/` filters display only; `a` always previews the complete active-profile scope, even with no displayed matches. Esc leaves search without clearing the filter; Delete or Actions → Clear Files / Recovery display filter removes it. Refresh preserves selected identity where present. Actions → Keep local file: enter exact mapping ID / Delete managed link: enter exact mapping ID accepts a valid ID even outside the current filter. Enter advances the ID field to Review; only the subsequent preview can proceed to approval. Both modes retain repository sources; deletion still needs exact-ID acknowledgement and literal yes.
 
 **Git:** `5` opens metadata inspection. Its root defaults to the current file repository; `g` accepts an independent exact non-bare working-tree root. Relative paths resolve from the launch directory without tilde/environment expansion. This requires no manifest/registration and never changes file scope or configuration. Actions → Git: use current file repository root restores the default. `z` reads Status (branch headers, kind/XY, names and rename originals); `u` reads tracked worktree-vs-index metadata; `s` reads index-vs-HEAD metadata, including unborn repositories. `/` filters metadata only; Delete clears the filter, Up/Down selects, `i`/Enter shows full details, PgUp/PgDn scrolls. Refresh preserves selected path where present. Empty comparisons and unavailable reads are distinct. Missing Git requires installing it separately and restarting Dort; path/read errors retain the root draft. No staging, commit, push or other Git mutation exists.
 
@@ -71,6 +74,12 @@ Review the full scrollable preview before Enter. Type literal `yes` and Enter to
 **Profiles:** `t` opens known repository profiles, labeling mandatory base/default/platform/local contributors and optional session additions. Up/Down selects; Space/Enter toggles optional names; select Apply and Enter to validate the new union. Esc leaves scope unchanged. Mandatory contributors cannot be unchecked. Profile additions affect complete inventory/plans/repository checks and never persist; choosing a repository resets these additions.
 
 **Checks:** `c` checks the current repository manifest. `v` opens an independent standalone path draft; enter a path, then activate Check. Its Temporary profiles button uses separate draft additions, still unioned with local/base/default/platform profiles. Standalone checks require no repository, registration or Git; relative paths resolve from the launch directory. Results include schema, effective profiles, selected counts, dependency order and unsupported capabilities, explicitly without live-file/tool inspection. Errors retain the path/additions; Discard clears them.
+
+**Recovery:** `3` shows retained transactions across **all repositories**, independent of file selection/configuration. `/` searches metadata; Delete or Actions → Clear Files / Recovery display filter clears the display filter. The global write-blocker count is never filtered away. A failed diagnosis is unavailable, not a healthy empty history. Up/Down selects; `i`/Enter shows full repository/transaction IDs, phase, schema, checkpoint count and integrity details without hash transcription. Use PgUp/PgDn for long details. `b` previews schema-1/2 rollback; `s`/`x` previews schema-3 resume/abandon only when the diagnosis offers that action. Hints are not permission: the core preview independently checks current paths/artifacts, and completed history is not proof rollback is safe. Schema-1 rollback withdraws the newly adopted source into private transaction storage; schema-2 rollback leaves repository sources unchanged. Backups/private artifacts are retained, not garbage-collected. Preparing bootstraps cannot resume: explicitly abandon, then start a new Create/attach transaction. Terminal or uncertain bootstrap histories cannot resume. Abandon retains published repositories, registration and private artifacts; it does not undo publication. Review the real preview and type literal `yes` only when its effects are intended. No automatic recovery or repair occurs.
+
+**Diagnostics/About:** in Checks (`4`), `j` reads host/architecture, HOME/config/state paths, registered count/active ID, session root, Git availability and global write blockers. Configuration and history availability are reported independently; no local variable values or file contents appear. Diagnostics never installs tools or repairs configuration. `r` refreshes this report; `m` returns to the retained manifest result. Actions → About shows Dort's build version, safeguards and unsupported capabilities; Esc returns to the prior destination/focus.
+
+**Errors/retry:** Esc returns to retained input/scope. `r` retries read/preview intent against current state, never replays a consumed approval or disclosed patch. After a failed write, `r` only refreshes observations; `h` opens all-repository Recovery. Retain artifacts and inspect possible partial effects. Choose an action again for a new preview and a new confirmation; do not assume a failed call made no changes.
 
 Actions includes a session preview-only switch; it cannot change mode during a preview/worker. An entry `--dry-run` locks the entire session to preview-only and cannot be switched off.
 

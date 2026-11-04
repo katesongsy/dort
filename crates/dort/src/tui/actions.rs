@@ -13,6 +13,7 @@ use dort_core::{
 };
 use std::path::{Path, PathBuf};
 
+#[derive(Default)]
 pub struct Data {
     pub overview: String,
     pub repository: Option<PathBuf>,
@@ -58,7 +59,15 @@ pub fn load_scoped(
         "Experimental local-file manager\nHost: {:?} / {:?}\nWrite blockers: {}\n",
         host.platform,
         host.architecture,
-        history.iter().filter(|d| d.blocks_writes()).count()
+        if history_error.is_some() {
+            "unknown (diagnosis unavailable)".into()
+        } else {
+            history
+                .iter()
+                .filter(|d| d.blocks_writes())
+                .count()
+                .to_string()
+        }
     );
     if let Some(error) = &history_error {
         overview.push_str(&format!("History diagnosis failed: {error}\n"));
@@ -189,7 +198,7 @@ impl Pending {
                 preview.report.effects.join("\n- ")
             ),
             Self::Rollback(preview) => format!(
-                "Rollback schema {}\nRepository ID: {}\nTransaction ID: {}\nJournal head: {}\nInverse paths:\n{}\nLater edits can block execution; retained sources/backups are not deleted.",
+                "Rollback schema {}\nRepository ID: {}\nTransaction ID: {}\nJournal head: {}\nInverse paths:\n{}\nLater edits can block execution. Schema-1 rollback withdraws its new source into private transaction storage; schema-2 leaves repository sources unchanged. Private backups/artifacts are retained; no garbage collection.",
                 preview.journal_schema,
                 preview.repository_id,
                 preview.transaction_id,
@@ -202,7 +211,7 @@ impl Pending {
                     .join("\n")
             ),
             Self::Bootstrap(preview) => format!(
-                "{} bootstrap\nRepository: {:?}\nRepository ID: {}\nTransaction ID: {}\nRepository published: {}\nRegistration published: {}\nEffects:\n- {}\nAbandon retains published repositories, registration and private artifacts.",
+                "{} bootstrap\nRepository: {:?}\nRepository ID: {}\nTransaction ID: {}\nJournal head: {}\nRepository published: {}\nRegistration published: {}\nEffects:\n- {}\nAbandon retains published repositories, registration and private artifacts. It does not undo publication.\nResume publishes only the exact retained preparation; later changes can block execution. Preparing transactions must be abandoned before retrying Create/attach with a new transaction. No network or live dotfile changes.",
                 match preview.action {
                     bootstrap::RecoveryAction::Resume => "Resume",
                     bootstrap::RecoveryAction::Abandon => "Abandon",
@@ -210,6 +219,7 @@ impl Pending {
                 preview.repository,
                 preview.repository_id,
                 preview.transaction_id,
+                preview.journal_head_sha256,
                 preview.repository_published,
                 preview.registration_published,
                 preview.effects.join("\n- ")
@@ -296,7 +306,79 @@ impl Approved {
     }
 }
 
+pub struct Diagnostics {
+    pub host: HostContext,
+    pub registry: std::result::Result<crate::services::DoctorReport, String>,
+    pub history: std::result::Result<(usize, usize), String>,
+}
+
+/// Retain intent only, never an approval or an executable preview.
+#[derive(Clone)]
+pub enum Retry {
+    Check(Option<PathBuf>, Vec<String>),
+    Profiles(Option<PathBuf>, Vec<String>, bool),
+    Discover,
+    Select(Option<PathBuf>),
+    History,
+    Diagnostics,
+    Refresh,
+    Files(Request),
+    Init(PathBuf, PathBuf),
+    Rollback(String, String),
+    Bootstrap(String, String, bootstrap::RecoveryAction),
+}
+impl Retry {
+    pub fn task(self) -> Task {
+        match self {
+            Self::Check(manifest, requested) => Task::Check {
+                manifest,
+                requested,
+            },
+            Self::Profiles(manifest, requested, apply) => Task::Profiles {
+                manifest,
+                requested,
+                apply,
+            },
+            Self::Discover => Task::Discover,
+            Self::Select(root) => Task::Select(root),
+            Self::History => Task::History,
+            Self::Diagnostics => Task::Diagnostics,
+            Self::Refresh => Task::Refresh,
+            Self::Files(request) => Task::Files(request),
+            Self::Init(root, git) => Task::Init { root, git },
+            Self::Rollback(r, t) => Task::Rollback(r, t),
+            Self::Bootstrap(r, t, action) => Task::Bootstrap(r, t, action),
+        }
+    }
+}
+impl Task {
+    pub fn retry_intent(&self) -> Option<Retry> {
+        match self {
+            Self::Check {
+                manifest,
+                requested,
+            } => Some(Retry::Check(manifest.clone(), requested.clone())),
+            Self::Profiles {
+                manifest,
+                requested,
+                apply,
+            } => Some(Retry::Profiles(manifest.clone(), requested.clone(), *apply)),
+            Self::Discover => Some(Retry::Discover),
+            Self::Select(root) => Some(Retry::Select(root.clone())),
+            Self::History => Some(Retry::History),
+            Self::Diagnostics => Some(Retry::Diagnostics),
+            Self::Refresh => Some(Retry::Refresh),
+            Self::Files(request) => Some(Retry::Files(request.clone())),
+            Self::Init { root, git } => Some(Retry::Init(root.clone(), git.clone())),
+            Self::Rollback(r, t) => Some(Retry::Rollback(r.clone(), t.clone())),
+            Self::Bootstrap(r, t, action) => Some(Retry::Bootstrap(r.clone(), t.clone(), *action)),
+            _ => None,
+        }
+    }
+}
 pub enum Task {
+    History,
+    Diagnostics,
     Git(super::git::Read),
     Refresh,
     Discover,
@@ -320,6 +402,11 @@ pub enum Task {
     Execute(Approved),
 }
 pub enum Output {
+    History {
+        rows: Vec<journal::Diagnosis>,
+        error: Option<String>,
+    },
+    Diagnostics(Diagnostics),
     Git(super::git::Report),
     Data(Data),
     Discovery(crate::services::Discovery),
@@ -354,6 +441,27 @@ pub fn perform_scoped(
     observer: impl FnMut(&Event) -> Result<()>,
 ) -> Result<Output> {
     match task {
+        Task::History => Ok(match journal::diagnose(host) {
+            Ok(rows) => Output::History { rows, error: None },
+            Err(error) => Output::History {
+                rows: vec![],
+                error: Some(diagnostic(&error)),
+            },
+        }),
+        Task::Diagnostics => Ok(Output::Diagnostics(Diagnostics {
+            host: host.clone(),
+            registry: LocalConfig::load(host)
+                .map(|local| crate::services::doctor(host, &local))
+                .map_err(|e| diagnostic(&e)),
+            history: journal::diagnose(host)
+                .map(|rows| {
+                    (
+                        rows.len(),
+                        rows.iter().filter(|r| r.blocks_writes()).count(),
+                    )
+                })
+                .map_err(|e| diagnostic(&e)),
+        })),
         Task::Git(read) => read.perform().map(Output::Git),
         Task::Refresh => load_scoped(host, repository.as_deref(), requested).map(Output::Data),
         Task::Check {

@@ -334,6 +334,7 @@ fn onboarding_app(fixture: &Fixture, dry_run: bool) -> App {
     app
 }
 fn run_task(app: &mut App, fixture: &Fixture, task: Task) -> Option<Task> {
+    app.retry = task.retry_intent();
     app.start(matches!(task, Task::Execute(_)));
     let result = actions::perform_scoped(
         task,
@@ -1193,4 +1194,306 @@ fn malformed_configuration_does_not_hide_independent_history() {
     assert!(data.overview.contains("Configuration unavailable:"));
     assert!(data.history_error.is_none());
     assert!(data.known_roots.is_empty());
+}
+
+#[test]
+fn diagnostics_share_doctor_metadata_and_keep_configuration_failure_content_free() {
+    let fixture = Fixture::new(false);
+    let mut app = onboarding_app(&fixture, false);
+    app.repository = Some(fixture.root.clone());
+    key(&mut app, KeyCode::Char('4'));
+    let task = key(&mut app, KeyCode::Char('j')).unwrap();
+    run_task(&mut app, &fixture, task);
+    let report = app.diagnostics.as_ref().unwrap();
+    let local = dort_core::local::LocalConfig::load(&fixture.host).unwrap();
+    assert_eq!(
+        serde_json::to_value(report.registry.as_ref().unwrap()).unwrap(),
+        serde_json::to_value(crate::services::doctor(&fixture.host, &local)).unwrap()
+    );
+    assert_eq!(*report.history.as_ref().unwrap(), (0, 0));
+    assert!(!fixture.host.state_dir.exists() && !fixture.host.config_dir.exists());
+    let text = super::tests::render(&app, 140, 45);
+    assert!(text.contains("Diagnostics | Dort") && text.contains("Global write blockers: 0"));
+    assert!(text.contains("Session file root:") && text.contains("Live files/tools not inspected"));
+    let task = key(&mut app, KeyCode::Char('r')).unwrap();
+    assert!(matches!(task, Task::Diagnostics));
+    run_task(&mut app, &fixture, task);
+    fs::create_dir_all(&fixture.host.config_dir).unwrap();
+    fs::write(
+        fixture.host.local_config_path(),
+        "secret='private-config-body-marker' invalid",
+    )
+    .unwrap();
+    run_task(&mut app, &fixture, Task::Diagnostics);
+    let text = super::tests::render(&app, 140, 45);
+    assert!(text.contains("Configuration unavailable:"));
+    assert!(text.contains("unknown (not zero)"));
+    assert!(!text.contains("private-config-body-marker"));
+    assert_eq!(
+        *app.diagnostics.as_ref().unwrap().history.as_ref().unwrap(),
+        (0, 0)
+    );
+    assert!(!fixture.host.state_dir.exists());
+    key(&mut app, KeyCode::Char('m'));
+    assert!(!app.showing_diagnostics);
+}
+
+#[test]
+fn all_repository_recovery_survives_bad_configuration_and_selected_root() {
+    let fixture = Fixture::new(true);
+    let other = fixture.root.parent().unwrap().join("other-repository");
+    fs::create_dir_all(other.join(".git")).unwrap();
+    fs::write(other.join("source"), "ordinary other settings\n").unwrap();
+    fs::write(
+        other.join("dort.toml"),
+        "schema=1\n[[files]]\nid='other'\nsource='source'\ntarget='~/.other'\nmode='link'\n",
+    )
+    .unwrap();
+    let lock = WriterLock::acquire(&fixture.host).unwrap();
+    RepositoryRegistry::register(&fixture.host, &lock, &other).unwrap();
+    drop(lock);
+    for root in [&fixture.root, &other] {
+        let mut app = App::new(false);
+        app.repository = Some(root.clone());
+        run_task(&mut app, &fixture, Task::Files(Request::Apply));
+        let task = approve(&mut app);
+        run_task(&mut app, &fixture, task);
+    }
+    fs::write(fixture.host.local_config_path(), "invalid config").unwrap();
+    let mut app = App::new(false);
+    app.repository = Some(fixture.root.join("missing"));
+    app.tab = super::app::Tab::Recovery;
+    run_task(&mut app, &fixture, Task::History);
+    let rows = dort_core::journal::diagnose(&fixture.host).unwrap();
+    assert_eq!(app.data.as_ref().unwrap().history.len(), 2);
+    assert_eq!(rows.len(), 2);
+    assert_ne!(rows[0].repository_id, rows[1].repository_id);
+    key(&mut app, KeyCode::Char('/'));
+    type_text(&mut app, &rows[1].transaction_id);
+    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(
+        app.history_selection().unwrap().transaction_id,
+        rows[1].transaction_id
+    );
+    assert!(super::tests::render(&app, 140, 40).contains(&rows[1].repository_id));
+    assert!(
+        matches!(key(&mut app, KeyCode::Char('b')), Some(Task::Rollback(r,t)) if r == rows[1].repository_id && t == rows[1].transaction_id)
+    );
+}
+
+#[test]
+fn recovery_lock_failure_needs_new_preview_and_confirmation_not_replayed_approval() {
+    let fixture = Fixture::new(true);
+    let mut app = App::new(false);
+    app.repository = Some(fixture.root.clone());
+    run_task(&mut app, &fixture, Task::Files(Request::Apply));
+    let task = approve(&mut app);
+    run_task(&mut app, &fixture, task);
+    app.tab = super::app::Tab::Recovery;
+    run_task(&mut app, &fixture, Task::History);
+    key(&mut app, KeyCode::Enter);
+    let task = key(&mut app, KeyCode::Char('b')).unwrap();
+    run_task(&mut app, &fixture, task);
+    let text = &app.preview.as_ref().unwrap().text;
+    assert!(text.contains("Journal head:") && text.contains("Inverse paths:"));
+    let task = approve(&mut app);
+    let lock = WriterLock::acquire(&fixture.host).unwrap();
+    run_task(&mut app, &fixture, task);
+    assert!(app.error.as_ref().unwrap().contains("partial effects"));
+    assert!(app.preview.is_none() && app.confirmation.is_none() && app.retry.is_none());
+    assert!(fixture.host.home.join(".editor").is_symlink());
+    drop(lock);
+    let task = key(&mut app, KeyCode::Char('h')).unwrap();
+    run_task(&mut app, &fixture, task);
+    let task = key(&mut app, KeyCode::Char('b')).unwrap();
+    run_task(&mut app, &fixture, task);
+    assert!(app.preview.is_some() && app.confirmation.is_none());
+    let task = approve(&mut app);
+    run_task(&mut app, &fixture, task);
+    assert!(!fixture.host.home.join(".editor").exists());
+    assert!(fixture.root.join("source").exists());
+    assert!(!dort_core::journal::diagnose(&fixture.host).unwrap()[0].blocks_writes());
+}
+
+#[test]
+fn preview_read_retry_keeps_intent_but_reads_new_state_before_any_approval() {
+    let fixture = Fixture::new(true);
+    let mut app = App::new(false);
+    app.repository = Some(fixture.root.clone());
+    let old = fs::read(fixture.root.join("dort.toml")).unwrap();
+    fs::write(
+        fixture.root.join("dort.toml"),
+        "private-value-marker invalid",
+    )
+    .unwrap();
+    run_task(&mut app, &fixture, Task::Files(Request::Apply));
+    assert!(app.error.is_some());
+    assert!(!super::tests::render(&app, 120, 35).contains("private-value-marker"));
+    fs::write(fixture.root.join("dort.toml"), old).unwrap();
+    let task = key(&mut app, KeyCode::Char('r')).unwrap();
+    assert!(matches!(task, Task::Files(Request::Apply)));
+    run_task(&mut app, &fixture, task);
+    assert!(app.preview.is_some() && app.confirmation.is_none());
+    assert!(!fixture.host.home.join(".editor").exists());
+    assert!(
+        dort_core::journal::diagnose(&fixture.host)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn bootstrap_running_recovery_uses_contextual_preview_and_retains_published_artifacts() {
+    use dort_core::{adoption::Boundary, bootstrap};
+    for abandon in [false, true] {
+        let fixture = Fixture::new(false);
+        let root = fixture.root.parent().unwrap().join("interrupted-bootstrap");
+        let git = fake_git(&fixture);
+        let preview = bootstrap::preview(&fixture.host, &root, &git).unwrap();
+        let lock = WriterLock::acquire(&fixture.host).unwrap();
+        let result = bootstrap::execute(
+            &fixture.host,
+            &lock,
+            bootstrap::Approval::from_preview(preview).unwrap(),
+            &git,
+            |event| {
+                if matches!(event.boundary, Boundary::Mutation) {
+                    Err(dort_core::Error::Invalid(
+                        "stop after repository publication".into(),
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert!(result.is_err() && root.exists());
+        drop(lock);
+        let mut app = App::new(false);
+        app.tab = super::app::Tab::Recovery;
+        run_task(&mut app, &fixture, Task::History);
+        let task = key(&mut app, KeyCode::Char(if abandon { 'x' } else { 's' })).unwrap();
+        run_task(&mut app, &fixture, task);
+        let report = &app.preview.as_ref().unwrap().text;
+        assert!(report.contains("Repository published: true") && report.contains("Journal head:"));
+        assert!(report.contains("retains published repositories"));
+        key(&mut app, KeyCode::Esc);
+        assert!(root.exists());
+        assert!(dort_core::journal::diagnose(&fixture.host).unwrap()[0].blocks_writes());
+        let task = key(&mut app, KeyCode::Char(if abandon { 'x' } else { 's' })).unwrap();
+        run_task(&mut app, &fixture, task);
+        let task = approve(&mut app);
+        run_task(&mut app, &fixture, task);
+        assert!(root.join("dort.toml").exists());
+        let history = dort_core::journal::diagnose(&fixture.host).unwrap();
+        assert!(!history[0].blocks_writes());
+        assert!(
+            dort_core::local::LocalConfig::load(&fixture.host)
+                .unwrap()
+                .repositories
+                .is_empty()
+                == abandon
+        );
+        let transaction = fixture
+            .host
+            .state_dir
+            .join("repositories")
+            .join(&history[0].repository_id)
+            .join("transactions")
+            .join(&history[0].transaction_id);
+        assert!(transaction.exists());
+        run_task(&mut app, &fixture, Task::History);
+        assert!(key(&mut app, KeyCode::Char('s')).is_none());
+        assert!(key(&mut app, KeyCode::Char('x')).is_none());
+    }
+}
+
+#[test]
+fn selected_schema_one_rollback_withdraws_source_into_private_storage() {
+    let fixture = Fixture::new(true);
+    let target = fixture.host.home.join(".new-settings");
+    fs::write(&target, "ordinary original settings\n").unwrap();
+    let mut app = App::new(false);
+    app.repository = Some(fixture.root.clone());
+    run_task(
+        &mut app,
+        &fixture,
+        Task::Files(crate::services::adopt_request(
+            &target,
+            "new-settings",
+            std::path::Path::new("files/new-settings"),
+        )),
+    );
+    let task = approve(&mut app);
+    run_task(&mut app, &fixture, task);
+    assert!(target.is_symlink());
+    app.tab = super::app::Tab::Recovery;
+    run_task(&mut app, &fixture, Task::History);
+    assert_eq!(app.history_selection().unwrap().journal_schema, Some(1));
+    let task = key(&mut app, KeyCode::Char('b')).unwrap();
+    run_task(&mut app, &fixture, task);
+    assert!(
+        app.preview
+            .as_ref()
+            .unwrap()
+            .text
+            .contains("Rollback schema 1")
+    );
+    let task = approve(&mut app);
+    run_task(&mut app, &fixture, task);
+    assert!(!target.is_symlink());
+    assert_eq!(
+        fs::read_to_string(target).unwrap(),
+        "ordinary original settings\n"
+    );
+    assert!(!fixture.root.join("files/new-settings").exists());
+    let rows = dort_core::journal::diagnose(&fixture.host).unwrap();
+    let transaction = fixture
+        .host
+        .state_dir
+        .join("repositories")
+        .join(&rows[0].repository_id)
+        .join("transactions")
+        .join(&rows[0].transaction_id);
+    // The created source parent is op-0000; the source is withdrawn to op-0001.
+    assert_eq!(
+        fs::read_to_string(transaction.join("op-0001")).unwrap(),
+        "ordinary original settings\n"
+    );
+}
+
+#[test]
+fn malformed_journal_tail_is_a_global_blocker_not_a_recovery_permission() {
+    let fixture = Fixture::new(true);
+    let mut app = App::new(false);
+    app.repository = Some(fixture.root.clone());
+    run_task(&mut app, &fixture, Task::Files(Request::Apply));
+    let task = approve(&mut app);
+    run_task(&mut app, &fixture, task);
+    let rows = dort_core::journal::diagnose(&fixture.host).unwrap();
+    let transaction = fixture
+        .host
+        .state_dir
+        .join("repositories")
+        .join(&rows[0].repository_id)
+        .join("transactions")
+        .join(&rows[0].transaction_id);
+    fs::write(
+        transaction.join("999999.json"),
+        "deliberately malformed fixture tail",
+    )
+    .unwrap();
+    app.tab = super::app::Tab::Recovery;
+    run_task(&mut app, &fixture, Task::History);
+    assert!(app.history_selection().unwrap().problem.is_some());
+    assert!(app.history_selection().unwrap().blocks_writes());
+    for c in ['b', 's', 'x'] {
+        assert!(key(&mut app, KeyCode::Char(c)).is_none());
+    }
+    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(fixture.host.home.join(".editor").is_symlink());
+    assert_eq!(
+        fs::read_to_string(transaction.join("999999.json")).unwrap(),
+        "deliberately malformed fixture tail"
+    );
 }

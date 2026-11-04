@@ -39,7 +39,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Open the interactive Overview, Files and Recovery interface (also the terminal default).
+    /// Open the interactive local workflows, recovery, checks and Git interface.
     Tui,
     /// Create a local repository at an absent path, or attach an already-valid one.
     Init { path: PathBuf },
@@ -205,14 +205,6 @@ enum RemovalMode {
     Remove,
 }
 
-#[derive(Serialize)]
-struct DoctorReport {
-    host: HostContext,
-    registered_repositories: usize,
-    active_repository: Option<String>,
-    mode: &'static str,
-}
-
 pub fn run() -> ExitCode {
     let cli = Cli::parse();
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -375,12 +367,7 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
             }
         }
         Command::Doctor => {
-            let report = DoctorReport {
-                host,
-                registered_repositories: local.repositories.len(),
-                active_repository: local.active_repository,
-                mode: "read-only foundation",
-            };
+            let report = crate::services::doctor(&host, &local);
             if cli.json {
                 print_json(&report)?;
             } else {
