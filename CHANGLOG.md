@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tui:** introduce styled workbench and structured file workflows ([b3d514b](https://github.com/katesongsy/dort/commit/b3d514be2c297ea2624651cf93a5b9c349a95ec4))
+
 - **tui:** complete recovery and diagnostic workflows ([6b1aa91](https://github.com/katesongsy/dort/commit/6b1aa9196a86856c535699030560fe515024567f))
 
 - **tui:** add read-only Git workflows and gated patch viewing ([ada7aa7](https://github.com/katesongsy/dort/commit/ada7aa7341d0847615b210c09447d5009b89163e))
