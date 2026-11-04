@@ -95,6 +95,26 @@ fn assert_plan_parity(actual: &dort_core::planner::Plan, expected: &dort_core::p
 fn key(app: &mut App, code: KeyCode) -> Option<Task> {
     app.key(KeyEvent::new(code, KeyModifiers::NONE), 80, 24)
 }
+fn submit_path(app: &mut App) -> Task {
+    assert!(matches!(
+        app.shell.overlay,
+        Some(super::shell::Overlay::Form(
+            super::shell::Form::Choose | super::shell::Form::Init
+        ))
+    ));
+    if app.shell.path_focused == 0 {
+        assert!(key(app, KeyCode::Enter).is_none());
+    }
+    key(app, KeyCode::Enter).expect("activate visible path action after field advance")
+}
+fn adopt_selected(app: &mut App) {
+    key(app, KeyCode::Esc); // return to Content before inspecting
+    key(app, KeyCode::Enter); // Inspect row, never open a draft directly.
+    app.action_selected = 0;
+    key(app, KeyCode::Tab);
+    key(app, KeyCode::Right); // Adopt selected, a visible item action.
+    key(app, KeyCode::Enter);
+}
 fn type_text(app: &mut App, value: &str) {
     for c in value.chars() {
         assert!(key(app, KeyCode::Char(c)).is_none());
@@ -125,7 +145,8 @@ fn preview_scroll_is_bounded_by_escaped_metadata_and_resets_on_home() {
     let fixture = Fixture::new(false);
     let mut app = App::new(true);
     app.complete(Ok(fixture.prepare(Request::Apply)));
-    // Exercise only presentation offsets; retain the real opaque core preview.
+    // Exercise only full-report presentation offsets; retain the real opaque core preview.
+    app.preview.as_mut().unwrap().full = true;
     app.preview.as_mut().unwrap().text = format!("{}\n{}\nEND", "é".repeat(20), "row\n".repeat(30));
     for _ in 0..100 {
         app.key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), 48, 14);
@@ -133,7 +154,7 @@ fn preview_scroll_is_bounded_by_escaped_metadata_and_resets_on_home() {
     }
     let p = app.preview.as_ref().unwrap();
     assert_eq!(p.horizontal, 120 - 46); // Each é becomes six ASCII escape bytes.
-    assert_eq!(p.scroll, 33 - 3);
+    assert_eq!(p.scroll, 33 - 5);
     app.key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), 48, 14);
     assert_eq!(app.preview.as_ref().unwrap().horizontal, 120 - 46 - 8);
     app.resize(140, 60);
@@ -150,6 +171,40 @@ fn preview_scroll_is_bounded_by_escaped_metadata_and_resets_on_home() {
     assert!(app.confirmation.is_none()); // Scroll/reset never changes dry-run approval.
     assert!(!fixture.host.state_dir.exists());
     assert!(!fixture.host.config_dir.exists());
+}
+
+#[test]
+fn structured_review_selection_never_reduces_scope_and_full_report_remains_available() {
+    let fixture = Fixture::new(false);
+    let mut manifest = fs::read_to_string(fixture.root.join("dort.toml")).unwrap();
+    manifest
+        .push_str("\n[[files]]\nid='second'\nsource='second'\ntarget='~/.second'\nmode='link'\n");
+    fs::write(fixture.root.join("dort.toml"), manifest).unwrap();
+    fs::write(fixture.root.join("second"), "ordinary settings\n").unwrap();
+    let mut app = App::new(true);
+    app.complete(Ok(fixture.prepare(Request::Apply)));
+    let snapshot = |app: &App| {
+        let actions::Pending::Files(plan) = &app.preview.as_ref().unwrap().pending else {
+            panic!("expected file preview")
+        };
+        serde_json::to_value(plan).unwrap()
+    };
+    let original = snapshot(&app);
+    let screen = super::tests::render(&app, 80, 24);
+    assert!(screen.contains("2 changes") && screen.contains("FIRST EFFECT"));
+    key(&mut app, KeyCode::Down);
+    assert_eq!(app.preview.as_ref().unwrap().selected, 1);
+    key(&mut app, KeyCode::Char('i'));
+    assert!(app.preview.as_ref().unwrap().full);
+    assert!(super::tests::render(&app, 140, 40).contains("permissions:"));
+    assert_eq!(snapshot(&app), original);
+    key(&mut app, KeyCode::Enter);
+    assert!(app.confirmation.is_none());
+    key(&mut app, KeyCode::Esc);
+    assert!(!fixture.host.state_dir.exists() && !fixture.host.config_dir.exists());
+    assert!(
+        !fixture.host.home.join(".editor").exists() && !fixture.host.home.join(".second").exists()
+    );
 }
 
 #[test]
@@ -266,7 +321,7 @@ fn confirmation_snapshots_and_resize_guard() {
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let expected = "Approve reviewed effects\nType literal yes, then Enter.\nExecution independently revalidates all\nguards.\n\n>\n\nEsc: cancel without execution";
+    let expected = "Approve reviewed effects\nType literal yes, then Enter.\nExecution independently revalidates all gu\nards.\n┌ Confirmation · Focus ──────────────────┐\n│                                        │\n└────────────────────────────────────────┘\n Enter  Submit   PgDn  Details   Esc  Canc";
     assert_eq!(modal(&screen), expected);
     type_text(&mut app, "yes");
     assert!(
@@ -401,7 +456,7 @@ fn create_retains_input_on_back_then_approves_and_switches_session() {
     let mut app = onboarding_app(&fixture, false);
     key(&mut app, KeyCode::Char('n'));
     type_text(&mut app, "new-q?repo");
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = submit_path(&mut app);
     run_task(&mut app, &fixture, task);
     let report = &app.preview.as_ref().unwrap().text;
     assert!(report.contains("Create local repository") && report.contains("new-q?repo"));
@@ -453,7 +508,7 @@ fn attachment_uses_shared_bootstrap_and_session_picker_never_persists() {
     let bytes = fs::read(fixture.root.join("dort.toml")).unwrap();
     key(&mut app, KeyCode::Char('n'));
     type_text(&mut app, "repository");
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = submit_path(&mut app);
     run_task(&mut app, &fixture, task);
     assert!(
         app.preview
@@ -474,7 +529,7 @@ fn attachment_uses_shared_bootstrap_and_session_picker_never_persists() {
     key(&mut app, KeyCode::Char('p'));
     key(&mut app, KeyCode::Enter); // exact path form
     type_text(&mut app, "other");
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = submit_path(&mut app);
     run_task(&mut app, &fixture, task);
     assert_eq!(app.repository, Some(unregistered));
     assert!(app.data.as_ref().unwrap().overview.contains("unregistered"));
@@ -511,7 +566,7 @@ fn invalid_path_missing_git_and_read_errors_preserve_draft_and_old_scope() {
     key(&mut app, KeyCode::Char('p'));
     key(&mut app, KeyCode::Enter);
     type_text(&mut app, "absent/q?path");
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = submit_path(&mut app);
     run_task(&mut app, &fixture, task);
     assert!(app.error.as_ref().unwrap().contains("Read failed:"));
     assert!(!app.error.as_ref().unwrap().contains("partial effects"));
@@ -524,6 +579,7 @@ fn invalid_path_missing_git_and_read_errors_preserve_draft_and_old_scope() {
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Char('n'));
     type_text(&mut app, "new");
+    key(&mut app, KeyCode::Enter); // advance to review button
     app.git = Err("Git missing".into());
     assert!(key(&mut app, KeyCode::Enter).is_none());
     assert!(app.error.as_ref().unwrap().contains("Git missing"));
@@ -537,7 +593,7 @@ fn bootstrap_approval_staleness_and_lock_failure_are_visible_without_retry() {
     let mut app = onboarding_app(&fixture, false);
     key(&mut app, KeyCode::Char('n'));
     type_text(&mut app, "new");
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = submit_path(&mut app);
     run_task(&mut app, &fixture, task);
     let task = approve(&mut app);
     let lock = WriterLock::acquire(&fixture.host).unwrap();
@@ -573,7 +629,7 @@ fn dry_run_bootstrap_can_never_execute_even_after_mode_toggle() {
     assert!(app.dry_run);
     key(&mut app, KeyCode::Char('n'));
     type_text(&mut app, "new");
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = submit_path(&mut app);
     run_task(&mut app, &fixture, task);
     key(&mut app, KeyCode::Enter);
     assert!(app.confirmation.is_none());
@@ -638,11 +694,11 @@ fn discovery_marks_ineligible_entries_and_enter_preserves_existing_draft() {
     app.candidate_selected = index;
     for (width, height) in [(48, 14), (80, 24), (140, 40)] {
         let screen = super::tests::render(&app, width, height);
-        assert!(screen.contains("> [not eligible]"));
+        assert!(screen.contains("Not eligible"));
     }
-    assert!(key(&mut app, KeyCode::Enter).is_none());
+    adopt_selected(&mut app);
     assert!(app.shell.overlay.is_none());
-    assert!(app.status.contains("Directories cannot be adopted"));
+    assert!(app.status.contains("Not eligible for adoption"));
     assert_eq!(app.shell.adoption.target, "retained target");
     assert_eq!(app.shell.adoption.id, "retained-id");
     assert_eq!(app.shell.adoption.source, "retained/source");
@@ -656,14 +712,15 @@ fn discovery_marks_ineligible_entries_and_enter_preserves_existing_draft() {
             .iter()
             .position(|c| c.entry.path == *path)
             .unwrap();
-        assert!(super::tests::render(&app, 80, 24).contains("> [not eligible]"));
-        assert!(key(&mut app, KeyCode::Enter).is_none());
+        assert!(super::tests::render(&app, 80, 24).contains("Not eligible"));
+        adopt_selected(&mut app);
         assert!(app.shell.overlay.is_none());
         assert_eq!(app.shell.adoption.target, "retained target");
+        key(&mut app, KeyCode::Esc);
     }
     app.candidate_selected = index;
     key(&mut app, KeyCode::Char('i'));
-    assert!(super::tests::render(&app, 140, 40).contains("Not eligible for adoption"));
+    assert!(super::tests::render(&app, 140, 40).contains("[Not eligible]"));
     key(&mut app, KeyCode::Esc);
     app.candidate_selected = app
         .discovery
@@ -674,8 +731,11 @@ fn discovery_marks_ineligible_entries_and_enter_preserves_existing_draft() {
         .iter()
         .position(|c| c.entry.path == file)
         .unwrap();
-    assert!(super::tests::render(&app, 80, 24).contains("> [eligible hint]"));
+    assert!(super::tests::render(&app, 80, 24).contains("Eligible hint"));
     key(&mut app, KeyCode::Enter);
+    assert!(app.shell.overlay.is_none());
+    assert_eq!(app.shell.adoption.target, "retained target");
+    adopt_selected(&mut app);
     assert_eq!(app.shell.adoption.target, file.to_str().unwrap());
     assert!(matches!(
         app.shell.overlay,
@@ -706,7 +766,7 @@ fn discovery_is_independent_metadata_only_and_keeps_exact_candidate_identity() {
         "{screen}"
     );
     assert!(!screen.contains("private-body-marker"));
-    key(&mut app, KeyCode::Enter);
+    adopt_selected(&mut app);
     assert_eq!(
         app.shell.adoption.target,
         fixture.host.home.join(".q?config").to_str().unwrap()
@@ -786,7 +846,7 @@ fn adoption_retains_all_input_through_missing_repository_picker_and_attachment()
     key(&mut app, KeyCode::Enter);
     key(&mut app, KeyCode::Enter); // exact path
     type_text(&mut app, "repository");
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = submit_path(&mut app);
     run_task(&mut app, &fixture, task);
     assert!(matches!(
         app.shell.overlay,
@@ -797,7 +857,7 @@ fn adoption_retains_all_input_through_missing_repository_picker_and_attachment()
     key(&mut app, KeyCode::Tab); // Create/attach, from Choose button
     key(&mut app, KeyCode::Enter);
     type_text(&mut app, "repository");
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = submit_path(&mut app);
     run_task(&mut app, &fixture, task);
     let task = approve(&mut app);
     let refresh = run_task(&mut app, &fixture, task).unwrap();
@@ -1102,7 +1162,7 @@ fn file_search_is_text_only_and_never_narrows_approved_apply() {
     assert_eq!(app.inventory.managed.query, "second");
     key(&mut app, KeyCode::Enter); // compact details
     let screen = super::tests::render(&app, 80, 30);
-    assert!(screen.contains("Source:") && screen.contains("Symlink"));
+    assert!(screen.contains("Source") && screen.contains("Linked"));
     let task = key(&mut app, KeyCode::Char('a')).unwrap();
     run_task(&mut app, &fixture, task);
     let task = approve(&mut app);
@@ -1190,7 +1250,7 @@ fn candidate_search_retains_raw_selection_and_does_not_change_manual_drafts() {
     run_task(&mut app, &fixture, task);
     assert_eq!(app.candidate_selected, selected);
     assert_eq!(app.visible_file_rows(), [selected]);
-    key(&mut app, KeyCode::Enter);
+    adopt_selected(&mut app);
     assert!(app.shell.adoption.target.ends_with(".q?config"));
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Delete);
@@ -1227,7 +1287,7 @@ fn failed_profile_union_leaves_prior_scope_and_invalid_inventory_is_not_empty_su
     assert!(data.files_error.is_some() && data.history_error.is_none());
     app.complete(Ok(Output::Data(data)));
     key(&mut app, KeyCode::Char('2'));
-    assert!(super::tests::render(&app, 80, 24).contains("Unavailable:"));
+    assert!(super::tests::render(&app, 80, 24).contains("observation failed"));
     assert!(!fixture.host.state_dir.exists() && !fixture.host.config_dir.exists());
 }
 

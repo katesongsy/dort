@@ -1,6 +1,11 @@
 mod actions;
 mod app;
+mod components;
+#[cfg(test)]
+mod design_tests;
 mod events;
+mod files;
+mod forms;
 mod git;
 #[cfg(test)]
 mod git_tests;
@@ -8,10 +13,12 @@ mod inventory;
 mod recovery;
 #[cfg(test)]
 mod recovery_tests;
+mod review;
 mod shell;
 #[cfg(test)]
 mod tests;
 mod views;
+mod workbench;
 #[cfg(test)]
 mod workflow_tests;
 

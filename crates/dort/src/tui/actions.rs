@@ -13,6 +13,27 @@ use dort_core::{
 };
 use std::path::{Path, PathBuf};
 
+pub struct ManagedRow {
+    pub id: String,
+    pub source: PathBuf,
+    pub target: PathBuf,
+    pub state: &'static str,
+    pub source_kind: &'static str,
+    pub target_kind: &'static str,
+    pub blockers: Vec<String>,
+}
+
+fn entry_kind(entry: Option<&dort_core::observation::Entry>) -> &'static str {
+    use dort_core::observation::Kind;
+    match entry.map(|e| &e.kind) {
+        Some(Kind::Missing) => "Missing",
+        Some(Kind::Regular) => "Regular file",
+        Some(Kind::Directory) => "Directory",
+        Some(Kind::Symlink) => "Symbolic link",
+        Some(Kind::Special) => "Special file",
+        None => "Unavailable",
+    }
+}
 #[derive(Default)]
 pub struct Data {
     pub overview: String,
@@ -20,6 +41,7 @@ pub struct Data {
     pub known_roots: Vec<PathBuf>,
     pub profiles: Vec<String>,
     pub files: Vec<(String, String)>,
+    pub managed: Vec<ManagedRow>,
     pub files_error: Option<String>,
     pub history: Vec<journal::Diagnosis>,
     pub history_error: Option<String>,
@@ -74,6 +96,7 @@ pub fn load_scoped(
     }
     let local = LocalConfig::load(host);
     let mut files = vec![];
+    let mut managed = vec![];
     let mut files_error = None;
     let mut known_roots = vec![];
     let mut profiles = vec![];
@@ -138,6 +161,19 @@ pub fn load_scoped(
                                 plan.has_blockers()
                             ));
                             for (file, input) in plan.files.iter().zip(&plan.inputs.files) {
+                                managed.push(ManagedRow {
+                                    id: file.id.clone(),
+                                    source: input.source_path.clone(),
+                                    target: input.target_path.clone(),
+                                    source_kind: entry_kind(input.source.as_ref()),
+                                    target_kind: entry_kind(input.destination.as_ref()),
+                                    state: match file.outcome {
+                                        planner::Outcome::NoOp => "Linked",
+                                        planner::Outcome::Change => "Needs apply",
+                                        planner::Outcome::Blocked => "Blocked",
+                                    },
+                                    blockers: file.blockers.clone(),
+                                });
                                 files.push((
                                     file.id.clone(),
                                     format!(
@@ -168,6 +204,7 @@ pub fn load_scoped(
         known_roots,
         profiles,
         files,
+        managed,
         files_error,
         history,
         history_error,

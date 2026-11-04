@@ -78,7 +78,8 @@ fn compact_forms_and_profile_picker_always_show_focused_control() {
         app.shell.adoption.focused = i;
         let screen = render(&app, 48, 14);
         assert!(
-            screen.contains(&format!("> {prefix}")),
+            screen.contains(&format!("{prefix} · Focus"))
+                || screen.contains(&format!("> [{prefix}")),
             "focused control {i} not visible: {screen}"
         );
     }
@@ -99,13 +100,17 @@ fn compact_forms_and_profile_picker_always_show_focused_control() {
     .enumerate()
     {
         app.shell.manifest_focused = i;
-        assert!(render(&app, 48, 14).contains(&format!("> {prefix}")));
+        assert!(
+            render(&app, 48, 14).contains(&format!("{prefix} · Focus"))
+                || render(&app, 48, 14).contains(&format!("> [{prefix}"))
+        );
     }
     app.shell.overlay = Some(Overlay::Form(Form::RemoveId));
     app.shell.unmanage_focused = 1;
-    assert!(render(&app, 48, 14).contains("> Review"));
+    assert!(render(&app, 48, 14).contains("> [Review"));
     app.shell.overlay = None;
     app.tab = Tab::Overview;
+    app.shell.focus = super::shell::Focus::Destinations;
     app.key(key(KeyCode::Left), 80, 24);
     assert!(app.tab == Tab::Git);
     app.key(key(KeyCode::Right), 80, 24);
@@ -137,7 +142,7 @@ fn compact_navigation_and_report_home_are_readable_without_color() {
             "5 Git",
             "Actions",
             "DRY RUN",
-            "Content",
+            "Focus",
         ] {
             assert!(
                 screen.contains(label),
@@ -200,7 +205,7 @@ fn long_lists_keep_selection_visible_through_resize_and_form_back() {
     app.key(key(KeyCode::PageDown), 48, 14);
     app.key(key(KeyCode::Tab), 48, 14);
     assert_eq!(app.shell.scroll, 0);
-    assert!(render(&app, 48, 14).contains("> ID"));
+    assert!(render(&app, 48, 14).contains("ID · Focus"));
     app.resize(40, 10);
     app.resize(48, 14);
     assert_eq!(app.shell.adoption.target, "q?/".repeat(100));
@@ -232,6 +237,7 @@ fn navigation_and_metadata_escaping() {
     let mut app = App::new(true);
     app.complete(Ok(Output::Data(Data {
         overview: "no repository\n\u{1b}[31m\u{202e}".into(),
+        managed: vec![],
         files_error: None,
         repository: None,
         known_roots: vec![],
@@ -243,7 +249,7 @@ fn navigation_and_metadata_escaping() {
     let screen = render(&app, 80, 24);
     assert!(screen.contains("DRY RUN"));
     assert!(screen.contains("\\u{1b}[31m\\u{202e}"));
-    app.key(key(KeyCode::Right), 80, 24);
+    app.key(key(KeyCode::Char('2')), 80, 24);
     assert!(app.tab == Tab::Files);
     app.key(key(KeyCode::Down), 80, 24);
     assert_eq!(app.selected, 0);
@@ -257,7 +263,7 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     app.tab = Tab::Files;
     app.key(key(KeyCode::Tab), 80, 24);
     assert!(app.shell.focus == Focus::Actions);
-    app.key(key(KeyCode::Enter), 80, 24);
+    app.key(key(KeyCode::Char(' ')), 80, 24);
     assert!(render(&app, 80, 24).contains("Choose repository (session only)"));
     app.key(key(KeyCode::Esc), 80, 24);
     app.details_scroll = 3;
@@ -331,6 +337,7 @@ fn busy_shell_cannot_change_scope_or_toggle_mode_or_start_another_job() {
 fn refresh_preserves_selected_identity_and_clamps_if_it_disappears() {
     let data = |ids: &[&str]| Data {
         overview: String::new(),
+        managed: vec![],
         files_error: None,
         repository: None,
         known_roots: vec![],
@@ -371,6 +378,7 @@ fn completion_keeps_noop_result_visible_through_refresh_and_read_failure() {
     app.start(false);
     app.complete(Ok(Output::Data(Data {
         overview: "fresh observations".into(),
+        managed: vec![],
         files_error: None,
         repository: None,
         known_roots: vec![],

@@ -161,7 +161,7 @@ fn patch_disclosure_is_once_isolated_and_dropped_on_close_scope_resize_or_exit()
     let task = key(&mut app, KeyCode::Char('u')).unwrap();
     f.run(&mut app, task);
     key(&mut app, KeyCode::Tab); // Actions focus must return to Git content after activation.
-    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Char(' '));
     key(&mut app, KeyCode::Char('/'));
     text(&mut app, "View patch content");
     assert!(key(&mut app, KeyCode::Enter).is_none());

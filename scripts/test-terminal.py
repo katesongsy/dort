@@ -262,11 +262,11 @@ def run():
         with Session([binary, "tui"], discovery_env, (24, 80)) as session:
             session.wait(b"loaded.")
             session.send(b"f")
-            session.wait(b"[not eligible]")
+            session.wait(b"Not eligible")
             session.send(b"/nvim\x1b")
             session.settle()
             session.send(b"\r")
-            session.wait(b"Not eligible for adoption")
+            session.wait(b"[Not eligible]")
             assert b"TARGET >" not in session.screen.text()
             session.send(b"i")
             session.wait(b"Directories, links and special files")
@@ -282,8 +282,8 @@ def run():
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"n")
-            session.wait(b"Path >")
-            session.send(b"q?/\r")
+            session.wait("Path · Focus".encode())
+            session.send(b"q?/\r\r")
             session.wait(b"Git executable not found")
             session.send(b"\x1b")
             session.settle()
@@ -298,8 +298,8 @@ def run():
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"p\r")
-            session.wait(b"Path >")
-            session.send(os.fsencode(unregistered) + b"\r")
+            session.wait("Path · Focus".encode())
+            session.send(os.fsencode(unregistered) + b"\r\r")
             session.wait(b"configuration unchanged.")
             session.send(b"q")
             session.finish()
@@ -311,7 +311,7 @@ def run():
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"v")
-            session.wait(b"Manifest path >")
+            session.wait("Manifest path · Focus".encode())
             session.send(os.fsencode(standalone) + b"\r\r")
             session.wait(b"Structural check passed")
             session.send(b"v\t\r")  # retained Check button -> Profiles
@@ -347,9 +347,11 @@ def run():
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"f")
-            session.wait(b"metadata candidate(s)")
+            session.wait(b"Eligible hint")
             session.send(b"\r")
-            session.wait(b"TARGET >")
+            session.wait(b"Selected item")
+            session.send(b"\t\x1b[C\r")  # visible Adopt selected action
+            session.wait("TARGET · Focus".encode())
             session.send(b"\t\t\t\r")  # fields -> Review, no repository selected
             session.wait(b"Read failed:")
             session.send(b"\x1b")
@@ -430,8 +432,8 @@ def run():
             with Session([binary, "tui"], onboarding_env) as session:
                 session.wait(b"loaded.")
                 session.send(b"n")
-                session.wait(b"Path >")
-                session.send(os.fsencode(created) + b"\r")
+                session.wait("Path · Focus".encode())
+                session.send(os.fsencode(created) + b"\r\r")
                 session.wait(b"Preview (metadata only)")
                 session.send(b"\x1b")
                 session.settle()
@@ -554,7 +556,7 @@ def run():
             session.wait(b"loaded.")
             session.send(b"2/q?/\x1b")
             session.settle()
-            session.wait(b"0 shown")
+            session.wait(b"No matches")
             session.send(b"a")
             session.wait(b"Preview (metadata only)")
             session.wait(b"display filters never narrow")
@@ -570,7 +572,7 @@ def run():
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"o")
-            session.wait(b"TARGET >")
+            session.wait("TARGET · Focus".encode())
             session.send(b"~/.q?config\rconfig\rfiles/config\r")
             session.send(b"\r")  # Review button, not an ordinary field
             session.wait(b"Preview (metadata only)")
@@ -594,7 +596,7 @@ def run():
             session.send(b"2/notconfig\x1b")
             session.settle()
             session.send(b" /delete managed link: enter\r")
-            session.wait(b"Exact ID >")
+            session.wait("Exact ID · Focus".encode())
             session.send(b"config\r\r")
             session.wait(b"Preview (metadata only)")
             session.send(b"\r")

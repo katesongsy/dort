@@ -36,17 +36,24 @@ pub struct Preview {
     pub text: String,
     pub scroll: u16,
     pub horizontal: u16,
+    pub full: bool,
+    pub selected: usize,
+    pub effect_scroll: u16,
 }
 impl Preview {
     fn clamp_scroll(&mut self, width: u16, height: u16) {
-        // The shell reserves nine rows; the preview border uses two more.
+        // Chrome, action bar and preview borders; compact navigation uses one extra row.
         // Escaped report bytes are ASCII, so byte lengths equal terminal columns.
         let escaped = super::views::safe(&self.text);
         let lines = escaped.lines().count();
         let columns = escaped.lines().map(str::len).max().unwrap_or(0);
         self.scroll = self.scroll.min(
             lines
-                .saturating_sub(usize::from(height.saturating_sub(11)))
+                .saturating_sub(usize::from(height.saturating_sub(if width < 80 {
+                    9
+                } else {
+                    8
+                })))
                 .min(u16::MAX as usize) as u16,
         );
         self.horizontal = self.horizontal.min(
@@ -57,6 +64,7 @@ impl Preview {
     }
 }
 pub struct Confirmation {
+    pub prompt_scroll: u16,
     pub input: String,
     pub removal_ack: Option<String>,
 }
@@ -82,6 +90,7 @@ pub struct App {
     pub history_details: bool,
     pub retry: Option<super::actions::Retry>,
     pub selected: usize,
+    pub action_selected: usize,
     pub details_scroll: u16,
     pub preview: Option<Preview>,
     pub confirmation: Option<Confirmation>,
@@ -93,6 +102,7 @@ pub struct App {
     preview_only_locked: bool,
     pub status: String,
     pub error: Option<String>,
+    pub failed_write: bool,
 }
 impl App {
     pub fn new(dry_run: bool) -> Self {
@@ -118,6 +128,7 @@ impl App {
             history_details: false,
             retry: None,
             selected: 0,
+            action_selected: 0,
             details_scroll: 0,
             preview: None,
             confirmation: None,
@@ -129,9 +140,11 @@ impl App {
             preview_only_locked: dry_run,
             status: "Loading read-only observations...".into(),
             error: None,
+            failed_write: false,
         }
     }
     pub fn start(&mut self, writing: bool) {
+        self.failed_write = false;
         self.busy = true;
         self.writing = writing;
         self.status = if writing {
@@ -143,6 +156,7 @@ impl App {
     }
     pub fn complete(&mut self, result: Result<Output, String>) -> Option<Task> {
         let writing = self.writing;
+        self.failed_write = writing && result.is_err();
         self.busy = false;
         self.writing = false;
         if self.exit_requested {
@@ -325,6 +339,9 @@ impl App {
                         text,
                         scroll: 0,
                         horizontal: 0,
+                        full: false,
+                        selected: 0,
+                        effect_scroll: 0,
                     });
                     self.status = "Review effects; Enter opens confirmation, Esc dismisses.".into();
                 }
@@ -476,10 +493,35 @@ impl App {
             return self.confirm_key(key);
         }
         if let Some(preview) = &mut self.preview {
+            let file_review = matches!(preview.pending, Pending::Files(_));
             match key.code {
+                KeyCode::Tab | KeyCode::Char('i') if file_review => {
+                    preview.full = !preview.full;
+                    preview.scroll = 0;
+                    preview.horizontal = 0;
+                    preview.effect_scroll = 0;
+                }
+                KeyCode::Down | KeyCode::Up if file_review && !preview.full => {
+                    if let Pending::Files(plan) = &preview.pending {
+                        preview.selected = if key.code == KeyCode::Down {
+                            (preview.selected + 1).min(plan.files.len().saturating_sub(1))
+                        } else {
+                            preview.selected.saturating_sub(1)
+                        };
+                        preview.effect_scroll = 0;
+                    }
+                }
+                KeyCode::PageDown | KeyCode::PageUp if file_review && !preview.full => {
+                    preview.effect_scroll = if key.code == KeyCode::PageDown {
+                        preview.effect_scroll.saturating_add(4)
+                    } else {
+                        preview.effect_scroll.saturating_sub(4)
+                    };
+                }
                 KeyCode::Home => {
                     preview.scroll = 0;
                     preview.horizontal = 0;
+                    preview.effect_scroll = 0;
                 }
                 KeyCode::Esc => {
                     self.preview = None;
@@ -508,6 +550,7 @@ impl App {
                 KeyCode::Left => preview.horizontal = preview.horizontal.saturating_sub(8),
                 KeyCode::Enter if !preview.pending.blocked() && !self.dry_run => {
                     self.confirmation = Some(Confirmation {
+                        prompt_scroll: 0,
                         input: String::new(),
                         removal_ack: None,
                     })
@@ -595,7 +638,23 @@ impl App {
                     key.code == KeyCode::BackTab || key.modifiers.contains(KeyModifiers::SHIFT),
                 );
             }
-            KeyCode::Right | KeyCode::Left => {
+            KeyCode::Down | KeyCode::Up if self.shell.focus == Focus::Actions => {
+                self.action_selected = if key.code == KeyCode::Up {
+                    self.action_selected.saturating_sub(1)
+                } else {
+                    (self.action_selected + 1).min(self.page_actions().len().saturating_sub(1))
+                };
+            }
+            KeyCode::Down | KeyCode::Up if self.shell.focus == Focus::Destinations => (),
+            KeyCode::Right | KeyCode::Left if self.shell.focus == Focus::Actions => {
+                let len = self.page_actions().len();
+                self.action_selected = if key.code == KeyCode::Left {
+                    self.action_selected.saturating_sub(1)
+                } else {
+                    (self.action_selected + 1).min(len.saturating_sub(1))
+                };
+            }
+            KeyCode::Right | KeyCode::Left if self.shell.focus == Focus::Destinations => {
                 self.tab = if key.code == KeyCode::Left {
                     self.tab.previous()
                 } else {
@@ -603,7 +662,18 @@ impl App {
                 };
                 self.selected = 0;
             }
-            KeyCode::Enter if self.shell.focus == Focus::Actions => self.shell.open_actions(false),
+            KeyCode::Enter if self.shell.focus == Focus::Actions => {
+                if let Some(action) = self
+                    .page_actions()
+                    .get(
+                        self.action_selected
+                            .min(self.page_actions().len().saturating_sub(1)),
+                    )
+                    .copied()
+                {
+                    return self.activate(action);
+                }
+            }
             KeyCode::Enter if self.shell.focus == Focus::Destinations => {
                 self.tab = self.tab.next();
                 self.selected = 0;
@@ -670,7 +740,10 @@ impl App {
             KeyCode::Char('r') => return self.activate(Action::Refresh),
             KeyCode::Char('f') => return self.activate(Action::Discover),
             KeyCode::Char('o') => return self.activate(Action::Adopt),
-            KeyCode::Enter if self.tab == Tab::Files && self.discovering => self.adopt_candidate(),
+            KeyCode::Enter if self.tab == Tab::Files && self.discovering => {
+                self.inventory.details = true;
+                self.details_scroll = 0;
+            }
             KeyCode::Enter if self.tab == Tab::Files => return self.activate(Action::Inspect),
             KeyCode::Down if self.tab == Tab::Files => self.move_file_selection(false),
             KeyCode::Up if self.tab == Tab::Files => self.move_file_selection(true),
@@ -821,6 +894,12 @@ impl App {
         }
     }
     fn activate(&mut self, action: Action) -> Option<Task> {
+        if let Some(reason) = self.action_reason(action) {
+            self.status = reason.into();
+            self.shell.overlay = None;
+            return None;
+        }
+        self.failed_write = false;
         self.shell.scroll = 0;
         if matches!(self.shell.overlay, Some(Overlay::Form(Form::Adopt)))
             && matches!(action, Action::Choose | Action::Init)
@@ -858,7 +937,7 @@ impl App {
             }
             Action::Destination(tab) => { self.tab = tab; self.selected = 0; self.shell.focus = Focus::Content; if tab == Tab::Files { self.discovering = false; } }
             Action::Choose => self.shell.overlay = Some(Overlay::Repositories { selected: 0 }),
-            Action::Init => self.shell.overlay = Some(Overlay::Form(Form::Init)),
+            Action::Init => { self.shell.path_focused = 0; self.shell.overlay = Some(Overlay::Form(Form::Init)); }
             Action::Discover => {
                 self.tab = Tab::Files;
                 self.discovering = true;
@@ -868,6 +947,10 @@ impl App {
             Action::Adopt => {
                 self.tab = Tab::Files;
                 self.shell.overlay = Some(Overlay::Form(Form::Adopt));
+            }
+            Action::AdoptSelected => {
+                if self.tab == Tab::Files && self.discovering { self.shell.focus = Focus::Content; self.adopt_candidate(); }
+                else { self.status = "Discover and inspect an eligible regular file first.".into(); }
             }
             Action::KeepId | Action::RemoveId => {
                 self.tab = Tab::Files;
@@ -1182,6 +1265,10 @@ impl App {
         }
     }
     fn adopt_candidate(&mut self) {
+        if !self.inventory.details {
+            self.status = "Inspect the selected candidate before choosing Adopt selected.".into();
+            return;
+        }
         if !self.visible_file_rows().contains(&self.candidate_selected) {
             return;
         }
@@ -1199,6 +1286,91 @@ impl App {
             self.shell.overlay = Some(Overlay::Form(Form::Adopt));
         }
     }
+    pub fn action_reason(&self, action: Action) -> Option<&'static str> {
+        match action {
+            Action::AdoptSelected
+                if self.tab != Tab::Files || !self.discovering || !self.inventory.details =>
+            {
+                Some("Inspect a discovered file first.")
+            }
+            Action::AdoptSelected
+                if self
+                    .discovery
+                    .as_ref()
+                    .and_then(|d| d.report.candidates.get(self.candidate_selected))
+                    .is_none_or(|c| !c.supported_for_adoption) =>
+            {
+                Some(
+                    "Not eligible for adoption: directories, links and special files are metadata only; choose an owned single-link regular file.",
+                )
+            }
+            Action::Rollback
+                if self.tab != Tab::Recovery
+                    || self
+                        .history_selection()
+                        .is_none_or(|r| !super::recovery::rollback(r)) =>
+            {
+                Some("Rollback unavailable; select an eligible schema-1/2 transaction.")
+            }
+            Action::Resume
+                if self.tab != Tab::Recovery
+                    || self
+                        .history_selection()
+                        .is_none_or(|r| !super::recovery::resume(r)) =>
+            {
+                Some("Resume unavailable; select an intact Running bootstrap.")
+            }
+            Action::Abandon
+                if self.tab != Tab::Recovery
+                    || self
+                        .history_selection()
+                        .is_none_or(|r| !super::recovery::abandon(r)) =>
+            {
+                Some("Abandon unavailable; select an intact nonterminal bootstrap.")
+            }
+            _ => None,
+        }
+    }
+    pub fn page_actions(&self) -> Vec<Action> {
+        match self.tab {
+            Tab::Overview => vec![
+                Action::Init,
+                Action::Choose,
+                Action::Discover,
+                Action::Apply,
+            ],
+            Tab::Files if self.discovering => vec![
+                Action::Inspect,
+                Action::AdoptSelected,
+                Action::Discover,
+                Action::Adopt,
+            ],
+            Tab::Files => vec![
+                Action::Inspect,
+                Action::Apply,
+                Action::Keep,
+                Action::Discover,
+            ],
+            Tab::Recovery => vec![
+                Action::Inspect,
+                Action::Rollback,
+                Action::Resume,
+                Action::Abandon,
+            ],
+            Tab::Checks => vec![
+                Action::CheckCurrent,
+                Action::CheckStandalone,
+                Action::Diagnostics,
+                Action::Profiles,
+            ],
+            Tab::Git => vec![
+                Action::GitStatus,
+                Action::GitUnstaged,
+                Action::GitStaged,
+                Action::GitPatch,
+            ],
+        }
+    }
     fn row_count(&self) -> usize {
         self.data.as_ref().map_or(0, |data| match self.tab {
             Tab::Files => data.files.len(),
@@ -1210,6 +1382,13 @@ impl App {
         let confirmation = self.confirmation.as_mut()?;
         match key.code {
             KeyCode::Esc => self.confirmation = None,
+            KeyCode::PageDown => {
+                confirmation.prompt_scroll = confirmation.prompt_scroll.saturating_add(4)
+            }
+            KeyCode::PageUp => {
+                confirmation.prompt_scroll = confirmation.prompt_scroll.saturating_sub(4)
+            }
+            KeyCode::Home => confirmation.prompt_scroll = 0,
             KeyCode::Backspace => {
                 confirmation.input.pop();
             }
@@ -1230,6 +1409,7 @@ impl App {
                 {
                     if confirmation.input == id {
                         confirmation.removal_ack = Some(confirmation.input.clone());
+                        confirmation.prompt_scroll = 0;
                         confirmation.input.clear();
                     } else {
                         self.status = "Exact file ID does not match; nothing executed.".into();

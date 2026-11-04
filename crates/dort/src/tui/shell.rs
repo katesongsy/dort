@@ -16,13 +16,6 @@ impl Focus {
             _ => Self::Destinations,
         }
     }
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Destinations => "Destinations",
-            Self::Content => "Content",
-            Self::Actions => "Actions",
-        }
-    }
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Form {
@@ -105,6 +98,7 @@ pub enum Action {
     Init,
     Discover,
     Adopt,
+    AdoptSelected,
     Profiles,
     CheckCurrent,
     CheckStandalone,
@@ -145,6 +139,7 @@ impl Action {
             Self::Init => "Create/attach local repository",
             Self::Discover => "Discover files (metadata only; no repository needed)",
             Self::Adopt => "Adopt a file (editable target / ID / source)",
+            Self::AdoptSelected => "Adopt selected eligible file (inspect first)",
             Self::Profiles => "Profiles: temporary repository additions",
             Self::CheckCurrent => "Check current repository manifest",
             Self::CheckStandalone => "Check standalone manifest (no repository needed)",
@@ -179,6 +174,7 @@ pub fn actions(query: &str) -> Vec<Action> {
         Action::Init,
         Action::Discover,
         Action::Adopt,
+        Action::AdoptSelected,
         Action::Profiles,
         Action::CheckCurrent,
         Action::CheckStandalone,
@@ -221,6 +217,7 @@ pub struct Shell {
     pub overlay: Option<Overlay>,
     pub scroll: u16,
     pub init_draft: String,
+    pub path_focused: usize,
     pub choose_draft: String,
     pub adoption: AdoptionDraft,
     pub return_to_adopt: bool,
@@ -247,6 +244,7 @@ impl Shell {
             overlay: None,
             scroll: 0,
             init_draft: String::new(),
+            path_focused: 0,
             choose_draft: String::new(),
             adoption: AdoptionDraft::new(),
             return_to_adopt: false,
@@ -268,14 +266,14 @@ impl Shell {
     pub fn text_entry(&self) -> bool {
         matches!(
             self.overlay,
-            Some(
-                Overlay::Form(Form::Choose | Form::Init)
-                    | Overlay::Actions {
-                        searching: true,
-                        ..
-                    }
-            )
-        ) || (matches!(self.overlay, Some(Overlay::Form(Form::Adopt))) && self.adoption.focused < 3)
+            Some(Overlay::Actions {
+                searching: true,
+                ..
+            })
+        ) || (matches!(self.overlay, Some(Overlay::Form(Form::Choose | Form::Init)))
+            && self.path_focused == 0)
+            || (matches!(self.overlay, Some(Overlay::Form(Form::Adopt)))
+                && self.adoption.focused < 3)
             || (matches!(self.overlay, Some(Overlay::Form(Form::Check)))
                 && self.manifest_focused == 0)
             || (matches!(
@@ -433,8 +431,22 @@ impl Shell {
                 };
                 match key.code {
                     KeyCode::Esc => self.back(),
-                    KeyCode::Enter => return Some(Intent::Submit(form)),
-                    _ => edit_text(draft, key),
+                    KeyCode::Tab | KeyCode::BackTab => {
+                        self.path_focused = (self.path_focused
+                            + if key.code == KeyCode::BackTab
+                                || key.modifiers.contains(KeyModifiers::SHIFT)
+                            {
+                                2
+                            } else {
+                                1
+                            })
+                            % 3;
+                    }
+                    KeyCode::Enter if self.path_focused == 0 => self.path_focused = 1,
+                    KeyCode::Enter if self.path_focused == 1 => return Some(Intent::Submit(form)),
+                    KeyCode::Enter => self.back(),
+                    _ if self.path_focused == 0 => edit_text(draft, key),
+                    _ => (),
                 }
             }
             Overlay::Repositories { selected } => match key.code {
@@ -443,6 +455,7 @@ impl Shell {
                 KeyCode::Up => *selected = selected.saturating_sub(1),
                 KeyCode::Enter if *selected == 0 => {
                     self.scroll = 0;
+                    self.path_focused = 0;
                     self.overlay = Some(Overlay::Form(Form::Choose))
                 }
                 KeyCode::Enter if *selected == 1 => return Some(Intent::Active),
