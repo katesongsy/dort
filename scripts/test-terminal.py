@@ -454,6 +454,43 @@ def run():
         assert not list(home.iterdir()) and not list(git_only.iterdir())
         print("PASS independent Git root, metadata search/summaries and one-view patch disclosure")
 
+        patch_calls = (base / "patch-calls").read_text()
+        with Session([binary, "tui"], dict(env, PATH=str(bin_dir)), (14, 48)) as session:
+            session.wait(b"loaded.")
+            session.send(b"5g" + os.fsencode(git_only) + b"\r")
+            session.wait(b"Git read completed")
+            for column in [b"PATH", b"KIND", b"XY"]:
+                session.wait(column)
+            session.wait(b"> q?name")
+            session.send(b"\r")
+            session.wait(b"Git details")
+            session.wait(b"Path:")
+            session.send(b"\x1b[6~" * 2)
+            session.wait(b"Git-only root:")
+            session.send(b"\x1b[H")
+            session.wait(b"Path:")
+            session.send(b"\x1b")
+            session.wait(b"PATH")
+            session.send(b"u")
+            for column in [b"PATH", b"CHANGE", b"MODES"]:
+                session.wait(column)
+            session.wait(b"100644 -> 100644")
+            session.send(b"/q?/\r")
+            session.wait(b"0 displayed")
+            session.wait(b"No matches")
+            session.send(b"\x1b[3~r")
+            session.settle()  # identical summaries can otherwise match the prior frame
+            session.wait(b"1 entries")
+            session.wait(b"Git read completed")
+            session.send(b"\r")
+            session.wait(b"Modes: 100644 -> 100644")
+            assert b"PRIVATE-PATCH" not in session.data, "Metadata rendered patch content"
+            session.send(b"q")
+            session.finish()
+        assert (base / "patch-calls").read_text() == patch_calls, "Metadata inspection fetched a patch"
+        assert not list(home.iterdir()) and not list(git_only.iterdir())
+        print("PASS compact typed Git tables, full-scope details and Home without patch reads or state")
+
         created = base / "created"
         for intent in ("create", "attach"):
             onboarding_home = base / f"home-{intent}"
@@ -683,7 +720,7 @@ def run():
             ) as session:
                 session.finish(code)
             print("PASS terminal cleanup", mode)
-    print("25 PTY cases passed (disposable HOME, no installed Git requirement)")
+    print("26 PTY cases passed (disposable HOME, no installed Git requirement)")
 
 
 if __name__ == "__main__":

@@ -241,7 +241,12 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if app.error.is_none() && app.preview.is_none() && app.shell.overlay.is_none() {
         match app.tab {
             Tab::Files => super::files::draw(frame, content[0], app),
-            Tab::Git => app.git_view.draw(frame, content[0]),
+            Tab::Git => app.git_view.draw(
+                frame,
+                content[0],
+                app.shell.focus == Focus::Content,
+                app.busy,
+            ),
             Tab::Overview => super::observations::overview(frame, content[0], app),
             Tab::Checks => super::observations::checks(frame, content[0], app),
             Tab::Recovery => super::recovery::draw(frame, content[0], app),

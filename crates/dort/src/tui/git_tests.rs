@@ -316,10 +316,10 @@ fn git_selection_uses_raw_identity_across_refresh_and_compact_search_is_visible(
             && screen.contains("Original path: Some(\"old\\nname\")")
     );
     key(&mut app, KeyCode::Esc);
-    assert!(render(&app, 48, 14).contains("Selected >"));
+    assert!(render(&app, 48, 14).contains("> second\\u{202e}"));
     key(&mut app, KeyCode::Char('/'));
     text(&mut app, "q?/");
-    assert!(render(&app, 48, 14).contains("Filter > \"q?/\""));
+    assert!(render(&app, 48, 14).contains("Filter > q?/"));
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Delete);
     app.git_view.accept(summary(&[]), true);

@@ -10,6 +10,8 @@ use ratatui::{
 };
 use std::path::PathBuf;
 
+mod metadata;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Comparison {
     #[default]
@@ -31,38 +33,38 @@ pub enum Metadata {
     Diff(Diff),
 }
 impl Metadata {
-    fn rows(&self) -> Vec<(String, String)> {
+    fn len(&self) -> usize {
         match self {
-            Self::Status(status) => status
-                .entries
-                .iter()
-                .map(|e| {
-                    (
-                        e.path.clone(),
-                        format!(
-                            "Kind: {} | XY: {}\nPath: {:?}\nOriginal path: {:?}",
-                            e.kind,
-                            e.xy.as_deref().unwrap_or("-"),
-                            e.path,
-                            e.original_path
-                        ),
-                    )
-                })
-                .collect(),
-            Self::Diff(diff) => diff
-                .entries
-                .iter()
-                .map(|e| {
-                    (
-                        e.path.clone(),
-                        format!(
-                            "Change: {} | modes: {} -> {}\nPath: {:?}",
-                            e.change, e.old_mode, e.new_mode, e.path
-                        ),
-                    )
-                })
-                .collect(),
+            Self::Status(status) => status.entries.len(),
+            Self::Diff(diff) => diff.entries.len(),
         }
+    }
+    fn path(&self, index: usize) -> Option<&str> {
+        match self {
+            Self::Status(status) => status.entries.get(index).map(|e| e.path.as_str()),
+            Self::Diff(diff) => diff.entries.get(index).map(|e| e.path.as_str()),
+        }
+    }
+    fn matches(&self, index: usize, search: &super::inventory::Search) -> bool {
+        // Retain labeled/escaped metadata search, never parse it for identity or policy.
+        let text = match self {
+            Self::Status(status) => status.entries.get(index).map(|e| {
+                format!(
+                    "Kind: {} | XY: {}\nPath: {:?}\nOriginal path: {:?}",
+                    e.kind,
+                    e.xy.as_deref().unwrap_or("-"),
+                    e.path,
+                    e.original_path
+                )
+            }),
+            Self::Diff(diff) => diff.entries.get(index).map(|e| {
+                format!(
+                    "Change: {} | modes: {} -> {}\nPath: {:?}",
+                    e.change, e.old_mode, e.new_mode, e.path
+                )
+            }),
+        };
+        text.is_some_and(|text| search.matches(&text))
     }
 }
 // Only this module can construct a content-disclosure read, after consuming confirmation.
@@ -204,12 +206,14 @@ impl State {
                 let old = self
                     .metadata
                     .as_ref()
-                    .and_then(|m| m.rows().get(self.selected).map(|r| r.0.clone()));
-                let rows = metadata.rows();
+                    .and_then(|m| m.path(self.selected))
+                    .map(str::to_owned);
                 self.selected = old
-                    .and_then(|p| rows.iter().position(|r| r.0 == p))
+                    .and_then(|path| {
+                        (0..metadata.len()).find(|&i| metadata.path(i) == Some(path.as_str()))
+                    })
                     .unwrap_or(self.selected)
-                    .min(rows.len().saturating_sub(1));
+                    .min(metadata.len().saturating_sub(1));
                 self.metadata = Some(metadata);
                 self.clamp();
             }
@@ -251,11 +255,8 @@ impl State {
         self.metadata
             .as_ref()
             .map(|m| {
-                m.rows()
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, r)| self.search.matches(&r.1))
-                    .map(|(i, _)| i)
+                (0..m.len())
+                    .filter(|&i| m.matches(i, &self.search))
                     .collect()
             })
             .unwrap_or_default()
@@ -385,13 +386,16 @@ impl State {
                 self.details = false;
                 self.scroll = 0;
             }
-            KeyCode::PageDown => self.scroll = self.scroll.saturating_add(4),
-            KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(4),
+            // The compact metadata detail viewport has three rows. Overlap
+            // scroll steps so no wrapped path row can be skipped at the floor.
+            KeyCode::PageDown => self.scroll = self.scroll.saturating_add(2),
+            KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(2),
+            KeyCode::Home => self.scroll = 0,
             _ => return None,
         }
         Some(None)
     }
-    pub fn draw(&self, frame: &mut Frame, area: Rect) {
+    pub fn draw(&self, frame: &mut Frame, area: Rect, focused: bool, busy: bool) {
         let scope = format!(
             "Git-only root: {:?} ({})\n{} | g root | z Status | u Unstaged | s Staged\nr refresh | / metadata search | w View patch content\n",
             self.root,
@@ -454,92 +458,25 @@ impl State {
                 self.draft
             )
         } else {
-            let compact = area.height < 12;
-            let mut text = if compact {
-                format!(
-                    "{}\n",
-                    super::views::short_field(
-                        if self.search.editing {
-                            "Filter"
-                        } else {
-                            "Root"
-                        },
-                        if self.search.editing {
-                            &self.search.query
-                        } else {
-                            self.root
-                                .as_ref()
-                                .and_then(|p| p.to_str())
-                                .unwrap_or("not selected")
-                        },
-                        area.width
-                    )
-                )
-            } else {
-                format!(
-                    "{scope}\nFilter: {:?} | i/Enter details | Esc list\n",
-                    self.search.query
-                )
-            };
-            if let Some(metadata) = &self.metadata {
-                if !compact && let Metadata::Status(status) = metadata {
-                    text.push_str(&format!("Branch headers: {:?}\n", status.branch));
-                }
-                let rows = metadata.rows();
-                let visible = self.visible();
-                text.push_str(&format!(
-                    "{} entries; {} displayed (metadata only)\n",
-                    rows.len(),
-                    visible.len()
-                ));
-                if rows.is_empty() {
-                    text.push_str("No changes in this comparison.\n");
-                }
-                if self.details {
-                    if visible.contains(&self.selected) {
-                        text.push_str(&rows[self.selected].1);
-                    }
-                } else {
-                    let count = usize::from(area.height.saturating_sub(10)).max(1);
-                    let pos = visible
-                        .iter()
-                        .position(|&i| i == self.selected)
-                        .unwrap_or(0);
-                    for &i in visible
-                        .iter()
-                        .skip(pos.saturating_sub(count / 2))
-                        .take(count)
-                    {
-                        if compact {
-                            text.push_str(&super::views::short_field(
-                                if i == self.selected {
-                                    "Selected"
-                                } else {
-                                    "Path"
-                                },
-                                &rows[i].0,
-                                area.width,
-                            ));
-                            text.push('\n');
-                        } else {
-                            text.push_str(&format!(
-                                "{} {:?}\n",
-                                if i == self.selected { ">" } else { " " },
-                                rows[i].0
-                            ));
-                        }
-                    }
-                }
-            } else {
-                text.push_str("Summary unavailable/not loaded. Choose scope, then refresh.\n");
-            }
-            if compact {
-                text.push_str(&format!("\n{scope}\nFilter: {:?}\n", self.search.query));
-                if let Some(Metadata::Status(status)) = &self.metadata {
-                    text.push_str(&format!("Branch headers: {:?}\n", status.branch));
-                }
-            }
-            text
+            let visible = self.visible();
+            metadata::draw(
+                frame,
+                area,
+                metadata::View {
+                    root: self.root.as_deref(),
+                    follows_files: self.follows_files,
+                    comparison: self.comparison,
+                    metadata: self.metadata.as_ref(),
+                    search: &self.search,
+                    visible: &visible,
+                    selected: self.selected,
+                    details: self.details,
+                    scroll: self.scroll,
+                    focused,
+                    busy,
+                },
+            );
+            return;
         };
         frame.render_widget(
             Paragraph::new(safe(&body))

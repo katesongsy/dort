@@ -475,6 +475,188 @@ fn recovery_details_keep_full_ids_and_guards_inspectable_without_mutating_diagno
         assert!(app.preview.is_none() && app.confirmation.is_none());
     }
 }
+fn git_app(metadata: super::git::Metadata) -> App {
+    let mut app = App::new(false);
+    app.tab = Tab::Git;
+    app.git_view.root = Some("/synthetic/independent-git-root".into());
+    app.git_view.follows_files = false;
+    if let super::git::Metadata::Diff(diff) = &metadata {
+        app.git_view.choose(if diff.staged {
+            super::git::Comparison::Staged
+        } else {
+            super::git::Comparison::Unstaged
+        });
+    }
+    app.git_view
+        .accept(super::git::Report::Summary(metadata), true);
+    app
+}
+#[test]
+fn git_metadata_tables_have_typed_columns_focus_and_selected_styles_at_all_sizes() {
+    use dort_core::git::{Diff, DiffEntry, Status, StatusEntry};
+    let mut app = git_app(super::git::Metadata::Status(Status {
+        schema: 1,
+        read_only: true,
+        branch: vec!["branch.head main".into()],
+        entries: vec![
+            StatusEntry {
+                kind: "unmerged".into(),
+                xy: Some("UU".into()),
+                path: "conflict".into(),
+                original_path: None,
+            },
+            StatusEntry {
+                kind: "renamed".into(),
+                xy: Some("R.".into()),
+                path: "new-name".into(),
+                original_path: Some("old-name".into()),
+            },
+        ],
+    }));
+    key(&mut app, KeyCode::Down);
+    for (w, h) in [(48, 14), (80, 24), (110, 24), (140, 40)] {
+        let b = buffer(&app, w, h);
+        for column in ["PATH", "KIND", "XY"] {
+            locate(&b, column);
+        }
+        let selected = locate(&b, "> new-name");
+        let row: String = (0..w).map(|x| b[(x, selected.1)].symbol()).collect();
+        let byte = row.find("renamed").unwrap();
+        let status = (row[..byte].chars().count() as u16, selected.1);
+        assert_eq!(b[status].bg, Color::Cyan);
+        assert_eq!(b[status].fg, Color::Black);
+        assert!(
+            b[status]
+                .modifier
+                .contains(Modifier::REVERSED | Modifier::BOLD)
+        );
+        assert_eq!(b[locate(&b, "unmerged")].fg, Color::Red);
+        assert_eq!(b[locate(&b, "Focus")].fg, Color::Cyan);
+        if w >= 110 {
+            locate(&b, "Git details");
+        }
+    }
+    let app = git_app(super::git::Metadata::Diff(Diff {
+        schema: 1,
+        read_only: true,
+        staged: true,
+        patch: None,
+        entries: vec![DiffEntry {
+            change: "M".into(),
+            old_mode: "100644".into(),
+            new_mode: "100755".into(),
+            path: "changed-file".into(),
+        }],
+    }));
+    for (w, h) in [(48, 14), (80, 24), (110, 24), (140, 40)] {
+        let b = buffer(&app, w, h);
+        for column in ["PATH", "CHANGE", "MODES"] {
+            locate(&b, column);
+        }
+        locate(&b, "100644 -> 100755");
+        locate(&b, "Staged (index vs HEAD");
+        locate(&b, "> changed-file");
+    }
+}
+#[test]
+fn git_metadata_full_paths_branch_and_limits_are_reachable_using_real_scroll_keys() {
+    use dort_core::git::{Status, StatusEntry};
+    let path = format!("{}path-end\u{202e}", "long-path/".repeat(20));
+    let original = format!("{}old\nname", "original/".repeat(20));
+    let mut app = git_app(super::git::Metadata::Status(Status {
+        schema: 1,
+        read_only: true,
+        branch: vec!["branch.oid (initial)".into(), "branch.head main".into()],
+        entries: vec![StatusEntry {
+            kind: "renamed".into(),
+            xy: Some("R.".into()),
+            path: path.clone(),
+            original_path: Some(original.clone()),
+        }],
+    }));
+    app.git_view.root = Some(format!("/synthetic/{}/root-end", "scope/".repeat(30)).into());
+    key(&mut app, KeyCode::Enter);
+    for (w, h) in [(48, 14), (80, 24), (110, 24), (140, 40)] {
+        key(&mut app, KeyCode::Home);
+        let first = render(&app, w, h);
+        let mut all = String::new();
+        let mut consecutive = String::new();
+        for _ in 0..60 {
+            let b = buffer(&app, w, h);
+            let (x, y) = locate(&b, "Git details");
+            for line in y + 1..h - 5 {
+                for col in x - 1..w - 1 {
+                    all.push_str(b[(col, line)].symbol());
+                }
+            }
+            // Git's ordinary metadata scroll advances two rows: capture these
+            // consecutive rows to verify paths longer than the whole viewport.
+            for line in y + 1..y + 3 {
+                for col in x - 1..w - 1 {
+                    consecutive.push_str(b[(col, line)].symbol());
+                }
+            }
+            app.key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), w, h);
+        }
+        all.push_str(&consecutive);
+        for value in [
+            views::safe(&format!("Path: {path:?}")),
+            views::safe(&format!("Original path: {:?}", Some(&original))),
+            "root-end".into(),
+            "independent session choice".into(),
+            "branch.oid (initial)".into(),
+            "branch.head main".into(),
+            "Metadata boundary".into(),
+            "No patch content requested.".into(),
+        ] {
+            assert!(
+                all.contains(&value),
+                "inspectable typed Git metadata at {w}x{h}: {value}"
+            );
+        }
+        assert!(!all.contains('\u{202e}') && !all.contains('\u{1b}'));
+        app.key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE), w, h);
+        assert_eq!(first, render(&app, w, h));
+    }
+    assert!(!app.git_view.sensitive() && app.preview.is_none() && app.confirmation.is_none());
+}
+#[test]
+fn git_metadata_unknown_empty_and_filter_caret_remain_distinct_at_the_floor() {
+    use dort_core::git::Status;
+    let mut app = git_app(super::git::Metadata::Status(Status {
+        schema: 1,
+        read_only: true,
+        branch: vec![],
+        entries: vec![],
+    }));
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        let screen = render(&app, w, h);
+        assert!(screen.contains("0 entries") && screen.contains("No changes"));
+        key(&mut app, KeyCode::Enter);
+        assert!(render(&app, w, h).contains("No changes in this comparison."));
+        key(&mut app, KeyCode::Esc);
+    }
+    app.git_view.metadata = None;
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        let screen = render(&app, w, h);
+        assert!(screen.contains("Unknown") && screen.contains("Summary unavailable/not loaded"));
+        assert!(!screen.contains("0 entries") && !screen.contains("No changes"));
+        key(&mut app, KeyCode::Enter);
+        assert!(render(&app, w, h).contains("Summary unavailable/not loaded"));
+        key(&mut app, KeyCode::Esc);
+    }
+    app.git_view.search.editing = true;
+    app.git_view.search.query = format!("q?/{}needle", "é\u{1b}".repeat(30));
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
+        t.draw(|f| views::draw(f, &app)).unwrap();
+        let (x, y) = locate(t.backend().buffer(), "needle");
+        assert_eq!(t.get_cursor_position().unwrap(), (x + 6, y).into());
+        locate(t.backend().buffer(), "Filter > ...");
+        let screen = render(&app, w, h);
+        assert!(!screen.contains('é') && !screen.contains('\u{1b}'));
+    }
+}
 #[test]
 fn single_path_field_cannot_submit_until_the_visible_action_is_activated() {
     let mut app = App::new(false);
