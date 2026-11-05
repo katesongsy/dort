@@ -4,6 +4,9 @@
 compile_error!("Dort currently supports macOS and Ubuntu only.");
 
 pub mod adoption;
+pub mod batch;
+mod batch_execution;
+mod batch_journal;
 pub mod bootstrap;
 pub mod context;
 pub mod discovery;

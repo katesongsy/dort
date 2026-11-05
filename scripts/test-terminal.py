@@ -289,14 +289,17 @@ def run():
         with Session([binary, "tui"], discovery_env, (24, 80)) as session:
             session.wait(b"loaded.")
             session.send(b"f")
-            session.wait(b"Not eligible")
+            session.wait(b"Metadata discovery loaded")
             session.send(b"/nvim\x1b")
             session.settle()
             session.send(b"\r")
-            session.wait(b"[Not eligible]")
+            session.settle()  # Enter folds a directory, never opens an adoption form.
             assert b"TARGET >" not in session.screen.text()
             session.send(b"i")
-            session.wait(b"Directories, links and special files")
+            session.wait(b"Directory / tree group")
+            session.send(b"e")
+            session.settle()
+            assert b"TARGET >" not in session.screen.text()
             session.send(b"q")
             session.finish()
         assert not (discovery_home / ".config" / "dort").exists()
@@ -942,6 +945,133 @@ def run():
         assert target.is_symlink()
         print("PASS exact-ID link deletion outside display filter and separate yes")
 
+        # Each batch scenario has its own canonical disposable home and registry.
+        def batch_fixture(name, managed):
+            batch_home, batch_repo = base / (name + '-home'), base / (name + '-repo')
+            batch_home.mkdir(mode=0o700)
+            (batch_repo / '.git').mkdir(parents=True)
+            targets = batch_home / '.config/bundle'
+            targets.mkdir(parents=True, mode=0o700)
+            manifest = 'schema=1\n'
+            for item in ['only-a', 'only-b'] + (['only-c'] if managed else []):
+                (targets / item).write_text('ordinary settings\n')
+                if managed:
+                    (batch_repo / item).write_text('ordinary source settings\n')
+                    manifest += (f"[[files]]\nid='{item}'\nsource='{item}'\n"
+                                 f"target='~/.config/bundle/{item}'\nmode='link'\n")
+            (batch_repo / 'dort.toml').write_text(manifest)
+            configuration = batch_home / '.config/dort'
+            configuration.mkdir(mode=0o700)
+            repo_id = hashlib.sha256(os.fsencode(batch_repo)).hexdigest()
+            registration = configuration / 'local.toml'
+            registration.write_text(f'schema=1\nactive_repository="{repo_id}"\n'
+                                    f'[repositories."{repo_id}"]\nroot={json.dumps(str(batch_repo))}\n')
+            registration.chmod(0o600)
+            batch_env = dict(env, HOME=str(batch_home), XDG_CONFIG_HOME=str(batch_home / '.config'),
+                             XDG_STATE_HOME=str(batch_home / '.local/state'))
+            return batch_home, batch_repo, targets, batch_env
+
+        def batch_heads(batch_home, expected):
+            folders = list((batch_home / '.local/state/dort/repositories').glob('*/transactions/*'))
+            assert len(folders) == expected, 'Batch did not use one transaction per approval'
+            for folder in folders:
+                head = json.loads(json.loads(sorted(folder.glob('*.json'))[-1].read_text())['payload'])
+                assert head['schema'] == 4 and head['phase'] in ('completed', 'rolled_back')
+
+        batch_home, batch_repo, targets, batch_env = batch_fixture('batch-adopt', False)
+        with Session([binary, 'tui'], batch_env) as session:
+            session.wait(b'loaded.')
+            session.send(b'f')
+            session.wait(b'Metadata discovery loaded')
+            session.send(b'/bundle\r')
+            session.click_label('[ ] only-a')
+            session.click_label('[ ] only-b')
+            session.wait(b'2 marked')
+            session.send(b'h')  # Folding does not remove either mark.
+            session.wait(b'2 hidden')
+            session.send(b'lE')
+            session.wait(b'File 1/2')
+            session.click_label('Next')
+            session.wait(b'File 2/2')
+            session.click_label('Review batch')
+            session.wait(b'Combined batch preview')
+            session.send(b'\r')
+            session.wait(b'Confirm')
+            session.send(b'yes\r')
+            session.wait(b'Observations refreshed.')
+            assert all((targets / name).is_symlink() for name in ('only-a', 'only-b'))
+            batch_heads(batch_home, 1)
+            session.send(b'3b')
+            session.wait(b'Rollback schema 4')
+            session.send(b'\r')
+            session.wait(b'Confirm')
+            session.send(b'yes\r')
+            session.wait(b'Observations refreshed.')
+            session.send(b'q')
+            session.finish()
+        for name in ('only-a', 'only-b'):
+            assert not (targets / name).is_symlink()
+            assert (targets / name).read_text() == 'ordinary settings\n'
+            assert not (batch_repo / 'files' / name).exists()
+        batch_heads(batch_home, 1)
+        print('PASS tree marks/folding, editable combined adoption and schema-4 whole rollback')
+
+        for operation in ('K', 'D'):
+            batch_home, batch_repo, targets, batch_env = batch_fixture('batch-' + operation, True)
+            with Session([binary, 'tui'], batch_env) as session:
+                session.wait(b'loaded.')
+                session.send(b'2')
+                session.click_label('[ ] only-a')
+                session.click_label('[ ] only-b')
+                session.send(b'/only-a\rA')  # Hidden only-b remains explicitly included.
+                session.wait(b'Combined batch preview')
+                session.send(b'\r')
+                session.wait(b'Confirm')
+                session.send(b'yes\r')
+                session.wait(b'Observations refreshed.')
+                assert all((targets / name).is_symlink() for name in ('only-a', 'only-b'))
+                assert not (targets / 'only-c').is_symlink()
+                batch_heads(batch_home, 1)
+                session.send(b'\x1b')
+                session.settle()
+                session.send(operation.encode())
+                session.wait(b'Combined batch preview')
+                session.send(b'\r')
+                if operation == 'D':
+                    session.wait(b'1/2')
+                    session.send(b'yes\r')
+                    session.settle()
+                    assert all((targets / name).is_symlink() for name in ('only-a', 'only-b'))
+                    session.send(b'\x7f\x7f\x7fonly-a\r')
+                    session.wait(b'2/2')
+                    session.resize((14, 47))
+                    session.wait(b'terminal too small')
+                    session.resize((24, 80))
+                    session.wait(b'Combined batch preview')
+                    session.settle()  # Drain resize events before fresh confirmation input.
+                    session.send(b'\r')
+                    session.wait(b'1/2')  # The entire acknowledgement sequence was cleared.
+                    session.send(b'only-a\ronly-b\r')
+                    session.wait(b'literal yes')
+                else:
+                    session.wait(b'Confirm')
+                session.send(b'yes\r')
+                session.wait(b'Batch file operation completed.')
+                session.send(b'q')
+                session.finish()
+            for name in ('only-a', 'only-b'):
+                assert not (targets / name).is_symlink()
+                if operation == 'K':
+                    assert (targets / name).read_text() == 'ordinary source settings\n'
+                else:
+                    assert not (targets / name).exists()
+                assert (batch_repo / name).read_text() == 'ordinary source settings\n'
+            assert (targets / 'only-c').read_text() == 'ordinary settings\n'
+            remaining = (batch_repo / 'dort.toml').read_text()
+            assert 'only-a' not in remaining and 'only-b' not in remaining and 'only-c' in remaining
+            batch_heads(batch_home, 2)
+            print('PASS selected Apply and combined', operation, 'with hidden marks and guarded approval')
+
         for mode, code in [("normal", 0), ("error", 0), ("panic", 101)]:
             with Session(
                 [probe, "--exact", "tui::tests::terminal_cleanup_probe", "--nocapture"],
@@ -949,7 +1079,7 @@ def run():
             ) as session:
                 session.finish(code)
             print("PASS terminal cleanup", mode)
-    print("31 PTY cases passed (disposable HOME, no installed Git requirement)")
+    print("34 PTY cases passed (disposable HOME, no installed Git requirement)")
 
 
 if __name__ == "__main__":

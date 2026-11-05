@@ -41,7 +41,7 @@ pub struct AdoptionDraft {
     pub focused: usize,
 }
 impl AdoptionDraft {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             target: String::new(),
             id: String::new(),
@@ -99,6 +99,14 @@ pub enum Action {
     Discover,
     Adopt,
     AdoptSelected,
+    BatchAdopt,
+    ApplyMarked,
+    KeepMarked,
+    RemoveMarked,
+    ToggleMark,
+    ClearMarks,
+    ExpandAll,
+    CollapseAll,
     Profiles,
     CheckCurrent,
     CheckStandalone,
@@ -140,6 +148,14 @@ impl Action {
             Self::Discover => "Discover files (metadata only; no repository needed)",
             Self::Adopt => "Adopt a file (editable target / ID / source)",
             Self::AdoptSelected => "Adopt selected eligible file (inspect first)",
+            Self::BatchAdopt => "Adopt marked files (combined editable batch)",
+            Self::ApplyMarked => "Apply marked mappings (selected batch)",
+            Self::KeepMarked => "Keep marked mappings (combined batch)",
+            Self::RemoveMarked => "Delete marked links (each exact ID then yes)",
+            Self::ToggleMark => "Mark/unmark item or matching group descendants",
+            Self::ClearMarks => "Clear marks (current Files inventory)",
+            Self::ExpandAll => "Expand all tree groups",
+            Self::CollapseAll => "Collapse all tree groups",
             Self::Profiles => "Profiles: temporary repository additions",
             Self::CheckCurrent => "Check current repository manifest",
             Self::CheckStandalone => "Check standalone manifest (no repository needed)",

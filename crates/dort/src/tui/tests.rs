@@ -189,7 +189,7 @@ fn long_lists_keep_selection_visible_through_resize_and_form_back() {
     }
     for (width, height) in [(48, 14), (80, 24), (140, 40), (48, 14)] {
         app.resize(width, height);
-        assert!(render(&app, width, height).contains("> file-120"));
+        assert!(render(&app, width, height).contains("> [ ] file-120"));
         assert_eq!(app.selected, 120);
     }
     app.key(key(KeyCode::Char('p')), 48, 14);
@@ -210,7 +210,7 @@ fn long_lists_keep_selection_visible_through_resize_and_form_back() {
     assert_eq!(app.shell.adoption.target, "q?/".repeat(100));
     assert!(matches!(app.shell.overlay, Some(Overlay::Form(_))));
     app.key(key(KeyCode::Esc), 48, 14);
-    assert!(render(&app, 48, 14).contains("> file-120"));
+    assert!(render(&app, 48, 14).contains("> [ ] file-120"));
 }
 
 #[test]
@@ -265,6 +265,9 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     app.key(key(KeyCode::Tab), 80, 24);
     assert!(app.preview.is_none() && app.confirmation.is_none());
     app.key(key(KeyCode::Char(' ')), 80, 24);
+    for c in "Choose repository".chars() {
+        app.key(key(KeyCode::Char(c)), 80, 24);
+    }
     assert!(render(&app, 80, 24).contains("Choose repository (session only)"));
     app.key(key(KeyCode::Esc), 80, 24); // search -> results
     app.key(key(KeyCode::Esc), 80, 24); // close, restoring invoking focus

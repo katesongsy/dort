@@ -116,7 +116,11 @@ fn direct_keys_select_rows_scroll_details_and_ignore_tab_without_region_focus() 
         assert!(scrolled.contains(if tab == Tab::Recovery {
             "> bbbbbbbb"
         } else {
-            "> second"
+            if tab == Tab::Files {
+                "> [ ] second"
+            } else {
+                "> second"
+            }
         }));
         press(&mut app, KeyCode::Tab, size);
         press(&mut app, KeyCode::BackTab, size);
@@ -128,7 +132,11 @@ fn direct_keys_select_rows_scroll_details_and_ignore_tab_without_region_focus() 
             render(&app, size.0, size.1).contains(if tab == Tab::Recovery {
                 "> aaaaaaaa"
             } else {
-                "> first"
+                if tab == Tab::Files {
+                    "> [ ] first"
+                } else {
+                    "> first"
+                }
             })
         );
         press(&mut app, KeyCode::Right, size);
@@ -163,7 +171,11 @@ fn clicks_and_wheels_use_hovered_rows_and_details_with_filtered_raw_identity() {
             render(&app, size.0, size.1).contains(if tab == Tab::Recovery {
                 "> bbbbbbbb"
             } else {
-                "> second"
+                if tab == Tab::Files {
+                    "> [ ] second"
+                } else {
+                    "> second"
+                }
             })
         );
         let before = render(&app, size.0, size.1);
@@ -174,7 +186,11 @@ fn clicks_and_wheels_use_hovered_rows_and_details_with_filtered_raw_identity() {
             render(&app, size.0, size.1).contains(if tab == Tab::Recovery {
                 "> aaaaaaaa"
             } else {
-                "> first"
+                if tab == Tab::Files {
+                    "> [ ] first"
+                } else {
+                    "> first"
+                }
             })
         );
         let (x, y) = at(

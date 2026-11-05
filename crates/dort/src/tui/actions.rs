@@ -205,6 +205,7 @@ pub fn load_scoped(
 
 pub enum Pending {
     Files(Box<Plan>),
+    Batch(Box<dort_core::batch::Plan>),
     Init(Box<BootstrapPreview>),
     Rollback(recovery::Preview),
     Bootstrap(bootstrap::RecoveryPreview),
@@ -212,6 +213,7 @@ pub enum Pending {
 impl Pending {
     pub fn report(&self) -> Result<String> {
         Ok(match self {
+            Self::Batch(plan) => plan.human(),
             Self::Files(plan) => format!(
                 "Repository: {:?}\nEffective profiles: {:?}\nScope: all mappings selected by this request; display filters never narrow it.\n{}",
                 plan.inputs.repository,
@@ -258,6 +260,13 @@ impl Pending {
             ),
         })
     }
+    pub fn review_len(&self) -> Option<usize> {
+        match self {
+            Self::Files(p) => Some(p.files.len()),
+            Self::Batch(p) => Some(p.items.iter().map(|i| i.files.len()).sum()),
+            _ => None,
+        }
+    }
     pub fn removal_id(&self) -> Option<&str> {
         match self {
             Self::Files(plan) => match &plan.inputs.request {
@@ -271,10 +280,17 @@ impl Pending {
         }
     }
     pub fn blocked(&self) -> bool {
-        matches!(self, Self::Files(plan) if plan.has_blockers())
+        match self {
+            Self::Files(plan) => plan.has_blockers(),
+            Self::Batch(plan) => plan.has_blockers(),
+            _ => false,
+        }
     }
     pub fn approve(self, removal: Option<&str>) -> Result<Approved> {
         match self {
+            Self::Batch(plan) => {
+                dort_core::batch::Approval::from_plan(*plan).map(|a| Approved::Batch(Box::new(a)))
+            }
             Self::Files(plan) => FileApproval::from_plan(*plan, removal)
                 .map(|approval| Approved::Files(Box::new(approval))),
             Self::Init(preview) => {
@@ -297,6 +313,7 @@ impl Pending {
 
 pub enum Approved {
     Files(Box<FileApproval>),
+    Batch(Box<dort_core::batch::Approval>),
     Init(Box<BootstrapApproval>, PathBuf),
     Rollback(recovery::Approval, String),
     Bootstrap(bootstrap::RecoveryApproval, String),
@@ -313,6 +330,14 @@ impl Approved {
         observer: impl FnMut(&Event) -> Result<()>,
     ) -> Result<Completion> {
         let (operation, transaction_id, repository) = match self {
+            Self::Batch(approval) => {
+                let lock = WriterLock::acquire(host)?;
+                (
+                    "Batch file operation",
+                    dort_core::batch::execute(host, &lock, *approval, observer)?,
+                    None,
+                )
+            }
             Self::Files(approval) => ("File operation", (*approval).execute(host, observer)?, None),
             Self::Init(approval, root) => (
                 "Create/attach",
@@ -355,6 +380,7 @@ pub enum Retry {
     Diagnostics,
     Refresh,
     Files(Request),
+    Batch(dort_core::batch::Request),
     Init(PathBuf, PathBuf),
     Rollback(String, String),
     Bootstrap(String, String, bootstrap::RecoveryAction),
@@ -377,6 +403,7 @@ impl Retry {
             Self::Diagnostics => Task::Diagnostics,
             Self::Refresh => Task::Refresh,
             Self::Files(request) => Task::Files(request),
+            Self::Batch(request) => Task::Batch(request),
             Self::Init(root, git) => Task::Init { root, git },
             Self::Rollback(r, t) => Task::Rollback(r, t),
             Self::Bootstrap(r, t, action) => Task::Bootstrap(r, t, action),
@@ -401,6 +428,7 @@ impl Task {
             Self::Diagnostics => Some(Retry::Diagnostics),
             Self::Refresh => Some(Retry::Refresh),
             Self::Files(request) => Some(Retry::Files(request.clone())),
+            Self::Batch(request) => Some(Retry::Batch(request.clone())),
             Self::Init { root, git } => Some(Retry::Init(root.clone(), git.clone())),
             Self::Rollback(r, t) => Some(Retry::Rollback(r.clone(), t.clone())),
             Self::Bootstrap(r, t, action) => Some(Retry::Bootstrap(r.clone(), t.clone(), *action)),
@@ -429,6 +457,7 @@ pub enum Task {
         git: PathBuf,
     },
     Files(Request),
+    Batch(dort_core::batch::Request),
     Rollback(String, String),
     Bootstrap(String, String, bootstrap::RecoveryAction),
     Execute(Approved),
@@ -554,6 +583,11 @@ pub fn perform_scoped(
         }
         Task::Init { root, git } => BootstrapPreview::prepare(host, &root, &git)
             .map(|p| Output::Preview(Pending::Init(Box::new(p)))),
+        Task::Batch(request) => {
+            let local = LocalConfig::load(host)?;
+            crate::services::batch_plan(host, &local, repository.as_deref(), requested, request)
+                .map(|p| Output::Preview(Pending::Batch(Box::new(p))))
+        }
         Task::Files(request) => {
             let local = LocalConfig::load(host)?;
             let snapshot =

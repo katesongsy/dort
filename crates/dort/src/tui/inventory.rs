@@ -23,6 +23,11 @@ pub struct Inventory {
     pub managed: Search,
     pub candidates: Search,
     pub details: bool,
+    pub group: Option<usize>,
+    pub candidate_marks: std::collections::BTreeSet<std::path::PathBuf>,
+    pub managed_marks: std::collections::BTreeSet<String>,
+    pub candidate_folded: std::collections::BTreeSet<std::path::PathBuf>,
+    pub managed_folded: std::collections::BTreeSet<std::path::PathBuf>,
 }
 impl Inventory {
     pub fn search(&self, discovering: bool) -> &Search {

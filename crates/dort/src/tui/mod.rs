@@ -1,5 +1,8 @@
 mod actions;
 mod app;
+#[cfg(test)]
+mod batch_tests;
+mod batch_ui;
 mod components;
 #[cfg(test)]
 mod design_tests;
@@ -27,6 +30,7 @@ mod review;
 mod shell;
 #[cfg(test)]
 mod tests;
+mod tree;
 mod views;
 mod workbench;
 #[cfg(test)]
@@ -123,7 +127,13 @@ fn run_loop(
             return Ok(());
         }
         terminal
-            .draw(|frame| views::draw(frame, &app))
+            .draw(|frame| {
+                // Normalize against the frame actually rendered, not only queued
+                // resize events: a visible below-floor frame must clear all consent.
+                let area = frame.area();
+                app.resize(area.width, area.height);
+                views::draw(frame, &app);
+            })
             .map_err(terminal_error)?;
         if event::poll(Duration::from_millis(50)).map_err(terminal_error)? {
             match event::read().map_err(terminal_error)? {

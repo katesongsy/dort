@@ -158,6 +158,20 @@ pub fn resolve_root(path: &Path, launch_directory: &Path) -> PathBuf {
     }
 }
 
+pub fn batch_plan(
+    host: &HostContext,
+    local: &LocalConfig,
+    repository: Option<&Path>,
+    requested: &[String],
+    request: dort_core::batch::Request,
+) -> Result<dort_core::batch::Plan> {
+    let root = local.select_repository(repository)?;
+    let profiles = requested_profiles(local, requested);
+    Ok(dort_core::batch::plan(dort_core::batch::observe(
+        host, &root, &profiles, request,
+    )?))
+}
+
 pub fn adopt_request(target: &Path, id: &str, source: &Path) -> Request {
     Request::Adopt {
         mapping: ManagedFile {

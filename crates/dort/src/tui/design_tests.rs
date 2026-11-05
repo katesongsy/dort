@@ -99,7 +99,7 @@ fn workbench_has_semantic_styles_and_selected_identity_at_all_supported_sizes() 
         assert!(b[active].modifier.contains(Modifier::BOLD));
         assert!(b[active].modifier.contains(Modifier::REVERSED));
         locate(&b, "STATE");
-        let (_, row_y) = locate(&b, "> editor");
+        let (_, row_y) = locate(&b, "> [ ] editor");
         let row: String = (0..w).map(|x| b[(x, row_y)].symbol()).collect();
         let byte = row
             .find("Blocked")
@@ -461,7 +461,7 @@ fn recovery_details_keep_full_ids_and_guards_inspectable_without_mutating_diagno
                 "Integrity:",
                 "Blocks new writes:",
                 "Core preview independently checks live paths and artifacts.",
-                "Schema-1 rollback withdraws its new source into private storage;",
+                "Adoption rollback (schema 1 or 4) withdraws new sources into private storage;",
                 "no garbage collection.",
             ] {
                 assert!(all.contains(value), "full typed detail {value} at {w}x{h}");

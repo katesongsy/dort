@@ -813,8 +813,11 @@ fn discovery_marks_ineligible_entries_and_enter_preserves_existing_draft() {
     }
     app.candidate_selected = index;
     key(&mut app, KeyCode::Char('i'));
-    assert!(super::tests::render(&app, 140, 40).contains("[Not eligible]"));
+    assert!(super::tests::render(&app, 140, 40).contains("Directory / tree group"));
     key(&mut app, KeyCode::Esc);
+    // The directory is now a foldable group. Reopen it before selecting its file.
+    key(&mut app, KeyCode::Char('l'));
+    app.inventory.group = None;
     app.candidate_selected = app
         .discovery
         .as_ref()

@@ -112,12 +112,69 @@ fn detail(plan: &Plan, selected: usize) -> Text<'static> {
     ));
     Text::from(lines)
 }
+pub fn draw_batch(
+    frame: &mut Frame,
+    area: Rect,
+    batch: &dort_core::batch::Plan,
+    preview: &Preview,
+    hits: &super::input::Hits,
+) {
+    // Render-only aggregation; approval always consumes the untouched real Batch plan.
+    let Some(first) = batch.items.first() else {
+        return;
+    };
+    let mut display = first.clone();
+    display.files = batch
+        .items
+        .iter()
+        .flat_map(|p| p.files.iter().cloned())
+        .collect();
+    display.inputs.files = batch
+        .items
+        .iter()
+        .flat_map(|p| p.inputs.files.iter().cloned())
+        .collect();
+    // Combined conflicts block every item, even if its isolated plan could change.
+    // Keep the reasons in the scrollable selected-effects view as well as the full report.
+    if !batch.blockers.is_empty() {
+        for file in &mut display.files {
+            file.outcome = Outcome::Blocked;
+            file.blockers
+                .extend(batch.blockers.iter().map(|b| format!("Batch: {b}")));
+        }
+    }
+    draw_inner(
+        frame,
+        area,
+        &display,
+        preview,
+        hits,
+        "Exact marked set · one transaction · failure may be partial",
+    );
+}
 pub fn draw(
     frame: &mut Frame,
     area: Rect,
     plan: &Plan,
     preview: &Preview,
     hits: &super::input::Hits,
+) {
+    draw_inner(
+        frame,
+        area,
+        plan,
+        preview,
+        hits,
+        "Scope: all mappings; display filters never narrow it.",
+    );
+}
+fn draw_inner(
+    frame: &mut Frame,
+    area: Rect,
+    plan: &Plan,
+    preview: &Preview,
+    hits: &super::input::Hits,
+    scope: &str,
 ) {
     let parts = Layout::vertical([
         Constraint::Length(2),
@@ -141,10 +198,7 @@ pub fn draw(
                     ui::heading()
                 },
             ),
-            Line::styled(
-                "Scope: all mappings; display filters never narrow it.",
-                ui::muted(),
-            ),
+            Line::styled(scope, ui::muted()),
         ]),
         parts[0],
     );

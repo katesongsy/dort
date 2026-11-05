@@ -55,7 +55,7 @@ enum Command {
     },
     /// Read-only retained history across all repositories.
     History,
-    /// Explicitly preview/approve guarded rollback of a schema-1/2 transaction.
+    /// Explicitly preview/approve guarded rollback of a schema-1/2/4 transaction.
     Rollback {
         repository_id: String,
         transaction_id: String,

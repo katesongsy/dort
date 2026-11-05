@@ -123,7 +123,7 @@ fn stage_file(j: &Journal, id: usize, bytes: &[u8], fp: &Fingerprint) -> Result<
     j.directory.sync()
 }
 
-fn remove_mapping(
+pub(crate) fn remove_mapping(
     bytes: &[u8],
     id: &str,
     host: &HostContext,

@@ -19,6 +19,11 @@ fn short(action: Action) -> &'static str {
         Action::Discover => "Discover files",
         Action::Apply => "Review apply",
         Action::Inspect => "Inspect",
+        Action::BatchAdopt => "Adopt marked",
+        Action::ApplyMarked => "Apply marked",
+        Action::KeepMarked => "Keep marked",
+        Action::RemoveMarked => "Delete marked",
+        Action::ToggleMark => "Mark/group",
         Action::AdoptSelected => "Adopt selected",
         Action::Adopt => "Manual adoption",
         Action::Keep => "Keep local file",
@@ -43,6 +48,11 @@ pub fn shortcut(action: Action) -> &'static str {
         Action::Discover => "f",
         Action::Apply => "a",
         Action::Inspect => "i",
+        Action::BatchAdopt => "E",
+        Action::ApplyMarked => "A",
+        Action::KeepMarked => "K",
+        Action::RemoveMarked => "D",
+        Action::ToggleMark => "x",
         Action::AdoptSelected => "e",
         Action::Adopt => "o",
         Action::Keep => "k",
@@ -300,6 +310,13 @@ pub fn draw(frame: &mut Frame, app: &App) {
             let inner = block.inner(content[0]);
             frame.render_widget(block, content[0]);
             super::review::draw(frame, inner, plan, preview, &app.hits);
+        } else if let super::actions::Pending::Batch(plan) = &preview.pending
+            && !preview.full
+        {
+            let block = ui::pane("Combined batch preview · Review exact marked set", true);
+            let inner = block.inner(content[0]);
+            frame.render_widget(block, content[0]);
+            super::review::draw_batch(frame, inner, plan, preview, &app.hits);
         } else {
             frame.render_widget(
                 Paragraph::new(safe(&preview.text))
@@ -320,6 +337,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
             ])),
             content[1],
         );
+    } else if let Some(editor) = app.batch_editor.as_ref().filter(|e| e.open) {
+        super::batch_ui::draw(frame, body, app, editor);
     } else if let Some(overlay) = &app.shell.overlay {
         app.hits.clear();
         // Bounded dialogs; do not stretch long prose across a very wide terminal.
@@ -380,7 +399,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
             ("PgDn", "Effects"),
             ("Esc", "Back"),
         ]
-    } else if matches!(app.shell.overlay, Some(Overlay::Form(_))) {
+    } else if matches!(app.shell.overlay, Some(Overlay::Form(_)))
+        || app.batch_editor.as_ref().is_some_and(|e| e.open)
+    {
         vec![
             ("Enter", "Next"),
             ("Tab", "Field"),
@@ -415,7 +436,15 @@ pub fn draw(frame: &mut Frame, app: &App) {
         frame.render_widget(Clear, modal);
         app.hits.wheel(modal, super::input::Wheel::Confirmation);
         let removal = app.preview.as_ref().and_then(|p| p.pending.removal_id());
-        let prompt = if let Some(id) = removal.filter(|_| confirmation.removal_ack.is_none()) {
+        let batch_ids = app.batch_removal_ids();
+        let prompt = if let Some(id) = batch_ids.get(confirmation.batch_acks.len()) {
+            format!(
+                "Separate deletion acknowledgement {}/{}\nType exact file ID: {}\nAll IDs then literal yes; sources retained.",
+                confirmation.batch_acks.len() + 1,
+                batch_ids.len(),
+                safe(id)
+            )
+        } else if let Some(id) = removal.filter(|_| confirmation.removal_ack.is_none()) {
             format!(
                 "Separate deletion acknowledgement\nType exact file ID: {}\nRepository source is retained.",
                 safe(id)

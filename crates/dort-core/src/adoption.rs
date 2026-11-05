@@ -49,7 +49,7 @@ impl Approval {
 
 // Directory timestamps/link counts change when state or siblings are created. Bind their
 // identities, ownership and permissions, not unrelated directory churn.
-pub(crate) fn canonical(plan: &Plan) -> Result<String> {
+pub(crate) fn canonical(plan: &impl Serialize) -> Result<String> {
     let mut value =
         serde_json::to_value(plan).map_err(|_| Error::Invalid("cannot encode approval".into()))?;
     fn normalize(value: &mut serde_json::Value) {

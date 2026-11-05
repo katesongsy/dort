@@ -67,12 +67,28 @@ fn context_groups_order_one_complete_action_set_and_keep_risk_separate() {
                         | Action::Abandon
                         | Action::KeepId
                         | Action::RemoveId
+                        | Action::BatchAdopt
+                        | Action::ApplyMarked
+                        | Action::KeepMarked
+                        | Action::RemoveMarked
                 ) {
                     assert!(row.group == Group::Preview);
                 }
                 if row.action == Action::GitPatch {
                     assert!(row.group == Group::Content);
                 }
+            }
+            for action in [
+                Action::BatchAdopt,
+                Action::ApplyMarked,
+                Action::KeepMarked,
+                Action::RemoveMarked,
+                Action::ToggleMark,
+                Action::ClearMarks,
+                Action::ExpandAll,
+                Action::CollapseAll,
+            ] {
+                assert_eq!(rows.iter().filter(|r| r.action == action).count(), 1);
             }
             let preferred = app.page_actions();
             assert!(rows[0].action == preferred[0]);

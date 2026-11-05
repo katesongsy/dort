@@ -67,6 +67,7 @@ pub struct Confirmation {
     pub prompt_scroll: u16,
     pub input: String,
     pub removal_ack: Option<String>,
+    pub batch_acks: Vec<String>,
 }
 pub struct App {
     pub tab: Tab,
@@ -80,6 +81,7 @@ pub struct App {
     pub data: Option<Data>,
     pub discovering: bool,
     pub inventory: super::inventory::Inventory,
+    pub batch_editor: Option<super::batch_ui::Editor>,
     pub discovery: Option<crate::services::Discovery>,
     pub candidate_selected: usize,
     pub requested_profiles: Vec<String>,
@@ -119,6 +121,7 @@ impl App {
             data: None,
             discovering: false,
             inventory: Default::default(),
+            batch_editor: None,
             discovery: None,
             candidate_selected: 0,
             requested_profiles: vec![],
@@ -351,6 +354,9 @@ impl App {
                 Err(error) => self.status = super::actions::diagnostic(&error),
             },
             Ok(Output::Completed(completion)) => {
+                if let Some(editor) = &mut self.batch_editor {
+                    editor.open = false;
+                }
                 self.discovery = None;
                 if let Some(root) = completion.repository {
                     self.repository = Some(root);
@@ -465,12 +471,41 @@ impl App {
             }
             Target::PreviewRow(index) => {
                 if let Some(preview) = &mut self.preview
-                    && let Pending::Files(plan) = &preview.pending
-                    && index < plan.files.len()
+                    && preview.pending.review_len().is_some_and(|len| index < len)
                 {
                     preview.selected = index;
                     preview.effect_scroll = 0;
                 }
+                None
+            }
+            Target::BatchControl(index, activate) => {
+                let editor = self.batch_editor.as_mut().filter(|e| e.open)?;
+                editor.focused = index;
+                if activate {
+                    editor.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+                } else {
+                    None
+                }
+            }
+            Target::TreeFold(index) | Target::TreeMark(index) => {
+                super::tree::select(self, index);
+                if matches!(target, Target::TreeFold(_)) {
+                    let close = super::tree::visible(self)
+                        .into_iter()
+                        .find(|n| n.key == index)
+                        .is_some_and(|n| {
+                            let folded = if self.discovering {
+                                &self.inventory.candidate_folded
+                            } else {
+                                &self.inventory.managed_folded
+                            };
+                            !folded.contains(&n.path)
+                        });
+                    super::tree::fold(self, close);
+                } else {
+                    super::tree::toggle(self);
+                }
+                self.details_scroll = 0;
                 None
             }
             Target::Destination(tab) => self.activate(Action::Destination(tab)),
@@ -481,12 +516,10 @@ impl App {
                 height,
             ),
             Target::Row(index) => {
-                if self.tab == Tab::Files && self.visible_file_rows().contains(&index) {
-                    if self.discovering {
-                        self.candidate_selected = index;
-                    } else {
-                        self.selected = index;
-                    }
+                if self.tab == Tab::Files
+                    && super::tree::visible(self).iter().any(|n| n.key == index)
+                {
+                    super::tree::select(self, index);
                     self.inventory.details = false;
                 } else if self.tab == Tab::Recovery && self.visible_history_rows().contains(&index)
                 {
@@ -705,10 +738,17 @@ impl App {
             return None;
         }
         if self.confirmation.is_some() {
+            if self
+                .preview
+                .as_ref()
+                .is_some_and(|p| matches!(p.pending, Pending::Batch(_)))
+            {
+                return self.batch_confirm_key(key);
+            }
             return self.confirm_key(key);
         }
         if let Some(preview) = &mut self.preview {
-            let file_review = matches!(preview.pending, Pending::Files(_));
+            let file_review = preview.pending.review_len().is_some();
             match key.code {
                 KeyCode::Char('i') if file_review => {
                     preview.full = !preview.full;
@@ -717,9 +757,9 @@ impl App {
                     preview.effect_scroll = 0;
                 }
                 KeyCode::Down | KeyCode::Up if file_review && !preview.full => {
-                    if let Pending::Files(plan) = &preview.pending {
+                    if let Some(len) = preview.pending.review_len() {
                         preview.selected = if key.code == KeyCode::Down {
-                            (preview.selected + 1).min(plan.files.len().saturating_sub(1))
+                            (preview.selected + 1).min(len.saturating_sub(1))
                         } else {
                             preview.selected.saturating_sub(1)
                         };
@@ -768,6 +808,7 @@ impl App {
                         prompt_scroll: 0,
                         input: String::new(),
                         removal_ack: None,
+                        batch_acks: vec![],
                     })
                 }
                 KeyCode::Enter => {
@@ -779,6 +820,9 @@ impl App {
                 preview.clamp_scroll(width, height);
             }
             return None;
+        }
+        if let Some(editor) = self.batch_editor.as_mut().filter(|e| e.open) {
+            return editor.key(key);
         }
         if self.shell.overlay.is_some() {
             if key.code == KeyCode::Home {
@@ -876,6 +920,23 @@ impl App {
             KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(2),
             KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(2),
             KeyCode::Home => self.details_scroll = 0,
+            KeyCode::Char('x') if self.tab == Tab::Files => {
+                return self.activate(Action::ToggleMark);
+            }
+            KeyCode::Char('h') if self.tab == Tab::Files => super::tree::fold(self, true),
+            KeyCode::Char('l') if self.tab == Tab::Files => super::tree::fold(self, false),
+            KeyCode::Char('E') if self.tab == Tab::Files => {
+                return self.activate(Action::BatchAdopt);
+            }
+            KeyCode::Char('A') if self.tab == Tab::Files => {
+                return self.activate(Action::ApplyMarked);
+            }
+            KeyCode::Char('K') if self.tab == Tab::Files => {
+                return self.activate(Action::KeepMarked);
+            }
+            KeyCode::Char('D') if self.tab == Tab::Files => {
+                return self.activate(Action::RemoveMarked);
+            }
             KeyCode::Char('e') if self.tab == Tab::Files && self.discovering => {
                 return self.activate(Action::AdoptSelected);
             }
@@ -945,6 +1006,19 @@ impl App {
             KeyCode::Char('r') => return self.activate(Action::Refresh),
             KeyCode::Char('f') => return self.activate(Action::Discover),
             KeyCode::Char('o') => return self.activate(Action::Adopt),
+            KeyCode::Enter if self.tab == Tab::Files && self.inventory.group.is_some() => {
+                if let Some(node) = super::tree::visible(self)
+                    .into_iter()
+                    .find(|n| n.key == self.file_selection())
+                {
+                    let folded = if self.discovering {
+                        &self.inventory.candidate_folded
+                    } else {
+                        &self.inventory.managed_folded
+                    };
+                    super::tree::fold(self, !folded.contains(&node.path));
+                }
+            }
             KeyCode::Enter if self.tab == Tab::Files && self.discovering => {
                 self.inventory.details = true;
                 self.details_scroll = 0;
@@ -1126,6 +1200,46 @@ impl App {
         self.shell.overlay = None;
         self.git_view.discard_patch();
         match action {
+            Action::ToggleMark => super::tree::toggle(self),
+            Action::ClearMarks => {
+                if self.discovering {
+                    self.inventory.candidate_marks.clear();
+                } else {
+                    self.inventory.managed_marks.clear();
+                }
+            }
+            Action::ExpandAll | Action::CollapseAll => {
+                let paths = super::tree::nodes(self).into_iter()
+                    .filter(|n| n.branch).map(|n| n.path).collect();
+                let folded = if self.discovering {
+                    &mut self.inventory.candidate_folded
+                } else {
+                    &mut self.inventory.managed_folded
+                };
+                if action == Action::ExpandAll {
+                    folded.clear();
+                } else {
+                    *folded = paths;
+                }
+                self.clamp_file_selection();
+            }
+            Action::BatchAdopt => {
+                if let Some(editor) = self.batch_editor.as_mut() {
+                    editor.sync(&self.inventory.candidate_marks);
+                } else {
+                    self.batch_editor = Some(super::batch_ui::Editor::new(
+                        &self.inventory.candidate_marks,
+                    ));
+                }
+            }
+            Action::ApplyMarked | Action::KeepMarked | Action::RemoveMarked => {
+                let ids = self.inventory.managed_marks.iter().cloned().collect();
+                return Some(Task::Batch(match action {
+                    Action::ApplyMarked => dort_core::batch::Request::Apply(ids),
+                    Action::KeepMarked => dort_core::batch::Request::Keep(ids),
+                    _ => dort_core::batch::Request::Remove(ids),
+                }));
+            }
             Action::GitRoot => {
                 self.tab = Tab::Git;
 
@@ -1253,7 +1367,8 @@ impl App {
         None
     }
     pub fn text_entry(&self) -> bool {
-        self.shell.text_entry()
+        self.batch_editor.as_ref().is_some_and(|e| e.open)
+            || self.shell.text_entry()
             || (self.tab == Tab::Git && self.git_view.text_entry())
             || (self.tab == Tab::Recovery && self.history_search.editing)
             || (self.shell.overlay.is_none()
@@ -1261,6 +1376,9 @@ impl App {
                 && self.inventory.search(self.discovering).editing)
     }
     pub fn file_selection(&self) -> usize {
+        if let Some(group) = self.inventory.group {
+            return group;
+        }
         if self.discovering {
             self.candidate_selected
         } else {
@@ -1302,20 +1420,26 @@ impl App {
         if self.tab != Tab::Files {
             return;
         }
-        let visible = self.visible_file_rows();
+        let visible: Vec<_> = super::tree::visible(self)
+            .into_iter()
+            .map(|n| n.key)
+            .collect();
         let old = self.file_selection();
-        if !visible.contains(&old)
-            && let Some(index) = visible.iter().min_by_key(|&&index| index.abs_diff(old))
-        {
-            if self.discovering {
-                self.candidate_selected = *index;
-            } else {
-                self.selected = *index;
-            }
+        let next = if visible.contains(&old) {
+            Some(old)
+        } else {
+            visible.first().copied()
+        };
+        self.inventory.group = None;
+        if let Some(key) = next {
+            super::tree::select(self, key);
         }
     }
     fn move_file_selection(&mut self, backwards: bool) {
-        let visible = self.visible_file_rows();
+        let visible: Vec<_> = super::tree::visible(self)
+            .into_iter()
+            .map(|n| n.key)
+            .collect();
         let position = visible
             .iter()
             .position(|&i| i == self.file_selection())
@@ -1323,16 +1447,10 @@ impl App {
         let next = if backwards {
             position.saturating_sub(1)
         } else {
-            position
-                .saturating_add(1)
-                .min(visible.len().saturating_sub(1))
+            (position + 1).min(visible.len().saturating_sub(1))
         };
         if let Some(&index) = visible.get(next) {
-            if self.discovering {
-                self.candidate_selected = index;
-            } else {
-                self.selected = index;
-            }
+            super::tree::select(self, index);
         }
     }
     pub fn visible_history_rows(&self) -> Vec<usize> {
@@ -1388,6 +1506,12 @@ impl App {
         if self.git_view.follows_files {
             self.git_view.scope_changed();
             self.git_view.root = None;
+        }
+        self.inventory.group = None;
+        self.inventory.managed_marks.clear();
+        // Adoption paths/drafts are retained; the new root is freshly core-validated.
+        if let Some(editor) = &mut self.batch_editor {
+            editor.open = false;
         }
         self.requested_profiles.clear();
         if self
@@ -1506,6 +1630,41 @@ impl App {
     }
     pub fn action_reason(&self, action: Action) -> Option<&'static str> {
         match action {
+            Action::ToggleMark | Action::ClearMarks | Action::ExpandAll | Action::CollapseAll
+                if self.tab != Tab::Files =>
+            {
+                Some("Tree controls are available in Files.")
+            }
+            Action::BatchAdopt
+                if self.tab != Tab::Files
+                    || !self.discovering
+                    || self.inventory.candidate_marks.is_empty() =>
+            {
+                Some(
+                    "Mark discovered regular files with x before opening a combined adoption draft.",
+                )
+            }
+            Action::BatchAdopt
+                if self.inventory.candidate_marks.len() > dort_core::batch::MAX_FILES =>
+            {
+                Some("A batch supports at most 32 marked files; clear some marks first.")
+            }
+            Action::ApplyMarked | Action::KeepMarked | Action::RemoveMarked
+                if self.tab != Tab::Files
+                    || self.discovering
+                    || self.inventory.managed_marks.is_empty() =>
+            {
+                Some(
+                    "Mark managed mappings with x; uppercase A/K/D request a selected batch, not full-scope Apply.",
+                )
+            }
+            Action::Keep | Action::Remove | Action::AdoptSelected
+                if self.inventory.group.is_some() =>
+            {
+                Some(
+                    "Not eligible for adoption or single-file actions: select a file, not a tree directory/group; x marks matching descendants, including folded rows.",
+                )
+            }
             Action::Apply
                 if self
                     .data
@@ -1568,7 +1727,7 @@ impl App {
                         .history_selection()
                         .is_none_or(|r| !super::recovery::rollback(r)) =>
             {
-                Some("Rollback unavailable; select an eligible schema-1/2 transaction.")
+                Some("Rollback unavailable; select an eligible schema-1/2/4 transaction.")
             }
             Action::Resume
                 if self.tab != Tab::Recovery
@@ -1600,6 +1759,8 @@ impl App {
             Tab::Files if self.discovering => vec![
                 Action::Inspect,
                 Action::AdoptSelected,
+                Action::BatchAdopt,
+                Action::ToggleMark,
                 Action::Discover,
                 Action::Adopt,
             ],
@@ -1608,6 +1769,10 @@ impl App {
                 Action::Apply,
                 Action::Keep,
                 Action::Discover,
+                Action::ApplyMarked,
+                Action::KeepMarked,
+                Action::RemoveMarked,
+                Action::ToggleMark,
             ],
             Tab::Recovery => {
                 let mut actions = vec![Action::Inspect];
@@ -1644,6 +1809,61 @@ impl App {
             Tab::Recovery => data.history.len(),
             _ => 0,
         })
+    }
+    pub fn batch_removal_ids(&self) -> Vec<String> {
+        match self.preview.as_ref().map(|p| &p.pending) {
+            Some(Pending::Batch(plan))
+                if plan.inputs.action == dort_core::batch::Action::Remove =>
+            {
+                plan.inputs
+                    .items
+                    .iter()
+                    .flat_map(|s| s.files.iter().map(|f| f.mapping.id.clone()))
+                    .collect()
+            }
+            _ => vec![],
+        }
+    }
+    fn batch_confirm_key(&mut self, key: KeyEvent) -> Option<Task> {
+        if key.code != KeyCode::Enter {
+            return self.confirm_key(key);
+        }
+        let ids = self.batch_removal_ids();
+        let confirmation = self.confirmation.as_mut()?;
+        if let Some(id) = ids.get(confirmation.batch_acks.len()) {
+            if &confirmation.input == id {
+                confirmation.batch_acks.push(id.clone());
+                confirmation.input.clear();
+                confirmation.prompt_scroll = 0;
+            } else {
+                self.status = "Exact batch file ID does not match; nothing executed.".into();
+            }
+            return None;
+        }
+        if confirmation.input != "yes" {
+            self.status = "Acknowledge every deletion ID, then type literal yes.".into();
+            return None;
+        }
+        let acks = confirmation.batch_acks.clone();
+        let Pending::Batch(plan) = self.preview.take()?.pending else {
+            return None;
+        };
+        self.confirmation = None;
+        let approval = if plan.inputs.action == dort_core::batch::Action::Remove {
+            dort_core::batch::Approval::from_removal_plan(
+                *plan,
+                dort_core::batch::RemovalAcknowledgements::confirm(acks),
+            )
+        } else {
+            dort_core::batch::Approval::from_plan(*plan)
+        };
+        match approval {
+            Ok(a) => Some(Task::Execute(super::actions::Approved::Batch(Box::new(a)))),
+            Err(error) => {
+                self.status = format!("Approval refused: {}", super::actions::diagnostic(&error));
+                None
+            }
+        }
     }
     fn confirm_key(&mut self, key: KeyEvent) -> Option<Task> {
         let confirmation = self.confirmation.as_mut()?;

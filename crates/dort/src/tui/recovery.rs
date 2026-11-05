@@ -11,7 +11,7 @@ use ratatui::{
 
 pub fn rollback(row: &Diagnosis) -> bool {
     row.problem.is_none()
-        && matches!(row.journal_schema, Some(1 | 2))
+        && matches!(row.journal_schema, Some(1 | 2 | 4))
         && row.phase.is_some_and(|p| p != Phase::RolledBack)
 }
 pub fn abandon(row: &Diagnosis) -> bool {
@@ -97,7 +97,7 @@ fn details(app: &App) -> Text<'static> {
         Line::styled("Actions | eligibility hints only", ui::heading()),
     ];
     if rollback(row) {
-        lines.push(ui::keys(&[("b", "Preview rollback (schemas 1/2)")]));
+        lines.push(ui::keys(&[("b", "Preview rollback (schemas 1/2/4)")]));
     } else {
         lines.push(note(
             "Rollback unavailable for this diagnosis.",
@@ -129,7 +129,7 @@ fn details(app: &App) -> Text<'static> {
     lines.push(Line::default());
     lines.push(Line::styled("Guards & retained artifacts", ui::heading()));
     lines.push(note("Core preview independently checks live paths and artifacts. Completed history is not proof of safe rollback. No automatic recovery or repair.", Style::default()));
-    lines.push(note("Schema-1 rollback withdraws its new source into private storage; schema-2 leaves repository sources unchanged. Backups/private artifacts are retained; no garbage collection.", ui::warning()));
+    lines.push(note("Adoption rollback (schema 1 or 4) withdraws new sources into private storage; lifecycle rollback (schema 2 or 4) leaves repository sources unchanged. Backups/private artifacts are retained; no garbage collection.", ui::warning()));
     lines.push(ui::keys(&[
         ("PgUp/PgDn", "full details"),
         ("Home", "start"),

@@ -66,6 +66,14 @@ pub fn entries(tab: Tab, discovering: bool, preferred: &[Action]) -> Vec<Entry> 
         Discover,
         Adopt,
         AdoptSelected,
+        BatchAdopt,
+        ApplyMarked,
+        KeepMarked,
+        RemoveMarked,
+        ToggleMark,
+        ClearMarks,
+        ExpandAll,
+        CollapseAll,
         Profiles,
         CheckCurrent,
         CheckStandalone,
@@ -97,12 +105,12 @@ pub fn entries(tab: Tab, discovering: bool, preferred: &[Action]) -> Vec<Entry> 
     .into_iter()
     .map(|action| {
         let group = match action {
-            Apply | Keep | Remove | KeepId | RemoveId | Rollback | Resume | Abandon => {
-                Group::Preview
-            }
+            Apply | Keep | Remove | KeepId | RemoveId | Rollback | Resume | Abandon
+            | BatchAdopt | ApplyMarked | KeepMarked | RemoveMarked => Group::Preview,
             GitPatch => Group::Content,
             Inspect if matches!(tab, Tab::Files | Tab::Recovery) => Group::Item,
             AdoptSelected if tab == Tab::Files && discovering => Group::Item,
+            ToggleMark | ClearMarks | ExpandAll | CollapseAll if tab == Tab::Files => Group::View,
             Refresh => Group::View,
             Discover | Adopt | ClearFilter if tab == Tab::Files => Group::View,
             ClearFilter if tab == Tab::Recovery => Group::View,

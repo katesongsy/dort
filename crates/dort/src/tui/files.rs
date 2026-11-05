@@ -24,7 +24,22 @@ fn details(app: &App) -> Text<'static> {
         lines.extend(Text::from(safe(result)).lines);
         lines.push(Line::raw(""));
     }
-    if app.discovering {
+    if app.inventory.group.is_some() {
+        if let Some(node) = super::tree::visible(app)
+            .into_iter()
+            .find(|n| n.key == app.file_selection())
+        {
+            lines.push(Line::styled(
+                "Directory / tree group · metadata only",
+                ui::heading(),
+            ));
+            lines.push(ui::metadata(
+                "Full path",
+                node.path.to_str().unwrap_or("unavailable"),
+            ));
+            lines.push(Line::raw("Enter or h/l folds/unfolds. x marks/unmarks matching descendants, including folded rows; discovery directories/links are never adopted. Marks survive filters and folding."));
+        }
+    } else if app.discovering {
         if let Some(candidate) = app
             .discovery
             .as_ref()
@@ -126,11 +141,23 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         Constraint::Min(3),
     ])
     .split(area);
-    let title = if app.discovering {
-        "Files / Discover"
+    let nodes = super::tree::visible(app);
+    let marked = if app.discovering {
+        app.inventory.candidate_marks.len()
     } else {
-        "Files / Managed"
+        app.inventory.managed_marks.len()
     };
+    let shown_marks = nodes.iter().filter(|n| super::tree::marked(app, n)).count();
+    let title = format!(
+        "Files / {} · {} marked ({} hidden)",
+        if app.discovering {
+            "Discover"
+        } else {
+            "Managed"
+        },
+        marked,
+        marked.saturating_sub(shown_marks)
+    );
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(format!(" {title}  "), ui::heading()),
@@ -191,7 +218,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         );
         return;
     }
-    let visible = app.visible_file_rows();
+    let visible: Vec<_> = nodes.iter().map(|n| n.key).collect();
     let selected = app.file_selection();
     let list_area = split[0];
     let total = if app.discovering {
@@ -201,45 +228,97 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         app.data.as_ref().map_or(0, |d| d.files.len())
     };
-    let title = format!("{} / {} shown", visible.len(), total);
+    let title = format!(
+        "{} / {} shown | x mark h/l fold",
+        app.visible_file_rows().len(),
+        total
+    );
     let mut rows = Vec::new();
-    for &i in &visible {
-        if app.discovering {
-            if let Some(c) = app
-                .discovery
-                .as_ref()
-                .and_then(|d| d.report.candidates.get(i))
-            {
-                let state = if c.supported_for_adoption {
-                    "Eligible hint"
+    for node in &nodes {
+        let prefix = format!(
+            "{}{} {}",
+            "  ".repeat(node.depth.min(12)),
+            if node.branch {
+                let folded = if app.discovering {
+                    &app.inventory.candidate_folded
                 } else {
-                    "Not eligible"
+                    &app.inventory.managed_folded
                 };
-                let name = c
-                    .entry
-                    .path
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("unavailable");
-                rows.push(Row::new(vec![
-                    Cell::from(ui::inline(name)),
-                    Cell::from(state).style(ui::state(state)),
-                    Cell::from(kind(&c.entry.kind)),
-                ]));
-            }
-        } else if let Some(data) = &app.data {
-            if let Some(row) = data.managed.get(i) {
-                rows.push(Row::new(vec![
-                    Cell::from(ui::inline(&row.id)),
-                    Cell::from(row.state).style(ui::state(row.state)),
-                    Cell::from(safe(row.target.to_str().unwrap_or("unavailable"))),
-                ]));
-            } else if let Some((id, _)) = data.files.get(i) {
-                rows.push(Row::new(vec![
-                    Cell::from(safe(id)),
-                    Cell::from("Unknown"),
-                    Cell::from(""),
-                ]));
+                if folded.contains(&node.path) {
+                    "[>]"
+                } else {
+                    "[v]"
+                }
+            } else if super::tree::marked(app, node) {
+                "[x]"
+            } else {
+                "[ ]"
+            },
+            node.path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unavailable")
+        );
+        if node.branch {
+            rows.push(Row::new(vec![
+                Cell::from(ui::inline(&prefix)).style(ui::heading()),
+                Cell::from("Group").style(ui::muted()),
+                Cell::from("Directory"),
+            ]));
+        } else if let Some(i) = node.raw {
+            if app.discovering {
+                if let Some(c) = app
+                    .discovery
+                    .as_ref()
+                    .and_then(|d| d.report.candidates.get(i))
+                {
+                    let state = if c.supported_for_adoption {
+                        "Eligible hint"
+                    } else {
+                        "Not eligible"
+                    };
+                    rows.push(Row::new(vec![
+                        Cell::from(ui::inline(&prefix)),
+                        Cell::from(state).style(ui::state(state)),
+                        Cell::from(kind(&c.entry.kind)),
+                    ]));
+                }
+            } else if let Some(data) = &app.data {
+                if let Some(row) = data.managed.get(i) {
+                    rows.push(Row::new(vec![
+                        Cell::from(format!(
+                            "{}{} {}",
+                            "  ".repeat(node.depth.min(12)),
+                            if super::tree::marked(app, node) {
+                                "[x]"
+                            } else {
+                                "[ ]"
+                            },
+                            ui::inline(&row.id)
+                        )),
+                        Cell::from(row.state).style(ui::state(row.state)),
+                        Cell::from(ui::inline(
+                            node.path
+                                .file_name()
+                                .and_then(|p| p.to_str())
+                                .unwrap_or("unavailable"),
+                        )),
+                    ]));
+                } else if let Some((id, _)) = data.files.get(i) {
+                    rows.push(Row::new(vec![
+                        Cell::from(format!(
+                            "{} {}",
+                            if super::tree::marked(app, node) {
+                                "[x]"
+                            } else {
+                                "[ ]"
+                            },
+                            ui::inline(id)
+                        )),
+                        Cell::from("Unknown"),
+                        Cell::from(""),
+                    ]));
+                }
             }
         }
     }
@@ -291,6 +370,22 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             TableState::default().with_selected(visible.iter().position(|&i| i == selected));
         frame.render_stateful_widget(table, list_area, &mut state);
         app.hits.rows(list_area, &visible, state.offset());
+        // Register only actual rendered rows, after the generic row hit regions.
+        let first = state.offset();
+        let count = list_area.height.saturating_sub(3) as usize;
+        for (line, node) in nodes.iter().skip(first).take(count).enumerate() {
+            let x = list_area.x + 3 + (node.depth.min(12) * 2) as u16;
+            if x + 3 < list_area.right() {
+                app.hits.click(
+                    Rect::new(x, list_area.y + 2 + line as u16, 3, 1),
+                    if node.branch {
+                        super::input::Target::TreeFold(node.key)
+                    } else {
+                        super::input::Target::TreeMark(node.key)
+                    },
+                );
+            }
+        }
     }
     if wide {
         ui::report(
