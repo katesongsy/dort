@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tui:** add contextual search-first action palette ([b6de53f](https://github.com/katesongsy/dort/commit/b6de53fde6bff4fe991bebaab26ac55a15cd6a7f))
+
 - **tui:** add typed session pickers and reachable compact details ([bd80394](https://github.com/katesongsy/dort/commit/bd80394eaa822c1d095259bd58bca9900f8e9164))
 
 - **tui:** add typed Git metadata tables and details ([2246363](https://github.com/katesongsy/dort/commit/2246363aacae5b85b3a2460e56c757726aee7592))
