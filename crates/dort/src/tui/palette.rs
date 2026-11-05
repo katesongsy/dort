@@ -171,7 +171,7 @@ fn details(app: &App, rows: &[&Entry], query: &str, selected: usize) -> Text<'st
         lines.push(Line::raw("No matching actions. Ctrl-U clears the search."));
     }
     lines.push(Line::raw("Search matches labels only, case-insensitively; it never narrows execution scope. Mutation previews and content disclosure are separate groups."));
-    lines.push(Line::raw("Home returns controls. Tab switches search/results. Esc leaves search, then closes Actions, restoring the invoking destination and focus."));
+    lines.push(Line::raw("Home returns controls. Arrows choose results; / edits search. Esc leaves search, then closes Actions."));
     Text::from(lines)
 }
 pub fn draw(
@@ -207,7 +207,7 @@ pub fn draw(
         if searching {
             "Actions · Search by label"
         } else {
-            "Actions · Tab or / to search"
+            "Actions · / to search"
         },
         query,
         searching,
@@ -247,11 +247,27 @@ pub fn draw(
         .block(ui::pane("Actions · Enter choose", !searching))
         .highlight_symbol("> ")
         .row_highlight_style(ui::selected());
-    frame.render_stateful_widget(
-        table,
-        parts[1],
-        &mut TableState::default().with_selected((!rows.is_empty()).then_some(selected)),
-    );
+    let mut state = TableState::default().with_selected((!rows.is_empty()).then_some(selected));
+    frame.render_stateful_widget(table, parts[1], &mut state);
+    app.hits
+        .click(parts[0], super::input::Target::PaletteSearch);
+    app.hits.wheel(parts[1], super::input::Wheel::Choices);
+    for (y, entry) in rows
+        .iter()
+        .skip(state.offset())
+        .take(usize::from(parts[1].height.saturating_sub(3)))
+        .enumerate()
+    {
+        app.hits.click(
+            Rect::new(
+                parts[1].x + 1,
+                parts[1].y + 2 + y as u16,
+                parts[1].width.saturating_sub(2),
+                1,
+            ),
+            super::input::Target::Palette(entry.action),
+        );
+    }
     let note = if let Some(entry) = rows.get(selected) {
         format!(
             "{} | {}",

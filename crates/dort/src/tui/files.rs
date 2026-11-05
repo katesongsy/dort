@@ -1,5 +1,5 @@
 //! Structured Files workspace; display identity is never used to construct a request.
-use super::{app::App, components as ui, shell::Focus, views::safe};
+use super::{app::App, components as ui, views::safe};
 use dort_core::observation::Kind;
 use ratatui::{
     Frame,
@@ -171,14 +171,15 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             (sections[1].x + 10 + query.len() as u16).min(sections[1].right().saturating_sub(1));
         frame.set_cursor_position((x, sections[1].y));
     }
+    app.hits.click(sections[1], super::input::Target::Filter);
     let content = sections[2];
-    let wide = content.width >= 110 && content.height >= 14;
+    let wide = super::workbench::wide_details(area, 2);
     let split = if wide {
         Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)]).split(content)
     } else {
         Layout::vertical([Constraint::Percentage(100)]).split(content)
     };
-    let focused = app.shell.focus == Focus::Content;
+    let focused = true;
     if !wide && (app.inventory.details || app.result.is_some()) {
         ui::report(
             frame,
@@ -289,15 +290,16 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         let mut state =
             TableState::default().with_selected(visible.iter().position(|&i| i == selected));
         frame.render_stateful_widget(table, list_area, &mut state);
+        app.hits.rows(list_area, &visible, state.offset());
     }
     if wide {
         ui::report(
             frame,
             split[1],
-            "Selected item",
+            "Selected item | PgUp/PgDn details",
             details(app),
             app.details_scroll,
-            false,
+            true,
         );
     }
 }

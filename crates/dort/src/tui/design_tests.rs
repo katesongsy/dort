@@ -2,7 +2,7 @@
 use super::{
     actions::{Data, ManagedRow, Output},
     app::{App, Tab},
-    shell::{Focus, Form, Overlay},
+    shell::{Form, Overlay},
     tests::render,
     views,
 };
@@ -32,6 +32,16 @@ fn locate(buffer: &Buffer, needle: &str) -> (u16, u16) {
     }
     panic!("missing fixture label: {needle}")
 }
+fn report_title(buffer: &Buffer) -> (u16, u16) {
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            if buffer[(x, y)].symbol() == "┌" && buffer[(x, y)].fg == Color::Cyan {
+                return (x, y);
+            }
+        }
+    }
+    panic!("missing accented report border");
+}
 fn synthetic_host() -> dort_core::context::HostContext {
     dort_core::context::HostContext::new(
         "/synthetic/home".into(),
@@ -52,7 +62,7 @@ fn inspect_all(app: &mut App, w: u16, h: u16) -> String {
         // Reconstruct consecutive rendered cell rows, including paths longer than
         // the entire compact viewport. No model/report strings feed this check.
         let b = buffer(app, w, h);
-        let (_, title_y) = locate(&b, "Focus");
+        let (_, title_y) = report_title(&b);
         for x in 1..w - 1 {
             wrapped_rows.push_str(b[(x, title_y + 1)].symbol());
         }
@@ -105,7 +115,7 @@ fn workbench_has_semantic_styles_and_selected_identity_at_all_supported_sizes() 
             Color::Black,
             "selected row foreground at {w}x{h}"
         );
-        let title = locate(&b, "Focus");
+        let title = report_title(&b);
         assert_eq!(b[title].fg, Color::Cyan);
         locate(&b, "Review apply");
         // Chrome occupies two normal rows or three compact rows, not nine.
@@ -134,19 +144,15 @@ fn input_has_a_real_visible_caret_and_field_button_hierarchy() {
     assert_ne!(b[action].bg, Color::Reset);
 }
 #[test]
-fn arrows_navigate_visible_focused_controls_not_hidden_global_tabs() {
+fn arrows_change_destination_and_tab_does_not_select_screen_regions() {
     let mut app = files_app();
-    key(&mut app, KeyCode::Right);
+    key(&mut app, KeyCode::Tab);
     assert!(app.tab == Tab::Files);
-    key(&mut app, KeyCode::Tab);
-    assert!(app.shell.focus == Focus::Actions);
-    key(&mut app, KeyCode::Right);
-    assert_eq!(app.action_selected, 1);
-    assert!(render(&app, 80, 24).contains("> [Review apply"));
-    key(&mut app, KeyCode::Tab);
-    assert!(app.shell.focus == Focus::Destinations);
     key(&mut app, KeyCode::Right);
     assert!(app.tab == Tab::Recovery);
+    key(&mut app, KeyCode::BackTab);
+    key(&mut app, KeyCode::Left);
+    assert!(app.tab == Tab::Files && app.preview.is_none());
 }
 #[test]
 fn typed_overview_cards_keep_unknown_distinct_from_zero_and_metadata_inspectable() {
@@ -264,7 +270,7 @@ fn diagnostic_cards_independently_render_registry_and_history_availability() {
                     assert!(details.contains(value), "inspectable {value} at {w}x{h}");
                 }
                 let b = buffer(&app, w, h);
-                let focus = locate(&b, "Focus");
+                let focus = report_title(&b);
                 assert_eq!(b[focus].fg, Color::Cyan);
             }
         }
@@ -388,7 +394,7 @@ fn recovery_table_has_typed_columns_selection_and_integrity_styles_at_all_sizes(
         );
         let integrity = locate(&b, "INTEGRITY!");
         assert_eq!(b[integrity].fg, Color::Red);
-        let focus = locate(&b, "Focus");
+        let focus = report_title(&b);
         assert_eq!(b[focus].fg, Color::Cyan);
         assert_eq!(app.selected, 1);
         if w >= 110 {
@@ -531,7 +537,7 @@ fn git_metadata_tables_have_typed_columns_focus_and_selected_styles_at_all_sizes
                 .contains(Modifier::REVERSED | Modifier::BOLD)
         );
         assert_eq!(b[locate(&b, "unmerged")].fg, Color::Red);
-        assert_eq!(b[locate(&b, "Focus")].fg, Color::Cyan);
+        assert_eq!(b[report_title(&b)].fg, Color::Cyan);
         if w >= 110 {
             locate(&b, "Git details");
         }
@@ -575,9 +581,9 @@ fn git_metadata_full_paths_branch_and_limits_are_reachable_using_real_scroll_key
         }],
     }));
     app.git_view.root = Some(format!("/synthetic/{}/root-end", "scope/".repeat(30)).into());
-    key(&mut app, KeyCode::Enter);
     for (w, h) in [(48, 14), (80, 24), (110, 24), (140, 40)] {
-        key(&mut app, KeyCode::Home);
+        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), w, h);
+        app.key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE), w, h);
         let first = render(&app, w, h);
         let mut all = String::new();
         let mut consecutive = String::new();

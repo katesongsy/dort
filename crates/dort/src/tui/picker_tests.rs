@@ -84,7 +84,7 @@ fn paged_cells(app: &mut App, modal: bool) -> String {
                 (0..48)
                     .map(|x| b[(x, *y)].symbol())
                     .collect::<String>()
-                    .contains("Focus")
+                    .contains("┌")
             })
             .unwrap();
         let mut viewport = String::new();
@@ -150,7 +150,7 @@ fn profile_table_distinguishes_membership_focus_and_apply_without_changing_scope
     key(&mut app, KeyCode::Enter); // mandatory base is immutable
     key(&mut app, KeyCode::Down);
     key(&mut app, KeyCode::Enter); // default is immutable too
-    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Down);
     key(&mut app, KeyCode::Char(' ')); // optional addition
     let Some(Overlay::Profiles(p)) = &app.shell.overlay else {
         panic!("picker")
@@ -172,6 +172,43 @@ fn profile_table_distinguishes_membership_focus_and_apply_without_changing_scope
     assert!(apply && manifest.is_none());
     assert_eq!(requested, ["extra-q?"]);
     assert!(app.requested_profiles.is_empty()); // task alone cannot apply
+}
+#[test]
+fn mouse_profile_checkboxes_preserve_mandatory_union_and_separate_apply() {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let mut app = profiles(false);
+    let click = |app: &mut App, label: &str| {
+        let screen = render(app, 80, 24);
+        let (x, y) = screen
+            .lines()
+            .enumerate()
+            .find_map(|(y, row)| {
+                row.find(label)
+                    .map(|i| (row[..i].chars().count() as u16, y as u16))
+            })
+            .expect("visible synthetic control");
+        app.mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: x,
+                row: y,
+                modifiers: KeyModifiers::NONE,
+            },
+            80,
+            24,
+        )
+    };
+    assert!(click(&mut app, "base").is_none());
+    let Some(Overlay::Profiles(picker)) = &app.shell.overlay else {
+        panic!("picker");
+    };
+    assert!(picker.requested.is_empty());
+    assert!(click(&mut app, "extra-q?").is_none());
+    assert!(app.requested_profiles.is_empty());
+    assert!(
+        matches!(click(&mut app, "[Apply additions"), Some(Task::Profiles { requested, apply: true, manifest: None }) if requested == ["extra-q?"])
+    );
+    assert!(app.requested_profiles.is_empty()); // read-only validation must finish first
 }
 #[test]
 fn repository_picker_preserves_raw_indices_and_retained_create_adopt_drafts() {
@@ -213,7 +250,7 @@ fn repository_picker_preserves_raw_indices_and_retained_create_adopt_drafts() {
     app.shell.adoption.focused = 4;
     key(&mut app, KeyCode::Enter);
     for _ in 0..3 {
-        key(&mut app, KeyCode::Tab);
+        key(&mut app, KeyCode::Down);
     }
     assert!(render(&app, 48, 14).contains("> [Create/attach"));
     assert!(key(&mut app, KeyCode::Enter).is_none());

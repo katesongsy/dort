@@ -2,7 +2,7 @@
 use super::{
     app::{App, Tab},
     components as ui,
-    shell::{Action, Focus, Overlay},
+    shell::{Action, Overlay},
     views::{self, safe},
 };
 use ratatui::{
@@ -36,35 +36,58 @@ fn short(action: Action) -> &'static str {
         _ => action.label(),
     }
 }
-fn buttons(frame: &mut Frame, area: Rect, app: &App) {
-    let actions = app.page_actions();
-    let selected = app.action_selected.min(actions.len().saturating_sub(1));
-    let focused = app.shell.focus == Focus::Actions;
-    let count = if area.width < 80 { 2 } else { 3 };
-    let start = if focused {
-        selected.saturating_sub(count - 1)
-    } else {
-        0
-    };
-    let mut spans = Vec::new();
-    for (i, action) in actions.iter().enumerate().skip(start).take(count) {
-        let disabled = app.action_reason(*action).is_some();
-        let mut button = ui::button(short(*action), "", focused && selected == i);
-        if disabled && !(focused && selected == i) {
-            button.style = ui::muted();
-        }
-        spans.push(button);
+pub fn shortcut(action: Action) -> &'static str {
+    match action {
+        Action::Init => "n",
+        Action::Choose => "p",
+        Action::Discover => "f",
+        Action::Apply => "a",
+        Action::Inspect => "i",
+        Action::AdoptSelected => "e",
+        Action::Adopt => "o",
+        Action::Keep => "k",
+        Action::Remove => "d",
+        Action::Rollback => "b",
+        Action::Resume => "s",
+        Action::Abandon => "x",
+        Action::CheckCurrent => "c",
+        Action::CheckStandalone => "v",
+        Action::Diagnostics => "j",
+        Action::Profiles => "t",
+        Action::GitStatus => "z",
+        Action::GitUnstaged => "u",
+        Action::GitStaged => "s",
+        Action::GitPatch => "w",
+        _ => "",
     }
-    frame.render_widget(
-        Paragraph::new(Line::from(spans)),
-        Rect::new(area.x, area.y, area.width, 1),
+}
+fn buttons(frame: &mut Frame, area: Rect, app: &App) {
+    let mut x = area.x;
+    for action in app.page_actions() {
+        let label = short(action);
+        let key = shortcut(action);
+        let button = ui::button(label, key, false);
+        let width = button.width() as u16;
+        if x + width > area.right() {
+            break;
+        }
+        let r = Rect::new(x, area.y, width, 1);
+        app.hits.click(r, super::input::Target::Action(action));
+        frame.render_widget(
+            Paragraph::new(Line::from(button)).style(if app.action_reason(action).is_some() {
+                ui::muted()
+            } else {
+                ui::accent()
+            }),
+            r,
+        );
+        x += width;
+    }
+    let note = "Space: Actions | Click buttons | Display-only search";
+    app.hits.click(
+        Rect::new(area.x, area.y + 1, 18.min(area.width), 1),
+        super::input::Target::PaletteSearch,
     );
-    let note = if focused {
-        app.action_reason(actions[selected])
-            .unwrap_or("Left/Right choose action · Enter activate · Space all actions")
-    } else {
-        "Tab focuses actions · Space opens all actions · Search never changes execution scope"
-    };
     ui::prose(
         frame,
         Rect::new(area.x, area.y + 1, area.width, 1),
@@ -73,31 +96,45 @@ fn buttons(frame: &mut Frame, area: Rect, app: &App) {
     );
 }
 fn tabs(frame: &mut Frame, area: Rect, app: &App) {
-    let items = [
+    let mut x = area.x;
+    let mut y = area.y;
+    for (i, (tab, label)) in [
         (Tab::Overview, "1 Overview"),
         (Tab::Files, "2 Files"),
         (Tab::Recovery, "3 Recovery"),
         (Tab::Checks, "4 Checks"),
         (Tab::Git, "5 Git"),
-    ];
-    let mut lines = vec![Line::default()];
-    for (i, (tab, label)) in items.iter().enumerate() {
+    ]
+    .iter()
+    .enumerate()
+    {
         if area.width < 80 && i == 3 {
-            lines.push(Line::default());
+            x = area.x;
+            y += 1;
         }
-        lines.last_mut().unwrap().spans.push(Span::styled(
-            format!(" {} ", label),
-            if *tab == app.tab {
-                ui::selected()
-            } else {
-                ui::muted()
-            },
-        ));
+        let text = format!(" {label} ");
+        let width = text.len() as u16;
+        let r = Rect::new(x, y, width.min(area.right().saturating_sub(x)), 1);
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                text,
+                if *tab == app.tab {
+                    ui::selected()
+                } else {
+                    ui::muted()
+                },
+            )),
+            r,
+        );
+        if app.shell.overlay.is_none()
+            && app.preview.is_none()
+            && app.error.is_none()
+            && app.confirmation.is_none()
+        {
+            app.hits.click(r, super::input::Target::Destination(*tab));
+        }
+        x += width;
     }
-    if app.shell.focus == Focus::Destinations {
-        lines[0].spans.push(Span::styled(" · Focus", ui::accent()));
-    }
-    frame.render_widget(Paragraph::new(lines), area);
 }
 fn legacy_document(text: String) -> Text<'static> {
     // Transitional report styling only: never derive identity, eligibility or requests from prose.
@@ -117,8 +154,12 @@ fn legacy_document(text: String) -> Text<'static> {
             .collect::<Vec<_>>(),
     )
 }
+pub fn wide_details(area: Rect, header_rows: u16) -> bool {
+    area.width >= 110 && area.height.saturating_sub(header_rows) >= 14
+}
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
+    app.hits.begin(area);
     if area.width < 48 || area.height < 14 {
         ui::prose(
             frame,
@@ -159,19 +200,31 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Span::styled(if app.dry_run { "  [DRY RUN]" } else { "" }, ui::warning()),
         Span::styled("  [p Scope]", ui::accent()),
     ]);
+    let scope_x = sections[0].x + header.width().saturating_sub("  [p Scope]".len()) as u16;
+    if scope_x < sections[0].right()
+        && app.shell.overlay.is_none()
+        && app.preview.is_none()
+        && app.error.is_none()
+    {
+        app.hits.click(
+            Rect::new(
+                scope_x,
+                sections[0].y,
+                11.min(sections[0].right() - scope_x),
+                1,
+            ),
+            super::input::Target::Action(Action::Choose),
+        );
+    }
     frame.render_widget(Paragraph::new(header), sections[0]);
     tabs(frame, sections[1], app);
     let body = sections[2];
     let content = Layout::vertical([Constraint::Min(3), Constraint::Length(2)]).split(body);
+    app.hits.wheel(content[0], super::input::Wheel::Details);
     if app.error.is_none() && app.preview.is_none() && app.shell.overlay.is_none() {
         match app.tab {
             Tab::Files => super::files::draw(frame, content[0], app),
-            Tab::Git => app.git_view.draw(
-                frame,
-                content[0],
-                app.shell.focus == Focus::Content,
-                app.busy,
-            ),
+            Tab::Git => app.git_view.draw(frame, content[0], app.busy, &app.hits),
             Tab::Overview => super::observations::overview(frame, content[0], app),
             Tab::Checks => super::observations::checks(frame, content[0], app),
             Tab::Recovery => super::recovery::draw(frame, content[0], app),
@@ -179,6 +232,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
         buttons(frame, content[1], app);
     }
     if let Some(error) = &app.error {
+        app.hits.clear();
+        app.hits.wheel(content[0], super::input::Wheel::Preview);
         ui::report(
             frame,
             content[0],
@@ -207,13 +262,44 @@ pub fn draw(frame: &mut Frame, app: &App) {
             content[1],
         );
     } else if let Some(preview) = &app.preview {
+        app.hits.clear();
+        app.hits.wheel(content[0], super::input::Wheel::Preview);
+        let back_x = content[1].x
+            + if preview.pending.blocked() || app.dry_run {
+                " [Continue unavailable] ".len() as u16
+            } else {
+                ui::button("Continue to confirmation", "Enter", true).width() as u16
+            };
+        if !preview.pending.blocked() && !app.dry_run {
+            app.hits.click(
+                Rect::new(
+                    content[1].x,
+                    content[1].y,
+                    (back_x - content[1].x).min(content[1].width),
+                    1,
+                ),
+                super::input::Target::Continue,
+            );
+        }
+        if back_x < content[1].right() {
+            app.hits.click(
+                Rect::new(
+                    back_x,
+                    content[1].y,
+                    (content[1].right() - back_x)
+                        .min(ui::button("Back", "Esc", false).width() as u16),
+                    1,
+                ),
+                super::input::Target::Back,
+            );
+        }
         if let super::actions::Pending::Files(plan) = &preview.pending
             && !preview.full
         {
             let block = ui::pane("Preview (metadata only) · Review effects", true);
             let inner = block.inner(content[0]);
             frame.render_widget(block, content[0]);
-            super::review::draw(frame, inner, plan, preview);
+            super::review::draw(frame, inner, plan, preview, &app.hits);
         } else {
             frame.render_widget(
                 Paragraph::new(safe(&preview.text))
@@ -235,6 +321,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             content[1],
         );
     } else if let Some(overlay) = &app.shell.overlay {
+        app.hits.clear();
         // Bounded dialogs; do not stretch long prose across a very wide terminal.
         let width = body.width.min(88);
         let modal = Rect::new(
@@ -244,6 +331,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             body.height,
         );
         frame.render_widget(Clear, modal);
+        app.hits.wheel(modal, super::input::Wheel::Overlay);
         match overlay {
             Overlay::Profiles(_) | Overlay::Repositories { .. } => {
                 super::pickers::draw(frame, modal, app, overlay)
@@ -292,23 +380,30 @@ pub fn draw(frame: &mut Frame, app: &App) {
             ("PgDn", "Effects"),
             ("Esc", "Back"),
         ]
-    } else if app.text_entry() {
+    } else if matches!(app.shell.overlay, Some(Overlay::Form(_))) {
         vec![
             ("Enter", "Next"),
             ("Tab", "Field"),
             ("Esc", "Back"),
             ("Ctrl-C", "Quit"),
         ]
+    } else if app.text_entry() {
+        vec![
+            ("Enter", "Submit/Done"),
+            ("Esc", "Back"),
+            ("Ctrl-C", "Quit"),
+        ]
     } else {
         vec![
-            ("Enter", "Activate"),
-            ("Tab", "Focus"),
+            ("Up/Down", "Select"),
+            ("PgDn", "Details"),
             ("Space", "Actions"),
             ("?", "Help"),
         ]
     };
     frame.render_widget(Paragraph::new(ui::keys(&keys)), sections[4]);
     if let Some(confirmation) = &app.confirmation {
+        app.hits.clear();
         let width = area.width.saturating_sub(4).min(76);
         let height = area.height.saturating_sub(4).min(13);
         let modal = Rect::new(
@@ -318,6 +413,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             height,
         );
         frame.render_widget(Clear, modal);
+        app.hits.wheel(modal, super::input::Wheel::Confirmation);
         let removal = app.preview.as_ref().and_then(|p| p.pending.removal_id());
         let prompt = if let Some(id) = removal.filter(|_| confirmation.removal_ack.is_none()) {
             format!(

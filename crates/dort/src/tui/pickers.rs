@@ -163,17 +163,32 @@ fn table(
     headers: Row<'static>,
     widths: &[Constraint],
     selected: Option<usize>,
-) {
+) -> usize {
     let table = Table::new(rows, widths.to_vec())
         .header(headers.style(ui::muted()))
         .block(ui::pane(title, selected.is_some()))
         .row_highlight_style(ui::selected())
         .highlight_symbol("> ");
-    frame.render_stateful_widget(
-        table,
-        area,
-        &mut TableState::default().with_selected(selected),
-    );
+    let mut state = TableState::default().with_selected(selected);
+    frame.render_stateful_widget(table, area, &mut state);
+    state.offset()
+}
+fn choices_hits(app: &App, area: Rect, count: usize, offset: usize, toggle: bool) {
+    app.hits.wheel(area, super::input::Wheel::Choices);
+    for (y, index) in (offset..count)
+        .take(usize::from(area.height.saturating_sub(3)))
+        .enumerate()
+    {
+        app.hits.click(
+            Rect::new(
+                area.x + 1,
+                area.y + 2 + y as u16,
+                area.width.saturating_sub(2),
+                1,
+            ),
+            super::input::Target::Picker(index, toggle),
+        );
+    }
 }
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
     let (title, details) = match overlay {
@@ -231,7 +246,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
                     ])
                 })
                 .collect();
-            table(
+            let offset = table(
                 frame,
                 parts[1],
                 title,
@@ -244,12 +259,24 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
                 ],
                 (!apply).then_some(picker.selected),
             );
+            choices_hits(app, parts[1], count, offset, true);
+            app.hits.click(
+                Rect::new(
+                    parts[2].x,
+                    parts[2].y,
+                    parts[2]
+                        .width
+                        .min(ui::button("Apply additions", "Enter", apply).width() as u16),
+                    1,
+                ),
+                super::input::Target::Picker(count, true),
+            );
             frame.render_widget(
                 Paragraph::new(Line::from(ui::button("Apply additions", "Enter", apply))),
                 parts[2],
             );
             frame.render_widget(
-                Paragraph::new("Up/Down/Tab choose | Space toggle | Esc back").style(ui::muted()),
+                Paragraph::new("Up/Down choose | Click/Space toggle | Esc back").style(ui::muted()),
                 parts[3],
             );
         }
@@ -273,7 +300,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
                     "Known".into(),
                 ])
             }));
-            table(
+            let offset = table(
                 frame,
                 parts[1],
                 "Repository selector",
@@ -282,12 +309,24 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
                 &[Constraint::Min(12), Constraint::Length(6)],
                 (!create).then_some(*selected),
             );
+            choices_hits(app, parts[1], roots.len() + 2, offset, false);
+            app.hits.click(
+                Rect::new(
+                    parts[2].x,
+                    parts[2].y,
+                    parts[2]
+                        .width
+                        .min(ui::button("Create/attach", "Enter", create).width() as u16),
+                    1,
+                ),
+                super::input::Target::Picker(roots.len() + 2, true),
+            );
             frame.render_widget(
                 Paragraph::new(Line::from(ui::button("Create/attach", "Enter", create))),
                 parts[2],
             );
             frame.render_widget(
-                Paragraph::new("Up/Down/Tab choose | Enter select | Esc back").style(ui::muted()),
+                Paragraph::new("Up/Down/Click choose | Enter select | Esc back").style(ui::muted()),
                 parts[3],
             );
         }

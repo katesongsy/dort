@@ -1,6 +1,6 @@
 use super::{
     actions::{Data, Output, Pending, Task},
-    shell::{Action, Focus, Form, Intent, Overlay, ProfilePicker, Shell},
+    shell::{Action, Form, Intent, Overlay, ProfilePicker, Shell},
 };
 use dort_core::{
     bootstrap::RecoveryAction,
@@ -90,8 +90,9 @@ pub struct App {
     pub history_details: bool,
     pub retry: Option<super::actions::Retry>,
     pub selected: usize,
-    pub action_selected: usize,
+    pub hits: super::input::Hits,
     pub details_scroll: u16,
+    viewport: (u16, u16),
     pub preview: Option<Preview>,
     pub confirmation: Option<Confirmation>,
     pub busy: bool,
@@ -128,8 +129,9 @@ impl App {
             history_details: false,
             retry: None,
             selected: 0,
-            action_selected: 0,
+            hits: Default::default(),
             details_scroll: 0,
+            viewport: (48, 14),
             preview: None,
             confirmation: None,
             busy: false,
@@ -144,6 +146,7 @@ impl App {
         }
     }
     pub fn start(&mut self, writing: bool) {
+        self.hits.clear();
         self.failed_write = false;
         self.busy = true;
         self.writing = writing;
@@ -377,9 +380,212 @@ impl App {
                 }
             }
         }
+        self.hits.clear();
         None
     }
+    pub fn mouse(
+        &mut self,
+        event: ratatui::crossterm::event::MouseEvent,
+        width: u16,
+        height: u16,
+    ) -> Option<Task> {
+        use super::input::{Target, Wheel};
+        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+        if self.hits.size() != (width, height) {
+            self.resize(width, height);
+            return None;
+        }
+        if width < 48 || height < 14 {
+            self.resize(width, height);
+            return None;
+        }
+        self.viewport = (width, height);
+        let code = match event.kind {
+            MouseEventKind::ScrollDown => Some(KeyCode::PageDown),
+            MouseEventKind::ScrollUp => Some(KeyCode::PageUp),
+            _ => None,
+        };
+        if let Some(code) = code {
+            let wheel = self.hits.scroll(event.column, event.row)?;
+            if matches!(wheel, Wheel::Choices | Wheel::PreviewRows) {
+                let code = if code == KeyCode::PageDown {
+                    KeyCode::Down
+                } else {
+                    KeyCode::Up
+                };
+                return self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height);
+            }
+            if matches!(wheel, Wheel::Details) {
+                self.hits.clear();
+                if self.tab == Tab::Git {
+                    self.git_view.scroll_metadata_details(code);
+                } else {
+                    super::shell::scroll_details(&mut self.details_scroll, code);
+                }
+                return None;
+            }
+            if matches!(wheel, Wheel::Rows) && !self.busy {
+                self.hits.clear();
+                let backwards = code == KeyCode::PageUp;
+                match self.tab {
+                    Tab::Files => self.move_file_selection(backwards),
+                    Tab::Recovery => self.move_history_selection(backwards),
+                    Tab::Git => self.git_view.move_metadata(backwards),
+                    _ => (),
+                }
+                self.details_scroll = 0;
+                return None;
+            }
+            return self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height);
+        }
+        if event.kind != MouseEventKind::Down(MouseButton::Left) || self.confirmation.is_some() {
+            return None;
+        }
+        let target = self.hits.target(event.column, event.row)?;
+        self.hits.clear();
+        if self.busy {
+            if let Target::Destination(tab) = target {
+                self.tab = tab;
+                self.selected = 0;
+                self.git_view.discard_patch();
+            }
+            return None;
+        }
+        match target {
+            Target::Continue => {
+                if self.preview.is_some() {
+                    self.key(
+                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                        width,
+                        height,
+                    )
+                } else {
+                    None
+                }
+            }
+            Target::PreviewRow(index) => {
+                if let Some(preview) = &mut self.preview
+                    && let Pending::Files(plan) = &preview.pending
+                    && index < plan.files.len()
+                {
+                    preview.selected = index;
+                    preview.effect_scroll = 0;
+                }
+                None
+            }
+            Target::Destination(tab) => self.activate(Action::Destination(tab)),
+            Target::Action(action) => self.activate(action),
+            Target::Back => self.key(
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                width,
+                height,
+            ),
+            Target::Row(index) => {
+                if self.tab == Tab::Files && self.visible_file_rows().contains(&index) {
+                    if self.discovering {
+                        self.candidate_selected = index;
+                    } else {
+                        self.selected = index;
+                    }
+                    self.inventory.details = false;
+                } else if self.tab == Tab::Recovery && self.visible_history_rows().contains(&index)
+                {
+                    self.selected = index;
+                    self.history_details = false;
+                } else if self.tab == Tab::Git {
+                    self.git_view.select_metadata(index);
+                }
+                self.details_scroll = 0;
+                None
+            }
+            Target::Filter => {
+                if self.tab == Tab::Files {
+                    self.inventory.search_mut(self.discovering).editing = true;
+                }
+                if self.tab == Tab::Recovery {
+                    self.history_search.editing = true;
+                }
+                if self.tab == Tab::Git {
+                    self.git_view.search.editing = true;
+                }
+                None
+            }
+            Target::FormControl(index, activate) => {
+                match self.shell.overlay {
+                    Some(Overlay::Form(Form::Adopt)) => self.shell.adoption.focused = index,
+                    Some(Overlay::Form(Form::Check)) => self.shell.manifest_focused = index,
+                    Some(Overlay::Form(Form::KeepId | Form::RemoveId)) => {
+                        self.shell.unmanage_focused = index
+                    }
+                    Some(Overlay::Form(Form::Choose | Form::Init)) => {
+                        self.shell.path_focused = index
+                    }
+                    _ => return None,
+                }
+                if activate {
+                    self.key(
+                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                        width,
+                        height,
+                    )
+                } else {
+                    None
+                }
+            }
+            Target::Picker(index, activate) => {
+                match &mut self.shell.overlay {
+                    Some(Overlay::Repositories { selected }) => *selected = index,
+                    Some(Overlay::Profiles(picker)) => picker.selected = index,
+                    _ => return None,
+                }
+                if activate {
+                    self.key(
+                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                        width,
+                        height,
+                    )
+                } else {
+                    None
+                }
+            }
+            Target::Palette(action) => {
+                if let Some(Overlay::Actions {
+                    entries,
+                    query,
+                    selected,
+                    searching,
+                }) = &mut self.shell.overlay
+                {
+                    if let Some(index) = super::palette::matches(entries, query)
+                        .iter()
+                        .position(|entry| entry.action == action)
+                    {
+                        *selected = index;
+                    }
+                    *searching = false;
+                }
+                self.intent(Intent::Action(action))
+            }
+            Target::PaletteSearch => {
+                if let Some(Overlay::Actions { searching, .. }) = &mut self.shell.overlay {
+                    *searching = true;
+                } else {
+                    self.git_view.discard_patch();
+                    self.shell.open_actions(super::palette::entries(
+                        self.tab,
+                        self.discovering,
+                        &self.page_actions(),
+                    ));
+                }
+                None
+            }
+        }
+    }
     pub fn key(&mut self, key: KeyEvent, width: u16, height: u16) -> Option<Task> {
+        self.hits.clear();
+        self.key_inner(key, width, height)
+    }
+    fn key_inner(&mut self, key: KeyEvent, width: u16, height: u16) -> Option<Task> {
         let interrupt =
             key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
         if interrupt
@@ -426,12 +632,18 @@ impl App {
             if key.code == KeyCode::Esc {
                 self.shell.overlay = None;
             }
-            if matches!(key.code, KeyCode::Left | KeyCode::Right) {
-                self.tab = if key.code == KeyCode::Left {
-                    self.tab.previous()
-                } else {
-                    self.tab.next()
-                };
+            let destination = match key.code {
+                KeyCode::Left => Some(self.tab.previous()),
+                KeyCode::Right => Some(self.tab.next()),
+                KeyCode::Char('1') => Some(Tab::Overview),
+                KeyCode::Char('2') => Some(Tab::Files),
+                KeyCode::Char('3') => Some(Tab::Recovery),
+                KeyCode::Char('4') => Some(Tab::Checks),
+                KeyCode::Char('5') => Some(Tab::Git),
+                _ => None,
+            };
+            if let Some(tab) = destination {
+                self.tab = tab;
                 self.selected = 0;
                 self.git_view.discard_patch();
             }
@@ -463,7 +675,7 @@ impl App {
                     self.retry = None;
                     self.tab = Tab::Recovery;
                     self.shell.overlay = None;
-                    self.shell.focus = Focus::Content;
+
                     self.details_scroll = 0;
                     return Some(Task::History);
                 }
@@ -498,7 +710,7 @@ impl App {
         if let Some(preview) = &mut self.preview {
             let file_review = matches!(preview.pending, Pending::Files(_));
             match key.code {
-                KeyCode::Tab | KeyCode::Char('i') if file_review => {
+                KeyCode::Char('i') if file_review => {
                     preview.full = !preview.full;
                     preview.scroll = 0;
                     preview.horizontal = 0;
@@ -584,11 +796,33 @@ impl App {
             }
             return None;
         }
-        if self.tab == Tab::Git
-            && (self.shell.focus == Focus::Content
-                || self.git_view.text_entry()
-                || self.git_view.sensitive())
+        // Tab belongs to local forms, never to workbench regions.
+        if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+            return None;
+        }
+        if !self.text_entry()
+            && !self.git_view.sensitive()
+            && matches!(key.code, KeyCode::Left | KeyCode::Right)
         {
+            let tab = if key.code == KeyCode::Left {
+                self.tab.previous()
+            } else {
+                self.tab.next()
+            };
+            return self.activate(Action::Destination(tab));
+        }
+        if !self.text_entry() && matches!(key.code, KeyCode::PageDown | KeyCode::PageUp) {
+            if self.tab == Tab::Files {
+                self.inventory.details = true;
+            }
+            if self.tab == Tab::Recovery {
+                self.history_details = true;
+            }
+            if self.tab == Tab::Git && !self.git_view.sensitive() {
+                self.git_view.inspect_metadata();
+            }
+        }
+        if self.tab == Tab::Git {
             if self.git_view.editing_root
                 && key.code == KeyCode::Enter
                 && let Err(error) = &self.git
@@ -615,7 +849,9 @@ impl App {
             }
         }
         // Any outer-shell navigation/action drops a disclosed patch reference.
-        self.git_view.discard_patch();
+        if self.git_view.sensitive() {
+            self.git_view.discard_patch();
+        }
         if self.tab == Tab::Recovery && self.history_search.editing {
             self.history_search.key(key);
             self.clamp_history_selection();
@@ -628,63 +864,25 @@ impl App {
             self.details_scroll = 0;
             return None;
         }
-        let opens_overlay = matches!(key.code, KeyCode::Char('?' | ' ' | '/' | 'p' | 'n'))
-            || (key.code == KeyCode::Enter && self.shell.focus == Focus::Actions);
-        if !matches!(key.code, KeyCode::PageDown | KeyCode::PageUp) && !opens_overlay {
+        let opens_overlay = matches!(key.code, KeyCode::Char('?' | ' ' | '/' | 'p' | 'n'));
+        if !matches!(
+            key.code,
+            KeyCode::PageDown | KeyCode::PageUp | KeyCode::Tab | KeyCode::BackTab
+        ) && !opens_overlay
+        {
             self.details_scroll = 0;
         }
         match key.code {
             KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(2),
             KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(2),
-            KeyCode::Tab | KeyCode::BackTab => {
-                self.shell.focus = self.shell.focus.next(
-                    key.code == KeyCode::BackTab || key.modifiers.contains(KeyModifiers::SHIFT),
-                );
-            }
-            KeyCode::Down | KeyCode::Up if self.shell.focus == Focus::Actions => {
-                self.action_selected = if key.code == KeyCode::Up {
-                    self.action_selected.saturating_sub(1)
-                } else {
-                    (self.action_selected + 1).min(self.page_actions().len().saturating_sub(1))
-                };
-            }
-            KeyCode::Down | KeyCode::Up if self.shell.focus == Focus::Destinations => (),
-            KeyCode::Right | KeyCode::Left if self.shell.focus == Focus::Actions => {
-                let len = self.page_actions().len();
-                self.action_selected = if key.code == KeyCode::Left {
-                    self.action_selected.saturating_sub(1)
-                } else {
-                    (self.action_selected + 1).min(len.saturating_sub(1))
-                };
-            }
-            KeyCode::Right | KeyCode::Left if self.shell.focus == Focus::Destinations => {
-                self.tab = if key.code == KeyCode::Left {
-                    self.tab.previous()
-                } else {
-                    self.tab.next()
-                };
-                self.selected = 0;
-            }
-            KeyCode::Enter if self.shell.focus == Focus::Actions => {
-                if let Some(action) = self
-                    .page_actions()
-                    .get(
-                        self.action_selected
-                            .min(self.page_actions().len().saturating_sub(1)),
-                    )
-                    .copied()
-                {
-                    return self.activate(action);
-                }
-            }
-            KeyCode::Enter if self.shell.focus == Focus::Destinations => {
-                self.tab = self.tab.next();
-                self.selected = 0;
+            KeyCode::Home => self.details_scroll = 0,
+            KeyCode::Char('e') if self.tab == Tab::Files && self.discovering => {
+                return self.activate(Action::AdoptSelected);
             }
             KeyCode::Esc => {
                 self.inventory.details = false;
                 self.history_details = false;
-                self.shell.focus = Focus::Content;
+
                 self.result = None;
             }
             KeyCode::Char(' ') => self.shell.open_actions(super::palette::entries(
@@ -692,14 +890,10 @@ impl App {
                 self.discovering,
                 &self.page_actions(),
             )),
-            KeyCode::Char('/') if self.tab == Tab::Files && self.shell.focus == Focus::Content => {
+            KeyCode::Char('/') if self.tab == Tab::Files => {
                 self.inventory.search_mut(self.discovering).editing = true
             }
-            KeyCode::Char('/')
-                if self.tab == Tab::Recovery && self.shell.focus == Focus::Content =>
-            {
-                self.history_search.editing = true
-            }
+            KeyCode::Char('/') if self.tab == Tab::Recovery => self.history_search.editing = true,
             KeyCode::Char('/') => self.shell.open_actions(super::palette::entries(
                 self.tab,
                 self.discovering,
@@ -786,6 +980,10 @@ impl App {
         None
     }
     pub fn resize(&mut self, width: u16, height: u16) {
+        if self.viewport != (width, height) {
+            self.hits.clear();
+        }
+        self.viewport = (width, height);
         if width < 48 || height < 14 {
             self.confirmation = None;
             self.git_view.resize();
@@ -930,7 +1128,7 @@ impl App {
         match action {
             Action::GitRoot => {
                 self.tab = Tab::Git;
-                self.shell.focus = Focus::Content;
+
                 self.git_view.editing_root = true;
             }
             Action::GitDefault => {
@@ -950,17 +1148,17 @@ impl App {
             Action::GitRefresh => return self.git_task(),
             Action::GitPatch => {
                 self.tab = Tab::Git;
-                self.shell.focus = Focus::Content;
+
                 self.git_view.confirm_patch();
                 self.status = "Patch viewing needs a loaded Unstaged or Staged summary. Type literal view patch in its warning to disclose once.".into();
             }
-            Action::Destination(tab) => { self.tab = tab; self.selected = 0; self.shell.focus = Focus::Content; if tab == Tab::Files { self.discovering = false; } }
+            Action::Destination(tab) => { self.tab = tab; self.selected = 0;if tab == Tab::Files { self.discovering = false; } }
             Action::Choose => self.shell.overlay = Some(Overlay::Repositories { selected: 0 }),
             Action::Init => { self.shell.path_focused = 0; self.shell.overlay = Some(Overlay::Form(Form::Init)); }
             Action::Discover => {
                 self.tab = Tab::Files;
                 self.discovering = true;
-                self.shell.focus = Focus::Content;
+
                 return Some(Task::Discover);
             }
             Action::Adopt => {
@@ -968,7 +1166,7 @@ impl App {
                 self.shell.overlay = Some(Overlay::Form(Form::Adopt));
             }
             Action::AdoptSelected => {
-                if self.tab == Tab::Files && self.discovering { self.shell.focus = Focus::Content; self.adopt_candidate(); }
+                if self.tab == Tab::Files && self.discovering {self.adopt_candidate(); }
                 else { self.status = "Discover and inspect an eligible regular file first.".into(); }
             }
             Action::KeepId | Action::RemoveId => {
@@ -988,10 +1186,12 @@ impl App {
                 self.status = "File display filter cleared; apply scope was never narrowed.".into();
             }
             Action::Inspect if self.tab == Tab::Recovery => {
+
                 self.history_details = true;
                 self.details_scroll = 0;
             }
             Action::Inspect if self.tab == Tab::Files => {
+
                 self.inventory.details = true;
                 self.details_scroll = 0;
             }
@@ -1234,7 +1434,6 @@ impl App {
     }
     fn git_task(&mut self) -> Option<Task> {
         self.tab = Tab::Git;
-        self.shell.focus = Focus::Content;
         let root = if self.git_view.follows_files {
             self.data
                 .as_ref()

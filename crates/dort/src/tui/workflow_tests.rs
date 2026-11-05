@@ -108,12 +108,9 @@ fn submit_path(app: &mut App) -> Task {
     key(app, KeyCode::Enter).expect("activate visible path action after field advance")
 }
 fn adopt_selected(app: &mut App) {
-    key(app, KeyCode::Esc); // return to Content before inspecting
+    key(app, KeyCode::Esc); // Return to list before inspecting.
     key(app, KeyCode::Enter); // Inspect row, never open a draft directly.
-    app.action_selected = 0;
-    key(app, KeyCode::Tab);
-    key(app, KeyCode::Right); // Adopt selected, a visible item action.
-    key(app, KeyCode::Enter);
+    key(app, KeyCode::Char('e')); // Separate labeled Adopt selected action.
 }
 fn type_text(app: &mut App, value: &str) {
     for c in value.chars() {
@@ -342,6 +339,71 @@ fn confirmation_snapshots_and_resize_guard() {
     assert!(app.confirmation.is_none());
     assert!(app.preview.is_some());
     assert!(!fixture.host.state_dir.exists());
+}
+#[test]
+fn mouse_continue_opens_confirmation_but_cannot_submit_exact_id_or_yes() {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let fixture = Fixture::new(true);
+    let mut app = App::new(false);
+    app.complete(Ok(fixture.prepare(Request::Apply)));
+    fixture.execute(approve(&mut app));
+    app.complete(Ok(fixture.prepare(Request::Unmanage {
+        id: "editor".into(),
+        mode: UnmanageMode::Remove,
+    })));
+    let screen = super::tests::render(&app, 48, 14);
+    let (x, y) = screen
+        .lines()
+        .enumerate()
+        .find_map(|(y, row)| {
+            row.find("[Continue")
+                .map(|i| (row[..i].chars().count() as u16, y as u16))
+        })
+        .unwrap();
+    assert!(
+        app.mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: x,
+                row: y,
+                modifiers: KeyModifiers::NONE
+            },
+            48,
+            14
+        )
+        .is_none()
+    );
+    assert!(app.confirmation.is_some());
+    for phrase in ["editor", "yes"] {
+        type_text(&mut app, phrase);
+        for y in 0..14 {
+            for x in [1, 12, 24, 36, 46] {
+                super::tests::render(&app, 48, 14);
+                assert!(
+                    app.mouse(
+                        MouseEvent {
+                            kind: MouseEventKind::Down(MouseButton::Left),
+                            column: x,
+                            row: y,
+                            modifiers: KeyModifiers::NONE
+                        },
+                        48,
+                        14
+                    )
+                    .is_none()
+                );
+            }
+        }
+        let confirmation = app.confirmation.as_ref().unwrap();
+        assert_eq!(confirmation.input, phrase);
+        assert_eq!(confirmation.removal_ack.is_some(), phrase == "yes");
+        if phrase == "editor" {
+            assert!(key(&mut app, KeyCode::Enter).is_none());
+        }
+    }
+    assert!(fixture.host.home.join(".editor").is_symlink());
+    key(&mut app, KeyCode::Esc); // cancel instead of executing
+    assert!(app.preview.is_some() && app.confirmation.is_none());
 }
 #[test]
 fn blocked_preview_cannot_confirm_and_errors_remain_inspectable() {
@@ -814,6 +876,46 @@ fn discovery_is_independent_metadata_only_and_keeps_exact_candidate_identity() {
     run_task(&mut app, &fixture, task);
     assert!(app.status.contains("disappeared"));
     assert!(!fixture.host.config_dir.exists() && !fixture.host.state_dir.exists());
+}
+
+#[test]
+fn wide_candidate_inspection_then_direct_action_opens_exact_draft() {
+    let fixture = Fixture::new(false);
+    let path = fixture.host.home.join(".wide-candidate");
+    fs::write(&path, "ordinary settings\n").unwrap();
+    let mut app = onboarding_app(&fixture, false);
+    app.shell.adoption.target = "retained target".into();
+    let task = key(&mut app, KeyCode::Char('f')).unwrap();
+    run_task(&mut app, &fixture, task);
+    for code in [KeyCode::Enter, KeyCode::PageDown, KeyCode::Home] {
+        assert!(
+            app.key(KeyEvent::new(code, KeyModifiers::NONE), 140, 40)
+                .is_none()
+        );
+    }
+    assert!(app.inventory.details);
+    assert_eq!(app.shell.adoption.target, "retained target");
+    assert!(
+        app.action_reason(super::shell::Action::AdoptSelected)
+            .is_none()
+    );
+    assert!(
+        app.key(
+            KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE),
+            140,
+            40
+        )
+        .is_none()
+    );
+    assert!(matches!(
+        app.shell.overlay,
+        Some(super::shell::Overlay::Form(super::shell::Form::Adopt))
+    ));
+    assert_eq!(app.shell.adoption.target, path.to_str().unwrap());
+    assert_eq!(app.shell.adoption.id, "wide-candidate");
+    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(!fixture.host.config_dir.exists() && !fixture.host.state_dir.exists());
+    assert_eq!(fs::read_to_string(path).unwrap(), "ordinary settings\n");
 }
 
 #[test]

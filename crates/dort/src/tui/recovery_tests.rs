@@ -2,7 +2,7 @@ use super::{
     actions::{Data, Output, Task},
     app::{App, Tab},
     recovery,
-    shell::{Action, Focus, Overlay},
+    shell::{Action, Overlay},
     tests::render,
 };
 use dort_core::journal::{Diagnosis, Phase};
@@ -202,15 +202,13 @@ fn preparing_table_enter_inspects_then_the_visible_action_uses_raw_identity() {
     assert!(key(&mut app, KeyCode::Enter).is_none());
     assert!(app.history_details && app.preview.is_none() && app.confirmation.is_none());
     assert_eq!(app.page_actions().len(), 2);
-    key(&mut app, KeyCode::Tab);
-    key(&mut app, KeyCode::Right);
-    assert!(render(&app, 80, 24).contains("> [Review abandon"));
+    key(&mut app, KeyCode::Tab); // no region focus cycle
+    assert!(render(&app, 80, 24).contains("[Review abandon · x]"));
     assert!(
-        matches!(key(&mut app, KeyCode::Enter), Some(Task::Bootstrap(r,t,dort_core::bootstrap::RecoveryAction::Abandon)) if r == "b".repeat(64) && t == "b".repeat(64))
+        matches!(key(&mut app, KeyCode::Char('x')), Some(Task::Bootstrap(r,t,dort_core::bootstrap::RecoveryAction::Abandon)) if r == "b".repeat(64) && t == "b".repeat(64))
     );
     assert!(app.preview.is_none() && app.confirmation.is_none());
     // Discovery in the global palette still includes inapplicable operations.
-    app.shell.focus = Focus::Content;
     key(&mut app, KeyCode::Char(' ')); // search-first, no extra / keystroke
     for c in "resume".chars() {
         key(&mut app, KeyCode::Char(c));
@@ -268,13 +266,12 @@ fn error_retry_never_retains_approval_and_failed_writes_offer_read_only_recovery
 fn about_reports_build_version_and_returns_to_prior_focus_and_details() {
     let mut app = App::new(false);
     app.tab = Tab::Recovery;
-    app.shell.focus = Focus::Actions;
     app.details_scroll = 8;
     app.shell.overlay = Some(Overlay::About);
     let text = render(&app, 120, 45);
     assert!(text.contains(env!("CARGO_PKG_VERSION")));
     assert!(text.contains("Not implemented:"));
     key(&mut app, KeyCode::Esc);
-    assert!(app.tab == Tab::Recovery && app.shell.focus == Focus::Actions);
+    assert!(app.tab == Tab::Recovery);
     assert_eq!(app.details_scroll, 8);
 }

@@ -164,7 +164,7 @@ fn patch_disclosure_is_once_isolated_and_dropped_on_close_scope_resize_or_exit()
     key(&mut app, KeyCode::Char(' ')); // Actions opens with search focused.
     text(&mut app, "View patch content");
     assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(app.shell.focus == super::shell::Focus::Content);
+    assert!(app.tab == Tab::Git);
     assert!(render(&app, 48, 14).contains("May expose secrets"));
     text(&mut app, "yes");
     assert!(key(&mut app, KeyCode::Enter).is_none());

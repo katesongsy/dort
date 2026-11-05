@@ -112,7 +112,13 @@ fn detail(plan: &Plan, selected: usize) -> Text<'static> {
     ));
     Text::from(lines)
 }
-pub fn draw(frame: &mut Frame, area: Rect, plan: &Plan, preview: &Preview) {
+pub fn draw(
+    frame: &mut Frame,
+    area: Rect,
+    plan: &Plan,
+    preview: &Preview,
+    hits: &super::input::Hits,
+) {
     let parts = Layout::vertical([
         Constraint::Length(2),
         Constraint::Length(if area.height >= 12 { 5 } else { 3 }),
@@ -167,6 +173,16 @@ pub fn draw(frame: &mut Frame, area: Rect, plan: &Plan, preview: &Preview) {
     let mut state =
         TableState::default().with_selected((!plan.files.is_empty()).then_some(preview.selected));
     frame.render_stateful_widget(table, parts[1], &mut state);
+    hits.wheel(parts[1], super::input::Wheel::PreviewRows);
+    for (y, index) in (state.offset()..plan.files.len())
+        .take(usize::from(parts[1].height.saturating_sub(1)))
+        .enumerate()
+    {
+        hits.click(
+            Rect::new(parts[1].x, parts[1].y + 1 + y as u16, parts[1].width, 1),
+            super::input::Target::PreviewRow(index),
+        );
+    }
     if parts[2].height >= 3 {
         ui::report(
             frame,

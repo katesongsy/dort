@@ -1,5 +1,5 @@
 //! Typed read-only dashboards. Presentation never derives identity or policy from prose.
-use super::{app::App, components as ui, shell::Focus};
+use super::{app::App, components as ui};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -84,7 +84,7 @@ fn dashboard(
         title,
         Text::from(lines),
         app.details_scroll,
-        app.shell.focus == Focus::Content,
+        true,
     );
 }
 fn count(value: Option<usize>) -> String {
@@ -101,7 +101,7 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
             "Overview",
             Text::raw("Loading read-only observations..."),
             0,
-            app.shell.focus == Focus::Content,
+            true,
         );
         return;
     };
@@ -379,7 +379,7 @@ fn diagnostics(frame: &mut Frame, area: Rect, app: &App) {
             "Diagnostics",
             Text::raw("Diagnostics not loaded. j: read host, paths and registry metadata"),
             0,
-            app.shell.focus == Focus::Content,
+            true,
         );
         return;
     };

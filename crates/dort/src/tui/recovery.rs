@@ -1,5 +1,5 @@
 //! Typed content-free history presentation. Eligibility is advisory; core previews decide.
-use super::{app::App, components as ui, shell::Focus};
+use super::{app::App, components as ui};
 use dort_core::journal::{Diagnosis, Phase};
 use ratatui::{
     Frame,
@@ -211,8 +211,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         rows[0],
     );
     search(frame, rows[1], app);
+    app.hits.click(rows[1], super::input::Target::Filter);
     let content = rows[2];
-    let focused = app.shell.focus == Focus::Content;
+    let focused = true;
     let Some(data) = &app.data else {
         ui::report(
             frame,
@@ -239,7 +240,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         );
         return;
     }
-    let wide = content.width >= 110 && content.height >= 14;
+    let wide = super::workbench::wide_details(area, 2);
     if !wide && app.history_details {
         ui::report(
             frame,
@@ -307,15 +308,16 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         let mut selection =
             TableState::default().with_selected(visible.iter().position(|&i| i == app.selected));
         frame.render_stateful_widget(table, panes[0], &mut selection);
+        app.hits.rows(panes[0], &visible, selection.offset());
     }
     if wide {
         ui::report(
             frame,
             panes[1],
-            "Transaction details",
+            "Transaction details | PgUp/PgDn",
             details(app),
             app.details_scroll,
-            false,
+            true,
         );
     }
 }

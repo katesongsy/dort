@@ -3,12 +3,15 @@ mod app;
 mod components;
 #[cfg(test)]
 mod design_tests;
+#[cfg(test)]
+mod direct_input_tests;
 mod events;
 mod files;
 mod forms;
 mod git;
 #[cfg(test)]
 mod git_tests;
+mod input;
 mod inventory;
 mod observations;
 mod palette;
@@ -42,6 +45,7 @@ use std::{path::PathBuf, time::Duration};
 struct TerminalGuard;
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
+        let _ = ratatui::crossterm::execute!(std::io::stdout(), event::DisableMouseCapture);
         ratatui::restore();
     }
 }
@@ -71,10 +75,12 @@ pub fn run(
 fn terminal_session(
     action: impl FnOnce(&mut DefaultTerminal, &mut Option<Worker>) -> Result<()>,
 ) -> Result<()> {
-    // Construct the guard first: partial initialization failures also restore the terminal.
+    // Guard unwinds before the worker: restore mouse/terminal modes, then join.
+    let mut worker = None;
     let guard = TerminalGuard;
     let mut terminal = ratatui::try_init().map_err(terminal_error)?;
-    let mut worker = None;
+    ratatui::crossterm::execute!(std::io::stdout(), event::EnableMouseCapture)
+        .map_err(terminal_error)?;
     let result = action(&mut terminal, &mut worker);
     // Restore immediately on input/render errors, then wait for any approved write.
     drop(guard);
@@ -124,6 +130,12 @@ fn run_loop(
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     let size = terminal.size().map_err(terminal_error)?;
                     if let Some(task) = app.key(key, size.width, size.height) {
+                        launch(task, host, &mut app, worker)?;
+                    }
+                }
+                Event::Mouse(mouse) => {
+                    let size = terminal.size().map_err(terminal_error)?;
+                    if let Some(task) = app.mouse(mouse, size.width, size.height) {
                         launch(task, host, &mut app, worker)?;
                     }
                 }

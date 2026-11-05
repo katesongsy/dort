@@ -395,7 +395,47 @@ impl State {
         }
         Some(None)
     }
-    pub fn draw(&self, frame: &mut Frame, area: Rect, focused: bool, busy: bool) {
+    pub fn inspect_metadata(&mut self) {
+        if !self.sensitive() && !self.editing_root {
+            self.details = true;
+        }
+    }
+    pub fn select_metadata(&mut self, index: usize) {
+        if !self.sensitive() && !self.editing_root && self.visible().contains(&index) {
+            self.selected = index;
+            self.scroll = 0;
+        }
+    }
+    pub fn move_metadata(&mut self, backwards: bool) {
+        let visible = self.visible();
+        let pos = visible
+            .iter()
+            .position(|&i| i == self.selected)
+            .unwrap_or(0);
+        let next = if backwards {
+            pos.saturating_sub(1)
+        } else {
+            (pos + 1).min(visible.len().saturating_sub(1))
+        };
+        if let Some(&index) = visible.get(next) {
+            self.select_metadata(index);
+        }
+    }
+    pub fn scroll_metadata_details(&mut self, code: KeyCode) -> bool {
+        if self.sensitive() || self.editing_root {
+            return false;
+        }
+        super::shell::scroll_details(&mut self.scroll, code)
+    }
+    pub fn draw(&self, frame: &mut Frame, area: Rect, busy: bool, hits: &super::input::Hits) {
+        hits.wheel(
+            area,
+            if self.sensitive() || self.editing_root {
+                super::input::Wheel::GitPrivate
+            } else {
+                super::input::Wheel::Details
+            },
+        );
         let scope = format!(
             "Git-only root: {:?} ({})\n{} | g root | z Status | u Unstaged | s Staged\nr refresh | / metadata search | w View patch content\n",
             self.root,
@@ -463,6 +503,7 @@ impl State {
                 frame,
                 area,
                 metadata::View {
+                    hits,
                     root: self.root.as_deref(),
                     follows_files: self.follows_files,
                     comparison: self.comparison,
@@ -472,7 +513,6 @@ impl State {
                     selected: self.selected,
                     details: self.details,
                     scroll: self.scroll,
-                    focused,
                     busy,
                 },
             );

@@ -110,7 +110,6 @@ fn compact_forms_and_profile_picker_always_show_focused_control() {
     assert!(render(&app, 48, 14).contains("> [Review"));
     app.shell.overlay = None;
     app.tab = Tab::Overview;
-    app.shell.focus = super::shell::Focus::Destinations;
     app.key(key(KeyCode::Left), 80, 24);
     assert!(app.tab == Tab::Git);
     app.key(key(KeyCode::Right), 80, 24);
@@ -142,7 +141,7 @@ fn compact_navigation_and_report_home_are_readable_without_color() {
             "5 Git",
             "Actions",
             "DRY RUN",
-            "Focus",
+            "Space",
         ] {
             assert!(
                 screen.contains(label),
@@ -260,11 +259,11 @@ fn navigation_and_metadata_escaping() {
 
 #[test]
 fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
-    use super::shell::{Focus, Overlay};
+    use super::shell::Overlay;
     let mut app = App::new(false);
     app.tab = Tab::Files;
     app.key(key(KeyCode::Tab), 80, 24);
-    assert!(app.shell.focus == Focus::Actions);
+    assert!(app.preview.is_none() && app.confirmation.is_none());
     app.key(key(KeyCode::Char(' ')), 80, 24);
     assert!(render(&app, 80, 24).contains("Choose repository (session only)"));
     app.key(key(KeyCode::Esc), 80, 24); // search -> results
@@ -276,9 +275,9 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     assert_eq!(app.shell.scroll, 2);
     app.key(key(KeyCode::Esc), 80, 24);
     assert_eq!(app.details_scroll, 3);
-    assert!(app.tab == Tab::Files && app.shell.focus == Focus::Actions);
+    assert!(app.tab == Tab::Files);
     app.key(key(KeyCode::BackTab), 80, 24);
-    assert!(app.shell.focus == Focus::Content);
+    assert!(app.preview.is_none() && app.confirmation.is_none());
     app.key(key(KeyCode::Char(' ')), 80, 24);
     for c in "q?/".chars() {
         app.key(key(KeyCode::Char(c)), 80, 24);

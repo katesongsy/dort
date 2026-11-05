@@ -106,6 +106,20 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
             break;
         }
         let r = Rect::new(inner.x, y, inner.width, h);
+        let hit = match control {
+            Control::Button(label) => Rect::new(
+                r.x,
+                r.y,
+                r.width
+                    .min(ui::button(label, "", focused == i).width() as u16),
+                r.height,
+            ),
+            Control::Field(..) => r,
+        };
+        app.hits.click(
+            hit,
+            super::input::Target::FormControl(i, matches!(control, Control::Button(_))),
+        );
         match control {
             Control::Field(label, value) => {
                 ui::input(frame, r, label, value, focused == i && !app.busy)

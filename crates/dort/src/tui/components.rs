@@ -44,7 +44,7 @@ pub fn pane(title: &str, focused: bool) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(
-            format!(" {}{} ", title, if focused { " · Focus" } else { "" }),
+            format!(" {title} "),
             if focused { accent() } else { heading() },
         ))
         .border_style(if focused { accent() } else { muted() })
@@ -141,7 +141,10 @@ pub fn metadata(label: &str, value: &str) -> Line<'static> {
     ])
 }
 pub fn input(frame: &mut Frame, area: Rect, label: &str, value: &str, focused: bool) {
-    let block = pane(label, focused);
+    let block = pane(
+        &format!("{label}{}", if focused { " · Focus" } else { "" }),
+        focused,
+    );
     let inner = block.inner(area);
     let escaped = inline(value);
     let max = usize::from(inner.width.saturating_sub(1));

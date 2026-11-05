@@ -184,6 +184,28 @@ class Session:
     def send(self, value):
         os.write(self.master, value)
 
+    def mouse(self, button, column, row):
+        # SGR coordinates are one-based; button 0 clicks, 64/65 wheel up/down.
+        self.send(f"\x1b[<{button};{column + 1};{row + 1}M".encode())
+        if button == 0:
+            self.send(f"\x1b[<0;{column + 1};{row + 1}m".encode())
+
+    def click_label(self, label):
+        self.wait(label.encode())
+        self.settle()
+        for row, cells in enumerate(self.screen.cells):
+            text = "".join(cells)
+            if label in text:
+                self.mouse(0, text.index(label), row)
+                return
+        raise AssertionError("Click target was not visible")
+
+    def resize(self, size):
+        self.settle()
+        self.screen = Screen(size)
+        fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", *size, 0, 0))
+        os.killpg(self.process.pid, signal.SIGWINCH)
+
     def finish(self, expected=0):
         deadline = time.monotonic() + TIMEOUT
         while self.code is None and time.monotonic() < deadline:
@@ -201,6 +223,11 @@ class Session:
         after[3] &= ~getattr(termios, "PENDIN", 0)
         assert after == before, "Terminal attributes were not restored"
         assert b"\x1b[?1049l" in self.data, "Alternate screen was not left"
+        for mode in (1000, 1002, 1003, 1015, 1006):
+            enabled = f"\x1b[?{mode}h".encode()
+            disabled = f"\x1b[?{mode}l".encode()
+            assert enabled in self.data, "Mouse capture was not enabled"
+            assert self.data.rfind(disabled) > self.data.rfind(enabled), "Mouse capture was not restored"
         os.write(self.release_w, b"x")
         self.process.wait(timeout=5)
 
@@ -457,13 +484,56 @@ def run():
 
         candidate = home / ".q?config"
         candidate.write_text("private-body-marker\n")
+        with Session([binary, "tui"], env, (24, 110)) as session:
+            session.wait(b"loaded.")
+            session.click_label("2 Files")
+            session.click_label("Discover files")
+            session.wait(b"Eligible hint")
+            session.click_label(".q?config")  # selection only
+            session.click_label("Inspect")
+            session.wait(b"Selected item | PgUp/PgDn")
+            session.mouse(65, 90, 10)  # detail viewport, not row selection
+            session.settle()
+            scrolled = session.screen.text()
+            session.send(b"\t\x1b[Z")
+            session.settle()
+            assert session.screen.text() == scrolled, "Tab unexpectedly changed workbench state"
+            session.send(b"\x1b[H")
+            session.wait(b"[Eligible hint]")
+            session.click_label("[Adopt selected")  # exact visible button, not explanatory prose
+            session.wait("TARGET · Focus".encode())
+            session.click_label("ID")
+            session.send(b"\x15mouse-id")
+            session.wait(b"mouse-id")
+            session.send(b"\x1b")
+            session.settle()
+            session.resize((14, 48))
+            session.wait(b"Selected item")
+            session.send(b"\x1b")
+            session.wait(b"NAME")
+            session.send(b"\x1b[C")  # direct destination, never action selection
+            session.wait(b"All repositories")
+            session.click_label("2 Files")
+            session.wait(b"Files / Managed")  # destination chooses managed view
+            session.resize((22, 110))
+            session.wait(b"Selected item | PgUp/PgDn")
+            session.resize((21, 110))
+            session.wait(b"Files / Managed")
+            assert b"Selected item |" not in session.screen.text()
+            assert b"private-body-marker" not in session.data
+            session.send(b"q")
+            session.finish()
+        assert not (home / ".config").exists() and not (home / ".local").exists()
+        assert candidate.read_text() == "private-body-marker\n"
+        print("PASS direct Files keys/mouse, retained viewport and width/height layouts without writes")
+
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"f")
             session.wait(b"Eligible hint")
             session.send(b"\r")
             session.wait(b"Selected item")
-            session.send(b"\t\x1b[C\r")  # visible Adopt selected action
+            session.send(b"e")  # direct, separate Adopt selected action
             session.wait("TARGET · Focus".encode())
             session.send(b"\t\t\t\r")  # fields -> Review, no repository selected
             session.wait(b"Read failed:")
@@ -579,6 +649,46 @@ def run():
         assert (base / "patch-calls").read_text() == patch_calls, "Metadata inspection fetched a patch"
         assert not list(home.iterdir()) and not list(git_only.iterdir())
         print("PASS compact typed Git tables, full-scope details and Home without patch reads or state")
+
+        with Session([binary, "tui"], dict(env, PATH=str(bin_dir)), (24, 110)) as session:
+            session.wait(b"loaded.")
+            session.click_label("5 Git")
+            session.send(b"g" + os.fsencode(git_only) + b"\r")
+            session.wait(b"Git read completed")
+            session.click_label("q?name")
+            session.send(b"\r\x1b[6~")
+            session.wait(b"Git details | PgUp/PgDn")
+            session.mouse(65, 90, 10)
+            session.settle()
+            scrolled = session.screen.text()
+            session.send(b"\t\x1b[Z")
+            session.settle()
+            assert scrolled == session.screen.text(), "Tab changed Git metadata scroll"
+            session.send(b"\x1b[H")
+            session.wait(b'Path: "q?name"')
+            session.resize((22, 110))
+            session.wait(b"Git details | Esc list")
+            session.send(b"\x1b")
+            session.wait(b"PATH")
+            session.resize((23, 110))
+            session.wait(b"Git details | PgUp/PgDn")
+            session.click_label("Unstaged")
+            session.wait(b"Unstaged (worktree vs index)")
+            session.wait(b"100644 -> 100644")  # loaded diff before content action
+            session.click_label("View patch")
+            session.wait(b"May expose secrets")
+            session.mouse(0, 20, 8)  # ordinary clicks cannot submit the phrase
+            session.send(b"yes\r")
+            session.settle()
+            assert b"May expose secrets" in session.screen.text()
+            assert b"PRIVATE-PATCH" not in session.data
+            session.send(b"\x1b")
+            session.settle()
+            session.send(b"q")
+            session.finish()
+        assert (base / "patch-calls").read_text() == patch_calls, "Wide metadata controls disclosed content"
+        assert not list(home.iterdir()) and not list(git_only.iterdir())
+        print("PASS direct Git metadata keys/mouse and resize isolated from patch confirmation")
 
         created = base / "created"
         for intent in ("create", "attach"):
@@ -727,7 +837,7 @@ def run():
             session.wait(b"Validated checkpoints:")
             session.send(b"\x1b[H")
             session.wait(b"Repository ID:")
-            session.send(b"\t\x1b[C\r")  # explicit contextual Rollback page button
+            session.click_label("Review rollback")  # same typed action as b; still preview only
             session.wait(b"Rollback schema 2")
             session.send(b"\r")
             session.settle()
@@ -739,7 +849,37 @@ def run():
         assert checkpoints == {str(path.relative_to(state)): hashlib.sha256(path.read_bytes()).digest()
                                for path in state.rglob("*.json")}, "Recovery inspection/preview changed history"
         assert target.is_symlink() and (repo / "source").read_text() == "ordinary settings\n"
-        print("PASS compact typed Recovery inspection, focused rollback preview and dry-run without writes")
+        print("PASS compact typed Recovery inspection, clicked rollback preview and dry-run without writes")
+
+        with Session([binary, "--dry-run", "tui"], env, (24, 110)) as session:
+            session.wait(b"loaded.")
+            session.click_label("3 Recovery")
+            session.send(b"/Completed\r")
+            session.wait(b"Showing 1")
+            session.click_label("Inspect")
+            session.wait(b"Transaction details | PgUp/PgDn")
+            session.mouse(65, 90, 10)
+            session.settle()
+            scrolled = session.screen.text()
+            session.send(b"\t\x1b[Z")
+            session.settle()
+            assert scrolled == session.screen.text(), "Tab changed Recovery detail scroll"
+            session.send(b"\x1b[H")
+            session.wait(b"Transaction identity")
+            session.resize((14, 48))
+            session.wait(b"Transaction details")
+            session.send(b"\x1b")
+            session.wait(b"TX ID")
+            session.click_label("Inspect")
+            session.wait(b"Transaction details")
+            session.send(b"\x1b")
+            session.wait(b"TX ID")
+            session.send(b"q")
+            session.finish()
+        assert checkpoints == {str(path.relative_to(state)): hashlib.sha256(path.read_bytes()).digest()
+                               for path in state.rglob("*.json")}, "Wide Recovery browsing changed history"
+        assert target.is_symlink() and (repo / "source").read_text() == "ordinary settings\n"
+        print("PASS direct Recovery mouse/keys, Home and compact inspect/back without writes")
 
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
@@ -809,7 +949,7 @@ def run():
             ) as session:
                 session.finish(code)
             print("PASS terminal cleanup", mode)
-    print("28 PTY cases passed (disposable HOME, no installed Git requirement)")
+    print("31 PTY cases passed (disposable HOME, no installed Git requirement)")
 
 
 if __name__ == "__main__":

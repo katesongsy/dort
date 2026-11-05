@@ -12,6 +12,7 @@ use ratatui::{
 use std::path::Path;
 
 pub(super) struct View<'a> {
+    pub hits: &'a crate::tui::input::Hits,
     pub root: Option<&'a Path>,
     pub follows_files: bool,
     pub comparison: Comparison,
@@ -21,7 +22,6 @@ pub(super) struct View<'a> {
     pub selected: usize,
     pub details: bool,
     pub scroll: u16,
-    pub focused: bool,
     pub busy: bool,
 }
 fn field(label: &str, value: impl ToString) -> Line<'static> {
@@ -147,11 +147,15 @@ fn filter(frame: &mut Frame, area: Rect, view: &View<'_>) {
         ])),
         area,
     );
-    if editing && view.focused && !view.busy && area.width > 0 {
+    if editing && true && !view.busy && area.width > 0 {
         frame.set_cursor_position((caret.min(area.right().saturating_sub(1)), area.y));
     }
 }
 
+pub(super) fn wide_details(area: Rect, metadata: Option<&Metadata>) -> bool {
+    let branch = matches!(metadata, Some(Metadata::Status(_))) && area.height >= 12;
+    crate::tui::workbench::wide_details(area, 2 + u16::from(branch))
+}
 pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
     let branch = match view.metadata {
         Some(Metadata::Status(status)) if area.height >= 12 => Some(status.branch.join(" | ")),
@@ -175,6 +179,8 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         sections[0],
     );
     filter(frame, sections[1], &view);
+    view.hits
+        .click(sections[1], crate::tui::input::Target::Filter);
     if let Some(branch) = branch {
         frame.render_widget(
             Paragraph::new(ui::clip(&branch, area.width)).style(ui::muted()),
@@ -182,7 +188,7 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         );
     }
     let content = sections[3];
-    let wide = content.width >= 110 && content.height >= 14;
+    let wide = wide_details(area, view.metadata);
     if !wide && view.details {
         ui::report(
             frame,
@@ -190,7 +196,7 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
             "Git details | Esc list",
             details(&view),
             view.scroll,
-            view.focused,
+            true,
         );
         return;
     }
@@ -203,7 +209,7 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         .metadata
         .map(|m| format!("Metadata | {} entries", m.len()))
         .unwrap_or_else(|| "Metadata | Unknown".into());
-    let block = ui::pane(&title, view.focused);
+    let block = ui::pane(&title, true);
     if view.metadata.is_none()
         || view.metadata.is_some_and(|m| m.len() == 0)
         || view.visible.is_empty()
@@ -262,15 +268,16 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         let mut selection = TableState::default()
             .with_selected(view.visible.iter().position(|&i| i == view.selected));
         frame.render_stateful_widget(table, panes[0], &mut selection);
+        view.hits.rows(panes[0], view.visible, selection.offset());
     }
     if wide {
         ui::report(
             frame,
             panes[1],
-            "Git details",
+            "Git details | PgUp/PgDn",
             details(&view),
             view.scroll,
-            false,
+            true,
         );
     }
 }

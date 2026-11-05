@@ -4,7 +4,7 @@ use super::{
     app::{App, Tab},
     components as ui,
     palette::{self, Group},
-    shell::{Action, Focus, Form, Overlay},
+    shell::{Action, Form, Overlay},
     tests::render,
     views,
 };
@@ -85,7 +85,6 @@ fn context_groups_order_one_complete_action_set_and_keep_risk_separate() {
 fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {
     let mut app = App::new(false);
     app.tab = Tab::Files;
-    app.shell.focus = Focus::Actions;
     assert!(key(&mut app, KeyCode::Char(' ')).is_none());
     assert!(current(&app).2 && app.text_entry());
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
@@ -110,12 +109,12 @@ fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {
     }
     text(&mut app, "q?/");
     assert_eq!(current(&app).0, "q?/");
-    assert!(!app.quit && app.tab == Tab::Files && app.shell.focus == Focus::Actions);
+    assert!(!app.quit && app.tab == Tab::Files);
     assert!(render(&app, 48, 14).contains("No matching actions"));
     assert!(key(&mut app, KeyCode::Enter).is_none());
     key(&mut app, KeyCode::Esc); // leave input, retain literal query
     assert!(!current(&app).2 && current(&app).0 == "q?/");
-    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Char('/'));
     assert!(current(&app).2);
     app.key(
         KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
@@ -126,16 +125,14 @@ fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {
     key(&mut app, KeyCode::Down);
     let selected = current(&app).1;
     assert!(!current(&app).2 && selected == 1);
-    key(&mut app, KeyCode::Tab); // search focus without changing row
+    key(&mut app, KeyCode::Char('/')); // search focus without changing row
     key(&mut app, KeyCode::PageDown);
     assert_eq!(current(&app).1, selected);
     assert_eq!(app.shell.scroll, 1);
     key(&mut app, KeyCode::Home);
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Esc);
-    assert!(
-        app.shell.overlay.is_none() && app.tab == Tab::Files && app.shell.focus == Focus::Actions
-    );
+    assert!(app.shell.overlay.is_none() && app.tab == Tab::Files);
 }
 #[test]
 fn disabled_actions_stay_open_and_full_reasons_are_keyboard_reachable_without_dispatch() {

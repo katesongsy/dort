@@ -1,21 +1,20 @@
-//! Pure session-local shell, focus and retained path drafts. No environment or I/O.
+//! Pure session-local shell and retained path drafts. No environment or I/O.
 use super::app::Tab;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Focus {
-    Destinations,
-    Content,
-    Actions,
-}
-impl Focus {
-    pub fn next(self, backwards: bool) -> Self {
-        match (self, backwards) {
-            (Self::Destinations, false) | (Self::Actions, true) => Self::Content,
-            (Self::Content, false) | (Self::Destinations, true) => Self::Actions,
-            _ => Self::Destinations,
+// Ordinary metadata viewport only; private Git patch scrolling never calls this.
+pub fn scroll_details(scroll: &mut u16, code: KeyCode) -> bool {
+    match code {
+        KeyCode::Down | KeyCode::PageDown => {
+            *scroll = scroll.saturating_add(if code == KeyCode::Down { 1 } else { 2 })
         }
+        KeyCode::Up | KeyCode::PageUp => {
+            *scroll = scroll.saturating_sub(if code == KeyCode::Up { 1 } else { 2 })
+        }
+        KeyCode::Home | KeyCode::Enter | KeyCode::Char('i') => *scroll = 0,
+        _ => return false,
     }
+    true
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Form {
@@ -165,7 +164,6 @@ impl Action {
     }
 }
 pub struct Shell {
-    pub focus: Focus,
     pub overlay: Option<Overlay>,
     pub scroll: u16,
     pub init_draft: String,
@@ -192,7 +190,6 @@ pub enum Intent {
 impl Shell {
     pub fn new() -> Self {
         Self {
-            focus: Focus::Content,
             overlay: None,
             scroll: 0,
             init_draft: String::new(),
@@ -294,12 +291,8 @@ impl Shell {
                             None
                         }
                     }
-                    KeyCode::Down | KeyCode::Tab => {
-                        picker.selected = (picker.selected + 1).min(count)
-                    }
-                    KeyCode::Up | KeyCode::BackTab => {
-                        picker.selected = picker.selected.saturating_sub(1)
-                    }
+                    KeyCode::Down => picker.selected = (picker.selected + 1).min(count),
+                    KeyCode::Up => picker.selected = picker.selected.saturating_sub(1),
                     KeyCode::Enter if picker.selected == count => {
                         return Some(Intent::ApplyProfiles {
                             manifest: picker.standalone.then(|| picker.report.manifest.clone()),
@@ -426,10 +419,8 @@ impl Shell {
             }
             Overlay::Repositories { selected } => match key.code {
                 KeyCode::Esc => self.back(),
-                KeyCode::Down | KeyCode::Tab => {
-                    *selected = selected.saturating_add(1).min(known_count + 2)
-                }
-                KeyCode::Up | KeyCode::BackTab => *selected = selected.saturating_sub(1),
+                KeyCode::Down => *selected = selected.saturating_add(1).min(known_count + 2),
+                KeyCode::Up => *selected = selected.saturating_sub(1),
                 KeyCode::Enter if *selected == 0 => {
                     self.scroll = 0;
                     self.path_focused = 0;
@@ -450,7 +441,6 @@ impl Shell {
             } => match key.code {
                 KeyCode::Esc if *searching => *searching = false,
                 KeyCode::Esc => self.overlay = None,
-                KeyCode::Tab | KeyCode::BackTab => *searching = !*searching,
                 KeyCode::Down => {
                     *searching = false;
                     *selected = selected.saturating_add(1).min(
