@@ -11,6 +11,9 @@ mod git;
 mod git_tests;
 mod inventory;
 mod observations;
+mod palette;
+#[cfg(test)]
+mod palette_tests;
 #[cfg(test)]
 mod picker_tests;
 mod pickers;

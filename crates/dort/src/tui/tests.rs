@@ -156,7 +156,7 @@ fn compact_navigation_and_report_home_are_readable_without_color() {
     }
     app.key(key(KeyCode::Home), 48, 14);
     assert_eq!(app.shell.scroll, 0);
-    assert!(render(&app, 48, 14).contains("Space: Actions | / there: search by label"));
+    assert!(render(&app, 48, 14).contains("Space: Actions with search focused"));
     app.key(key(KeyCode::Esc), 48, 14);
     app.complete(Err("long report\n".repeat(100)));
     app.key(key(KeyCode::PageDown), 48, 14);
@@ -267,7 +267,8 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     assert!(app.shell.focus == Focus::Actions);
     app.key(key(KeyCode::Char(' ')), 80, 24);
     assert!(render(&app, 80, 24).contains("Choose repository (session only)"));
-    app.key(key(KeyCode::Esc), 80, 24);
+    app.key(key(KeyCode::Esc), 80, 24); // search -> results
+    app.key(key(KeyCode::Esc), 80, 24); // close, restoring invoking focus
     app.details_scroll = 3;
     app.key(key(KeyCode::Char('?')), 80, 24);
     assert!(render(&app, 100, 40).contains("| Help"));
@@ -279,7 +280,6 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     app.key(key(KeyCode::BackTab), 80, 24);
     assert!(app.shell.focus == Focus::Content);
     app.key(key(KeyCode::Char(' ')), 80, 24);
-    app.key(key(KeyCode::Char('/')), 80, 24);
     for c in "q?/".chars() {
         app.key(key(KeyCode::Char(c)), 80, 24);
     }

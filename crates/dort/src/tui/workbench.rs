@@ -2,14 +2,14 @@
 use super::{
     app::{App, Tab},
     components as ui,
-    shell::{self, Action, Focus, Overlay},
+    shell::{Action, Focus, Overlay},
     views::{self, safe},
 };
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     text::{Line, Span, Text},
-    widgets::{Clear, List, ListItem, ListState, Paragraph},
+    widgets::{Clear, Paragraph},
 };
 
 fn short(action: Action) -> &'static str {
@@ -98,81 +98,6 @@ fn tabs(frame: &mut Frame, area: Rect, app: &App) {
         lines[0].spans.push(Span::styled(" · Focus", ui::accent()));
     }
     frame.render_widget(Paragraph::new(lines), area);
-}
-fn palette(
-    frame: &mut Frame,
-    area: Rect,
-    app: &App,
-    query: &str,
-    selected: usize,
-    searching: bool,
-) {
-    let sections = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Min(3),
-        Constraint::Length(2),
-    ])
-    .split(area);
-    ui::input(
-        frame,
-        sections[0],
-        if searching {
-            "Actions · Search by label"
-        } else {
-            "Actions · / search"
-        },
-        query,
-        searching,
-    );
-    let actions = shell::actions(query);
-    let rows: Vec<_> = actions
-        .iter()
-        .map(|a| {
-            let reason = app.action_reason(*a);
-            let group = match a {
-                Action::Destination(_) => "Navigate",
-                Action::Choose | Action::Init | Action::Profiles => "Repository",
-                Action::About | Action::Help | Action::Quit => "Help",
-                _ => "Workflow",
-            };
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("{group:<11}"), ui::muted()),
-                Span::styled(
-                    safe(a.label()),
-                    if reason.is_some() {
-                        ui::muted()
-                    } else {
-                        ratatui::style::Style::default()
-                    },
-                ),
-            ]))
-        })
-        .collect();
-    let list = List::new(rows)
-        .block(ui::pane("Actions · Enter choose", !searching))
-        .highlight_style(ui::selected())
-        .highlight_symbol("> ");
-    let mut state = ListState::default().with_selected((!actions.is_empty()).then_some(selected));
-    frame.render_stateful_widget(list, sections[1], &mut state);
-    if let Some(action) = actions.get(selected) {
-        ui::prose(
-            frame,
-            sections[2],
-            app.action_reason(*action).unwrap_or(action.label()),
-            if app.action_reason(*action).is_some() {
-                ui::warning()
-            } else {
-                ui::muted()
-            },
-        );
-    } else {
-        ui::prose(
-            frame,
-            sections[2],
-            "No matching actions. Ctrl-U clears search.",
-            ui::muted(),
-        );
-    }
 }
 fn legacy_document(text: String) -> Text<'static> {
     // Transitional report styling only: never derive identity, eligibility or requests from prose.
@@ -330,7 +255,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 query,
                 selected,
                 searching,
-            } if app.shell.scroll == 0 => palette(frame, modal, app, query, *selected, *searching),
+                entries,
+            } => super::palette::draw(frame, modal, app, entries, query, *selected, *searching),
             _ => ui::report(
                 frame,
                 modal,

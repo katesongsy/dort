@@ -1,6 +1,6 @@
 use super::{
-    app::{App, Tab},
-    shell::{self, Form, Overlay},
+    app::App,
+    shell::{Form, Overlay},
 };
 // Escape all non-ASCII/control metadata before terminal rendering, including bidi controls.
 pub fn safe(text: &str) -> String {
@@ -14,7 +14,7 @@ pub fn safe(text: &str) -> String {
     }
     escaped
 }
-const HELP: &str = "1/2/3/4/5: Overview / Files / Recovery / Checks / Git\nTab / Shift-Tab: focus Content, Actions, Destinations\nLeft/Right: focused destination tabs or action buttons\nEnter: inspect row or activate focused button | Space: Actions\n/: search Files/Recovery metadata, or Actions when open | Delete: clear filter\np: choose repository for session | n: create/attach\nr: refresh current observations/check/diagnosis (never execute)\na: preview apply (Overview / Files)\nk / d: keep local file / delete managed link in Files\ni: file metadata details | Actions: enter exact mapping ID\nFile filters are display-only; apply always uses full active scope\nRecovery i/Enter: full IDs and contextual action hints\nb: preview rollback in Recovery | s / x: resume / abandon\nErrors: r retry read/fresh preview; h independent Recovery\nPreview: arrows / PgUp/PgDn scroll; Home resets; Enter continue\nConfirmation: exact file ID for deletion, then literal yes\nEsc: confirmation -> preview -> retained form -> destination\nForms/search: printable q ? / are text; Backspace edits\nCtrl-U in a form: clear current field | PgUp/PgDn: scroll\nHome: reset report/help scroll (not text fields)\nq outside text / Ctrl-C anywhere: exit, joining worker\nNo automatic replay/rollback, network, staging or commits.\nf: Discover metadata | o: retained manual adoption form\nDiscover: Enter inspects; Adopt selected is a separate action\nDirectories and other ineligible entries are metadata only\nAdoption: Tab/Shift-Tab fields/buttons; Enter advances fields\nt: temporary repository profiles | c: check repository manifest\nv: standalone manifest check (independent scope/profiles)\nProfiles union: base/default/platform/local plus temporary additions\nGit: g exact root | z Status | u Unstaged | s Staged\nr metadata refresh | / search | i details | w View patch content\nPatch: warning + literal view patch, once; Esc drops content\nEsc: return to previous destination and focus.";
+const HELP: &str = "1/2/3/4/5: Overview / Files / Recovery / Checks / Git\nTab / Shift-Tab: focus Content, Actions, Destinations\nLeft/Right: focused destination tabs or action buttons\nEnter: inspect row or activate focused button | Space: Actions\nActions opens with search focused: type label, Enter request\nTab: search/results | Up/Down: choose | PgDn: full action/reason\nActions: Esc leaves search, then closes; Home returns controls\n/: search Files/Recovery metadata, or refocus Actions results | Delete: clear filter\np: choose repository for session | n: create/attach\nr: refresh current observations/check/diagnosis (never execute)\na: preview apply (Overview / Files)\nk / d: keep local file / delete managed link in Files\ni: file metadata details | Actions: enter exact mapping ID\nFile filters are display-only; apply always uses full active scope\nRecovery i/Enter: full IDs and contextual action hints\nb: preview rollback in Recovery | s / x: resume / abandon\nErrors: r retry read/fresh preview; h independent Recovery\nPreview: arrows / PgUp/PgDn scroll; Home resets; Enter continue\nConfirmation: exact file ID for deletion, then literal yes\nEsc: confirmation -> preview -> retained form -> destination\nForms/search: printable q ? / are text; Backspace edits\nCtrl-U in a form: clear current field | PgUp/PgDn: scroll\nHome: reset report/help scroll (not text fields)\nq outside text / Ctrl-C anywhere: exit, joining worker\nNo automatic replay/rollback, network, staging or commits.\nf: Discover metadata | o: retained manual adoption form\nDiscover: Enter inspects; Adopt selected is a separate action\nDirectories and other ineligible entries are metadata only\nAdoption: Tab/Shift-Tab fields/buttons; Enter advances fields\nt: temporary repository profiles | c: check repository manifest\nv: standalone manifest check (independent scope/profiles)\nProfiles union: base/default/platform/local plus temporary additions\nGit: g exact root | z Status | u Unstaged | s Staged\nr metadata refresh | / search | i details | w View patch content\nPatch: warning + literal view patch, once; Esc drops content\nEsc: return to previous destination and focus.";
 
 pub fn draw(frame: &mut ratatui::Frame, app: &App) {
     super::workbench::draw(frame, app);
@@ -97,9 +97,9 @@ fn adoption_text(app: &App, height: u16, width: u16) -> String {
 
 pub(super) fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16) -> String {
     match overlay {
-        // Pickers have dedicated typed controls/details, never a legacy report.
-        Overlay::Profiles(_) | Overlay::Repositories { .. } => {
-            unreachable!("typed picker renderer")
+        // These overlays have dedicated typed controls/details, never a legacy report.
+        Overlay::Profiles(_) | Overlay::Repositories { .. } | Overlay::Actions { .. } => {
+            unreachable!("typed overlay renderer")
         }
         Overlay::Form(form @ (Form::KeepId | Form::RemoveId)) => {
             let rows = [
@@ -138,65 +138,13 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16
             text
         }
         Overlay::Help => format!(
-            "Dort {} | Help\nSpace: Actions | / there: search by label\n1..5: views | Tab: focus | Esc: back\n{HELP}\nChecks: j Diagnostics | m manifest result | Actions: About",
+            "Dort {} | Help\nSpace: Actions with search focused | Tab: search/results\n1..5: views | Tab: focus | Esc: back\n{HELP}\nChecks: j Diagnostics | m manifest result | Actions: About",
             env!("CARGO_PKG_VERSION")
         ),
         Overlay::About => format!(
             "Dort {} | About\nGit-native developer environment manager\nExperimental guarded local workflows. MIT license.\n\nSupported hosts: macOS and Ubuntu, ARM64 / x86_64.\nLocal create/attach, discovery/adoption, link apply/unmanage, guarded recovery, structural checks and read-only Git.\n\nNot implemented: providers/package managers, templates, secrets, cloning/sync, network, Git staging/commit/push.\nPreviews are not authorization. Failed writes may retain partial effects; inspect Recovery. No automatic rollback/repair.\nGit patches require a separate one-view disclosure; not secret-proof.\nBackups are private, not encrypted. Process-exit tests do not prove power-loss safety.\n\nEsc/Enter: return to prior destination and focus | PgUp/PgDn: scroll",
             env!("CARGO_PKG_VERSION")
         ),
-        Overlay::Actions {
-            query,
-            selected,
-            searching,
-        } => {
-            let entries: Vec<_> = shell::actions(query)
-                .iter()
-                .map(|action| {
-                    let eligibility = match action {
-                        shell::Action::Rollback => Some(
-                            app.tab == Tab::Recovery
-                                && app
-                                    .history_selection()
-                                    .is_some_and(super::recovery::rollback),
-                        ),
-                        shell::Action::Resume => Some(
-                            app.tab == Tab::Recovery
-                                && app.history_selection().is_some_and(super::recovery::resume),
-                        ),
-                        shell::Action::Abandon => Some(
-                            app.tab == Tab::Recovery
-                                && app
-                                    .history_selection()
-                                    .is_some_and(super::recovery::abandon),
-                        ),
-                        _ => None,
-                    };
-                    match eligibility {
-                        Some(true) => format!("{} [core preview required]", action.label()),
-                        Some(false) => {
-                            format!("{} [unavailable; inspect diagnosis]", action.label())
-                        }
-                        None => action.label().to_owned(),
-                    }
-                })
-                .collect();
-            let mut text = window_rows(
-                if *searching {
-                    "Actions | TEXT ENTRY"
-                } else {
-                    "Actions | Enter choose"
-                },
-                &entries,
-                *selected,
-                height,
-                width,
-            );
-            text.push_str(&format!(
-                "Search: {query}\n/: edit search | Esc: leave search/back | Delete: clear\n"
-            ));
-            text
-        }
         Overlay::Form(Form::Adopt) => adoption_text(app, height, width),
         Overlay::Form(form) => {
             let draft = app.shell.draft(*form);

@@ -687,7 +687,11 @@ impl App {
                 self.shell.focus = Focus::Content;
                 self.result = None;
             }
-            KeyCode::Char(' ') => self.shell.open_actions(false),
+            KeyCode::Char(' ') => self.shell.open_actions(super::palette::entries(
+                self.tab,
+                self.discovering,
+                &self.page_actions(),
+            )),
             KeyCode::Char('/') if self.tab == Tab::Files && self.shell.focus == Focus::Content => {
                 self.inventory.search_mut(self.discovering).editing = true
             }
@@ -696,7 +700,11 @@ impl App {
             {
                 self.history_search.editing = true
             }
-            KeyCode::Char('/') => self.shell.open_actions(true),
+            KeyCode::Char('/') => self.shell.open_actions(super::palette::entries(
+                self.tab,
+                self.discovering,
+                &self.page_actions(),
+            )),
             KeyCode::Delete if self.tab == Tab::Recovery => {
                 self.history_search.query.clear();
                 self.clamp_history_selection();
@@ -820,7 +828,15 @@ impl App {
     }
     fn intent(&mut self, intent: Intent) -> Option<Task> {
         match intent {
-            Intent::Action(action) => self.activate(action),
+            Intent::Action(action) => {
+                if matches!(self.shell.overlay, Some(Overlay::Actions { .. }))
+                    && let Some(reason) = self.action_reason(action)
+                {
+                    self.status = reason.into();
+                    return None;
+                }
+                self.activate(action)
+            }
             Intent::Active => Some(Task::Select(None)),
             Intent::ApplyProfiles {
                 manifest,
@@ -1291,6 +1307,46 @@ impl App {
     }
     pub fn action_reason(&self, action: Action) -> Option<&'static str> {
         match action {
+            Action::Apply
+                if self
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.repository.as_ref())
+                    .is_none() =>
+            {
+                Some("Choose a repository before requesting a full-scope apply preview.")
+            }
+            Action::Keep | Action::Remove
+                if self.tab != Tab::Files
+                    || self.discovering
+                    || !self.visible_file_rows().contains(&self.selected) =>
+            {
+                Some("Select a displayed managed mapping in Files, or use the exact-ID draft.")
+            }
+            Action::Inspect if self.tab == Tab::Files && self.visible_file_rows().is_empty() => {
+                Some("No displayed file selected; refresh, discover or clear the display filter.")
+            }
+            Action::Inspect if self.tab == Tab::Recovery && self.history_selection().is_none() => {
+                Some(
+                    "No displayed transaction selected; refresh or clear the Recovery display filter.",
+                )
+            }
+            Action::Inspect if !matches!(self.tab, Tab::Files | Tab::Recovery) => {
+                Some("Select a file in Files or a transaction in Recovery to inspect.")
+            }
+            Action::ClearFilter if !matches!(self.tab, Tab::Files | Tab::Recovery) => {
+                Some("Display filters are available in Files and Recovery.")
+            }
+            Action::PreviewOnly if self.preview_only_locked => {
+                Some("--dry-run locks this session to preview-only; approval remains disabled.")
+            }
+            Action::GitPatch
+                if !matches!(self.git_view.metadata, Some(super::git::Metadata::Diff(_))) =>
+            {
+                Some(
+                    "Load an Unstaged or Staged Git summary before opening the separate content warning.",
+                )
+            }
             Action::AdoptSelected
                 if self.tab != Tab::Files || !self.discovering || !self.inventory.details =>
             {

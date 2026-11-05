@@ -651,6 +651,13 @@ fn dry_run_bootstrap_can_never_execute_even_after_mode_toggle() {
     type_text(&mut app, "toggle");
     key(&mut app, KeyCode::Enter);
     assert!(app.dry_run);
+    assert!(matches!(
+        app.shell.overlay,
+        Some(super::shell::Overlay::Actions { .. })
+    ));
+    assert!(app.status.contains("--dry-run locks"));
+    key(&mut app, KeyCode::Esc); // leave search after disabled action
+    key(&mut app, KeyCode::Esc); // dismiss Actions, no task/approval
     key(&mut app, KeyCode::Char('n'));
     type_text(&mut app, "new");
     let task = submit_path(&mut app);
@@ -1135,8 +1142,7 @@ fn temporary_profiles_are_mandatory_union_and_drive_full_inventory_and_plans() {
 }
 
 fn choose_action(app: &mut App, query: &str) {
-    key(app, KeyCode::Char(' '));
-    key(app, KeyCode::Char('/'));
+    key(app, KeyCode::Char(' ')); // real search is focused immediately
     type_text(app, query);
     key(app, KeyCode::Enter);
 }

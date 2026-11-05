@@ -75,6 +75,7 @@ pub enum Overlay {
         query: String,
         selected: usize,
         searching: bool,
+        entries: Vec<super::palette::Entry>,
     },
     Repositories {
         selected: usize,
@@ -84,7 +85,7 @@ pub enum Overlay {
     About,
     Help,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Destination(Tab),
     GitRoot,
@@ -163,55 +164,6 @@ impl Action {
         }
     }
 }
-pub fn actions(query: &str) -> Vec<Action> {
-    [
-        Action::Destination(Tab::Overview),
-        Action::Destination(Tab::Files),
-        Action::Destination(Tab::Recovery),
-        Action::Destination(Tab::Checks),
-        Action::Destination(Tab::Git),
-        Action::Choose,
-        Action::Init,
-        Action::Discover,
-        Action::Adopt,
-        Action::AdoptSelected,
-        Action::Profiles,
-        Action::CheckCurrent,
-        Action::CheckStandalone,
-        Action::Refresh,
-        Action::Apply,
-        Action::Keep,
-        Action::Remove,
-        Action::KeepId,
-        Action::RemoveId,
-        Action::ClearFilter,
-        Action::Inspect,
-        Action::Rollback,
-        Action::Resume,
-        Action::Abandon,
-        Action::PreviewOnly,
-        Action::GitRoot,
-        Action::GitDefault,
-        Action::GitStatus,
-        Action::GitUnstaged,
-        Action::GitStaged,
-        Action::GitRefresh,
-        Action::GitPatch,
-        Action::Diagnostics,
-        Action::About,
-        Action::Help,
-        Action::Quit,
-    ]
-    .into_iter()
-    .filter(|action| {
-        action
-            .label()
-            .to_ascii_lowercase()
-            .contains(&query.to_ascii_lowercase())
-    })
-    .collect()
-}
-
 pub struct Shell {
     pub focus: Focus,
     pub overlay: Option<Overlay>,
@@ -255,12 +207,13 @@ impl Shell {
             unmanage_focused: 0,
         }
     }
-    pub fn open_actions(&mut self, searching: bool) {
+    pub fn open_actions(&mut self, entries: Vec<super::palette::Entry>) {
         self.scroll = 0;
         self.overlay = Some(Overlay::Actions {
             query: String::new(),
             selected: 0,
-            searching,
+            searching: true,
+            entries,
         });
     }
     /// Ordinary metadata pages overlap even at the compact floor. Picker details
@@ -270,7 +223,11 @@ impl Shell {
             if self.scroll == 0
                 && matches!(
                     self.overlay,
-                    Some(Overlay::Profiles(_) | Overlay::Repositories { .. })
+                    Some(
+                        Overlay::Profiles(_)
+                            | Overlay::Repositories { .. }
+                            | Overlay::Actions { .. }
+                    )
                 )
             {
                 1
@@ -489,18 +446,26 @@ impl Shell {
                 query,
                 selected,
                 searching,
+                entries,
             } => match key.code {
                 KeyCode::Esc if *searching => *searching = false,
                 KeyCode::Esc => self.overlay = None,
+                KeyCode::Tab | KeyCode::BackTab => *searching = !*searching,
                 KeyCode::Down => {
-                    *selected = selected
-                        .saturating_add(1)
-                        .min(actions(query).len().saturating_sub(1))
+                    *searching = false;
+                    *selected = selected.saturating_add(1).min(
+                        super::palette::matches(entries, query)
+                            .len()
+                            .saturating_sub(1),
+                    );
                 }
-                KeyCode::Up => *selected = selected.saturating_sub(1),
+                KeyCode::Up => {
+                    *searching = false;
+                    *selected = selected.saturating_sub(1);
+                }
                 KeyCode::Enter => {
-                    if let Some(action) = actions(query).get(*selected) {
-                        return Some(Intent::Action(*action));
+                    if let Some(entry) = super::palette::matches(entries, query).get(*selected) {
+                        return Some(Intent::Action(entry.action));
                     }
                 }
                 KeyCode::Char('/') if !*searching => *searching = true,
@@ -509,8 +474,11 @@ impl Shell {
                     *selected = 0;
                 }
                 _ if *searching => {
+                    let before = query.clone();
                     edit_text(query, key);
-                    *selected = 0;
+                    if *query != before {
+                        *selected = 0;
+                    }
                 }
                 _ => (),
             },

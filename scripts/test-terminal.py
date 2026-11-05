@@ -377,6 +377,41 @@ def run():
         assert not list(home.iterdir()), "Read-only compact pickers persisted state"
         print("PASS compact typed pickers, details/Home and session-only validation")
 
+        with Session([binary, "tui"], env, size=(14, 48)) as session:
+            session.wait(b"loaded.")
+            session.send(b" ")
+            session.wait(b"Search by label")
+            session.send(b"q?/")
+            session.wait(b"No matching actions")
+            session.send(b"\x15rollback\r")  # disabled Enter must not dismiss or dispatch
+            session.wait(b"Rollback unavailable")
+            session.send(b"\x1b[6~")
+            session.wait(b"Actions | No work while browsing")
+            reached = False
+            for _ in range(30):
+                if b"transaction." in session.screen.text(): # final wrapped reason row
+                    reached = True
+                    break
+                session.send(b"\x1b[6~")
+                session.settle()
+            assert reached, "Compact Actions prerequisites were not keyboard reachable"
+            session.send(b"\x1b[H")
+            session.wait(b"GROUP")
+            session.send(b"\x1b")  # input -> results
+            session.settle()
+            session.send(b"\x1b")  # close, restoring Overview
+            session.settle()
+            session.send(b"4 ")
+            session.wait(b"Check current")  # current-view actions, not flat navigation first
+            session.send(b"about\r")
+            session.wait(b"| About")
+            session.send(b"\x1b")
+            session.settle()
+            session.send(b"q")
+            session.finish()
+        assert not list(home.iterdir()), "Browsing Actions or refusing an action created state"
+        print("PASS compact search-first contextual Actions and full disabled reasons without dispatch")
+
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"4j")
@@ -384,7 +419,10 @@ def run():
             session.wait(b"Registered repositories: 0")
             session.send(b"r")
             session.wait(b"Read-only Diagnostics loaded")
-            session.send(b" /about\r")
+            session.settle()  # identical refresh result may still be the prior frame
+            session.send(b" ")
+            session.wait(b"Search by label")
+            session.send(b"about\r")
             session.wait(b"| About")
             session.wait(b"Experimental guarded local workflows")
             session.send(b"\x1b")
@@ -471,7 +509,17 @@ def run():
             session.send(b"\x1b[3~u")  # clear display filter; unstaged summary
             session.wait(b"Unstaged (worktree vs index)")
             session.wait(b"1 entries")
-            assert not (base / "patch-calls").exists(), "Summary prefetched a patch"
+            session.send(b" View patch content")
+            session.wait(b"Search by label")
+            session.send(b"\x1b[6~")
+            session.wait(b"Actions | No work while browsing")
+            session.send(b"\x1b[H")
+            session.wait(b"GROUP")
+            session.send(b"\x1b")
+            session.settle()
+            session.send(b"\x1b")
+            session.wait(b"1 entries")
+            assert not (base / "patch-calls").exists(), "Summary/Actions browsing prefetched a patch"
             assert b"PRIVATE-PATCH" not in session.data
             session.send(b"wyes\r")
             session.wait(b"May expose secrets")
@@ -736,7 +784,7 @@ def run():
             session.wait(b"loaded.")
             session.send(b"2/notconfig\x1b")
             session.settle()
-            session.send(b" /delete managed link: enter\r")
+            session.send(b" delete managed link: enter\r")
             session.wait("Exact ID · Focus".encode())
             session.send(b"config\r\r")
             session.wait(b"Preview (metadata only)")
@@ -761,7 +809,7 @@ def run():
             ) as session:
                 session.finish(code)
             print("PASS terminal cleanup", mode)
-    print("27 PTY cases passed (disposable HOME, no installed Git requirement)")
+    print("28 PTY cases passed (disposable HOME, no installed Git requirement)")
 
 
 if __name__ == "__main__":
