@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **files:** add tree selection and guarded batch transactions ([186e2be](https://github.com/katesongsy/dort/commit/186e2be1e77f666a4ad1c8c17060d45b3ab73daf))
+
 - **tui:** add direct keyboard and mouse navigation ([2ef224e](https://github.com/katesongsy/dort/commit/2ef224e738625cfd8c7bb879bc3b705bf520d3e5))
 
 - **tui:** add contextual search-first action palette ([b6de53f](https://github.com/katesongsy/dort/commit/b6de53fde6bff4fe991bebaab26ac55a15cd6a7f))
