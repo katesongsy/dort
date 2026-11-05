@@ -1067,7 +1067,8 @@ fn temporary_profiles_are_mandatory_union_and_drive_full_inventory_and_plans() {
             .collect::<Vec<_>>(),
         ["base", "defaults", "local", "platform"]
     );
-    assert!(super::tests::render(&app, 48, 14).contains("> [x] base (mandatory)"));
+    let screen = super::tests::render(&app, 48, 14);
+    assert!(screen.contains("> [x] base") && screen.contains("Mandatory"));
     key(&mut app, KeyCode::Enter); // base cannot be removed
     let Overlay::Profiles(picker) = app.shell.overlay.as_ref().unwrap() else {
         panic!("profiles")
@@ -1079,7 +1080,7 @@ fn temporary_profiles_are_mandatory_union_and_drive_full_inventory_and_plans() {
     for _ in 0..3 {
         key(&mut app, KeyCode::Down);
     } // local/platform/Apply
-    assert!(super::tests::render(&app, 48, 14).contains("> Apply additions"));
+    assert!(super::tests::render(&app, 48, 14).contains("> [Apply additions"));
     let task = key(&mut app, KeyCode::Enter).unwrap();
     let refresh = run_task(&mut app, &fixture, task).unwrap();
     run_task(&mut app, &fixture, refresh);

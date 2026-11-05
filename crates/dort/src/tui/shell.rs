@@ -263,6 +263,24 @@ impl Shell {
             searching,
         });
     }
+    /// Ordinary metadata pages overlap even at the compact floor. Picker details
+    /// use one as a sentinel so the first PgDn reveals their first rendered row.
+    pub fn page(&mut self, down: bool) {
+        self.scroll = if down {
+            if self.scroll == 0
+                && matches!(
+                    self.overlay,
+                    Some(Overlay::Profiles(_) | Overlay::Repositories { .. })
+                )
+            {
+                1
+            } else {
+                self.scroll.saturating_add(2)
+            }
+        } else {
+            self.scroll.saturating_sub(2)
+        };
+    }
     pub fn text_entry(&self) -> bool {
         matches!(
             self.overlay,
@@ -451,14 +469,19 @@ impl Shell {
             }
             Overlay::Repositories { selected } => match key.code {
                 KeyCode::Esc => self.back(),
-                KeyCode::Down => *selected = selected.saturating_add(1).min(known_count + 1),
-                KeyCode::Up => *selected = selected.saturating_sub(1),
+                KeyCode::Down | KeyCode::Tab => {
+                    *selected = selected.saturating_add(1).min(known_count + 2)
+                }
+                KeyCode::Up | KeyCode::BackTab => *selected = selected.saturating_sub(1),
                 KeyCode::Enter if *selected == 0 => {
                     self.scroll = 0;
                     self.path_focused = 0;
                     self.overlay = Some(Overlay::Form(Form::Choose))
                 }
                 KeyCode::Enter if *selected == 1 => return Some(Intent::Active),
+                KeyCode::Enter if *selected == known_count + 2 => {
+                    return Some(Intent::Action(Action::Init));
+                }
                 KeyCode::Enter => return Some(Intent::Known(*selected - 2)),
                 _ => (),
             },

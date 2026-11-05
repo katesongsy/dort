@@ -320,6 +320,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
         );
         frame.render_widget(Clear, modal);
         match overlay {
+            Overlay::Profiles(_) | Overlay::Repositories { .. } => {
+                super::pickers::draw(frame, modal, app, overlay)
+            }
             Overlay::Form(form) if app.shell.scroll == 0 => {
                 super::forms::draw(frame, modal, app, *form)
             }

@@ -95,59 +95,12 @@ fn adoption_text(app: &App, height: u16, width: u16) -> String {
     text
 }
 
-fn profiles_text(picker: &shell::ProfilePicker, height: u16, width: u16) -> String {
-    let choices = &picker.report.choices;
-    let effective: std::collections::BTreeSet<_> =
-        choices.mandatory.iter().chain(&picker.requested).collect();
-    let contributions = format!(
-        "Temporary profiles | {}\nManifest: {:?}\nBase: always active | Defaults: {:?}\nPlatform: {:?} | Local: {:?}\nRequested additions: {:?}\nEffective union: {:?}\nOR selection; mandatory contributors cannot be unchecked.\n",
-        if picker.standalone {
-            "standalone manifest only"
-        } else {
-            "repository file/check scope"
-        },
-        picker.report.manifest,
-        choices.defaults,
-        choices.platform,
-        choices.local,
-        picker.requested,
-        effective
-    );
-    let rows: Vec<_> = choices
-        .known
-        .iter()
-        .map(|name| {
-            format!(
-                "[{}] {name}{}",
-                if effective.contains(name) { "x" } else { " " },
-                if choices.mandatory.contains(name) {
-                    " (mandatory)"
-                } else {
-                    ""
-                }
-            )
-        })
-        .chain(["Apply additions (read-only validation)".into()])
-        .collect();
-    let mut text = window_rows(
-        if picker.standalone {
-            "Profiles | standalone manifest"
-        } else {
-            "Profiles | repository scope"
-        },
-        &rows,
-        picker.selected,
-        height,
-        width,
-    );
-    text.push_str(&contributions);
-    text.push_str("Up/Down: choose | Space/Enter: toggle optional | Enter on Apply\nEsc: back without changing scope | PgUp/PgDn: details | Never persisted.");
-    text
-}
-
 pub(super) fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16) -> String {
     match overlay {
-        Overlay::Profiles(picker) => profiles_text(picker, height, width),
+        // Pickers have dedicated typed controls/details, never a legacy report.
+        Overlay::Profiles(_) | Overlay::Repositories { .. } => {
+            unreachable!("typed picker renderer")
+        }
         Overlay::Form(form @ (Form::KeepId | Form::RemoveId)) => {
             let rows = [
                 short_field("Exact ID", &app.shell.unmanage_id, width),
@@ -242,30 +195,6 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16
             text.push_str(&format!(
                 "Search: {query}\n/: edit search | Esc: leave search/back | Delete: clear\n"
             ));
-            text
-        }
-        Overlay::Repositories { selected } => {
-            let roots = app
-                .data
-                .as_ref()
-                .map(|data| data.known_roots.as_slice())
-                .unwrap_or_default();
-            let mut entries = vec![
-                "Enter exact repository path".into(),
-                "Use registered active repository".into(),
-            ];
-            entries.extend(roots.iter().map(|root| format!("{root:?}")));
-            let mut text = window_rows(
-                "Choose repository | SESSION ONLY",
-                &entries,
-                *selected,
-                height,
-                width,
-            );
-            text.push_str("Selection does not register or persist.\nUp/Down choose | Enter select | Esc back\n");
-            if roots.is_empty() {
-                text.push_str("No known roots; enter a path or use Create/attach.\n");
-            }
             text
         }
         Overlay::Form(Form::Adopt) => adoption_text(app, height, width),

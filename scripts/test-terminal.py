@@ -317,7 +317,7 @@ def run():
             session.wait(b"Checks | Standalone manifest")
             session.wait(b"Valid")
             session.wait(b"live files and installed tools were not inspected")
-            session.send(b"\x1b[6~" * 3)
+            session.send(b"\x1b[6~" * 6)
             session.wait(b"Capability limits")
             session.send(b"\x1b[H")
             session.wait(b"Structural check only")
@@ -335,6 +335,47 @@ def run():
             session.finish()
         assert not (home / ".config").exists() and not (home / ".local").exists()
         print("PASS independent standalone check and nonpersistent profile additions")
+
+        with Session([binary, "tui"], env, size=(14, 48)) as session:
+            session.wait(b"loaded.")
+            session.send(b"p")
+            session.wait(b"REPOSITORY")
+            session.wait(b"CHOICE")
+            session.send(b"\x1b[6~")
+            session.wait(b"Selection never registers")
+            session.send(b"\x1b[H")
+            session.wait(b"REPOSITORY")
+            session.send(b"\x1b[B\x1b[B")  # no roots: active, Create/attach
+            session.wait(b"> [Create/attach")
+            session.send(b"\r")
+            session.wait("Path · Focus".encode())
+            session.send(b"\x1b")
+            session.settle()
+            session.send(b"v")
+            session.wait("Manifest path · Focus".encode())
+            session.send(os.fsencode(standalone) + b"\r\t\r")
+            session.wait(b"PROFILE")
+            session.wait(b"Mandatory")
+            session.send(b"\x1b[6~")
+            session.wait(b"Temporary profiles | Never persisted")
+            reached = False
+            for _ in range(40):
+                if b"Effective union" in session.screen.text():
+                    reached = True
+                    break
+                session.send(b"\x1b[6~")
+                session.settle()
+            assert reached, "Compact picker contributors were not keyboard reachable"
+            session.send(b"\x1b[H")
+            session.wait(b"PROFILE")
+            session.send(b"\x1b[B \x1b[B\r")  # dev toggle, real Apply button
+            session.wait(b"Standalone profile additions validated")
+            session.send(b"\x1b")
+            session.settle()
+            session.send(b"q")
+            session.finish()
+        assert not list(home.iterdir()), "Read-only compact pickers persisted state"
+        print("PASS compact typed pickers, details/Home and session-only validation")
 
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
@@ -634,7 +675,7 @@ def run():
             session.send(b"\r")  # selected row inspects; never requests rollback
             session.wait(b"Transaction details")
             session.wait(b"Repository ID:")
-            session.send(b"\x1b[6~" * 2)
+            session.send(b"\x1b[6~" * 4)
             session.wait(b"Validated checkpoints:")
             session.send(b"\x1b[H")
             session.wait(b"Repository ID:")
@@ -720,7 +761,7 @@ def run():
             ) as session:
                 session.finish(code)
             print("PASS terminal cleanup", mode)
-    print("26 PTY cases passed (disposable HOME, no installed Git requirement)")
+    print("27 PTY cases passed (disposable HOME, no installed Git requirement)")
 
 
 if __name__ == "__main__":

@@ -435,19 +435,22 @@ impl App {
                 self.selected = 0;
                 self.git_view.discard_patch();
             }
-            let scroll = if self.shell.overlay.is_some() {
-                &mut self.shell.scroll
+            if self.shell.overlay.is_some() {
+                match key.code {
+                    KeyCode::Home => self.shell.scroll = 0,
+                    KeyCode::PageDown => self.shell.page(true),
+                    KeyCode::PageUp => self.shell.page(false),
+                    _ => (),
+                }
             } else {
-                &mut self.details_scroll
-            };
-            if key.code == KeyCode::Home {
-                *scroll = 0;
-            }
-            if key.code == KeyCode::PageDown {
-                *scroll = scroll.saturating_add(4);
-            }
-            if key.code == KeyCode::PageUp {
-                *scroll = scroll.saturating_sub(4);
+                match key.code {
+                    KeyCode::Home => self.details_scroll = 0,
+                    KeyCode::PageDown => {
+                        self.details_scroll = self.details_scroll.saturating_add(2)
+                    }
+                    KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(2),
+                    _ => (),
+                }
             }
             return None;
         }
@@ -483,8 +486,8 @@ impl App {
                     self.details_scroll = 0;
                 }
                 KeyCode::Home => self.details_scroll = 0,
-                KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(4),
-                KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(4),
+                KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(2),
+                KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(2),
                 _ => (),
             }
             return None;
@@ -570,10 +573,10 @@ impl App {
                 self.shell.scroll = 0;
             }
             if key.code == KeyCode::PageDown {
-                self.shell.scroll = self.shell.scroll.saturating_add(4);
+                self.shell.page(true);
             }
             if key.code == KeyCode::PageUp {
-                self.shell.scroll = self.shell.scroll.saturating_sub(4);
+                self.shell.page(false);
             }
             let count = self.data.as_ref().map_or(0, |data| data.known_roots.len());
             if let Some(intent) = self.shell.key(key, count) {
@@ -631,8 +634,8 @@ impl App {
             self.details_scroll = 0;
         }
         match key.code {
-            KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(4),
-            KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(4),
+            KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(2),
+            KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(2),
             KeyCode::Tab | KeyCode::BackTab => {
                 self.shell.focus = self.shell.focus.next(
                     key.code == KeyCode::BackTab || key.modifiers.contains(KeyModifiers::SHIFT),

@@ -197,7 +197,7 @@ fn long_lists_keep_selection_visible_through_resize_and_form_back() {
     for _ in 0..201 {
         app.key(key(KeyCode::Down), 48, 14);
     }
-    assert!(render(&app, 48, 14).contains("> \"/repository-199\""));
+    assert!(render(&app, 48, 14).contains("> /repository-199"));
     app.key(key(KeyCode::Esc), 48, 14);
     assert_eq!(app.selected, 120);
     app.key(key(KeyCode::Char('o')), 48, 14);
@@ -272,7 +272,7 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     app.key(key(KeyCode::Char('?')), 80, 24);
     assert!(render(&app, 100, 40).contains("| Help"));
     app.key(key(KeyCode::PageDown), 80, 24);
-    assert_eq!(app.shell.scroll, 4);
+    assert_eq!(app.shell.scroll, 2);
     app.key(key(KeyCode::Esc), 80, 24);
     assert_eq!(app.details_scroll, 3);
     assert!(app.tab == Tab::Files && app.shell.focus == Focus::Actions);
