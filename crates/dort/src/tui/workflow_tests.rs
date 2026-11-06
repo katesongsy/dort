@@ -505,6 +505,7 @@ fn onboarding_app(fixture: &Fixture, dry_run: bool) -> App {
 }
 fn run_task(app: &mut App, fixture: &Fixture, task: Task) -> Option<Task> {
     app.retry = task.retry_intent();
+    app.activity = Some(super::task_surfaces::Activity::for_task(&task, app));
     app.start(matches!(task, Task::Execute(_)));
     let result = actions::perform_scoped(
         task,

@@ -29,6 +29,9 @@ mod recovery_tests;
 mod review;
 mod shell;
 #[cfg(test)]
+mod task_surface_tests;
+mod task_surfaces;
+#[cfg(test)]
 mod tests;
 mod tree;
 mod views;
@@ -103,7 +106,10 @@ fn run_loop(
             if let Some(progress) = active.progress()
                 && !app.exit_requested
             {
-                app.status = progress;
+                app.status = format!("{} · sequence {}", progress.boundary, progress.sequence);
+                if let Some(activity) = &mut app.activity {
+                    activity.progress = Some(progress);
+                }
             }
             if active.finished() {
                 let output = active.join().map_err(|_| {
@@ -164,6 +170,10 @@ fn launch(
     app.retry = task.retry_intent();
     let writing = matches!(task, Task::Execute(_));
     let completed = matches!(task, Task::Refresh) && app.status.starts_with("Operation completed.");
+    let activity = task_surfaces::Activity::for_task(&task, app);
+    if !matches!(task, Task::Refresh) {
+        app.show_result = false;
+    }
     debug_assert!(worker.is_none(), "only one owned worker at a time");
     *worker = Some(
         Worker::start(
@@ -174,6 +184,7 @@ fn launch(
         )
         .map_err(terminal_error)?,
     );
+    app.activity = Some(activity);
     app.start(writing);
     if completed {
         app.status = "Operation completed. Refreshing observations...".into();

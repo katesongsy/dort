@@ -231,7 +231,12 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let body = sections[2];
     let content = Layout::vertical([Constraint::Min(3), Constraint::Length(2)]).split(body);
     app.hits.wheel(content[0], super::input::Wheel::Details);
-    if app.error.is_none() && app.preview.is_none() && app.shell.overlay.is_none() {
+    if !app.busy
+        && !app.show_result
+        && app.error.is_none()
+        && app.preview.is_none()
+        && app.shell.overlay.is_none()
+    {
         match app.tab {
             Tab::Files => super::files::draw(frame, content[0], app),
             Tab::Git => app.git_view.draw(frame, content[0], app.busy, &app.hits),
@@ -241,36 +246,31 @@ pub fn draw(frame: &mut Frame, app: &App) {
         }
         buttons(frame, content[1], app);
     }
-    if let Some(error) = &app.error {
-        app.hits.clear();
-        app.hits.wheel(content[0], super::input::Wheel::Preview);
-        ui::report(
-            frame,
-            content[0],
-            if app.failed_write {
-                "Write failed · Possible partial effects"
-            } else {
-                "Read failed · Input retained"
-            },
-            legacy_document(error.clone()),
-            app.details_scroll,
-            true,
-        );
-        frame.render_widget(
-            Paragraph::new(ui::keys(&[
-                (
-                    "r",
-                    if app.failed_write {
-                        "Refresh only"
-                    } else {
-                        "Retry read"
-                    },
-                ),
-                ("h", "Recovery"),
-                ("Esc", "Back"),
-            ])),
-            content[1],
-        );
+    if app.error.is_some() || app.busy || (app.show_result && app.preview.is_none()) {
+        super::task_surfaces::draw(frame, content[0], content[1], app);
+    }
+    if app.error.is_some() {
+        // Error controls above are exclusive; retained forms are not active underneath.
+    } else if app.busy {
+        if matches!(app.shell.overlay, Some(Overlay::Help)) {
+            app.hits.clear();
+            app.hits.wheel(content[0], super::input::Wheel::Overlay);
+            ui::report(
+                frame,
+                content[0],
+                "Help",
+                legacy_document(views::overlay_text(
+                    app,
+                    &Overlay::Help,
+                    content[0].height,
+                    content[0].width,
+                )),
+                app.shell.scroll,
+                true,
+            );
+        }
+    } else if app.show_result && app.preview.is_none() {
+        // A returned form stays retained but inactive until the result is dismissed.
     } else if let Some(preview) = &app.preview {
         app.hits.clear();
         app.hits.wheel(content[0], super::input::Wheel::Preview);
@@ -380,17 +380,32 @@ pub fn draw(frame: &mut Frame, app: &App) {
             ),
         }
     }
-    let status_style = if app.writing {
+    let earlier_failure = app.write_warning && !app.busy && app.error.is_none();
+    let status_style = if earlier_failure {
+        ui::danger()
+    } else if app.writing {
         ui::warning()
     } else {
         ui::muted()
     };
-    let status = &app.status; // Includes real metadata-only boundaries and deferred-exit feedback.
+    let status = if earlier_failure {
+        "Earlier write failed: Possible partial effects"
+    } else {
+        &app.status
+    }; // Includes real metadata-only boundaries and deferred-exit feedback.
     frame.render_widget(
         Paragraph::new(ui::clip(status, sections[3].width)).style(status_style),
         sections[3],
     );
-    let keys = if app.confirmation.is_some() {
+    let keys = if app.busy {
+        vec![
+            ("q/Ctrl-C", "Quit waits"),
+            ("PgDn", "Details"),
+            ("?", "Help"),
+        ]
+    } else if app.error.is_some() || app.show_result {
+        vec![("PgDn", "Details"), ("Home", "Top"), ("Esc", "Back")]
+    } else if app.confirmation.is_some() {
         vec![("Enter", "Submit"), ("Esc", "Back")]
     } else if app.preview.is_some() {
         vec![

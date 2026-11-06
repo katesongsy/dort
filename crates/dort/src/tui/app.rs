@@ -78,6 +78,12 @@ pub struct App {
     pub git: Result<PathBuf, String>,
     pub git_view: super::git::State,
     pub result: Option<String>,
+    pub receipt: Option<super::task_surfaces::Receipt>,
+    pub show_result: bool,
+    pub activity: Option<super::task_surfaces::Activity>,
+    pub reviewed_activity: Option<super::task_surfaces::Activity>,
+    pub failure: Option<super::task_surfaces::Failure>,
+    pub write_warning: bool,
     pub data: Option<Data>,
     pub discovering: bool,
     pub inventory: super::inventory::Inventory,
@@ -118,6 +124,12 @@ impl App {
             git: Err("Git unavailable; install Git separately and restart Dort".into()),
             git_view: super::git::State::new(),
             result: None,
+            receipt: None,
+            show_result: false,
+            activity: None,
+            reviewed_activity: None,
+            failure: None,
+            write_warning: false,
             data: None,
             discovering: false,
             inventory: Default::default(),
@@ -150,7 +162,9 @@ impl App {
     }
     pub fn start(&mut self, writing: bool) {
         self.hits.clear();
+        self.details_scroll = 0;
         self.failed_write = false;
+        self.failure = None;
         self.busy = true;
         self.writing = writing;
         self.status = if writing {
@@ -162,6 +176,7 @@ impl App {
     }
     pub fn complete(&mut self, result: Result<Output, String>) -> Option<Task> {
         let writing = self.writing;
+        let activity = self.activity.take();
         self.failed_write = writing && result.is_err();
         self.busy = false;
         self.writing = false;
@@ -173,6 +188,12 @@ impl App {
         }
         match result {
             Err(error) => {
+                self.failure = Some(super::task_surfaces::Failure {
+                    cause: error.clone(),
+                    activity,
+                });
+                self.write_warning |= writing;
+                self.show_result = false;
                 self.git_view.failed();
                 self.details_scroll = 0;
                 self.status = if writing {
@@ -328,6 +349,8 @@ impl App {
                 self.discovery = None;
                 self.candidate_selected = 0;
                 self.result = None;
+                self.receipt = None;
+                self.show_result = false;
                 self.data = None;
                 self.selected = 0;
                 self.details_scroll = 0;
@@ -340,6 +363,8 @@ impl App {
             }
             Ok(Output::Preview(pending)) => match pending.report() {
                 Ok(text) => {
+                    self.reviewed_activity =
+                        Some(super::task_surfaces::Activity::for_pending(&pending));
                     self.preview = Some(Preview {
                         pending,
                         text,
@@ -354,6 +379,13 @@ impl App {
                 Err(error) => self.status = super::actions::diagnostic(&error),
             },
             Ok(Output::Completed(completion)) => {
+                self.receipt = Some(super::task_surfaces::Receipt {
+                    operation: completion.operation,
+                    transaction_id: completion.transaction_id.clone(),
+                    activity: activity.or_else(|| self.reviewed_activity.clone()),
+                });
+                self.show_result = true;
+                self.details_scroll = 0;
                 if let Some(editor) = &mut self.batch_editor {
                     editor.open = false;
                 }
@@ -458,6 +490,7 @@ impl App {
             return None;
         }
         match target {
+            Target::Feedback(control) => self.feedback(control, width, height),
             Target::Continue => {
                 if self.preview.is_some() {
                     self.key(
@@ -614,6 +647,43 @@ impl App {
             }
         }
     }
+    fn feedback(
+        &mut self,
+        control: super::task_surfaces::Control,
+        width: u16,
+        height: u16,
+    ) -> Option<Task> {
+        use super::task_surfaces::Control;
+        if self.error.is_some() {
+            return self.key(
+                KeyEvent::new(
+                    match control {
+                        Control::Retry => KeyCode::Char('r'),
+                        Control::Recovery => KeyCode::Char('h'),
+                        Control::Back => KeyCode::Esc,
+                    },
+                    KeyModifiers::NONE,
+                ),
+                width,
+                height,
+            );
+        }
+        self.show_result = false;
+        self.details_scroll = 0;
+        match control {
+            Control::Retry => {
+                self.show_result = true;
+                Some(Task::Refresh)
+            }
+            Control::Recovery => {
+                self.git_view.discard_patch();
+                self.tab = Tab::Recovery;
+                self.shell.overlay = None;
+                Some(Task::History)
+            }
+            Control::Back => None,
+        }
+    }
     pub fn key(&mut self, key: KeyEvent, width: u16, height: u16) -> Option<Task> {
         self.hits.clear();
         self.key_inner(key, width, height)
@@ -624,7 +694,11 @@ impl App {
         if interrupt
             || (key.code == KeyCode::Char('q')
                 && self.confirmation.is_none()
-                && (self.preview.is_some() || !self.text_entry()))
+                && (self.error.is_some()
+                    || self.show_result
+                    || self.busy
+                    || self.preview.is_some()
+                    || !self.text_entry()))
         {
             self.git_view.discard_patch();
             if self.busy {
@@ -640,7 +714,12 @@ impl App {
             if key.code == KeyCode::Esc {
                 if self.error.is_some() {
                     self.error = None;
+                    self.failure = None;
+                    self.failed_write = false;
                     self.retry = None;
+                } else if self.show_result {
+                    self.show_result = false;
+                    self.details_scroll = 0;
                 } else if self.preview.is_some() {
                     self.preview = None;
                 } else if self.shell.overlay.is_some() {
@@ -727,6 +806,8 @@ impl App {
                 }
                 KeyCode::Esc => {
                     self.error = None;
+                    self.failure = None;
+                    self.failed_write = false;
                     self.retry = None;
                     self.details_scroll = 0;
                 }
@@ -736,6 +817,25 @@ impl App {
                 _ => (),
             }
             return None;
+        }
+        if self.show_result && self.preview.is_none() {
+            use super::task_surfaces::Control;
+            let control = match key.code {
+                KeyCode::Char('r') => Some(Control::Retry),
+                KeyCode::Char('h') => Some(Control::Recovery),
+                KeyCode::Esc => Some(Control::Back),
+                KeyCode::Home | KeyCode::PageDown | KeyCode::PageUp => {
+                    super::shell::scroll_details(&mut self.details_scroll, key.code);
+                    return None;
+                }
+                KeyCode::Tab => return None,
+                _ => None,
+            };
+            if let Some(control) = control {
+                return self.feedback(control, width, height);
+            }
+            self.show_result = false;
+            self.details_scroll = 0;
         }
         if self.confirmation.is_some() {
             if self
@@ -871,6 +971,8 @@ impl App {
                 && key.code == KeyCode::Enter
                 && let Err(error) = &self.git
             {
+                self.failure = None;
+                self.failed_write = false;
                 self.error = Some(format!(
                     "{error}\nInstall Git separately and restart Dort. Draft retained."
                 ));
@@ -1174,6 +1276,8 @@ impl App {
                         }),
                         Err(error) => {
                             self.details_scroll = 0;
+                            self.failure = None;
+                            self.failed_write = false;
                             self.error = Some(format!(
                                 "{error}\nInstall Git separately, then restart Dort to resolve its executable. Draft retained for this session."
                             ));
@@ -1191,6 +1295,7 @@ impl App {
             return None;
         }
         self.failed_write = false;
+        self.show_result = false;
         self.shell.scroll = 0;
         if matches!(self.shell.overlay, Some(Overlay::Form(Form::Adopt)))
             && matches!(action, Action::Choose | Action::Init)
@@ -1575,6 +1680,8 @@ impl App {
         match &self.git {
             Ok(executable) => Some(self.git_view.request(root, executable.clone())),
             Err(error) => {
+                self.failure = None;
+                self.failed_write = false;
                 self.error = Some(format!(
                     "{error}\nInstall Git separately and restart Dort. Git root draft retained."
                 ));

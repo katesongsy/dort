@@ -88,7 +88,10 @@ fn paged_cells(app: &mut App, modal: bool) -> String {
             })
             .unwrap();
         let mut viewport = String::new();
-        for row in y + 1..14 {
+        // Task errors pin a risk/read-only banner outside the scroll viewport.
+        // Exclude that fixed row when stitching, not any diagnostic/path cells.
+        let pinned_rows = u16::from(app.error.is_some());
+        for row in y + 1 + pinned_rows..14 {
             if b[(0, row)].symbol() == "└" {
                 break;
             }

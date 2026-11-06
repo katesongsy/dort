@@ -540,7 +540,10 @@ def run():
             session.wait("TARGET · Focus".encode())
             session.send(b"\t\t\t\r")  # fields -> Review, no repository selected
             session.wait(b"Read failed:")
-            session.send(b"\x1b")
+            session.click_label("[Retry read")  # Fresh read/preview intent, never execution.
+            session.settle()
+            session.wait(b"Read failed:")
+            session.click_label("[Back")
             session.settle()
             session.wait(b".q?config")
             assert b"private-body-marker" not in session.data
@@ -785,11 +788,63 @@ def run():
             while not target.is_symlink() and time.monotonic() < deadline:
                 session.pump()
             assert target.is_symlink(), "Approved TUI apply did not publish the link"
+            session.wait(b"Operation result")
+            session.wait(b"File operation completed.")
             session.send(b"q")
             session.finish()
         assert target.resolve() == repo / "source"
         assert (repo / "source").read_text() == "ordinary settings\n"
-        print("PASS approved apply and clean exit")
+        print("PASS approved apply, persistent result and clean exit")
+
+        retained = {str(path.relative_to(state)): hashlib.sha256(path.read_bytes()).digest()
+                    for path in state.rglob("*.json")}
+        with Session([binary, "tui"], env, (14, 48)) as session:
+            session.wait(b"loaded.")
+            session.send(b"a")
+            session.wait(b"Preview (metadata only)")
+            session.send(b"\r")
+            session.wait(b"Confirm")
+            session.send(b"yes\r")
+            session.wait(b"Operation result")
+            session.wait(b"no transaction created.")
+            session.click_label("[Refresh")
+            session.settle()
+            session.wait(b"no transaction created.")
+            session.click_label("[Back")
+            session.settle()
+            assert b"Operation result" not in session.screen.text()
+            session.send(b"q")
+            session.finish()
+        assert retained == {str(path.relative_to(state)): hashlib.sha256(path.read_bytes()).digest()
+                            for path in state.rglob("*.json")}, "No-op/receipt refresh changed history"
+        assert target.is_symlink() and (repo / "source").read_text() == "ordinary settings\n"
+        print("PASS compact no-op receipt, read-only refresh and clicked Back without a journal")
+
+        with (state / "dort/lock").open("r+b") as held:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with Session([binary, "tui"], env, (14, 48)) as session:
+                session.wait(b"loaded.")
+                session.send(b"a")
+                session.wait(b"Preview (metadata only)")
+                session.send(b"\r")
+                session.wait(b"Confirm")
+                session.send(b"yes\r")
+                session.wait(b"Possible partial effects")
+                session.send(b"\x1b[6~" * 4)
+                session.settle()
+                assert b"Possible partial effects" in session.screen.text(), "Risk scrolled out of view"
+                assert b"Retry execution" not in session.screen.text()
+                session.click_label("[Refresh")  # Must work while the writer lock is held.
+                session.wait(b"Earlier write failed:")
+                session.send(b"3")
+                session.wait(b"Blockers: 0")
+                session.wait(b"Earlier write failed:")
+                session.send(b"q")
+                session.finish()
+        assert retained == {str(path.relative_to(state)): hashlib.sha256(path.read_bytes()).digest()
+                            for path in state.rglob("*.json")}, "Failed-write feedback replayed execution"
+        assert target.is_symlink() and (repo / "source").read_text() == "ordinary settings\n"
+        print("PASS compact failed-write risk, safe refresh and Recovery while the writer lock is held")
 
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
@@ -1079,7 +1134,7 @@ def run():
             ) as session:
                 session.finish(code)
             print("PASS terminal cleanup", mode)
-    print("34 PTY cases passed (disposable HOME, no installed Git requirement)")
+    print("36 PTY cases passed (disposable HOME, no installed Git requirement)")
 
 
 if __name__ == "__main__":

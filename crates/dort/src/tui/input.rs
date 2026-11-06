@@ -5,6 +5,7 @@ use std::cell::{Cell, RefCell};
 
 #[derive(Clone, Copy)]
 pub enum Target {
+    Feedback(super::task_surfaces::Control),
     TreeFold(usize),
     TreeMark(usize),
     BatchControl(usize, bool),

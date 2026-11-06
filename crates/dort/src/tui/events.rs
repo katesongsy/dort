@@ -9,7 +9,7 @@ use std::{
 
 pub struct Worker {
     handle: Option<JoinHandle<dort_core::Result<Output>>>,
-    progress: Receiver<String>,
+    progress: Receiver<super::task_surfaces::Progress>,
 }
 impl Worker {
     pub fn start(
@@ -24,10 +24,7 @@ impl Worker {
             .spawn(move || {
                 actions::perform_scoped(task, &host, repository, &requested, |event| {
                     // Dropped/coalesced display updates never interrupt an approved write.
-                    let _ = sender.try_send(format!(
-                        "Transaction {} | {:?} {}",
-                        event.transaction_id, event.boundary, event.sequence
-                    ));
+                    let _ = sender.try_send(super::task_surfaces::Progress::from_event(event));
                     Ok(())
                 })
             })?;
@@ -36,7 +33,7 @@ impl Worker {
             progress,
         })
     }
-    pub fn progress(&self) -> Option<String> {
+    pub fn progress(&self) -> Option<super::task_surfaces::Progress> {
         self.progress.try_iter().last()
     }
     pub fn finished(&self) -> bool {
@@ -66,7 +63,13 @@ mod tests {
         let (progress_sender, progress) = mpsc::sync_channel(1);
         let worker = Worker {
             handle: Some(thread::spawn(move || {
-                progress_sender.send("durable checkpoint".into()).unwrap();
+                progress_sender
+                    .send(super::super::task_surfaces::Progress {
+                        transaction_id: "test-transaction".into(),
+                        boundary: "Durable checkpoint",
+                        sequence: 1,
+                    })
+                    .unwrap();
                 wait.recv().unwrap();
                 done.send(()).unwrap();
                 Ok(Output::Completed(actions::Completion {

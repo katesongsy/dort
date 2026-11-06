@@ -207,7 +207,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         Layout::vertical([Constraint::Percentage(100)]).split(content)
     };
     let focused = true;
-    if !wide && (app.inventory.details || app.result.is_some()) {
+    if !wide && (app.inventory.details || (app.result.is_some() && app.receipt.is_none())) {
         ui::report(
             frame,
             content,
