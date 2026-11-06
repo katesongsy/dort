@@ -192,13 +192,13 @@ class Session:
         if button == 0:
             self.send(f"\x1b[<0;{column + 1};{row + 1}m".encode())
 
-    def click_label(self, label):
+    def click_label(self, label, offset=0):
         self.wait(label.encode())
         self.settle()
         for row, cells in enumerate(self.screen.cells):
             text = "".join(cells)
             if label in text:
-                self.mouse(0, text.index(label), row)
+                self.mouse(0, text.index(label) + offset, row)
                 return
         raise AssertionError("Click target was not visible")
 
@@ -275,12 +275,12 @@ def run():
                           b"DRY RUN", b"Create/attach", b"Choose repository", b"Discover files", b"Check a manifest"]:
                 session.wait(label)
             session.send(b"?")
-            session.wait(b"Space: Actions")
+            session.wait(b";: Actions")
             session.send(b"\x1b[6~" * 30)
             session.settle()
-            assert b"Space: Actions" not in session.screen.text()
+            assert b";: Actions" not in session.screen.text()
             session.send(b"\x1b[H")
-            session.wait(b"Space: Actions")
+            session.wait(b";: Actions")
             session.send(b"\x1b")
             session.wait(b"Create/attach")
             session.send(b"q")
@@ -349,6 +349,80 @@ def run():
         assert not (discovery_home / ".local").exists()
         assert (discovery_home / ".config" / "nvim" / "init.lua").is_file()
         print("PASS ineligible discovered directory remains inspectable without adoption or state")
+
+        # Only disposable hidden-home fixtures: nested plugin and agent settings,
+        # automatic selected content, escaped controls and authentication exclusion.
+        (discovery_home / '.pi' / 'agent').mkdir(parents=True)
+        (discovery_home / '.pi' / 'agent' / 'settings.json').write_text('synthetic-agent-preview\n')
+        (discovery_home / '.pi' / 'agent' / 'auth.json').write_text('private-auth-fixture\n')
+        plugins = discovery_home / '.config' / 'nvim' / 'lua' / 'plugins'
+        plugins.mkdir(parents=True)
+        (plugins / 'editor.lua').write_text('synthetic-plugin-preview\n')
+        with Session([binary, 'tui'], discovery_env, (32, 140)) as session:
+            session.wait(b'loaded.')
+            session.send(b'f')
+            session.wait(b'Metadata discovery loaded')
+            session.send(b'/settings.json\rljlj')  # Open .pi and agent.
+            session.click_label('[ ] settings.json', offset=5)
+            session.wait(b'synthetic-agent-preview')
+            assert b'private-auth-fixture' not in session.screen.text()
+            session.send(b'5')
+            session.settle()
+            assert b'synthetic-agent-preview' not in session.screen.text()
+            session.send(b'f')
+            # The old status can survive a destination switch. Wait for the
+            # refreshed list itself before typing into its filter.
+            session.wait(b'[ ] settings.json')
+            session.send(b'/\x15editor.lua\rljljljlj')  # Open the matching directory chain.
+            session.click_label('[ ] editor.lua', offset=5)
+            session.wait(b'synthetic-plugin-preview')
+            session.send(b'q')
+            session.finish()
+        assert not (discovery_home / '.config' / 'dort').exists()
+        assert not (discovery_home / '.local').exists()
+        print('PASS bounded hidden-home discovery and automatic ephemeral selected-file preview')
+
+        ignore_home = base / 'ignore-home'
+        (ignore_home / '.editor' / 'sub').mkdir(parents=True)
+        ignored_file = ignore_home / '.editor' / 'sub' / 'config'
+        ignored_file.write_text('ordinary ignore fixture\n')
+        ignore_env = dict(env, HOME=str(ignore_home),
+                          XDG_CONFIG_HOME=str(ignore_home / '.config'),
+                          XDG_STATE_HOME=str(ignore_home / '.local/state'))
+        ignore_store = ignore_home / '.config' / 'dort' / 'discovery-ignore.toml'
+        with Session([binary, 'tui'], ignore_env, (24, 100)) as session:
+            session.wait(b'loaded.')
+            session.send(b'f')
+            session.wait(b'Metadata discovery loaded')
+            session.send(b';Ignore selected\r')
+            session.wait(b'Ignore discovery path')
+            assert not ignore_store.exists(), 'Ignore preview wrote preferences'
+            session.send(b'\r')
+            session.wait(b'Confirm')
+            session.send(b'yes\r')
+            session.wait(b'Metadata discovery loaded')
+            session.send(b'q')
+            session.finish()
+        assert '.editor' in ignore_store.read_text()
+        (ignore_home / '.editor' / 'later').write_text('later ordinary fixture\n')
+        output = subprocess.run([binary, '--json', 'files', 'discover'], env=ignore_env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        assert not any('/.editor' in c['entry']['path'] for c in json.loads(output.stdout)['candidates'])
+        with Session([binary, 'tui'], ignore_env, (14, 48)) as session:
+            session.wait(b'loaded.')
+            session.send(b';Manage ignored\r')
+            session.wait(b'Enter previews Unignore')
+            session.send(b'\r')
+            session.wait(b'Unignore discovery path')
+            session.send(b'\r')
+            session.wait(b'Confirm')
+            session.send(b'yes\r')
+            session.wait(b'Metadata discovery loaded')
+            session.send(b'q')
+            session.finish()
+        assert '.editor' not in ignore_store.read_text()
+        assert ignored_file.read_text() == 'ordinary ignore fixture\n'
+        print('PASS persistent confirmed ignore, CLI pruning and compact Unignore without live-file changes')
 
         # Text fields must consume shortcut letters, and a missing prerequisite
         # must return to the retained draft without creating state.
@@ -452,7 +526,7 @@ def run():
 
         with Session([binary, "tui"], env, size=(14, 48)) as session:
             session.wait(b"loaded.")
-            session.send(b" ")
+            session.send(b";")
             session.wait(b"Search by label")
             session.send(b"q?/")
             session.wait(b"No matching actions")
@@ -474,7 +548,7 @@ def run():
             session.settle()
             session.send(b"\x1b")  # close, restoring Overview
             session.settle()
-            session.send(b"4 ")
+            session.send(b"4;")
             session.wait(b"Check current")  # current-view actions, not flat navigation first
             session.send(b"about\r")
             session.wait(b"| About")
@@ -493,7 +567,7 @@ def run():
             session.send(b"r")
             session.wait(b"Read-only Diagnostics loaded")
             session.settle()  # identical refresh result may still be the prior frame
-            session.send(b" ")
+            session.send(b";")
             session.wait(b"Search by label")
             session.send(b"about\r")
             session.wait(b"| About")
@@ -535,15 +609,16 @@ def run():
             session.click_label("2 Files")
             session.click_label("Discover files")
             session.wait(b"Eligible hint")
-            session.click_label(".q?config")  # selection only
-            session.click_label("Inspect")
-            session.wait(b"Selected item | PgUp/PgDn")
+            session.click_label(".q?config")  # selection only; content is automatic
+            session.send(b"i")  # retain inspection when shrinking to compact
+            session.wait(b"private-body-marker")
+            session.wait("Content · Tab focus".encode())
             session.mouse(65, 90, 10)  # detail viewport, not row selection
             session.settle()
             scrolled = session.screen.text()
             session.send(b"\t\x1b[Z")
             session.settle()
-            assert session.screen.text() == scrolled, "Tab unexpectedly changed workbench state"
+            assert session.screen.text() == scrolled, "Focus round trip changed content or viewport"
             session.send(b"\x1b[H")
             session.wait(b"[Eligible hint]")
             session.click_label("[Adopt selected")  # exact visible button, not explanatory prose
@@ -554,7 +629,7 @@ def run():
             session.send(b"\x1b")
             session.settle()
             session.resize((14, 48))
-            session.wait(b"Selected item")
+            session.wait(b"Content")
             session.send(b"\x1b")
             session.wait(b"NAME")
             session.send(b"\x1b[C")  # direct destination, never action selection
@@ -562,23 +637,55 @@ def run():
             session.click_label("2 Files")
             session.wait(b"Files / Managed")  # destination chooses managed view
             session.resize((22, 110))
-            session.wait(b"Selected item | PgUp/PgDn")
+            session.wait(b"Selected item")
             session.resize((21, 110))
             session.wait(b"Files / Managed")
-            assert b"Selected item |" not in session.screen.text()
-            assert b"private-body-marker" not in session.data
+            assert b"Selected item" not in session.screen.text()
+            assert b"private-body-marker" not in session.screen.text(), "Discover content survived leaving its scope"
             session.send(b"q")
             session.finish()
         assert not (home / ".config").exists() and not (home / ".local").exists()
         assert candidate.read_text() == "private-body-marker\n"
         print("PASS direct Files keys/mouse, retained viewport and width/height layouts without writes")
 
+        focus_home = base / 'content-focus-home'
+        focus_home.mkdir(mode=0o700)
+        (focus_home / '.focus-a').write_text('focus-start-marker\n' + 'ordinary wrapped setting ' * 1200 + '\nfocus-end-marker\n')
+        (focus_home / '.focus-b').write_text('second-file-marker\n')
+        focus_env = dict(env, HOME=str(focus_home), XDG_CONFIG_HOME=str(focus_home / '.config'),
+                         XDG_STATE_HOME=str(focus_home / '.local/state'))
+        with Session([binary, 'tui'], focus_env, (40, 140)) as session:
+            session.wait(b'loaded.')
+            session.send(b'f')
+            session.wait(b'focus-start-marker')
+            session.send(b'\t')
+            session.settle()
+            session.send(b'j\x06')  # Content row + full rendered page, not file selection.
+            session.settle()
+            assert b'second-file-marker' not in session.screen.text()
+            session.send(b'G')
+            session.wait(b'focus-end-marker')
+            session.send(b'gg')
+            session.wait(b'focus-start-marker')
+            session.resize((14, 48))
+            session.wait(b'Content')
+            session.send(b'G')
+            session.wait(b'focus-end-marker')
+            session.send(b'\x1b')
+            session.wait(b'NAME')
+            session.send(b'j\t')  # List selection, then compact content focus.
+            session.wait(b'second-file-marker')
+            session.send(b'\x1bq')
+            session.finish()
+        assert not (focus_home / '.config').exists() and not (focus_home / '.local').exists()
+        print('PASS Discover content focus, wrapped Vim pages/end, compact resize and separate file cursor without writes')
+
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"f")
             session.wait(b"Eligible hint")
             session.send(b"\r")
-            session.wait(b"Selected item")
+            session.wait(b"Content")
             session.send(b"e")  # direct, separate Adopt selected action
             session.wait("TARGET · Focus".encode())
             session.send(b"\t\t\t\r")  # fields -> Review, no repository selected
@@ -589,7 +696,7 @@ def run():
             session.click_label("[Back")
             session.settle()
             session.wait(b".q?config")
-            assert b"private-body-marker" not in session.data
+            assert b"private-body-marker" not in session.screen.text(), "Discover content entered retained adoption/error UI"
             session.send(b"\x03")
             session.finish()
         assert not (home / ".config").exists() and not (home / ".local").exists()
@@ -628,7 +735,7 @@ def run():
             session.send(b"\x1b[3~u")  # clear display filter; unstaged summary
             session.wait(b"Unstaged (worktree vs index)")
             session.wait(b"1 entries")
-            session.send(b" View patch content")
+            session.send(b";View patch content")
             session.wait(b"Search by label")
             session.send(b"\x1b[6~")
             session.wait(b"Actions | No work while browsing")
@@ -1011,10 +1118,8 @@ def run():
             assert not candidate.is_symlink() and not (repo / "files/config").exists()
             session.send(b"\r")  # retained Review -> fresh preview
             session.settle()
-            session.send(b"\r")
-            session.wait(b"Confirm")
-            session.send(b"yes\r")
-            session.wait(b"Operation completed.")
+            session.send(b"\r")  # Adopt all: one explicit approval, no typed yes.
+            session.wait(b"Discover refreshed.")
             session.send(b"q")
             session.finish()
         assert candidate.is_symlink() and candidate.resolve() == repo / "files/config"
@@ -1025,7 +1130,7 @@ def run():
             session.wait(b"loaded.")
             session.send(b"2/notconfig\x1b")
             session.settle()
-            session.send(b" delete managed link: enter\r")
+            session.send(b";delete managed link: enter\r")
             session.wait("Exact ID · Focus".encode())
             session.send(b"config\r\r")
             session.wait(b"Preview (metadata only)")
@@ -1081,23 +1186,35 @@ def run():
             session.wait(b'loaded.')
             session.send(b'f')
             session.wait(b'Metadata discovery loaded')
-            session.send(b'/bundle\r')
+            session.send(b'/bundle\rlljlj')  # Open .config and bundle, then select a leaf.
             session.click_label('[ ] only-a')
             session.click_label('[ ] only-b')
             session.wait(b'2 marked')
             session.send(b'h')  # Folding does not remove either mark.
             session.wait(b'2 hidden')
             session.send(b'lE')
-            session.wait(b'File 1/2')
-            session.click_label('Next')
-            session.wait(b'File 2/2')
-            session.click_label('Review batch')
+            session.wait(b'All editable defaults')
+            session.wait(b'Review all')
+            session.settle()
+            assert b'Files / Discover' not in session.screen.text(), 'Batch editor leaked Discover underneath'
+            session.send(b'\x1b[6~')
+            session.wait(b'files/.config/bundle/only-a')
+            session.send(b'\x1b[H')
+            session.send(b'je')  # Select only-b and open a separate item form.
+            session.wait(b'Edit item')
+            session.send(b'\r\x15edited-b\r\r\r')  # TARGET -> ID -> SOURCE -> Done -> batch.
+            session.wait(b'Review all')
+            session.send(b'e\r')
+            session.wait(b'edited-b')
+            session.click_label('Done')  # Return only; never review/adopt an individual item.
+            session.wait(b'Review all')
+            session.click_label('Review all')
             session.wait(b'Combined batch preview')
-            session.send(b'\r')
-            session.wait(b'Confirm')
-            session.send(b'yes\r')
-            session.wait(b'Observations refreshed.')
+            session.send(b'\r')  # Adopt all consumes the real combined preview once.
+            session.wait(b'Discover refreshed.')
             assert all((targets / name).is_symlink() for name in ('only-a', 'only-b'))
+            for name in ('only-a', 'only-b'):
+                assert (targets / name).resolve() == batch_repo / 'files/.config/bundle' / name
             batch_heads(batch_home, 1)
             session.send(b'3b')
             session.wait(b'Rollback schema 4')
@@ -1110,7 +1227,7 @@ def run():
         for name in ('only-a', 'only-b'):
             assert not (targets / name).is_symlink()
             assert (targets / name).read_text() == 'ordinary settings\n'
-            assert not (batch_repo / 'files' / name).exists()
+            assert not (batch_repo / 'files/.config/bundle' / name).exists()
         batch_heads(batch_home, 1)
         print('PASS tree marks/folding, editable combined adoption and schema-4 whole rollback')
 
@@ -1118,7 +1235,7 @@ def run():
             batch_home, batch_repo, targets, batch_env = batch_fixture('batch-' + operation, True)
             with Session([binary, 'tui'], batch_env) as session:
                 session.wait(b'loaded.')
-                session.send(b'2')
+                session.send(b'2ljlj')  # Folders start closed.
                 session.click_label('[ ] only-a')
                 session.click_label('[ ] only-b')
                 session.send(b'/only-a\rA')  # Hidden only-b remains explicitly included.
@@ -1177,7 +1294,7 @@ def run():
             ) as session:
                 session.finish(code)
             print("PASS terminal cleanup", mode)
-    print("41 PTY cases passed (disposable HOME, no installed Git requirement)")
+    print("All PTY cases passed (disposable HOME, no installed Git requirement)")
 
 
 if __name__ == "__main__":

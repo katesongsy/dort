@@ -204,6 +204,7 @@ pub fn load_scoped(
 }
 
 pub enum Pending {
+    Ignore(dort_core::discovery_ignore::Preview),
     Files(Box<Plan>),
     Batch(Box<dort_core::batch::Plan>),
     Init(Box<BootstrapPreview>),
@@ -213,6 +214,7 @@ pub enum Pending {
 impl Pending {
     pub fn report(&self) -> Result<String> {
         Ok(match self {
+            Self::Ignore(preview) => preview.human(),
             Self::Batch(plan) => plan.human(),
             Self::Files(plan) => format!(
                 "Repository: {:?}\nEffective profiles: {:?}\nScope: all mappings selected by this request; display filters never narrow it.\n{}",
@@ -260,6 +262,13 @@ impl Pending {
             ),
         })
     }
+    pub fn adoption(&self) -> bool {
+        match self {
+            Self::Files(p) => matches!(p.inputs.request, Request::Adopt { .. }),
+            Self::Batch(p) => p.inputs.action == dort_core::batch::Action::Adopt,
+            _ => false,
+        }
+    }
     pub fn review_len(&self) -> Option<usize> {
         match self {
             Self::Files(p) => Some(p.files.len()),
@@ -288,6 +297,7 @@ impl Pending {
     }
     pub fn approve(self, removal: Option<&str>) -> Result<Approved> {
         match self {
+            Self::Ignore(preview) => Ok(Approved::Ignore(preview.approve())),
             Self::Batch(plan) => {
                 dort_core::batch::Approval::from_plan(*plan).map(|a| Approved::Batch(Box::new(a)))
             }
@@ -312,6 +322,7 @@ impl Pending {
 }
 
 pub enum Approved {
+    Ignore(dort_core::discovery_ignore::Approval),
     Files(Box<FileApproval>),
     Batch(Box<dort_core::batch::Approval>),
     Init(Box<BootstrapApproval>, PathBuf),
@@ -330,6 +341,10 @@ impl Approved {
         observer: impl FnMut(&Event) -> Result<()>,
     ) -> Result<Completion> {
         let (operation, transaction_id, repository) = match self {
+            Self::Ignore(approval) => {
+                approval.execute(host, false)?;
+                ("Discovery preferences", None, None)
+            }
             Self::Batch(approval) => {
                 let lock = WriterLock::acquire(host)?;
                 (
@@ -437,6 +452,10 @@ impl Task {
     }
 }
 pub enum Task {
+    IgnoredPaths,
+    Ignore(PathBuf, bool),
+    DiscoveryTree(super::discovery_tree::Read),
+    DiscoverContent(super::discover_content::Read),
     History,
     Diagnostics,
     Git(super::git::Read),
@@ -463,6 +482,9 @@ pub enum Task {
     Execute(Approved),
 }
 pub enum Output {
+    IgnoredPaths(Vec<PathBuf>),
+    DiscoveryTree(super::discovery_tree::Report),
+    DiscoverContent(super::discover_content::Report),
     History {
         rows: Vec<journal::Diagnosis>,
         error: Option<String>,
@@ -502,6 +524,24 @@ pub fn perform_scoped(
     observer: impl FnMut(&Event) -> Result<()>,
 ) -> Result<Output> {
     match task {
+        Task::IgnoredPaths => Ok(Output::IgnoredPaths(
+            dort_core::discovery_ignore::Rules::load(host)?
+                .paths()
+                .cloned()
+                .collect(),
+        )),
+        Task::Ignore(path, ignored) => {
+            let relative = if ignored {
+                path.strip_prefix(&host.home)
+                    .map_err(|_| Error::Invalid("ignore selection must be under HOME".into()))?
+            } else {
+                &path
+            };
+            dort_core::discovery_ignore::Preview::prepare(host, relative, ignored)
+                .map(|p| Output::Preview(Pending::Ignore(p)))
+        }
+        Task::DiscoveryTree(read) => Ok(Output::DiscoveryTree(read.perform())),
+        Task::DiscoverContent(read) => Ok(Output::DiscoverContent(read.perform(host))),
         Task::History => Ok(match journal::diagnose(host) {
             Ok(rows) => Output::History { rows, error: None },
             Err(error) => Output::History {

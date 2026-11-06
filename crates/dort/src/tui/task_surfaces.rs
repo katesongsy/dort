@@ -81,6 +81,11 @@ fn batch_label(action: dort_core::batch::Action) -> &'static str {
 impl Activity {
     pub fn for_task(task: &Task, app: &App) -> Self {
         let operation = match task {
+            Task::DiscoverContent(_) | Task::DiscoveryTree(_) => {
+                unreachable!("private passive reads have no activity surface")
+            }
+            Task::IgnoredPaths => "Manage ignored paths",
+            Task::Ignore(..) => "Preview discovery preferences",
             Task::Refresh => "Refresh observations",
             Task::History => "Inspect Recovery",
             Task::Diagnostics => "Read Diagnostics",
@@ -99,6 +104,7 @@ impl Activity {
                     return reviewed.clone();
                 }
                 match approved {
+                    Approved::Ignore(_) => "Discovery preferences",
                     Approved::Files(_) => "File operation",
                     Approved::Batch(_) => "Batch file operation",
                     Approved::Init(..) => "Create/attach",
@@ -204,6 +210,10 @@ impl Activity {
     }
     pub fn for_pending(pending: &Pending) -> Self {
         let (operation, scope) = match pending {
+            Pending::Ignore(_) => (
+                "Discovery preferences",
+                vec![("Scope", "Local HOME discovery only".into())],
+            ),
             Pending::Files(plan) => (
                 request_label(&plan.inputs.request),
                 vec![

@@ -93,7 +93,7 @@ fn buttons(frame: &mut Frame, area: Rect, app: &App) {
         );
         x += width;
     }
-    let note = "Space: Actions | Click buttons | Display-only search";
+    let note = ";: Actions | Click buttons | Display-only search";
     app.hits.click(
         Rect::new(area.x, area.y + 1, 18.min(area.width), 1),
         super::input::Target::PaletteSearch,
@@ -236,6 +236,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         && app.error.is_none()
         && app.preview.is_none()
         && app.shell.overlay.is_none()
+        && !app.batch_editor.as_ref().is_some_and(|e| e.open)
     {
         match app.tab {
             Tab::Files => super::files::draw(frame, content[0], app),
@@ -274,11 +275,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
     } else if let Some(preview) = &app.preview {
         app.hits.clear();
         app.hits.wheel(content[0], super::input::Wheel::Preview);
+        let continue_label = if preview.pending.adoption() {
+            "Adopt all"
+        } else {
+            "Continue to confirmation"
+        };
         let back_x = content[1].x
             + if preview.pending.blocked() || app.dry_run {
                 " [Continue unavailable] ".len() as u16
             } else {
-                ui::button("Continue to confirmation", "Enter", true).width() as u16
+                ui::button(continue_label, "Enter", true).width() as u16
             };
         if !preview.pending.blocked() && !app.dry_run {
             app.hits.click(
@@ -331,7 +337,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 if disabled {
                     Span::styled(" [Continue unavailable] ", ui::warning())
                 } else {
-                    ui::button("Continue to confirmation", "Enter", true)
+                    ui::button(continue_label, "Enter", true)
                 },
                 ui::button("Back", "Esc", false),
             ])),
@@ -352,6 +358,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
         frame.render_widget(Clear, modal);
         app.hits.wheel(modal, super::input::Wheel::Overlay);
         match overlay {
+            Overlay::Ignored { paths, selected } => {
+                super::ignored::draw(frame, modal, app, paths, *selected)
+            }
             Overlay::Profiles(_) | Overlay::Repositories { .. } => {
                 super::pickers::draw(frame, modal, app, overlay)
             }
@@ -414,6 +423,17 @@ pub fn draw(frame: &mut Frame, app: &App) {
             ("PgDn", "Effects"),
             ("Esc", "Back"),
         ]
+    } else if app
+        .batch_editor
+        .as_ref()
+        .is_some_and(|e| e.open && !e.item_form)
+    {
+        vec![
+            ("j/k", "Select"),
+            ("e", "Edit item"),
+            ("Enter", "Review all"),
+            ("Esc", "Back"),
+        ]
     } else if matches!(app.shell.overlay, Some(Overlay::Form(_)))
         || app.batch_editor.as_ref().is_some_and(|e| e.open)
     {
@@ -429,11 +449,25 @@ pub fn draw(frame: &mut Frame, app: &App) {
             ("Esc", "Back"),
             ("Ctrl-C", "Quit"),
         ]
+    } else if app.tab == Tab::Files && app.discovering {
+        vec![
+            ("Tab", "List/content"),
+            (
+                "j/k",
+                if app.content.focused {
+                    "Scroll"
+                } else {
+                    "Select"
+                },
+            ),
+            ("Esc", "List"),
+            (";", "Actions"),
+        ]
     } else {
         vec![
             ("Up/Down", "Select"),
             ("PgDn", "Details"),
-            ("Space", "Actions"),
+            (";", "Actions"),
             ("?", "Help"),
         ]
     };

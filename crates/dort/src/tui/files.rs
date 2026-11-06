@@ -8,6 +8,48 @@ use ratatui::{
     widgets::{Cell, Paragraph, Row, Table, TableState},
 };
 
+#[cfg(test)]
+thread_local! { pub(super) static FORMATTED_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+
+fn window_start(len: usize, capacity: usize, retained: usize, selected: Option<usize>) -> usize {
+    let mut first = retained.min(len.saturating_sub(capacity));
+    if let Some(selected) = selected {
+        if selected < first {
+            first = selected;
+        } else if selected >= first + capacity {
+            first = selected.saturating_sub(capacity.saturating_sub(1));
+        }
+    }
+    first.min(len)
+}
+
+fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
+    if app.discovering {
+        let parts = Layout::vertical([Constraint::Min(3), Constraint::Length(5)]).split(area);
+        super::discover_content::draw(frame, parts[0], &app.content);
+        app.hits.wheel(parts[0], super::input::Wheel::Content);
+        app.hits
+            .click(parts[0], super::input::Target::DiscoverFocus(true));
+        ui::report(
+            frame,
+            parts[1],
+            "Details · Alt+PgUp/PgDn",
+            details(app),
+            app.details_scroll,
+            false,
+        );
+    } else {
+        ui::report(
+            frame,
+            area,
+            "Selected item · PgUp/PgDn · Esc list",
+            details(app),
+            app.details_scroll,
+            true,
+        );
+    }
+}
+
 fn kind(kind: &Kind) -> &'static str {
     match kind {
         Kind::Regular => "File",
@@ -25,10 +67,7 @@ fn details(app: &App) -> Text<'static> {
         lines.push(Line::raw(""));
     }
     if app.inventory.group.is_some() {
-        if let Some(node) = super::tree::visible(app)
-            .into_iter()
-            .find(|n| n.key == app.file_selection())
-        {
+        if let Some(node) = super::tree::selected(app) {
             lines.push(Line::styled(
                 "Directory / tree group · metadata only",
                 ui::heading(),
@@ -37,14 +76,14 @@ fn details(app: &App) -> Text<'static> {
                 "Full path",
                 node.path.to_str().unwrap_or("unavailable"),
             ));
-            lines.push(Line::raw("Enter or h/l folds/unfolds. x marks/unmarks matching descendants, including folded rows; discovery directories/links are never adopted. Marks survive filters and folding."));
+            lines.push(Line::raw("Enter or h/l folds/unfolds. Space/x marks/unmarks matching descendants, including folded rows; discovery directories/links are never adopted. Marks survive filters and folding."));
         }
     } else if app.discovering {
         if let Some(candidate) = app
             .discovery
             .as_ref()
             .and_then(|d| d.report.candidates.get(app.candidate_selected))
-            .filter(|_| app.visible_file_rows().contains(&app.candidate_selected))
+            .filter(|_| super::discovery_tree::contains(app, app.candidate_selected))
         {
             let eligible = candidate.supported_for_adoption;
             let state = if eligible {
@@ -147,7 +186,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         app.inventory.managed_marks.len()
     };
-    let shown_marks = nodes.iter().filter(|n| super::tree::marked(app, n)).count();
+    let shown_marks = if marked == 0 {
+        0
+    } else if app.discovering {
+        super::discovery_tree::shown_marks(app)
+    } else {
+        nodes.iter().filter(|n| super::tree::marked(app, n)).count()
+    };
     let title = format!(
         "Files / {} · {} marked ({} hidden)",
         if app.discovering {
@@ -160,10 +205,21 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     );
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(format!(" {title}  "), ui::heading()),
+            Span::styled(
+                app.inventory
+                    .mark_refusal
+                    .as_ref()
+                    .map(|r| format!(" {r} "))
+                    .unwrap_or_else(|| format!(" {title}  ")),
+                if app.inventory.mark_refusal.is_some() {
+                    ui::danger()
+                } else {
+                    ui::heading()
+                },
+            ),
             Span::styled(
                 if app.discovering {
-                    "Metadata only"
+                    "Selected-file preview"
                 } else {
                     "Full active-profile scope"
                 },
@@ -206,21 +262,32 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         Layout::vertical([Constraint::Percentage(100)]).split(content)
     };
-    let focused = true;
-    if !wide && (app.inventory.details || (app.result.is_some() && app.receipt.is_none())) {
-        ui::report(
-            frame,
-            content,
-            "Selected item · Esc list",
-            details(app),
-            app.details_scroll,
-            focused,
-        );
+    let focused = !app.discovering || !app.content.focused;
+    if !wide
+        && (app.inventory.details
+            || app.content.focused
+            || (app.result.is_some() && app.receipt.is_none()))
+    {
+        draw_selected(frame, content, app);
         return;
     }
-    let visible: Vec<_> = nodes.iter().map(|n| n.key).collect();
-    let selected = app.file_selection();
+    let selected = super::tree::position(app, app.file_selection());
     let list_area = split[0];
+    if app.discovering {
+        app.hits
+            .click(list_area, super::input::Target::DiscoverFocus(false));
+    }
+    let capacity = list_area.height.saturating_sub(3) as usize;
+    app.inventory.page_capacity.set(capacity);
+    let offset = if app.discovering {
+        &app.inventory.candidate_offset
+    } else {
+        &app.inventory.managed_offset
+    };
+    let first = window_start(nodes.len(), capacity, offset.get(), selected);
+    offset.set(first);
+    let window: Vec<_> = nodes.window(first, capacity).collect();
+    let visible: Vec<_> = window.iter().map(|n| n.key).collect();
     let total = if app.discovering {
         app.discovery
             .as_ref()
@@ -229,12 +296,18 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         app.data.as_ref().map_or(0, |d| d.files.len())
     };
     let title = format!(
-        "{} / {} shown | x mark h/l fold",
-        app.visible_file_rows().len(),
+        "{} / {} shown | Space mark h/l fold",
+        if app.discovering {
+            super::discovery_tree::snapshot(app).matching.len()
+        } else {
+            app.visible_file_rows().len()
+        },
         total
     );
     let mut rows = Vec::new();
-    for node in &nodes {
+    for &node in &window {
+        #[cfg(test)]
+        FORMATTED_ROWS.with(|count| count.set(count.get() + 1));
         let prefix = format!(
             "{}{} {}",
             "  ".repeat(node.depth.min(12)),
@@ -323,7 +396,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         }
     }
     let block = ui::pane(&title, focused);
-    if rows.is_empty() {
+    if nodes.is_empty() {
         let message = if !app.discovering {
             app.data
                 .as_ref()
@@ -335,6 +408,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                 })
         } else if app.discovery.is_none() {
             "Discovery not loaded. Use Refresh."
+        } else if super::discovery_tree::pending(app) {
+            "Updating list... Search, Help and Quit remain available."
         } else if total == 0 {
             "No metadata candidates found in this bounded scan."
         } else {
@@ -366,14 +441,15 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             .block(block)
             .row_highlight_style(ui::selected())
             .highlight_symbol("> ");
-        let mut state =
-            TableState::default().with_selected(visible.iter().position(|&i| i == selected));
+        let mut state = TableState::default().with_selected(
+            selected
+                .and_then(|i| i.checked_sub(first))
+                .filter(|&i| i < window.len()),
+        );
         frame.render_stateful_widget(table, list_area, &mut state);
-        app.hits.rows(list_area, &visible, state.offset());
+        app.hits.rows(list_area, &visible, 0);
         // Register only actual rendered rows, after the generic row hit regions.
-        let first = state.offset();
-        let count = list_area.height.saturating_sub(3) as usize;
-        for (line, node) in nodes.iter().skip(first).take(count).enumerate() {
+        for (line, node) in window.iter().enumerate() {
             let x = list_area.x + 3 + (node.depth.min(12) * 2) as u16;
             if x + 3 < list_area.right() {
                 app.hits.click(
@@ -388,13 +464,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         }
     }
     if wide {
-        ui::report(
-            frame,
-            split[1],
-            "Selected item | PgUp/PgDn details",
-            details(app),
-            app.details_scroll,
-            true,
-        );
+        draw_selected(frame, split[1], app);
     }
 }

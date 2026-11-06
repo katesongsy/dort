@@ -20,14 +20,21 @@ impl Search {
 
 #[derive(Default)]
 pub struct Inventory {
+    pub pending_g: bool,
+    pub page_capacity: std::cell::Cell<usize>,
+    pub tree: std::cell::RefCell<super::discovery_tree::State>,
+    pub candidate_offset: std::cell::Cell<usize>,
+    pub managed_offset: std::cell::Cell<usize>,
     pub managed: Search,
     pub candidates: Search,
     pub details: bool,
+    pub mark_refusal: Option<String>,
     pub group: Option<usize>,
+    pub candidate_mark_revision: u64,
     pub candidate_marks: std::collections::BTreeSet<std::path::PathBuf>,
     pub managed_marks: std::collections::BTreeSet<String>,
-    pub candidate_folded: std::collections::BTreeSet<std::path::PathBuf>,
-    pub managed_folded: std::collections::BTreeSet<std::path::PathBuf>,
+    pub candidate_folded: std::sync::Arc<super::visibility::Folds>,
+    pub managed_folded: std::sync::Arc<super::visibility::Folds>,
 }
 impl Inventory {
     pub fn search(&self, discovering: bool) -> &Search {

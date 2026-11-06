@@ -66,6 +66,23 @@ fn stage_file(j: &Journal, id: usize, bytes: &[u8], fp: &Fingerprint) -> Result<
     j.directory.sync()
 }
 
+/// Parsed tables carry document-global positions. Discard positions imported
+/// from the separate addition document so normal insertion order is used.
+/// The full semantic equality check below remains authoritative.
+fn clear_imported_positions(table: &mut toml_edit::Table) {
+    table.set_position(None);
+    for (_, item) in table.iter_mut() {
+        match item {
+            toml_edit::Item::Table(child) => clear_imported_positions(child),
+            toml_edit::Item::ArrayOfTables(children) => {
+                for child in children.iter_mut() {
+                    clear_imported_positions(child);
+                }
+            }
+            _ => (),
+        }
+    }
+}
 fn edit_manifest(bytes: &[u8], h: &Header, host: &HostContext) -> Result<Option<Vec<u8>>> {
     if h.action == Action::Apply {
         return Ok(None);
@@ -96,36 +113,49 @@ fn edit_manifest(bytes: &[u8], h: &Header, host: &HostContext) -> Result<Option<
         .map_err(|_| Error::Invalid("cannot encode batch mappings".into()))?
         .parse::<toml_edit::DocumentMut>()
         .map_err(|_| Error::Invalid("cannot encode batch mapping tables".into()))?;
-    let mut doc = text
-        .parse::<toml_edit::DocumentMut>()
-        .map_err(|_| Error::Invalid("cannot edit manifest".into()))?;
-    let tables = added["files"]
-        .as_array_of_tables()
-        .ok_or_else(|| Error::Invalid("cannot encode batch mapping tables".into()))?;
-    if doc.get("files").is_none() {
-        doc["files"] = added["files"].clone();
-    } else if let Some(array) = doc["files"].as_array_of_tables_mut() {
-        for table in tables {
-            array.push(table.clone());
+    let expected = journal::encode(&expected)?;
+    // Keep every previously successful edit byte-for-byte: recovery binds the
+    // edited-manifest digest in existing schema-4 headers. Only retry an edit
+    // rejected by the original semantic guard, never relax that guard.
+    for reset_positions in [false, true] {
+        let mut doc = text
+            .parse::<toml_edit::DocumentMut>()
+            .map_err(|_| Error::Invalid("cannot edit manifest".into()))?;
+        let mut tables = added["files"]
+            .as_array_of_tables()
+            .ok_or_else(|| Error::Invalid("cannot encode batch mapping tables".into()))?
+            .clone();
+        if reset_positions {
+            for table in tables.iter_mut() {
+                clear_imported_positions(table);
+            }
         }
-    } else if let Some(array) = doc["files"].as_array_mut() {
-        for table in tables {
-            array.push(table.clone().into_inline_table());
+        if doc.get("files").is_none() {
+            doc["files"] = toml_edit::Item::ArrayOfTables(tables);
+        } else if let Some(array) = doc["files"].as_array_of_tables_mut() {
+            for table in &tables {
+                array.push(table.clone());
+            }
+        } else if let Some(array) = doc["files"].as_array_mut() {
+            for table in &tables {
+                array.push(table.clone().into_inline_table());
+            }
+        } else {
+            return Err(Error::Invalid(
+                "unsupported manifest files representation".into(),
+            ));
         }
-    } else {
-        return Err(Error::Invalid(
-            "unsupported manifest files representation".into(),
-        ));
+        let edited = doc.to_string();
+        if let Ok(parsed) = Manifest::parse(&edited)
+            && journal::encode(&parsed)? == expected
+        {
+            parsed.validate_for_host(host, &h.profiles, Some(&h.repository))?;
+            return Ok(Some(edited.into_bytes()));
+        }
     }
-    let edited = doc.to_string();
-    let parsed = Manifest::parse(&edited)?;
-    parsed.validate_for_host(host, &h.profiles, Some(&h.repository))?;
-    if journal::encode(&expected)? != journal::encode(&parsed)? {
-        return Err(Error::Invalid(
-            "batch edit changed unrelated manifest declarations".into(),
-        ));
-    }
-    Ok(Some(edited.into_bytes()))
+    Err(Error::Invalid(
+        "batch edit changed unrelated manifest declarations".into(),
+    ))
 }
 
 /// Returns None on an entirely correct/empty apply; no transaction/backups are created.

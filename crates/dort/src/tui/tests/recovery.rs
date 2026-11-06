@@ -209,7 +209,7 @@ fn preparing_table_enter_inspects_then_the_visible_action_uses_raw_identity() {
     );
     assert!(app.preview.is_none() && app.confirmation.is_none());
     // Discovery in the global palette still includes inapplicable operations.
-    key(&mut app, KeyCode::Char(' ')); // search-first, no extra / keystroke
+    key(&mut app, KeyCode::Char(';')); // search-first, no extra / keystroke
     for c in "resume".chars() {
         key(&mut app, KeyCode::Char(c));
     }

@@ -169,10 +169,10 @@ fn fifo_is_observed_without_blocking_or_reading() {
 }
 
 #[test]
-fn discovery_rejects_unbounded_directories_and_stops_at_config_depth_limit() {
+fn discovery_accepts_more_than_the_old_entry_limit_and_stops_at_depth_eight() {
     let home = TestHome::new();
-    fs::create_dir_all(home.host.home.join(".config/a/b/c")).unwrap();
-    fs::write(home.host.home.join(".config/a/b/c/too-deep"), "x").unwrap();
+    fs::create_dir_all(home.host.home.join(".config/a/b/c/d/e/f/g/h")).unwrap();
+    fs::write(home.host.home.join(".config/a/b/c/d/e/f/g/h/too-deep"), "x").unwrap();
     let report = discovery::discover(&home.host, None).unwrap();
     assert!(
         !report
@@ -183,12 +183,129 @@ fn discovery_rejects_unbounded_directories_and_stops_at_config_depth_limit() {
     for index in 0..4097 {
         fs::write(home.host.home.join(format!("visible-{index}")), "").unwrap();
     }
+    let report = discovery::discover(&home.host, None).unwrap();
+    assert!(report.warnings.is_empty());
     assert!(
-        discovery::discover(&home.host, None)
-            .unwrap_err()
-            .to_string()
-            .contains("limit")
+        !report
+            .candidates
+            .iter()
+            .any(|c| c.entry.path.ends_with("too-deep"))
     );
+}
+
+#[test]
+fn hidden_directories_and_nested_plugins_are_discovered_but_auth_and_sessions_are_not() {
+    let home = TestHome::new();
+    for relative in [
+        ".pi/agent/config.json",
+        ".config/nvim/lua/plugins/editor.lua",
+        ".other/a/b/c/d/e/f/at-bound",
+    ] {
+        let path = home.host.home.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "ordinary settings").unwrap();
+    }
+    for relative in [
+        ".pi/agent/auth.json",
+        ".pi/agent/sessions/a.json",
+        ".pi/cache/generated",
+        ".pi/agent/credentials/key",
+        ".other/session/data",
+    ] {
+        let path = home.host.home.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "sensitive fixture").unwrap();
+    }
+    let report = discovery::discover(&home.host, None).unwrap();
+    for suffix in ["config.json", "editor.lua", "at-bound"] {
+        assert!(
+            report
+                .candidates
+                .iter()
+                .any(|c| c.entry.path.ends_with(suffix))
+        );
+    }
+    for suffix in ["auth.json", "a.json", "generated", "key", "data"] {
+        assert!(
+            !report
+                .candidates
+                .iter()
+                .any(|c| c.entry.path.ends_with(suffix))
+        );
+    }
+}
+
+#[test]
+fn discovery_exclusions_are_relative_to_home_not_temporary_ancestors() {
+    let fixture = TestHome::new();
+    let mut host = fixture.host.clone();
+    host.home = host.home.join("tmp/home");
+    fs::create_dir_all(host.home.join(".app/cache")).unwrap();
+    fs::write(host.home.join(".app/settings"), "ordinary settings").unwrap();
+    fs::write(host.home.join(".app/cache/generated"), "withheld").unwrap();
+    let report = discovery::discover(&host, None).unwrap();
+    let entry = &report
+        .candidates
+        .iter()
+        .find(|c| c.entry.path.ends_with(".app/settings"))
+        .expect("temporary ancestors must not exclude HOME contents")
+        .entry;
+    assert_eq!(
+        discovery::selected_content(&host, None, entry)
+            .unwrap_or_else(|e| panic!("{e}"))
+            .text(),
+        "ordinary settings"
+    );
+    assert!(
+        !report
+            .candidates
+            .iter()
+            .any(|c| c.entry.path.ends_with("generated"))
+    );
+}
+
+#[test]
+fn selected_content_is_bounded_private_and_refuses_unsafe_or_sensitive_files() {
+    let home = TestHome::new();
+    let path = home.host.home.join(".settings");
+    fs::write(&path, "ordinary text\n").unwrap();
+    let entry = observation::inspect(&path, false).unwrap();
+    assert_eq!(
+        discovery::selected_content(&home.host, None, &entry)
+            .unwrap_or_else(|e| panic!("{e}"))
+            .text(),
+        "ordinary text\n"
+    );
+    let metadata = serde_json::to_string(&discovery::discover(&home.host, None).unwrap()).unwrap();
+    assert!(!metadata.contains("ordinary text"));
+    fs::write(&path, "changed").unwrap();
+    assert!(discovery::selected_content(&home.host, None, &entry).is_err());
+    for bytes in [
+        b"password=fixture".as_slice(),
+        b"{\"token\":\"fixture\"}",
+        b"\0binary",
+        b"\xff",
+        &[b'a'; 65537],
+    ] {
+        fs::write(&path, bytes).unwrap();
+        let entry = observation::inspect(&path, false).unwrap();
+        assert!(discovery::selected_content(&home.host, None, &entry).is_err());
+    }
+    fs::remove_file(&path).unwrap();
+    std::os::unix::fs::symlink(home.host.home.join(".elsewhere"), &path).unwrap();
+    let entry = observation::inspect(&path, false).unwrap();
+    assert!(discovery::selected_content(&home.host, None, &entry).is_err());
+    fs::remove_file(&path).unwrap();
+    fs::write(&path, "ordinary").unwrap();
+    fs::hard_link(&path, home.host.home.join(".hardlink")).unwrap();
+    let entry = observation::inspect(&path, false).unwrap();
+    assert!(discovery::selected_content(&home.host, None, &entry).is_err());
+    let auth = home.host.home.join(".auth.json");
+    fs::write(&auth, "ordinary").unwrap();
+    let sensitive_entry = observation::inspect(&auth, false).unwrap();
+    assert!(discovery::selected_content(&home.host, None, &sensitive_entry).is_err());
+    let entry = observation::inspect(&path, false).unwrap();
+    assert!(discovery::selected_content(&home.host, Some(&home.host.home), &entry).is_err());
 }
 
 #[test]
@@ -307,6 +424,7 @@ fn discovery_never_recurses_into_directory_symlinks_or_protected_roots() {
     fs::create_dir(&repository).unwrap();
     fs::write(repository.join("sentinel"), "x").unwrap();
     fs::create_dir_all(home.host.home.join(".config/dort")).unwrap();
+    fs::set_permissions(&home.host.config_dir, fs::Permissions::from_mode(0o700)).unwrap();
     fs::write(
         home.host.home.join(".config/dort/local.toml"),
         "private config",

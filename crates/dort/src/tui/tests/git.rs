@@ -161,7 +161,7 @@ fn patch_disclosure_is_once_isolated_and_dropped_on_close_scope_resize_or_exit()
     let task = key(&mut app, KeyCode::Char('u')).unwrap();
     f.run(&mut app, task);
     key(&mut app, KeyCode::Tab); // Actions focus must return to Git content after activation.
-    key(&mut app, KeyCode::Char(' ')); // Actions opens with search focused.
+    key(&mut app, KeyCode::Char(';')); // Actions opens with search focused.
     text(&mut app, "View patch content");
     assert!(key(&mut app, KeyCode::Enter).is_none());
     assert!(app.tab == Tab::Git);
@@ -274,7 +274,7 @@ fn git_root_default_and_independent_selection_do_not_require_healthy_file_observ
     app.complete(Ok(result));
     assert_eq!(app.repository.as_ref(), Some(&other));
     assert_eq!(app.git_view.root.as_ref(), Some(&f.root));
-    key(&mut app, KeyCode::Char(' '));
+    key(&mut app, KeyCode::Char(';'));
     text(&mut app, "Git: use current file repository root");
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.run(&mut app, task);

@@ -132,7 +132,11 @@ fn compatible_cells_preserve_geometry_raw_mouse_identity_and_textual_states() {
                 Some(Task::Files(dort_core::planner::Request::Apply))
             ));
             // The displayed escaped ID must never replace the actual request ID.
-            let task = key(&mut app, KeyCode::Char('d'), w, h);
+            key(&mut app, KeyCode::Char(';'), w, h);
+            for c in "delete managed link".chars() {
+                key(&mut app, KeyCode::Char(c), w, h);
+            }
+            let task = key(&mut app, KeyCode::Enter, w, h);
             assert!(
                 matches!(task,Some(Task::Files(dort_core::planner::Request::Unmanage { ref id, .. })) if id == "é")
             );

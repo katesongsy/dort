@@ -64,6 +64,8 @@ pub fn entries(tab: Tab, discovering: bool, preferred: &[Action]) -> Vec<Entry> 
         Choose,
         Init,
         Discover,
+        IgnoreSelected,
+        ManageIgnored,
         Adopt,
         AdoptSelected,
         BatchAdopt,
@@ -106,7 +108,10 @@ pub fn entries(tab: Tab, discovering: bool, preferred: &[Action]) -> Vec<Entry> 
     .map(|action| {
         let group = match action {
             Apply | Keep | Remove | KeepId | RemoveId | Rollback | Resume | Abandon
-            | BatchAdopt | ApplyMarked | KeepMarked | RemoveMarked => Group::Preview,
+            | BatchAdopt | ApplyMarked | KeepMarked | RemoveMarked | IgnoreSelected => {
+                Group::Preview
+            }
+            ManageIgnored => Group::View,
             GitPatch => Group::Content,
             Inspect if matches!(tab, Tab::Files | Tab::Recovery) => Group::Item,
             AdoptSelected if tab == Tab::Files && discovering => Group::Item,

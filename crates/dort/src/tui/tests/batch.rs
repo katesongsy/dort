@@ -112,6 +112,7 @@ fn select(app: &mut App, name: &str) {
                 return;
             }
         }
+        key(app, KeyCode::Char('l')); // New folders start closed; traverse explicitly.
         key(app, KeyCode::Down);
     }
     panic!("file not keyboard reachable: {name}");
@@ -138,10 +139,127 @@ fn click(app: &mut App, label: &str, offset: u16) -> Option<Task> {
     )
 }
 fn approve(app: &mut App) -> Task {
+    if app.preview.as_ref().is_some_and(|p| p.pending.adoption()) {
+        return key(app, KeyCode::Enter).expect("one explicit combined adoption approval");
+    }
     assert!(key(app, KeyCode::Enter).is_none());
     text(app, "yes");
     key(app, KeyCode::Enter).expect("literal approval")
 }
+#[test]
+fn separate_item_form_retains_edits_and_only_returns_to_combined_review() {
+    let f = Fixture::new(false);
+    let mut app = f.app(false);
+    let paths = [
+        f.host.home.join(".config/editor/only-a"),
+        f.host.home.join(".config/editor/only-b"),
+    ]
+    .into_iter()
+    .collect();
+    app.batch_editor = Some(super::batch_ui::Editor::new(&paths, &f.host.home));
+    key(&mut app, KeyCode::Char('j'));
+    assert_eq!(app.batch_editor.as_ref().unwrap().item, 1);
+    key(&mut app, KeyCode::Char('e'));
+    assert!(app.batch_editor.as_ref().unwrap().item_form);
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        let screen = render(&app, w, h);
+        assert!(screen.contains("Edit item"));
+        assert!(!screen.contains("Review all") && !screen.contains("Files /"));
+        assert!(!screen.contains("Adopt all") && !screen.contains("Content ·"));
+    }
+    key(&mut app, KeyCode::Enter); // TARGET -> ID, not a preview.
+    clear(&mut app);
+    text(&mut app, "edited-item"); // e is literal text inside the form.
+    key(&mut app, KeyCode::Enter);
+    clear(&mut app);
+    text(&mut app, "files/edited-item");
+    assert!(key(&mut app, KeyCode::Enter).is_none()); // SOURCE -> Done.
+    assert!(key(&mut app, KeyCode::Enter).is_none()); // Done -> list only.
+    let editor = app.batch_editor.as_ref().unwrap();
+    assert!(!editor.item_form && editor.open);
+    assert_eq!(editor.drafts[1].id, "edited-item");
+    assert!(app.preview.is_none());
+    key(&mut app, KeyCode::Char('k'));
+    key(&mut app, KeyCode::Char('e'));
+    key(&mut app, KeyCode::Enter);
+    clear(&mut app);
+    text(&mut app, "retained-on-escape");
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(
+        app.batch_editor.as_ref().unwrap().drafts[0].id,
+        "retained-on-escape"
+    );
+    let task = key(&mut app, KeyCode::Enter).expect("default combined review remains quick");
+    let Task::Batch(dort_core::batch::Request::Adopt(mappings)) = task else {
+        panic!("combined adoption only")
+    };
+    assert_eq!(mappings.len(), 2);
+    assert_eq!(mappings[0].id, "retained-on-escape");
+    assert_eq!(mappings[1].id, "edited-item");
+    assert!(journal::diagnose(&f.host).unwrap().is_empty());
+}
+
+#[test]
+fn item_form_mouse_done_never_reviews_an_individual_item() {
+    let f = Fixture::new(false);
+    let mut app = f.app(false);
+    let paths = [
+        f.host.home.join(".config/editor/only-a"),
+        f.host.home.join(".config/editor/only-b"),
+    ]
+    .into_iter()
+    .collect();
+    app.batch_editor = Some(super::batch_ui::Editor::new(&paths, &f.host.home));
+    key(&mut app, KeyCode::Down);
+    assert!(click(&mut app, "Edit item", 1).is_none());
+    assert_eq!(app.batch_editor.as_ref().unwrap().item, 1);
+    assert!(app.batch_editor.as_ref().unwrap().item_form);
+    render(&app, 140, 40);
+    let (x, y) = (0..40)
+        .flat_map(|y| (0..140).map(move |x| (x, y)))
+        .find(|(x, y)| {
+            matches!(
+                app.hits.target(*x, *y),
+                Some(super::input::Target::BatchControl(4, false))
+            )
+        })
+        .unwrap();
+    assert!(
+        app.mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: x,
+                row: y,
+                modifiers: KeyModifiers::NONE
+            },
+            140,
+            40
+        )
+        .is_none()
+    );
+    assert_eq!(app.batch_editor.as_ref().unwrap().focused, 4);
+    clear(&mut app);
+    text(&mut app, "mouse-edited");
+    assert!(
+        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 47, 13)
+            .is_none()
+    );
+    assert!(app.batch_editor.as_ref().unwrap().item_form);
+    assert!(app.preview.is_none());
+    assert!(click(&mut app, "Done", 1).is_none());
+    assert_eq!(
+        app.batch_editor.as_ref().unwrap().drafts[1].id,
+        "mouse-edited"
+    );
+    assert_eq!(app.batch_editor.as_ref().unwrap().item, 1);
+    assert!(!app.batch_editor.as_ref().unwrap().item_form);
+    assert!(app.preview.is_none());
+    let task = click(&mut app, "Review all", 1).unwrap();
+    assert!(
+        matches!(task, Task::Batch(dort_core::batch::Request::Adopt(items)) if items.len() == 2)
+    );
+}
+
 #[test]
 fn tree_folds_marks_hidden_items_and_batch_editor_retains_real_fields_at_floor() {
     let f = Fixture::new(false);
@@ -164,25 +282,40 @@ fn tree_folds_marks_hidden_items_and_batch_editor_retains_real_fields_at_floor()
     assert!(render(&app, 48, 14).contains("2 marked (1 hidden)"));
     assert!(key(&mut app, KeyCode::Char('E')).is_none());
     let screen = render(&app, 48, 14);
-    assert!(screen.contains("File 1/2") && screen.contains("TARGET"));
-    key(&mut app, KeyCode::Tab);
+    assert!(
+        screen.contains("TARGET") && screen.contains("SOURCE") && screen.contains("Review all")
+    );
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        super::files::FORMATTED_ROWS.with(|rows| rows.set(0));
+        let covered = render(&app, w, h);
+        assert!(covered.contains("All editable defaults"));
+        assert!(
+            !covered.contains("Files / Discover")
+                && !covered.contains("Content ·")
+                && !covered.contains("Details ·")
+        );
+        assert_eq!(
+            super::files::FORMATTED_ROWS.with(|rows| rows.get()),
+            0,
+            "Discover must not render behind the batch editor"
+        );
+    }
+    // Review is focused by default: no per-file visit is required to accept defaults.
+    assert_eq!(app.batch_editor.as_ref().unwrap().focused, 6);
+    key(&mut app, KeyCode::Tab); // First target.
+    key(&mut app, KeyCode::Tab); // First ID.
     clear(&mut app);
     text(&mut app, "custom-a");
     key(&mut app, KeyCode::Tab);
     clear(&mut app);
     text(&mut app, "files/custom-a");
-    // Tab traverses only local controls. Next is an explicit button.
+    // Every draft is already in the combined list; no Prev/Next acceptance loop.
     key(&mut app, KeyCode::Tab);
-    key(&mut app, KeyCode::Tab);
-    key(&mut app, KeyCode::Enter);
-    assert!(render(&app, 48, 14).contains("File 2/2"));
+    assert_eq!(app.batch_editor.as_ref().unwrap().item, 1);
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Char('E'));
     assert_eq!(app.batch_editor.as_ref().unwrap().drafts[0].id, "custom-a");
-    for _ in 0..5 {
-        key(&mut app, KeyCode::Tab);
-    }
-    let task = click(&mut app, "Review batch", 0).expect("explicit real review button");
+    let task = click(&mut app, "Review all", 0).expect("explicit real combined review button");
     f.run(&mut app, task);
     let Pending::Batch(p) = &app.preview.as_ref().unwrap().pending else {
         panic!("combined plan expected")
@@ -195,14 +328,84 @@ fn tree_folds_marks_hidden_items_and_batch_editor_retains_real_fields_at_floor()
     assert_eq!(app.preview.as_ref().unwrap().pending.review_len(), Some(2));
     let task = approve(&mut app);
     let refresh = f.run(&mut app, task).unwrap();
-    f.run(&mut app, refresh);
+    assert!(matches!(refresh, Task::Refresh));
+    let discover = f.run(&mut app, refresh).unwrap();
+    assert!(matches!(discover, Task::Discover));
+    assert_eq!(app.data.as_ref().unwrap().history.len(), 1);
+    assert_eq!(app.data.as_ref().unwrap().files.len(), 2);
+    assert!(f.run(&mut app, discover).is_none());
+    assert!(app.status.contains("Discover refreshed"));
     assert!(!app.batch_editor.as_ref().unwrap().open);
+    assert!(app.discovering && app.tab == Tab::Files && !app.show_result);
+    assert!(app.receipt.is_some());
+    assert!(app.inventory.candidate_marks.is_empty());
     assert!(f.host.home.join(".config/editor/only-a").is_symlink());
     assert!(f.host.home.join(".config/editor/only-b").is_symlink());
     assert!(!f.host.home.join(".config/editor/only-c").is_symlink());
     assert_eq!(journal::diagnose(&f.host).unwrap().len(), 1);
     assert!(f.repo.join("files/custom-a").is_file());
+    assert_eq!(
+        f.host
+            .home
+            .join(".config/editor/only-b")
+            .canonicalize()
+            .unwrap(),
+        f.repo.join("files/.config/editor/only-b")
+    );
 }
+#[test]
+fn same_named_files_adopt_into_preserved_subtrees_without_moving_existing_mappings() {
+    let f = Fixture::new(true);
+    for directory in ["alpha", "beta"] {
+        let path = f.host.home.join(".config/editor").join(directory);
+        fs::create_dir(&path).unwrap();
+        fs::write(path.join("init.lua"), "ordinary nested settings\n").unwrap();
+    }
+    let mut app = f.app(false);
+    let task = key(&mut app, KeyCode::Char('f')).unwrap();
+    f.run(&mut app, task);
+    key(&mut app, KeyCode::Char('/'));
+    text(&mut app, "init.lua");
+    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Char('x')); // Closed .config group marks both matches.
+    assert_eq!(app.inventory.candidate_marks.len(), 2);
+    key(&mut app, KeyCode::Char('E'));
+    let task = key(&mut app, KeyCode::Enter).unwrap();
+    f.run(&mut app, task);
+    assert!(!app.preview.as_ref().unwrap().pending.blocked());
+    let task = approve(&mut app);
+    let refresh = f
+        .run(&mut app, task)
+        .unwrap_or_else(|| panic!("nested adoption failed: {:?}", app.error));
+    let discover = f
+        .run(&mut app, refresh)
+        .unwrap_or_else(|| panic!("nested refresh failed: {:?}", app.error));
+    f.run(&mut app, discover);
+    for directory in ["alpha", "beta"] {
+        let relative = PathBuf::from(".config/editor")
+            .join(directory)
+            .join("init.lua");
+        assert_eq!(
+            f.host.home.join(&relative).canonicalize().unwrap(),
+            f.repo.join("files").join(&relative)
+        );
+        assert_eq!(
+            fs::read_to_string(f.repo.join("files").join(&relative)).unwrap(),
+            "ordinary nested settings\n"
+        );
+    }
+    let manifest =
+        dort_core::Manifest::parse(&fs::read_to_string(f.repo.join("dort.toml")).unwrap()).unwrap();
+    assert_eq!(manifest.files.len(), 5);
+    assert!(
+        manifest
+            .files
+            .iter()
+            .any(|m| m.id == "only-a" && m.source.as_path() == std::path::Path::new("only-a"))
+    );
+    assert!(f.repo.join("only-a").is_file());
+}
+
 #[test]
 fn selected_apply_keep_delete_are_combined_and_every_delete_id_then_yes_is_required() {
     for operation in ['K', 'D'] {

@@ -101,7 +101,7 @@ fn context_groups_order_one_complete_action_set_and_keep_risk_separate() {
 fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {
     let mut app = App::new(false);
     app.tab = Tab::Files;
-    assert!(key(&mut app, KeyCode::Char(' ')).is_none());
+    assert!(key(&mut app, KeyCode::Char(';')).is_none());
     assert!(current(&app).2 && app.text_entry());
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
@@ -153,7 +153,7 @@ fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {
 #[test]
 fn disabled_actions_stay_open_and_full_reasons_are_keyboard_reachable_without_dispatch() {
     let mut app = App::new(false);
-    key(&mut app, KeyCode::Char(' '));
+    key(&mut app, KeyCode::Char(';'));
     text(&mut app, "View patch content");
     let reason = app.action_reason(Action::GitPatch).unwrap();
     assert!(key(&mut app, KeyCode::Enter).is_none());
@@ -202,7 +202,7 @@ fn filtered_entry_identity_dispatches_a_draft_not_a_filtered_file_or_approval() 
     app.tab = Tab::Files;
     app.requested_profiles = vec!["session-addition".into()];
     app.inventory.managed.query = "no-matches".into();
-    key(&mut app, KeyCode::Char(' '));
+    key(&mut app, KeyCode::Char(';'));
     text(&mut app, "KEEP LOCAL FILE: ENTER EXACT");
     let (query, selected, _, entries) = current(&app);
     let matches = palette::matches(entries, query);

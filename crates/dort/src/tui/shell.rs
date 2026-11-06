@@ -49,9 +49,16 @@ impl AdoptionDraft {
             focused: 0,
         }
     }
-    pub fn suggest(&mut self, path: &std::path::Path) {
+    pub fn suggest(&mut self, path: &std::path::Path, home: &std::path::Path) {
+        // Discovery supplies validated paths beneath its explicit HOME. Never infer
+        // HOME from a basename/common ancestor or consult the process environment.
+        let relative = path
+            .strip_prefix(home)
+            .expect("discovery path beneath HOME");
         self.target = path.to_str().expect("validated candidate path").to_owned();
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+        let name = relative
+            .to_str()
+            .expect("validated relative candidate path");
         let id: String = name
             .trim_start_matches('.')
             .chars()
@@ -65,11 +72,19 @@ impl AdoptionDraft {
             .take(128)
             .collect();
         self.id = if id.is_empty() { "file".into() } else { id };
-        self.source = format!("files/{}", self.id);
+        self.source = std::path::Path::new("files")
+            .join(relative)
+            .to_str()
+            .expect("validated source suggestion")
+            .to_owned();
         self.focused = 0;
     }
 }
 pub enum Overlay {
+    Ignored {
+        paths: Vec<std::path::PathBuf>,
+        selected: usize,
+    },
     Actions {
         query: String,
         selected: usize,
@@ -97,6 +112,8 @@ pub enum Action {
     Choose,
     Init,
     Discover,
+    IgnoreSelected,
+    ManageIgnored,
     Adopt,
     AdoptSelected,
     BatchAdopt,
@@ -146,6 +163,10 @@ impl Action {
             Self::Choose => "Choose repository (session only)",
             Self::Init => "Create/attach local repository",
             Self::Discover => "Discover files (metadata only; no repository needed)",
+            Self::IgnoreSelected => {
+                "Ignore selected discovery file/folder (persistent local preview)"
+            }
+            Self::ManageIgnored => "Manage ignored paths / Unignore (local preferences)",
             Self::Adopt => "Adopt a file (editable target / ID / source)",
             Self::AdoptSelected => "Adopt selected eligible file (inspect first)",
             Self::BatchAdopt => "Adopt marked files (combined editable batch)",
@@ -194,6 +215,7 @@ pub struct Shell {
     pub unmanage_focused: usize,
 }
 pub enum Intent {
+    Unignore(std::path::PathBuf),
     Action(Action),
     Submit(Form),
     Known(usize),
@@ -292,6 +314,23 @@ impl Shell {
             self.scroll = 0;
         }
         match self.overlay.as_mut()? {
+            Overlay::Ignored { paths, selected } => match key.code {
+                KeyCode::Esc => self.overlay = None,
+                KeyCode::Down | KeyCode::Char('j') => {
+                    *selected = (*selected + 1).min(paths.len().saturating_sub(1))
+                }
+                KeyCode::Up | KeyCode::Char('k') => *selected = selected.saturating_sub(1),
+                KeyCode::PageDown => *selected = (*selected + 8).min(paths.len().saturating_sub(1)),
+                KeyCode::PageUp => *selected = selected.saturating_sub(8),
+                KeyCode::Home => *selected = 0,
+                KeyCode::End => *selected = paths.len().saturating_sub(1),
+                KeyCode::Enter => {
+                    if let Some(path) = paths.get(*selected) {
+                        return Some(Intent::Unignore(path.clone()));
+                    }
+                }
+                _ => (),
+            },
             Overlay::Help | Overlay::About => {
                 if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?')) {
                     self.overlay = None;

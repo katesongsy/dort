@@ -10,6 +10,7 @@ mod batch_journal;
 pub mod bootstrap;
 pub mod context;
 pub mod discovery;
+pub mod discovery_ignore;
 pub mod error;
 pub mod git;
 pub mod journal;

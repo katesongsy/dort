@@ -188,6 +188,8 @@ pub fn adopt_request(target: &Path, id: &str, source: &Path) -> Request {
 }
 
 pub struct Discovery {
+    /// Explicit discovery root for HOME-relative presentation defaults, never environment lookup.
+    pub home: PathBuf,
     pub repository: Option<PathBuf>,
     pub report: discovery::Discovery,
 }
@@ -213,7 +215,11 @@ pub fn discover(
         None
     };
     let report = discovery::discover(host, repository.as_deref())?;
-    Ok(Discovery { repository, report })
+    Ok(Discovery {
+        home: host.home.clone(),
+        repository,
+        report,
+    })
 }
 
 /// Own the actual preview and its executable binding, never a serialized report.

@@ -209,6 +209,50 @@ fn discovery_needs_no_repository_and_does_not_read_candidate_contents() {
 }
 
 #[test]
+fn discovery_honors_persistent_ignores_without_writes_and_rejects_malformed_preferences() {
+    let sandbox = Sandbox::new();
+    fs::create_dir_all(sandbox.home.join(".tool/sub")).unwrap();
+    fs::write(sandbox.home.join(".tool/sub/config"), "ordinary fixture").unwrap();
+    fs::write(sandbox.home.join(".tool-other"), "other").unwrap();
+    let config = sandbox.home.join(".config/dort");
+    fs::create_dir_all(&config).unwrap();
+    fs::set_permissions(&config, fs::Permissions::from_mode(0o700)).unwrap();
+    let path = config.join("discovery-ignore.toml");
+    fs::write(&path, "paths = ['.tool']\n").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let output = sandbox
+        .command()
+        .args(["--json", "files", "discover"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let candidates = report["candidates"].as_array().unwrap();
+    assert!(
+        candidates
+            .iter()
+            .all(|c| !c["entry"]["path"].as_str().unwrap().contains(".tool/"))
+    );
+    assert!(candidates.iter().any(|c| {
+        c["entry"]["path"]
+            .as_str()
+            .unwrap()
+            .ends_with(".tool-other")
+    }));
+    assert!(!sandbox.home.join(".local").exists());
+    assert_eq!(fs::read_to_string(&path).unwrap(), "paths = ['.tool']\n");
+    fs::write(&path, "paths = ['../outside']\n").unwrap();
+    sandbox
+        .command()
+        .args(["--json", "files", "discover"])
+        .assert()
+        .failure();
+    assert!(!sandbox.home.join(".local").exists());
+}
+
+#[test]
 fn adoption_json_and_human_previews_do_not_write_any_files_or_print_contents() {
     let sandbox = Sandbox::new();
     let manifest = sandbox.manifest("schema=1\n");

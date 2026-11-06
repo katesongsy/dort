@@ -47,7 +47,7 @@ impl Fixture {
         let home = support::TestHome::new();
         let repo = home.repository("repo");
         let original = if action == Action::Adopt {
-            "# retain comment\nschema=1\nfiles=[]\n".to_owned()
+            "# retain comment\nschema=1\n[[files]]\nid='preserved'\nsource='preserved'\ntarget='~/.preserved'\nmode='link'\n# retain nested table\n[files.overrides]\nubuntu='preserved-ubuntu'\n".to_owned()
         } else {
             {
                 let mut manifest = Manifest::parse("schema=1").unwrap();
@@ -56,6 +56,16 @@ impl Fixture {
             }
         };
         fs::write(repo.join("dort.toml"), &original).unwrap();
+        if action == Action::Adopt {
+            for name in ["preserved", "preserved-ubuntu"] {
+                fs::write(repo.join(name), "ordinary untouched source\n").unwrap();
+            }
+            fs::write(
+                home.host.home.join(".preserved"),
+                "ordinary untouched target\n",
+            )
+            .unwrap();
+        }
         if action != Action::Adopt {
             fs::create_dir_all(repo.join("files/shared")).unwrap();
         }
@@ -131,6 +141,16 @@ impl Fixture {
         }
         if self.action == Action::Adopt {
             assert!(!self.repo.join("files").exists());
+            for name in ["preserved", "preserved-ubuntu"] {
+                assert_eq!(
+                    fs::read_to_string(self.repo.join(name)).unwrap(),
+                    "ordinary untouched source\n"
+                );
+            }
+            assert_eq!(
+                fs::read_to_string(self.home.host.home.join(".preserved")).unwrap(),
+                "ordinary untouched target\n"
+            );
         }
         assert!(
             journal::diagnose(&self.home.host)
@@ -152,6 +172,27 @@ fn combined_batches_are_one_transaction_selected_scope_and_guarded_recovery() {
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].journal_schema, Some(4));
         assert!(!history[0].blocks_writes());
+        if action == Action::Adopt {
+            let text = fs::read_to_string(f.repo.join("dort.toml")).unwrap();
+            assert!(text.contains("# retain nested table"));
+            let manifest = Manifest::parse(&text).unwrap();
+            assert_eq!(
+                manifest
+                    .files
+                    .iter()
+                    .map(|m| m.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["preserved", "a", "b"]
+            );
+            assert_eq!(
+                manifest.files[0].source,
+                std::path::PathBuf::from("preserved")
+            );
+            assert_eq!(
+                manifest.files[0].overrides[&dort_core::platform::Platform::Ubuntu],
+                std::path::PathBuf::from("preserved-ubuntu")
+            );
+        }
         if action == Action::Apply {
             assert!(!f.home.host.home.join(".c").is_symlink());
             assert!(
@@ -177,6 +218,75 @@ fn combined_batches_are_one_transaction_selected_scope_and_guarded_recovery() {
         f.restored();
     }
 }
+#[test]
+fn adoption_append_handles_absent_empty_and_inline_files_without_reordering_declarations() {
+    for original in [
+        "# absent files\nschema=1\n[profiles]\navailable=['work']\n[profiles.platform]\nubuntu=['work']\n",
+        "# empty files\nschema=1\nfiles=[]\n",
+        "# inline files\nschema=1\nfiles=[{id='preserved',source='preserved',target='~/.preserved',mode='link'}]\n",
+    ] {
+        let mut f = Fixture::new(Action::Adopt);
+        f.original = original.into();
+        fs::write(f.repo.join("dort.toml"), original).unwrap();
+        let before = Manifest::parse(original).unwrap();
+        // Reference the previous append format, including imported
+        // table positions. Existing journal digests must still reconstruct it.
+        #[derive(serde::Serialize)]
+        struct Addition {
+            files: Vec<dort_core::model::ManagedFile>,
+        }
+        let added = toml::to_string(&Addition {
+            files: mappings().into_iter().take(2).collect(),
+        })
+        .unwrap()
+        .parse::<toml_edit::DocumentMut>()
+        .unwrap();
+        let mut legacy = original.parse::<toml_edit::DocumentMut>().unwrap();
+        if legacy.get("files").is_none() {
+            legacy["files"] = added["files"].clone();
+        } else if let Some(array) = legacy["files"].as_array_mut() {
+            for table in added["files"].as_array_of_tables().unwrap() {
+                array.push(table.clone().into_inline_table());
+            }
+        } else {
+            unreachable!("compatibility fixtures use absent/inline declarations");
+        }
+        let legacy = legacy.to_string();
+        let mut expected = before.clone();
+        expected.files.extend(mappings().into_iter().take(2));
+        assert_eq!(
+            serde_json::to_value(Manifest::parse(&legacy).unwrap()).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        f.execute(|_| Ok(())).unwrap();
+        let edited = fs::read_to_string(f.repo.join("dort.toml")).unwrap();
+        assert_eq!(
+            edited, legacy,
+            "preserve old successful edit bytes for schema-4 recovery"
+        );
+        let after = Manifest::parse(&edited).unwrap();
+        assert_eq!(after.files.len(), before.files.len() + 2);
+        for (old, new) in before.files.iter().zip(&after.files) {
+            assert_eq!(
+                serde_json::to_value(old).unwrap(),
+                serde_json::to_value(new).unwrap()
+            );
+        }
+        assert_eq!(
+            after
+                .files
+                .iter()
+                .rev()
+                .take(2)
+                .map(|m| m.id.as_str())
+                .collect::<Vec<_>>(),
+            ["b", "a"]
+        );
+        f.undo(|_| Ok(())).unwrap();
+        f.restored();
+    }
+}
+
 #[test]
 fn every_forward_inverse_error_boundary_is_restartable_and_blocks_new_writes() {
     for action in actions() {

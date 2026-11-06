@@ -43,7 +43,7 @@ Only this child command uses the demo HOME/XDG paths; your shell's HOME is uncha
 
 ### Find your way around
 
-Welcome shows the next steps. Space opens **Actions**; press `/` there and type a label to find it, then Enter to activate. All workflow actions are available by label; letter shortcuts below are optional accelerators. `?` opens Help. Tab/Shift-Tab changes focus, shown by highlighted borders or buttons. Left/Right chooses within the focused tabs or action buttons; Enter activates the selected button. `1` Overview, `2` Files, `3` Recovery, `4` Checks and `5` Git change destinations.
+Welcome shows the next steps. `;` opens **Actions** with search focused; type a label, use Up/Down to choose and Enter to request it. All workflow actions are available by label; letter shortcuts below are optional accelerators. `?` opens Help. Tab/Shift-Tab moves among form controls, or switches Discover file-list/content focus outside text/dialogs. Highlighted borders/buttons show focus; Esc returns from content to the list. Left/Right changes destination outside text/dialogs, as do `1` Overview, `2` Files, `3` Recovery, `4` Checks and `5` Git.
 
 PgUp/PgDn scroll reports; Home returns to the start. File reviews use Up/Down to select a mapping and `i` to toggle the complete report. In that full report, Left/Right scrolls long lines; Home resets both axes. Esc returns without writing: confirmation → preview → retained form → destination. In text fields/search, printable `q`, `?` and `/` are text, Backspace edits and Ctrl-U clears the current field. Outside text entry, `q` exits; Ctrl-C exits anywhere, waiting for an active worker.
 
@@ -55,15 +55,15 @@ PgUp/PgDn scroll reports; Home returns to the start. File reviews use Up/Down to
 
 Approved creation publishes a minimal local Git repository and `dort.toml`, registers/selects it and shows the result in Overview. It does not clone, stage or commit. Missing Git is a prerequisite error: install trusted Git separately and restart Dort; other read-only workflows remain available. A preview alone never authorizes execution.
 
-For inspection-only sessions, use `demo_dort --dry-run tui` instead. This disables all write approvals, including creation/adoption; it does not disable read-only discovery/checks. The remaining write steps require a normal session **only inside this disposable demo**.
+For inspection-only sessions, use `demo_dort --dry-run tui` instead. This disables all write approvals, including creation/adoption; read-only discovery/checks remain available, but automatic Discover file-content previews are withheld. The remaining write steps require a normal session **only inside this disposable demo**.
 
 ### 2. Discover and adopt the demo file
 
-1. Open Actions → **Discover files** (`f`). This reads bounded metadata, not file bodies. Directories and other ineligible rows are labeled and cannot open a candidate adoption draft. Find the `.notesrc` regular-file row with **Eligible hint** in its ADOPTION column with Up/Down or `/notesrc`; Esc leaves search while retaining the display filter.
-2. Enter inspects the candidate without starting adoption. Press `e` or click **Adopt selected** to open the editable draft as a separate action. Set TARGET to `~/.notesrc`, ID to `notes`, and SOURCE to `files/notesrc`. Enter advances fields; Tab/Shift-Tab moves between fields and buttons. The suggested ID/source may differ, so edit them explicitly for this walkthrough.
-3. On **Review read-only preview**, Enter requests the actual preview. Review source-copy, manifest, destination-link and backup effects. PgDn scrolls selected effects; `i` opens the full report, including permissions and warnings. Esc retains the draft without writing. To execute, Enter from an unblocked preview, then type `yes` and Enter.
+1. Open Actions → **Discover files** (`f`). This scans bounded metadata and automatically previews only the selected eligible regular file, with sensitive/binary/oversized content withheld. Directories and other ineligible rows are labeled and cannot open a candidate adoption draft. Find the `.notesrc` regular-file row with **Eligible hint** in its ADOPTION column with Up/Down or `/notesrc`; Esc leaves search while retaining the display filter.
+2. Enter inspects the candidate without starting adoption (optional). Press `e` or click **Adopt selected** to open the editable draft as a separate action. Set TARGET to `~/.notesrc`, ID to `notes`, and SOURCE to `files/notesrc`. Enter advances fields; Tab/Shift-Tab moves between fields and buttons. The suggested ID/source may differ, so edit them explicitly for this walkthrough.
+3. On **Review read-only preview**, Enter requests the actual preview. Review source-copy, manifest, destination-link and backup effects. PgDn scrolls selected effects; `i` opens the full report, including permissions and warnings. Esc retains the draft without writing. To execute adoption, activate **Adopt all** with Enter or a click from the unblocked preview; no typed yes is needed. Dort returns to refreshed Discover, retaining receipt details.
 
-The demo `.notesrc` becomes a link to its copied repository source, with a new base-profile mapping. Discovery eligibility is not approval or proof that content is safe: privately review any real file before adoption. No file bodies appear in ordinary views. Unsupported kinds, sensitive paths/content and unsafe parents are refused by core checks.
+The demo `.notesrc` becomes a link to its copied repository source, with a new base-profile mapping. Discovery eligibility is not approval or proof that content is safe: privately review any real file before adoption. Only Discover's ephemeral selected-file preview displays ordinary content; reports, receipts and history stay content-free. Unsupported kinds, sensitive paths/content and unsafe parents are refused by core checks.
 
 ### 3. Inspect files, checks and Git
 

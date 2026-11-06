@@ -250,7 +250,7 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
     lines.push(ui::keys(&[
         ("PgUp/PgDn", "details"),
         ("Home", "start"),
-        ("Space", "Actions"),
+        (";", "Actions"),
     ]));
     dashboard(
         frame,

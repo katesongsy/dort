@@ -9,6 +9,8 @@ pub enum Target {
     TreeFold(usize),
     TreeMark(usize),
     BatchControl(usize, bool),
+    BatchEdit,
+    DiscoverFocus(bool),
     Action(Action),
     Destination(Tab),
     Row(usize),
@@ -23,6 +25,7 @@ pub enum Target {
 }
 #[derive(Clone, Copy)]
 pub enum Wheel {
+    Content,
     Rows,
     Choices,
     Details,

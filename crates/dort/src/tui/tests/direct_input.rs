@@ -296,7 +296,7 @@ fn mouse_form_controls_and_palette_actions_never_bypass_typed_approval_or_disclo
     assert_eq!(app.shell.adoption.focused, 2);
     assert_eq!(app.shell.adoption.id, "q");
     press(&mut app, KeyCode::Esc, size);
-    press(&mut app, KeyCode::Char(' '), size);
+    press(&mut app, KeyCode::Char(';'), size);
     for c in "delete managed link".chars() {
         press(&mut app, KeyCode::Char(c), size);
     }
@@ -385,7 +385,7 @@ fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_ta
     );
     assert!(app.tab == Tab::Files && matches!(app.shell.overlay, Some(Overlay::Form(Form::Init))));
     press(&mut app, KeyCode::Esc, size);
-    press(&mut app, KeyCode::Char(' '), size);
+    press(&mut app, KeyCode::Char(';'), size);
     for c in "rollback".chars() {
         press(&mut app, KeyCode::Char(c), size);
     }

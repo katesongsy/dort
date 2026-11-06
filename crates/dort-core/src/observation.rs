@@ -218,7 +218,16 @@ pub(crate) fn read_checked(
     path: &Path,
     expected: &Fingerprint,
 ) -> Result<Vec<u8>> {
-    if expected.size < 0 || expected.size as u64 > MAX_CONTENT {
+    read_checked_bounded(handle, path, expected, MAX_CONTENT)
+}
+
+pub(crate) fn read_checked_bounded(
+    handle: &ParentHandle,
+    path: &Path,
+    expected: &Fingerprint,
+    limit: u64,
+) -> Result<Vec<u8>> {
+    if expected.size < 0 || expected.size as u64 > limit {
         return Err(Error::Invalid(
             "file exceeds the 16 MiB observation limit".into(),
         ));
@@ -238,13 +247,13 @@ pub(crate) fn read_checked(
     }
     let mut bytes = Vec::new();
     (&mut file)
-        .take(MAX_CONTENT + 1)
+        .take(limit + 1)
         .read_to_end(&mut bytes)
         .map_err(|e| io_error("read regular file", path, e))?;
     let after = fs::fstat(&file).map_err(|e| io_error("recheck open file", path, e))?;
     let named = fs::statat(&handle.directory, &handle.name, AtFlags::SYMLINK_NOFOLLOW)
         .map_err(|e| io_error("recheck named file", path, e))?;
-    if bytes.len() as u64 > MAX_CONTENT
+    if bytes.len() as u64 > limit
         || Fingerprint::from_stat(&after) != *expected
         || Fingerprint::from_stat(&named) != *expected
     {
@@ -364,8 +373,39 @@ pub fn sensitive_path(path: &Path) -> bool {
             "secret",
             "privatekeys",
             "passwords",
+            "auth",
+            "auth.json",
+            ".auth.json",
+            ".auth",
+            ".sessions",
+            "authentication",
+            "session",
+            "sessions",
+            "session-store",
+            "sessionstore",
+            "cookies",
+            "cookies.sqlite",
+            "login data",
+            "1password",
+            "bitwarden",
+            "keepass",
+            "keepassxc",
+            "lastpass",
+            ".password-store",
         ]
         .contains(&name.as_ref())
+            || [
+                "auth",
+                "authentication",
+                "credential",
+                "credentials",
+                "secret",
+                "secrets",
+                "session",
+                "sessions",
+                "cookies",
+            ]
+            .contains(&name.trim_start_matches('.').split('.').next().unwrap_or(""))
             || name.starts_with(".env.")
             || name.starts_with("id_rsa")
             || name.starts_with("id_ed25519")
@@ -377,10 +417,19 @@ pub fn sensitive_path(path: &Path) -> bool {
     })
 }
 
-fn sensitive_content(bytes: &[u8]) -> bool {
+pub(crate) fn sensitive_content(bytes: &[u8]) -> bool {
     let lower = bytes.to_ascii_lowercase();
     [
         b"private key".as_slice(),
+        b"\"password\"",
+        b"\"token\"",
+        b"\"secret\"",
+        b"\"credentials\"",
+        b"accesstoken",
+        b"apikey",
+        b"clientsecret",
+        b"authorization:",
+        b"bearer ",
         b"password=",
         b"password =",
         b"token=",

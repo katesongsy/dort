@@ -69,6 +69,13 @@ pub struct Confirmation {
     pub removal_ack: Option<String>,
     pub batch_acks: Vec<String>,
 }
+struct RowClick {
+    at: std::time::Instant,
+    key: usize,
+    discovering: bool,
+    size: (u16, u16),
+    row: u16,
+}
 pub struct App {
     pub appearance: super::appearance::Appearance,
     pub tab: Tab,
@@ -86,10 +93,13 @@ pub struct App {
     pub failure: Option<super::task_surfaces::Failure>,
     pub write_warning: bool,
     pub data: Option<Data>,
+    pub content: super::discover_content::State,
+    return_to_discover: bool,
+    rediscovering_after_adoption: bool,
     pub discovering: bool,
     pub inventory: super::inventory::Inventory,
     pub batch_editor: Option<super::batch_ui::Editor>,
-    pub discovery: Option<crate::services::Discovery>,
+    pub discovery: Option<std::sync::Arc<crate::services::Discovery>>,
     pub candidate_selected: usize,
     pub requested_profiles: Vec<String>,
     pub check: Option<(Box<crate::services::CheckReport>, bool)>,
@@ -100,6 +110,7 @@ pub struct App {
     pub retry: Option<super::actions::Retry>,
     pub selected: usize,
     pub hits: super::input::Hits,
+    last_click: Option<RowClick>,
     pub details_scroll: u16,
     viewport: (u16, u16),
     pub preview: Option<Preview>,
@@ -133,6 +144,9 @@ impl App {
             failure: None,
             write_warning: false,
             data: None,
+            content: Default::default(),
+            return_to_discover: false,
+            rediscovering_after_adoption: false,
             discovering: false,
             inventory: Default::default(),
             batch_editor: None,
@@ -147,6 +161,7 @@ impl App {
             retry: None,
             selected: 0,
             hits: Default::default(),
+            last_click: None,
             details_scroll: 0,
             viewport: (48, 14),
             preview: None,
@@ -163,6 +178,8 @@ impl App {
         }
     }
     pub fn start(&mut self, writing: bool) {
+        self.last_click = None;
+        self.inventory.pending_g = false;
         self.hits.clear();
         self.details_scroll = 0;
         self.failed_write = false;
@@ -175,8 +192,20 @@ impl App {
             "Reading..."
         }
         .into();
+        super::discover_content::sync(self, self.viewport.0, self.viewport.1);
     }
     pub fn complete(&mut self, result: Result<Output, String>) -> Option<Task> {
+        if let Ok(Output::DiscoverContent(report)) = result {
+            self.content.accept(report);
+            return None;
+        }
+        self.last_click = None;
+        if let Ok(Output::DiscoveryTree(report)) = result {
+            if super::discovery_tree::accept(self, report) {
+                self.clamp_file_selection();
+            }
+            return None;
+        }
         let writing = self.writing;
         let activity = self.activity.take();
         self.failed_write = writing && result.is_err();
@@ -190,6 +219,8 @@ impl App {
         }
         match result {
             Err(error) => {
+                self.return_to_discover = false;
+                self.rediscovering_after_adoption = false;
                 self.failure = Some(super::task_surfaces::Failure {
                     cause: error.clone(),
                     activity,
@@ -214,6 +245,7 @@ impl App {
                 }
                 self.error = Some(self.status.clone());
             }
+            Ok(Output::DiscoverContent(_) | Output::DiscoveryTree(_)) => unreachable!(),
             Ok(Output::History { rows, error }) => {
                 let identity = self
                     .data
@@ -258,6 +290,11 @@ impl App {
             }
             Ok(Output::Data(data)) => {
                 self.replace_data(data);
+                // Adoption must refresh managed/history observations as well as
+                // Discover, so immediately opening Recovery sees the new receipt.
+                if self.rediscovering_after_adoption && !self.quit {
+                    return Some(Task::Discover);
+                }
                 // Preserve execution errors/completion until the next explicit action.
                 if self.status == "Reading..." {
                     self.status = "Read-only observations loaded.".into();
@@ -337,8 +374,16 @@ impl App {
                 self.candidate_selected = position
                     .unwrap_or(self.candidate_selected)
                     .min(discovery.report.candidates.len().saturating_sub(1));
-                self.discovery = Some(discovery);
+                self.discovery = Some(std::sync::Arc::new(discovery));
                 self.clamp_file_selection();
+                if std::mem::take(&mut self.rediscovering_after_adoption)
+                    && let Some(receipt) = &self.receipt
+                {
+                    self.status = format!(
+                        "{} completed; Discover refreshed. Receipt in details; Recovery retains transaction history.",
+                        receipt.operation
+                    );
+                }
             }
             Ok(Output::Selected(repository, data)) => {
                 self.origin = if repository.is_some() {
@@ -363,6 +408,11 @@ impl App {
                 self.status =
                     "Repository selected for this session only; configuration unchanged.".into();
             }
+            Ok(Output::IgnoredPaths(paths)) => {
+                self.shell.overlay = Some(Overlay::Ignored { paths, selected: 0 });
+                self.shell.scroll = 0;
+                self.status = "Select an exact ignored path; Enter previews Unignore, Esc returns. Ancestor rules still apply.".into();
+            }
             Ok(Output::Preview(pending)) => match pending.report() {
                 Ok(text) => {
                     self.reviewed_activity =
@@ -376,11 +426,31 @@ impl App {
                         selected: 0,
                         effect_scroll: 0,
                     });
-                    self.status = "Review effects; Enter opens confirmation, Esc dismisses.".into();
+                    self.status = if self.preview.as_ref().is_some_and(|p| p.pending.adoption()) {
+                        "Review all mappings; Enter / Adopt all approves once. Esc returns without writing."
+                    } else {
+                        "Review effects; Enter opens confirmation, Esc dismisses."
+                    }.into();
                 }
                 Err(error) => self.status = super::actions::diagnostic(&error),
             },
             Ok(Output::Completed(completion)) => {
+                if completion.operation == "Discovery preferences" {
+                    self.content = Default::default();
+                    self.discovery = None;
+                    self.inventory.candidate_marks.clear();
+                    self.inventory.candidate_mark_revision =
+                        self.inventory.candidate_mark_revision.wrapping_add(1);
+                    self.shell.back();
+                    self.tab = Tab::Files;
+                    self.discovering = true;
+                    self.inventory.details = false;
+                    self.status = "Discovery preferences saved. Refreshing discovery; undo in Actions > Manage ignored paths.".into();
+                    if !self.quit {
+                        return Some(Task::Discover);
+                    }
+                    return None;
+                }
                 self.receipt = Some(super::task_surfaces::Receipt {
                     operation: completion.operation,
                     transaction_id: completion.transaction_id.clone(),
@@ -391,7 +461,10 @@ impl App {
                 if let Some(editor) = &mut self.batch_editor {
                     editor.open = false;
                 }
-                self.discovery = None;
+                let adopted = std::mem::take(&mut self.return_to_discover);
+                if !adopted {
+                    self.discovery = None;
+                }
                 if let Some(root) = completion.repository {
                     self.repository = Some(root);
                     self.reset_repository_scope();
@@ -415,6 +488,16 @@ impl App {
                         .unwrap_or_else(|| "No changes needed; no transaction created.".into())
                 ));
                 self.status = "Operation completed. Refreshing observations...".into();
+                if adopted {
+                    self.rediscovering_after_adoption = true;
+                    self.tab = Tab::Files;
+                    self.discovering = true;
+                    self.show_result = false;
+                    self.inventory.details = false;
+                    self.inventory.candidate_marks.clear();
+                    self.inventory.candidate_mark_revision =
+                        self.inventory.candidate_mark_revision.wrapping_add(1);
+                }
                 if !self.quit {
                     return Some(Task::Refresh);
                 }
@@ -429,6 +512,16 @@ impl App {
         width: u16,
         height: u16,
     ) -> Option<Task> {
+        self.mouse_at(event, width, height, std::time::Instant::now())
+    }
+    pub(super) fn mouse_at(
+        &mut self,
+        event: ratatui::crossterm::event::MouseEvent,
+        width: u16,
+        height: u16,
+        now: std::time::Instant,
+    ) -> Option<Task> {
+        self.inventory.pending_g = false;
         use super::input::{Target, Wheel};
         use ratatui::crossterm::event::{MouseButton, MouseEventKind};
         if self.hits.size() != (width, height) {
@@ -446,6 +539,7 @@ impl App {
             _ => None,
         };
         if let Some(code) = code {
+            self.last_click = None;
             let wheel = self.hits.scroll(event.column, event.row)?;
             if matches!(wheel, Wheel::Choices | Wheel::PreviewRows) {
                 let code = if code == KeyCode::PageDown {
@@ -454,6 +548,10 @@ impl App {
                     KeyCode::Up
                 };
                 return self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height);
+            }
+            if matches!(wheel, Wheel::Content) {
+                self.content.scroll_by(code == KeyCode::PageUp, 2);
+                return None;
             }
             if matches!(wheel, Wheel::Details) {
                 self.hits.clear();
@@ -482,7 +580,44 @@ impl App {
             return None;
         }
         let target = self.hits.target(event.column, event.row)?;
-        self.hits.clear();
+        if self.tab == Tab::Files
+            && matches!(
+                target,
+                Target::Row(_) | Target::TreeFold(_) | Target::TreeMark(_) | Target::Filter
+            )
+        {
+            self.content.focused = false;
+        }
+        let previous = self.last_click.take();
+        let row_click = matches!(target, Target::Row(_)) && self.tab == Tab::Files && !self.busy;
+        // Row selection does not alter layout: retain render-owned hits for coalesced clicks.
+        // Checkbox/chevron hits remain single-click controls, never double-click marks.
+        if !row_click {
+            self.hits.clear();
+        }
+        if row_click && let Target::Row(index) = target {
+            if previous.is_some_and(|click| {
+                click.key == index
+                    && click.discovering == self.discovering
+                    && click.size == (width, height)
+                    && click.row == event.row
+                    && now.saturating_duration_since(click.at)
+                        <= std::time::Duration::from_millis(400)
+            }) && super::tree::position(self, index).is_some()
+            {
+                super::tree::select(self, index);
+                super::tree::toggle(self);
+                self.hits.clear();
+                return None;
+            }
+            self.last_click = Some(RowClick {
+                at: now,
+                key: index,
+                discovering: self.discovering,
+                size: (width, height),
+                row: event.row,
+            });
+        }
         if self.busy {
             if let Target::Destination(tab) = target {
                 self.tab = tab;
@@ -513,9 +648,21 @@ impl App {
                 }
                 None
             }
+            Target::DiscoverFocus(content) => {
+                self.content.focused = content && self.content.available();
+                self.inventory.details = false;
+                None
+            }
+            Target::BatchEdit => {
+                self.batch_editor.as_mut().filter(|e| e.open)?.edit_item();
+                None
+            }
             Target::BatchControl(index, activate) => {
                 let editor = self.batch_editor.as_mut().filter(|e| e.open)?;
                 editor.focused = index;
+                if !editor.item_form && index < editor.drafts.len() * 3 {
+                    editor.item = index / 3;
+                }
                 if activate {
                     editor.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
                 } else {
@@ -525,17 +672,14 @@ impl App {
             Target::TreeFold(index) | Target::TreeMark(index) => {
                 super::tree::select(self, index);
                 if matches!(target, Target::TreeFold(_)) {
-                    let close = super::tree::visible(self)
-                        .into_iter()
-                        .find(|n| n.key == index)
-                        .is_some_and(|n| {
-                            let folded = if self.discovering {
-                                &self.inventory.candidate_folded
-                            } else {
-                                &self.inventory.managed_folded
-                            };
-                            !folded.contains(&n.path)
-                        });
+                    let close = super::tree::selected(self).is_some_and(|n| {
+                        let folded = if self.discovering {
+                            &self.inventory.candidate_folded
+                        } else {
+                            &self.inventory.managed_folded
+                        };
+                        !folded.contains(&n.path)
+                    });
                     super::tree::fold(self, close);
                 } else {
                     super::tree::toggle(self);
@@ -551,9 +695,7 @@ impl App {
                 height,
             ),
             Target::Row(index) => {
-                if self.tab == Tab::Files
-                    && super::tree::visible(self).iter().any(|n| n.key == index)
-                {
+                if self.tab == Tab::Files && super::tree::position(self, index).is_some() {
                     super::tree::select(self, index);
                     self.inventory.details = false;
                 } else if self.tab == Tab::Recovery && self.visible_history_rows().contains(&index)
@@ -604,6 +746,9 @@ impl App {
                 match &mut self.shell.overlay {
                     Some(Overlay::Repositories { selected }) => *selected = index,
                     Some(Overlay::Profiles(picker)) => picker.selected = index,
+                    Some(Overlay::Ignored { paths, selected }) if index < paths.len() => {
+                        *selected = index
+                    }
                     _ => return None,
                 }
                 if activate {
@@ -688,7 +833,23 @@ impl App {
     }
     pub fn key(&mut self, key: KeyEvent, width: u16, height: u16) -> Option<Task> {
         self.hits.clear();
-        self.key_inner(key, width, height)
+        self.last_click = None;
+        if key.code != KeyCode::Char('g')
+            || key.modifiers != KeyModifiers::NONE
+            || self.tab != Tab::Files
+            || self.text_entry()
+            || self.preview.is_some()
+            || self.shell.overlay.is_some()
+            || self.busy
+        {
+            self.inventory.pending_g = false;
+        }
+        let task = self.key_inner(key, width, height);
+        super::discover_content::sync(self, width, height);
+        if self.text_entry() {
+            self.content.focused = false;
+        }
+        task
     }
     fn key_inner(&mut self, key: KeyEvent, width: u16, height: u16) -> Option<Task> {
         let interrupt =
@@ -849,6 +1010,25 @@ impl App {
             }
             return self.confirm_key(key);
         }
+        if key.code == KeyCode::Enter
+            && !self.dry_run
+            && self
+                .preview
+                .as_ref()
+                .is_some_and(|p| p.pending.adoption() && !p.pending.blocked())
+        {
+            let preview = self.preview.take().expect("review retained");
+            return match preview.pending.approve(None) {
+                Ok(approved) => {
+                    self.return_to_discover = true;
+                    Some(Task::Execute(approved))
+                }
+                Err(error) => {
+                    self.status = super::actions::diagnostic(&error);
+                    None
+                }
+            };
+        }
         if let Some(preview) = &mut self.preview {
             let file_review = preview.pending.review_len().is_some();
             match key.code {
@@ -942,10 +1122,54 @@ impl App {
             }
             return None;
         }
-        // Tab belongs to local forms, never to workbench regions.
-        if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+        // Only Discover offers region focus; forms and disclosures retain local routing.
+        if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) && !self.text_entry() {
+            if self.tab == Tab::Files && self.discovering && self.content.available() {
+                self.content.focused = !self.content.focused;
+                self.inventory.details = false;
+            }
             return None;
         }
+        if self.tab == Tab::Files && self.discovering && self.content.focused && !self.text_entry()
+        {
+            if key.code == KeyCode::Esc {
+                self.content.focused = false;
+                self.inventory.details = false;
+                return None;
+            }
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                let page = self.content.page.get().max(1);
+                let movement = match key.code {
+                    KeyCode::Char('f') => Some((false, page)),
+                    KeyCode::Char('b') => Some((true, page)),
+                    KeyCode::Char('d') => Some((false, (page / 2).max(1))),
+                    KeyCode::Char('u') => Some((true, (page / 2).max(1))),
+                    _ => None,
+                };
+                if let Some((backwards, rows)) = movement {
+                    self.content.scroll_by(backwards, rows);
+                    return None;
+                }
+            } else if !key.modifiers.contains(KeyModifiers::ALT) {
+                match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => self.content.scroll_by(false, 1),
+                    KeyCode::Char('k') | KeyCode::Up => self.content.scroll_by(true, 1),
+                    KeyCode::Char('g') => {
+                        if std::mem::take(&mut self.inventory.pending_g) {
+                            self.content.scroll = 0;
+                        } else {
+                            self.inventory.pending_g = true;
+                        }
+                    }
+                    KeyCode::Char('G') => self.content.scroll = self.content.end.get(),
+                    _ => return self.workspace_key(key),
+                }
+                return None;
+            }
+        }
+        self.workspace_key(key)
+    }
+    fn workspace_key(&mut self, key: KeyEvent) -> Option<Task> {
         if !self.text_entry()
             && !self.git_view.sensitive()
             && matches!(key.code, KeyCode::Left | KeyCode::Right)
@@ -956,6 +1180,23 @@ impl App {
                 self.tab.next()
             };
             return self.activate(Action::Destination(tab));
+        }
+        if self.tab == Tab::Files
+            && self.discovering
+            && !self.text_entry()
+            && !key.modifiers.contains(KeyModifiers::ALT)
+            && matches!(
+                key.code,
+                KeyCode::PageDown | KeyCode::PageUp | KeyCode::Home
+            )
+        {
+            self.inventory.details = true;
+            if key.code == KeyCode::Home {
+                self.content.scroll = 0;
+            } else {
+                self.content.scroll_by(key.code == KeyCode::PageUp, 2);
+            }
+            return None;
         }
         if !self.text_entry() && matches!(key.code, KeyCode::PageDown | KeyCode::PageUp) {
             if self.tab == Tab::Files {
@@ -1012,7 +1253,52 @@ impl App {
             self.details_scroll = 0;
             return None;
         }
-        let opens_overlay = matches!(key.code, KeyCode::Char('?' | ' ' | '/' | 'p' | 'n'));
+        if self.tab == Tab::Files
+            && (!self.inventory.details || self.discovering)
+            && !self.content.focused
+        {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                let page = self.inventory.page_capacity.get().max(1);
+                let (backwards, count) = match key.code {
+                    KeyCode::Char('f') => (false, page),
+                    KeyCode::Char('b') => (true, page),
+                    KeyCode::Char('d') => (false, (page / 2).max(1)),
+                    KeyCode::Char('u') => (true, (page / 2).max(1)),
+                    _ => (false, 0),
+                };
+                if count > 0 {
+                    self.move_files(backwards, count);
+                    return None;
+                }
+            }
+            match key.code {
+                _ if key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {}
+                KeyCode::Char('j') => {
+                    self.move_files(false, 1);
+                    return None;
+                }
+                KeyCode::Char('k') => {
+                    self.move_files(true, 1);
+                    return None;
+                }
+                KeyCode::Char('g') => {
+                    if std::mem::take(&mut self.inventory.pending_g) {
+                        self.move_files(true, usize::MAX);
+                    } else {
+                        self.inventory.pending_g = true;
+                    }
+                    return None;
+                }
+                KeyCode::Char('G') => {
+                    self.move_files(false, usize::MAX);
+                    return None;
+                }
+                _ => (),
+            }
+        }
+        let opens_overlay = matches!(key.code, KeyCode::Char('?' | ';' | '/' | 'p' | 'n'));
         if !matches!(
             key.code,
             KeyCode::PageDown | KeyCode::PageUp | KeyCode::Tab | KeyCode::BackTab
@@ -1024,7 +1310,7 @@ impl App {
             KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(2),
             KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(2),
             KeyCode::Home => self.details_scroll = 0,
-            KeyCode::Char('x') if self.tab == Tab::Files => {
+            KeyCode::Char('x' | ' ') if self.tab == Tab::Files => {
                 return self.activate(Action::ToggleMark);
             }
             KeyCode::Char('h') if self.tab == Tab::Files => super::tree::fold(self, true),
@@ -1050,7 +1336,7 @@ impl App {
 
                 self.result = None;
             }
-            KeyCode::Char(' ') => self.shell.open_actions(super::palette::entries(
+            KeyCode::Char(';') => self.shell.open_actions(super::palette::entries(
                 self.tab,
                 self.discovering,
                 &self.page_actions(),
@@ -1111,10 +1397,7 @@ impl App {
             KeyCode::Char('f') => return self.activate(Action::Discover),
             KeyCode::Char('o') => return self.activate(Action::Adopt),
             KeyCode::Enter if self.tab == Tab::Files && self.inventory.group.is_some() => {
-                if let Some(node) = super::tree::visible(self)
-                    .into_iter()
-                    .find(|n| n.key == self.file_selection())
-                {
+                if let Some(node) = super::tree::selected(self) {
                     let folded = if self.discovering {
                         &self.inventory.candidate_folded
                     } else {
@@ -1140,8 +1423,6 @@ impl App {
             KeyCode::Char('a') if self.tab == Tab::Files || self.tab == Tab::Overview => {
                 return self.activate(Action::Apply);
             }
-            KeyCode::Char('k') if self.tab == Tab::Files => return self.activate(Action::Keep),
-            KeyCode::Char('d') if self.tab == Tab::Files => return self.activate(Action::Remove),
             KeyCode::Char('b') if self.tab == Tab::Recovery => {
                 return self.activate(Action::Rollback);
             }
@@ -1159,6 +1440,8 @@ impl App {
     }
     pub fn resize(&mut self, width: u16, height: u16) {
         if self.viewport != (width, height) {
+            self.inventory.pending_g = false;
+            self.last_click = None;
             self.hits.clear();
         }
         self.viewport = (width, height);
@@ -1168,6 +1451,7 @@ impl App {
         } else if let Some(preview) = &mut self.preview {
             preview.clamp_scroll(width, height);
         }
+        super::discover_content::sync(self, width, height);
     }
     fn replace_data(&mut self, data: Data) {
         let old_id = self.data.as_ref().and_then(|old| match self.tab {
@@ -1204,6 +1488,7 @@ impl App {
     }
     fn intent(&mut self, intent: Intent) -> Option<Task> {
         match intent {
+            Intent::Unignore(path) => Some(Task::Ignore(path, false)),
             Intent::Action(action) => {
                 if matches!(self.shell.overlay, Some(Overlay::Actions { .. }))
                     && let Some(reason) = self.action_reason(action)
@@ -1311,31 +1596,28 @@ impl App {
             Action::ClearMarks => {
                 if self.discovering {
                     self.inventory.candidate_marks.clear();
+                    self.inventory.candidate_mark_revision = self.inventory.candidate_mark_revision.wrapping_add(1);
                 } else {
                     self.inventory.managed_marks.clear();
                 }
             }
             Action::ExpandAll | Action::CollapseAll => {
-                let paths = super::tree::nodes(self).into_iter()
-                    .filter(|n| n.branch).map(|n| n.path).collect();
+                let folds = super::visibility::Folds::all(action == Action::CollapseAll);
                 let folded = if self.discovering {
                     &mut self.inventory.candidate_folded
                 } else {
                     &mut self.inventory.managed_folded
                 };
-                if action == Action::ExpandAll {
-                    folded.clear();
-                } else {
-                    *folded = paths;
-                }
+                *folded = std::sync::Arc::new(folds);
                 self.clamp_file_selection();
             }
             Action::BatchAdopt => {
+                let Some(discovery) = &self.discovery else { return None; };
                 if let Some(editor) = self.batch_editor.as_mut() {
-                    editor.sync(&self.inventory.candidate_marks);
+                    editor.sync(&self.inventory.candidate_marks, &discovery.home);
                 } else {
                     self.batch_editor = Some(super::batch_ui::Editor::new(
-                        &self.inventory.candidate_marks,
+                        &self.inventory.candidate_marks, &discovery.home,
                     ));
                 }
             }
@@ -1376,6 +1658,12 @@ impl App {
             Action::Destination(tab) => { self.tab = tab; self.selected = 0;if tab == Tab::Files { self.discovering = false; } }
             Action::Choose => self.shell.overlay = Some(Overlay::Repositories { selected: 0 }),
             Action::Init => { self.shell.path_focused = 0; self.shell.overlay = Some(Overlay::Form(Form::Init)); }
+            Action::ManageIgnored => return Some(Task::IgnoredPaths),
+            Action::IgnoreSelected => {
+                if let Some(node) = super::tree::selected(self) {
+                    return Some(Task::Ignore(node.path, true));
+                }
+            }
             Action::Discover => {
                 self.tab = Tab::Files;
                 self.discovering = true;
@@ -1492,23 +1780,17 @@ impl App {
             self.selected
         }
     }
+    pub fn file_rows_empty(&self) -> bool {
+        if self.discovering {
+            super::discovery_tree::snapshot(self).matching.is_empty()
+        } else {
+            self.visible_file_rows().is_empty()
+        }
+    }
     pub fn visible_file_rows(&self) -> Vec<usize> {
         let search = self.inventory.search(self.discovering);
         if self.discovering {
-            self.discovery
-                .as_ref()
-                .map(|d| {
-                    d.report
-                        .candidates
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, c)| {
-                            search.matches(c.entry.path.to_str().expect("validated candidate"))
-                        })
-                        .map(|(i, _)| i)
-                        .collect()
-                })
-                .unwrap_or_default()
+            super::discovery_tree::snapshot(self).matching.to_vec()
         } else {
             self.data
                 .as_ref()
@@ -1527,15 +1809,12 @@ impl App {
         if self.tab != Tab::Files {
             return;
         }
-        let visible: Vec<_> = super::tree::visible(self)
-            .into_iter()
-            .map(|n| n.key)
-            .collect();
+        let visible = super::tree::visible(self);
         let old = self.file_selection();
-        let next = if visible.contains(&old) {
+        let next = if super::tree::position(self, old).is_some() {
             Some(old)
         } else {
-            visible.first().copied()
+            visible.first().map(|n| n.key)
         };
         self.inventory.group = None;
         if let Some(key) = next {
@@ -1543,21 +1822,21 @@ impl App {
         }
     }
     fn move_file_selection(&mut self, backwards: bool) {
-        let visible: Vec<_> = super::tree::visible(self)
-            .into_iter()
-            .map(|n| n.key)
-            .collect();
-        let position = visible
-            .iter()
-            .position(|&i| i == self.file_selection())
-            .unwrap_or(0);
+        self.move_files(backwards, 1);
+    }
+    fn move_files(&mut self, backwards: bool, count: usize) {
+        self.details_scroll = 0;
+        let visible = super::tree::visible(self);
+        let position = super::tree::position(self, self.file_selection()).unwrap_or(0);
         let next = if backwards {
-            position.saturating_sub(1)
+            position.saturating_sub(count)
         } else {
-            (position + 1).min(visible.len().saturating_sub(1))
+            position
+                .saturating_add(count)
+                .min(visible.len().saturating_sub(1))
         };
-        if let Some(&index) = visible.get(next) {
-            super::tree::select(self, index);
+        if let Some(node) = visible.get(next) {
+            super::tree::select(self, node.key);
         }
     }
     pub fn visible_history_rows(&self) -> Vec<usize> {
@@ -1716,11 +1995,7 @@ impl App {
         }
     }
     fn adopt_candidate(&mut self) {
-        if !self.inventory.details {
-            self.status = "Inspect the selected candidate before choosing Adopt selected.".into();
-            return;
-        }
-        if !self.visible_file_rows().contains(&self.candidate_selected) {
+        if !super::discovery_tree::contains(self, self.candidate_selected) {
             return;
         }
         if let Some(candidate) = self
@@ -1732,13 +2007,23 @@ impl App {
                 self.status = "Not eligible for adoption: select an owned, single-link regular file. Directories cannot be adopted; use i for details or o for a manual draft.".into();
                 return;
             }
-            self.shell.adoption.suggest(&candidate.entry.path);
+            let home = &self.discovery.as_ref().expect("selected discovery").home;
+            self.shell.adoption.suggest(&candidate.entry.path, home);
             self.shell.scroll = 0;
             self.shell.overlay = Some(Overlay::Form(Form::Adopt));
         }
     }
     pub fn action_reason(&self, action: Action) -> Option<&'static str> {
         match action {
+            Action::IgnoreSelected
+                if self.tab != Tab::Files
+                    || !self.discovering
+                    || super::tree::selected(self).is_none() =>
+            {
+                Some(
+                    "Select a displayed discovery file or folder after the list finishes updating.",
+                )
+            }
             Action::ToggleMark | Action::ClearMarks | Action::ExpandAll | Action::CollapseAll
                 if self.tab != Tab::Files =>
             {
@@ -1790,7 +2075,7 @@ impl App {
             {
                 Some("Select a displayed managed mapping in Files, or use the exact-ID draft.")
             }
-            Action::Inspect if self.tab == Tab::Files && self.visible_file_rows().is_empty() => {
+            Action::Inspect if self.tab == Tab::Files && self.file_rows_empty() => {
                 Some("No displayed file selected; refresh, discover or clear the display filter.")
             }
             Action::Inspect if self.tab == Tab::Recovery && self.history_selection().is_none() => {
@@ -1814,10 +2099,13 @@ impl App {
                     "Load an Unstaged or Staged Git summary before opening the separate content warning.",
                 )
             }
+            Action::AdoptSelected if self.tab != Tab::Files || !self.discovering => {
+                Some("Select an eligible discovered regular file first.")
+            }
             Action::AdoptSelected
-                if self.tab != Tab::Files || !self.discovering || !self.inventory.details =>
+                if !super::discovery_tree::contains(self, self.candidate_selected) =>
             {
-                Some("Inspect a discovered file first.")
+                Some("Select a displayed candidate after the list finishes updating.")
             }
             Action::AdoptSelected
                 if self
@@ -1866,12 +2154,10 @@ impl App {
                 Action::Apply,
             ],
             Tab::Files if self.discovering => vec![
-                Action::Inspect,
                 Action::AdoptSelected,
                 Action::BatchAdopt,
                 Action::ToggleMark,
                 Action::Discover,
-                Action::Adopt,
             ],
             Tab::Files => vec![
                 Action::Inspect,

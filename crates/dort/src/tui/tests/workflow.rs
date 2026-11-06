@@ -118,6 +118,9 @@ fn type_text(app: &mut App, value: &str) {
     }
 }
 fn approve(app: &mut App) -> Task {
+    if app.preview.as_ref().is_some_and(|p| p.pending.adoption()) {
+        return key(app, KeyCode::Enter).expect("one explicit adoption approval");
+    }
     assert!(key(app, KeyCode::Enter).is_none());
     type_text(app, "yes");
     key(app, KeyCode::Enter).expect("explicit confirmation produces approved task")
@@ -847,6 +850,8 @@ fn discovery_marks_ineligible_entries_and_enter_preserves_existing_draft() {
     app.shell.adoption.source = "retained/source".into();
     let task = key(&mut app, KeyCode::Char('f')).unwrap();
     run_task(&mut app, &fixture, task);
+    app.inventory.candidate_folded = std::sync::Arc::new(super::visibility::Folds::all(false));
+    app.inventory.group = None;
     let index = app
         .discovery
         .as_ref()
@@ -930,8 +935,8 @@ fn discovery_is_independent_metadata_only_and_keeps_exact_candidate_identity() {
     );
     let screen = super::tests::render(&app, 240, 50);
     assert!(
-        screen.contains(".q?config") && screen.contains("Metadata eligibility"),
-        "{screen}"
+        screen.contains(".q?config") && screen.contains("Eligible hint"),
+        "selected candidate metadata should be visible"
     );
     assert!(!screen.contains("private-body-marker"));
     adopt_selected(&mut app);
@@ -940,7 +945,7 @@ fn discovery_is_independent_metadata_only_and_keeps_exact_candidate_identity() {
         fixture.host.home.join(".q?config").to_str().unwrap()
     );
     assert_eq!(app.shell.adoption.id, "q-config");
-    assert_eq!(app.shell.adoption.source, "files/q-config");
+    assert_eq!(app.shell.adoption.source, "files/.q?config");
     key(&mut app, KeyCode::Esc);
     fs::write(fixture.host.home.join(".aaa"), "ordinary\n").unwrap();
     let task = key(&mut app, KeyCode::Char('r')).unwrap();
@@ -1092,7 +1097,11 @@ fn adoption_retains_all_input_through_missing_repository_picker_and_attachment()
     assert_plan_parity(plan, &expected);
     let task = approve(&mut app);
     let refresh = run_task(&mut app, &fixture, task).unwrap();
-    run_task(&mut app, &fixture, refresh);
+    let discover = run_task(&mut app, &fixture, refresh).unwrap();
+    assert!(matches!(discover, Task::Discover));
+    assert!(run_task(&mut app, &fixture, discover).is_none());
+    assert!(app.discovering && !app.show_result);
+    assert!(app.status.contains("Discover refreshed"));
     assert!(fixture.host.home.join(".q?config").is_symlink());
     assert_eq!(
         fs::read_to_string(fixture.root.join("files/config")).unwrap(),
@@ -1319,7 +1328,7 @@ fn temporary_profiles_are_mandatory_union_and_drive_full_inventory_and_plans() {
 }
 
 fn choose_action(app: &mut App, query: &str) {
-    key(app, KeyCode::Char(' ')); // real search is focused immediately
+    key(app, KeyCode::Char(';')); // real search is focused immediately
     type_text(app, query);
     key(app, KeyCode::Enter);
 }
@@ -1504,7 +1513,7 @@ fn structural_check_reports_dependencies_and_capability_limits_without_observing
     let fixture = Fixture::new(false);
     fs::write(
         fixture.root.join("dort.toml"),
-        include_str!("../../../../examples/dort.toml"),
+        include_str!("../../../../../examples/dort.toml"),
     )
     .unwrap();
     let output = actions::perform(

@@ -141,7 +141,7 @@ fn compact_navigation_and_report_home_are_readable_without_color() {
             "5 Git",
             "Actions",
             "DRY RUN",
-            "Space",
+            ";",
         ] {
             assert!(
                 screen.contains(label),
@@ -155,7 +155,7 @@ fn compact_navigation_and_report_home_are_readable_without_color() {
     }
     app.key(key(KeyCode::Home), 48, 14);
     assert_eq!(app.shell.scroll, 0);
-    assert!(render(&app, 48, 14).contains("Space: Actions with search focused"));
+    assert!(render(&app, 48, 14).contains(";: Actions with search focused"));
     app.key(key(KeyCode::Esc), 48, 14);
     app.complete(Err("long report\n".repeat(100)));
     app.key(key(KeyCode::PageDown), 48, 14);
@@ -264,7 +264,7 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     app.tab = Tab::Files;
     app.key(key(KeyCode::Tab), 80, 24);
     assert!(app.preview.is_none() && app.confirmation.is_none());
-    app.key(key(KeyCode::Char(' ')), 80, 24);
+    app.key(key(KeyCode::Char(';')), 80, 24);
     for c in "Choose repository".chars() {
         app.key(key(KeyCode::Char(c)), 80, 24);
     }
@@ -281,7 +281,7 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     assert!(app.tab == Tab::Files);
     app.key(key(KeyCode::BackTab), 80, 24);
     assert!(app.preview.is_none() && app.confirmation.is_none());
-    app.key(key(KeyCode::Char(' ')), 80, 24);
+    app.key(key(KeyCode::Char(';')), 80, 24);
     for c in "q?/".chars() {
         app.key(key(KeyCode::Char(c)), 80, 24);
     }
