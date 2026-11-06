@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tui:** support ASCII and monochrome terminals ([0e823be](https://github.com/katesongsy/dort/commit/0e823be7e385a8710b032ac50116ce64e283baaf))
+
 - **tui:** add structured task activity and outcome panels ([c45f144](https://github.com/katesongsy/dort/commit/c45f144aae7e8c3d7664ea129f34b88c20a2a72b))
 
 - **files:** add tree selection and guarded batch transactions ([186e2be](https://github.com/katesongsy/dort/commit/186e2be1e77f666a4ad1c8c17060d45b3ab73daf))
