@@ -13,7 +13,7 @@ pub fn accent() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 pub fn muted() -> Style {
-    Style::default().fg(Color::DarkGray)
+    Style::default()
 }
 pub fn selected() -> Style {
     Style::default()

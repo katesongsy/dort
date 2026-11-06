@@ -2,6 +2,23 @@
 use dort_core::Error;
 use std::path::PathBuf;
 
+pub fn terminal_appearance() -> crate::tui::appearance::Appearance {
+    // Non-Unicode locale values remain nonempty and conservatively request ASCII.
+    let value = |name| std::env::var_os(name).map(|s| s.into_string().unwrap_or("C".into()));
+    let term = value("TERM");
+    let all = value("LC_ALL");
+    let ctype = value("LC_CTYPE");
+    let lang = value("LANG");
+    let no_color = value("NO_COLOR");
+    crate::tui::appearance::Appearance::classify(
+        term.as_deref(),
+        all.as_deref(),
+        ctype.as_deref(),
+        lang.as_deref(),
+        no_color.as_deref(),
+    )
+}
+
 // Ignore empty/relative PATH entries so a repository-local `git` is not selected.
 pub fn resolve_git() -> dort_core::Result<PathBuf> {
     use std::os::unix::fs::PermissionsExt;

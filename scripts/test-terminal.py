@@ -123,13 +123,15 @@ class Session:
         # Keep the controlling terminal alive after the program exits. In particular,
         # macOS otherwise revokes the slave before its restored modes can be checked.
         supervisor = (
-            "import subprocess,os,sys; p=subprocess.run(sys.argv[3:]); "
+            # Python may coerce a missing/C locale in its own environment; pass
+            # the requested fixture environment explicitly to the actual binary.
+            "import subprocess,os,sys,json; p=subprocess.run(sys.argv[4:],env=json.loads(sys.argv[3])); "
             "os.write(int(sys.argv[1]),str(p.returncode).encode()); "
             "os.read(int(sys.argv[2]),1)"
         )
         try:
             self.process = subprocess.Popen(
-                [sys.executable, "-c", supervisor, str(status_w), str(release_r), *arguments],
+                [sys.executable, "-c", supervisor, str(status_w), str(release_r), json.dumps(env), *arguments],
                 stdin=self.slave, stdout=self.slave, stderr=self.slave, env=env,
                 preexec_fn=setup, cwd=ROOT, pass_fds=(status_w, release_r),
             )
@@ -232,6 +234,14 @@ class Session:
         self.process.wait(timeout=5)
 
 
+def has_color_sgr(data):
+    # Reset/default colors and bold/reverse/underline are allowed in monochrome.
+    return any(value in range(30, 39) or value in range(40, 49)
+               or value in range(90, 108)
+               for match in re.finditer(rb"\x1b\[([0-9;]*)m", data)
+               for value in [int(part or b"0") for part in match[1].split(b";")])
+
+
 def run():
     screen = Screen((2, 20))
     screen.feed(b"Git executes\x1b[")
@@ -247,7 +257,7 @@ def run():
         env = {
             "HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config"),
             "XDG_STATE_HOME": str(home / ".local/state"), "PATH": "/no-external-programs",
-            "TERM": "xterm-256color",
+            "TERM": "xterm-256color", "LANG": "C.UTF-8",
         }
         for args, key, size in [([], b"q", (24, 80)), (["tui"], b"\x03", (24, 80)),
                                 (["--dry-run", "tui"], b"q", (6, 40))]:
@@ -275,8 +285,41 @@ def run():
             session.wait(b"Create/attach")
             session.send(b"q")
             session.finish()
+            assert session.screen.text().isascii() and session.data.isascii()
+            assert not has_color_sgr(session.data), "Monochrome emitted explicit colors"
         assert not list(home.iterdir()), "Compact navigation/help created state"
         print("PASS compact low-color navigation and Home help reset without state")
+
+        # Capability detection uses only each child's environment; ASCII and color
+        # are independent. These are VT fixture checks, not physical theme review.
+        cases = [
+            (dict(env, NO_COLOR="1"), False, True, (14, 48)),
+            (dict(env, LC_ALL="C", LC_CTYPE="C.UTF-8"), True, False, (24, 80)),
+            (dict(env, LC_CTYPE="POSIX"), True, False, (40, 140)),
+            (dict(env, LC_ALL="", LC_CTYPE="C.UTF-8", LANG="C", NO_COLOR=""), False, False, (14, 48)),
+            ({k: v for k, v in env.items() if k != "LANG"}, True, False, (24, 80)),
+        ]
+        for child_env, ascii_only, monochrome, size in cases:
+            with Session([binary, "tui"], child_env, size) as session:
+                session.wait(b"loaded.")
+                session.click_label("2 Files")
+                session.wait(b"Files / Managed")
+                session.send(b"o")
+                session.wait(b"TARGET")
+                session.send(b"~/.editor")
+                session.wait(b"~/.editor")
+                session.send(b"\tq")
+                session.settle()
+                session.wait(b"ID | Focus" if ascii_only else "ID · Focus".encode())
+                assert session.screen.text().isascii() == ascii_only, "Unexpected decoration capability"
+                assert session.data.isascii() == ascii_only, "Unexpected output encoding"
+                assert has_color_sgr(session.data) != monochrome, "Unexpected color capability"
+                session.send(b"\x03")
+                session.finish()
+                if monochrome:
+                    assert not has_color_sgr(session.data), "Monochrome emitted explicit colors"
+            assert not list(home.iterdir()), "Appearance/form navigation created state"
+            print("PASS independent terminal capabilities and mouse/form input", ascii_only, monochrome, size)
 
         # A directory remains inspectable but cannot overwrite an adoption draft.
         discovery_home = base / "discovery-home"
@@ -1134,7 +1177,7 @@ def run():
             ) as session:
                 session.finish(code)
             print("PASS terminal cleanup", mode)
-    print("36 PTY cases passed (disposable HOME, no installed Git requirement)")
+    print("41 PTY cases passed (disposable HOME, no installed Git requirement)")
 
 
 if __name__ == "__main__":

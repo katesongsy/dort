@@ -250,6 +250,7 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
             cli.dry_run,
             crate::environment::launch_directory()?,
             crate::environment::resolve_git().map_err(|error| error.to_string()),
+            crate::environment::terminal_appearance(),
         )?;
         return Ok(ExitCode::SUCCESS);
     }

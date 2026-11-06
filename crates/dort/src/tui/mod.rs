@@ -1,5 +1,8 @@
 mod actions;
 mod app;
+pub(crate) mod appearance;
+#[cfg(test)]
+mod appearance_tests;
 #[cfg(test)]
 mod batch_tests;
 mod batch_ui;
@@ -69,8 +72,10 @@ pub fn run(
     dry_run: bool,
     launch_directory: PathBuf,
     git: std::result::Result<PathBuf, String>,
+    appearance: appearance::Appearance,
 ) -> Result<()> {
     let mut app = App::new(dry_run);
+    app.appearance = appearance;
     if repository.is_some() {
         app.origin = "--repo override";
     }

@@ -406,6 +406,77 @@ fn mouse_continue_opens_confirmation_but_cannot_submit_exact_id_or_yes() {
     assert!(app.preview.is_some() && app.confirmation.is_none());
 }
 #[test]
+fn ascii_monochrome_real_removal_keeps_consent_and_shrink_guards() {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        let fixture = Fixture::new(false);
+        std::os::unix::fs::symlink(
+            fixture.root.join("source"),
+            fixture.host.home.join(".editor"),
+        )
+        .unwrap();
+        let mut app = App::new(false);
+        app.appearance = super::appearance::Appearance::classify(
+            Some("vt100"),
+            Some("C.UTF-8"),
+            None,
+            None,
+            None,
+        );
+        app.complete(Ok(fixture.prepare(Request::Unmanage {
+            id: "editor".into(),
+            mode: UnmanageMode::Remove,
+        })));
+        let press = |app: &mut App, code| app.key(KeyEvent::new(code, KeyModifiers::NONE), w, h);
+        let screen = super::tests::render(&app, w, h);
+        assert!(screen.is_ascii() && screen.contains("Continue"));
+        assert!(press(&mut app, KeyCode::Enter).is_none());
+        for phrase in ["editor", "yes"] {
+            for c in phrase.chars() {
+                assert!(press(&mut app, KeyCode::Char(c)).is_none());
+            }
+            let screen = super::tests::render(&app, w, h);
+            assert!(screen.is_ascii() && screen.contains(phrase));
+            for y in 0..h {
+                super::tests::render(&app, w, h);
+                assert!(
+                    app.mouse(
+                        MouseEvent {
+                            kind: MouseEventKind::Down(MouseButton::Left),
+                            column: w / 2,
+                            row: y,
+                            modifiers: KeyModifiers::NONE
+                        },
+                        w,
+                        h
+                    )
+                    .is_none()
+                );
+            }
+            if phrase == "editor" {
+                assert!(press(&mut app, KeyCode::Enter).is_none());
+            }
+        }
+        assert_eq!(
+            app.confirmation.as_ref().unwrap().removal_ack.as_deref(),
+            Some("editor")
+        );
+        app.resize(47, 13);
+        assert!(app.confirmation.is_none());
+        app.resize(w, h);
+        assert!(press(&mut app, KeyCode::Enter).is_none());
+        assert!(app.confirmation.as_ref().unwrap().removal_ack.is_none());
+        assert!(app.confirmation.as_ref().unwrap().input.is_empty());
+        for c in "yes".chars() {
+            press(&mut app, KeyCode::Char(c));
+        }
+        assert!(press(&mut app, KeyCode::Enter).is_none());
+        assert!(fixture.host.home.join(".editor").is_symlink());
+        assert!(!fixture.host.state_dir.exists() && !fixture.host.config_dir.exists());
+    }
+}
+
+#[test]
 fn blocked_preview_cannot_confirm_and_errors_remain_inspectable() {
     let fixture = Fixture::new(false);
     fs::remove_file(fixture.root.join("source")).unwrap();

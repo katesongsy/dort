@@ -18,6 +18,7 @@ const HELP: &str = "1/2/3/4/5: Overview / Files / Recovery / Checks / Git\nLeft/
 
 pub fn draw(frame: &mut ratatui::Frame, app: &App) {
     super::workbench::draw(frame, app);
+    app.appearance.apply(frame.buffer_mut());
 }
 pub(super) fn short_field(label: &str, value: &str, width: u16) -> String {
     let escaped = safe(&format!("{value:?}"));

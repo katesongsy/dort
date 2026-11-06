@@ -70,6 +70,7 @@ pub struct Confirmation {
     pub batch_acks: Vec<String>,
 }
 pub struct App {
+    pub appearance: super::appearance::Appearance,
     pub tab: Tab,
     pub shell: Shell,
     pub repository: Option<PathBuf>,
@@ -116,6 +117,7 @@ pub struct App {
 impl App {
     pub fn new(dry_run: bool) -> Self {
         Self {
+            appearance: Default::default(),
             tab: Tab::Overview,
             shell: Shell::new(),
             repository: None,

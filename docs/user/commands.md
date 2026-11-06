@@ -27,6 +27,8 @@ dort --dry-run tui         # inspection/previews only; confirmation disabled
 
 All three standard streams must be terminals. TUI entry rejects `--json`, `--yes` and `--confirm-remove`; no flags silently approve TUI writes. Use explicit CLI subcommands for automation. Startup observes only: it does not create missing configuration/state, acquire a lock or replay recovery. Without a repository, Welcome offers Choose repository and Create/attach; Recovery still diagnoses all retained local transactions. Discovery and standalone manifest checks work without a repository. Git also accepts an independent session-only working-tree root without a manifest or registration.
 
+**Terminal appearance:** the canvas and essential neutral labels use terminal defaults. Nonempty `NO_COLOR` requests monochrome (including `NO_COLOR=0`); selection keeps reverse/bold and states remain textual. It does not disable Unicode. The first nonempty `LC_ALL`, `LC_CTYPE`, then `LANG` determines character support: UTF-8/UTF8 locales use Unicode borders, others (including missing locale) use ASCII. `TERM=vt100`, `vt102`, `ansi` or `dumb` also selects ASCII; vt100/vt102/dumb/xterm-mono selects monochrome. For example, `LC_ALL=C NO_COLOR=1 dort tui` requests both. No terminal background is guessed or setting saved. Cursor addressing is still required: setting `TERM=dumb` is not a line-mode backend. These fallbacks do not change keys, mouse targets or approval requirements.
+
 | Key | Action |
 | --- | --- |
 | `1`, `2`, `3`, `4`, `5` | Change destination: Overview, Files, Recovery, Checks, Git, outside text entry. |
