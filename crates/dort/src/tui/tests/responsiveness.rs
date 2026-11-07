@@ -101,7 +101,7 @@ fn large_preparation_is_passive_coalesces_search_and_rejects_late_results() {
     super::launch(task, &f.host, &mut app, &mut worker).unwrap();
     assert!(!app.busy && app.activity.is_none());
     key(&mut app, KeyCode::Char('?'));
-    assert!(app.shell.overlay.is_some());
+    assert!(app.help.is_some() && app.shell.overlay.is_none());
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Char('/'));
     for ch in ".row-099999".chars() {

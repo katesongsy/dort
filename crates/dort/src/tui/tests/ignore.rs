@@ -122,6 +122,127 @@ fn ignore_folder_confirm_refresh_manage_and_unignore_are_complete_tui_workflows(
     );
 }
 #[test]
+fn visible_ignore_controls_mouse_and_keyboard_work_at_all_supported_sizes() {
+    use super::{input::Target, shell::Action};
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        let f = Fixture::new();
+        let mut app = f.app(false);
+        app.resize(w, h);
+        let screen = render(&app, w, h);
+        assert!(screen.contains("Ignore selected") && screen.contains("Ignored paths"));
+        assert!(screen.contains("Actions") && screen.contains("F1 Help"));
+        let mut found = Vec::new();
+        for action in [Action::IgnoreSelected, Action::ManageIgnored] {
+            let mut point = None;
+            for y in 0..h {
+                for x in 0..w {
+                    if matches!(app.hits.target(x,y), Some(Target::Action(a)) if a == action) {
+                        point = Some((x, y));
+                    }
+                }
+            }
+            found.push(point.expect("visible typed control"));
+        }
+        let (column, row) = found[0];
+        let task = app
+            .mouse(
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column,
+                    row,
+                    modifiers: KeyModifiers::NONE,
+                },
+                w,
+                h,
+            )
+            .unwrap();
+        f.finish(&mut app, task);
+        key(&mut app, KeyCode::Esc);
+        let task = app
+            .key(KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE), w, h)
+            .unwrap();
+        f.finish(&mut app, task);
+        let task = approve(&mut app);
+        let task = f.finish(&mut app, task).unwrap();
+        f.finish(&mut app, task);
+        app.resize(w, h);
+        render(&app, w, h);
+        let (column, row) = found[1];
+        let task = app
+            .mouse(
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column,
+                    row,
+                    modifiers: KeyModifiers::NONE,
+                },
+                w,
+                h,
+            )
+            .unwrap();
+        f.finish(&mut app, task);
+        assert!(matches!(app.shell.overlay, Some(Overlay::Ignored { .. })));
+        key(&mut app, KeyCode::Esc);
+        let task = app
+            .key(KeyEvent::new(KeyCode::Char('U'), KeyModifiers::NONE), w, h)
+            .unwrap();
+        f.finish(&mut app, task);
+        let task = key(&mut app, KeyCode::Enter).unwrap();
+        f.finish(&mut app, task);
+        let task = approve(&mut app);
+        let task = f.finish(&mut app, task).unwrap();
+        f.finish(&mut app, task);
+        assert_eq!(Rules::load(&f.host).unwrap().paths().count(), 0);
+        assert_eq!(
+            fs::read_to_string(f.host.home.join(".tool/sub/config")).unwrap(),
+            "ordinary fixture"
+        );
+    }
+}
+#[test]
+fn help_retains_real_preview_confirmation_and_shrink_still_clears_approval() {
+    let f = Fixture::new();
+    let mut app = f.app(false);
+    let task = key(&mut app, KeyCode::Char('I')).unwrap();
+    f.finish(&mut app, task);
+    let original = app.preview.as_ref().unwrap().text.clone();
+    key(&mut app, KeyCode::F(1));
+    for code in [
+        KeyCode::Enter,
+        KeyCode::Char('y'),
+        KeyCode::Char('e'),
+        KeyCode::Char('s'),
+        KeyCode::Enter,
+    ] {
+        assert!(key(&mut app, code).is_none());
+    }
+    assert!(app.confirmation.is_none());
+    assert!(!render(&app, 140, 40).contains(".tool"));
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(app.preview.as_ref().unwrap().text, original);
+    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Char('y'));
+    key(&mut app, KeyCode::Char('e'));
+    key(&mut app, KeyCode::F(1));
+    for code in [KeyCode::Char('s'), KeyCode::Enter] {
+        assert!(key(&mut app, code).is_none());
+    }
+    assert_eq!(app.confirmation.as_ref().unwrap().input, "ye");
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(app.confirmation.as_ref().unwrap().input, "ye");
+    key(&mut app, KeyCode::F(1));
+    app.resize(47, 13);
+    assert!(app.confirmation.is_none() && app.help.is_some() && app.preview.is_some());
+    app.resize(80, 24);
+    key(&mut app, KeyCode::Esc);
+    assert!(!f.host.config_dir.exists() && !f.host.state_dir.exists());
+    let task = approve(&mut app); // fresh input, real opaque core preview retained
+    let refresh = f.finish(&mut app, task).unwrap();
+    f.finish(&mut app, refresh);
+    assert_eq!(Rules::load(&f.host).unwrap().paths().count(), 1);
+}
+#[test]
 fn ignore_preview_cancel_dry_run_and_small_layout_cannot_write() {
     let f = Fixture::new();
     let mut app = f.app(true);

@@ -358,10 +358,7 @@ impl State {
                 self.search.editing = true;
                 self.scroll = 0;
             }
-            KeyCode::Delete => {
-                self.search.query.clear();
-                self.clamp();
-            }
+            KeyCode::Delete => self.clear_filter(),
             KeyCode::Up | KeyCode::Down => {
                 let visible = self.visible();
                 let pos = visible
@@ -394,6 +391,13 @@ impl State {
             _ => return None,
         }
         Some(None)
+    }
+    pub fn has_selection(&self) -> bool {
+        self.visible().contains(&self.selected)
+    }
+    pub fn clear_filter(&mut self) {
+        self.search.query.clear();
+        self.clamp();
     }
     pub fn inspect_metadata(&mut self) {
         if !self.sensitive() && !self.editing_root {

@@ -275,12 +275,12 @@ def run():
                           b"DRY RUN", b"Create/attach", b"Choose repository", b"Discover files", b"Check a manifest"]:
                 session.wait(label)
             session.send(b"?")
-            session.wait(b";: Actions")
+            session.wait(b"Help: Overview")
             session.send(b"\x1b[6~" * 30)
             session.settle()
-            assert b";: Actions" not in session.screen.text()
+            assert b"Help: Overview" not in session.screen.text()
             session.send(b"\x1b[H")
-            session.wait(b";: Actions")
+            session.wait(b"Help: Overview")
             session.send(b"\x1b")
             session.wait(b"Create/attach")
             session.send(b"q")
@@ -390,15 +390,42 @@ def run():
                           XDG_CONFIG_HOME=str(ignore_home / '.config'),
                           XDG_STATE_HOME=str(ignore_home / '.local/state'))
         ignore_store = ignore_home / '.config' / 'dort' / 'discovery-ignore.toml'
-        with Session([binary, 'tui'], ignore_env, (24, 100)) as session:
+        with Session([binary, 'tui'], ignore_env, (14, 48)) as session:
             session.wait(b'loaded.')
             session.send(b'f')
             session.wait(b'Metadata discovery loaded')
-            session.send(b';Ignore selected\r')
+            session.wait(b'Ignore selected')
+            session.wait(b'Ignored paths')
+            session.click_label('Ignore selected')
             session.wait(b'Ignore discovery path')
             assert not ignore_store.exists(), 'Ignore preview wrote preferences'
+            session.send(b'\x1bOP')
+            session.wait(b'Help: Review preview')
+            session.send(b'yes\r')
+            session.settle()
+            assert not ignore_store.exists(), 'Help approved a preview'
+            session.send(b'\x1b')
+            session.wait(b'Ignore discovery path')
             session.send(b'\r')
-            session.wait(b'Confirm')
+            session.wait(b'No writes before')
+            session.send(b'ye\x1bOP')
+            session.wait(b'Help: Confirmation')
+            session.send(b's\r')
+            session.settle()
+            assert not ignore_store.exists(), 'Help submitted confirmation input'
+            session.send(b'\x1b')
+            session.wait(b'No writes before')
+            session.send(b's')  # retained ye becomes yes, without submitting
+            session.send(b'\x1bOP')
+            session.wait(b'Help: Confirmation')
+            session.resize((13,47))
+            session.settle()
+            session.resize((14,48))
+            session.wait(b'Help: Confirmation')
+            session.send(b'\x1b')  # Help closes to preview; fresh confirmation required
+            session.wait(b'Ignore discovery path')
+            session.send(b'\r')
+            session.wait(b'No writes before')
             session.send(b'yes\r')
             session.wait(b'Metadata discovery loaded')
             session.send(b'q')
@@ -410,7 +437,9 @@ def run():
         assert not any('/.editor' in c['entry']['path'] for c in json.loads(output.stdout)['candidates'])
         with Session([binary, 'tui'], ignore_env, (14, 48)) as session:
             session.wait(b'loaded.')
-            session.send(b';Manage ignored\r')
+            session.send(b'f')
+            session.wait(b'Metadata discovery loaded')
+            session.click_label('Ignored paths')
             session.wait(b'Enter previews Unignore')
             session.send(b'\r')
             session.wait(b'Unignore discovery path')
@@ -530,7 +559,18 @@ def run():
             session.wait(b"Search by label")
             session.send(b"q?/")
             session.wait(b"No matching actions")
-            session.send(b"\x15rollback\r")  # disabled Enter must not dismiss or dispatch
+            session.send(b"\x15rollback\r")
+            session.wait(b"No matching actions")  # other-view commands stay in their view
+            session.send(b"\x1bOP")  # F1 works even in Actions search
+            session.wait(b"Help: Actions")
+            session.send(b"\r")  # Help never dispatches
+            session.send(b"\x1b")
+            session.wait(b"rollback")  # exact query retained
+            session.send(b"\x1b")  # leave search
+            session.settle()
+            session.send(b"\x1b")  # close
+            session.settle()
+            session.send(b"3;rollback\r")  # disabled Enter in its relevant view
             session.wait(b"Rollback unavailable")
             session.send(b"\x1b[6~")
             session.wait(b"Actions | No work while browsing")
@@ -543,10 +583,10 @@ def run():
                 session.settle()
             assert reached, "Compact Actions prerequisites were not keyboard reachable"
             session.send(b"\x1b[H")
-            session.wait(b"GROUP")
+            session.wait(b"SCOPE")
             session.send(b"\x1b")  # input -> results
             session.settle()
-            session.send(b"\x1b")  # close, restoring Overview
+            session.send(b"\x1b")  # close, restoring Recovery
             session.settle()
             session.send(b"4;")
             session.wait(b"Check current")  # current-view actions, not flat navigation first
@@ -740,7 +780,7 @@ def run():
             session.send(b"\x1b[6~")
             session.wait(b"Actions | No work while browsing")
             session.send(b"\x1b[H")
-            session.wait(b"GROUP")
+            session.wait(b"SCOPE")
             session.send(b"\x1b")
             session.settle()
             session.send(b"\x1b")

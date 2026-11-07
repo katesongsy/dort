@@ -3,7 +3,8 @@ use super::{
     actions::{Data, Output, Task},
     app::{App, Tab},
     components as ui,
-    palette::{self, Group},
+    context::{Effect, Scope},
+    palette,
     shell::{Action, Form, Overlay},
     tests::render,
     views,
@@ -35,67 +36,81 @@ fn current(app: &App) -> (&str, usize, bool, &[palette::Entry]) {
     (query, *selected, *searching, entries)
 }
 #[test]
-fn context_groups_order_one_complete_action_set_and_keep_risk_separate() {
-    let tabs = [
+fn contextual_catalog_is_unique_and_separates_scope_from_effect() {
+    let mut union = Vec::new();
+    for tab in [
         Tab::Overview,
         Tab::Files,
         Tab::Recovery,
         Tab::Checks,
         Tab::Git,
-    ];
-    let baseline = palette::entries(Tab::Overview, false, &[]);
-    for tab in tabs {
+    ] {
         for discovering in [false, true] {
             let mut app = App::new(false);
             app.tab = tab;
             app.discovering = discovering;
-            let rows = palette::entries(tab, discovering, &app.page_actions());
-            assert!(rows.windows(2).all(|p| p[0].group <= p[1].group));
-            assert_eq!(rows.len(), baseline.len());
-            for entry in &baseline {
-                assert_eq!(rows.iter().filter(|r| r.action == entry.action).count(), 1);
-            }
-            assert!(rows.iter().any(|e| e.action == Action::StandaloneProfiles));
+            let rows = palette::entries(&app);
+            assert!(rows.windows(2).all(|p| p[0].scope <= p[1].scope));
             for row in &rows {
-                if matches!(
-                    row.action,
-                    Action::Apply
-                        | Action::Keep
-                        | Action::Remove
-                        | Action::Rollback
-                        | Action::Resume
-                        | Action::Abandon
-                        | Action::KeepId
-                        | Action::RemoveId
-                        | Action::BatchAdopt
-                        | Action::ApplyMarked
-                        | Action::KeepMarked
-                        | Action::RemoveMarked
-                ) {
-                    assert!(row.group == Group::Preview);
+                assert_eq!(rows.iter().filter(|e| e.action == row.action).count(), 1);
+                if !union.contains(&row.action) {
+                    union.push(row.action);
                 }
                 if row.action == Action::GitPatch {
-                    assert!(row.group == Group::Content);
+                    assert!(
+                        tab == Tab::Git
+                            && row.scope == Scope::View
+                            && row.effect == Effect::Disclosure
+                    );
+                }
+                if row.action == Action::IgnoreSelected {
+                    assert!(
+                        tab == Tab::Files
+                            && discovering
+                            && row.scope == Scope::Item
+                            && row.effect == Effect::Preview
+                    );
+                }
+                if row.action == Action::KeepMarked {
+                    assert!(
+                        tab == Tab::Files
+                            && !discovering
+                            && row.scope == Scope::Marked
+                            && row.effect == Effect::Preview
+                    );
                 }
             }
-            for action in [
-                Action::BatchAdopt,
-                Action::ApplyMarked,
-                Action::KeepMarked,
-                Action::RemoveMarked,
-                Action::ToggleMark,
-                Action::ClearMarks,
-                Action::ExpandAll,
-                Action::CollapseAll,
+            for global in [
+                Action::Choose,
+                Action::Init,
+                Action::Help,
+                Action::Quit,
+                Action::Destination(Tab::Files),
             ] {
-                assert_eq!(rows.iter().filter(|r| r.action == action).count(), 1);
+                assert!(
+                    rows.iter()
+                        .any(|r| r.action == global && r.scope == Scope::Global)
+                );
             }
-            let preferred = app.page_actions();
-            assert!(rows[0].action == preferred[0]);
-            let results = palette::matches(&rows, "STANDALONE MANIFEST");
-            assert_eq!(results.len(), 2); // standalone check and its separate additions
+            assert_eq!(
+                rows.iter().any(|r| r.action == Action::StandaloneProfiles),
+                tab == Tab::Checks
+            );
+            assert_eq!(
+                rows.iter().any(|r| r.action == Action::Rollback),
+                tab == Tab::Recovery
+            );
+            assert_eq!(
+                rows.iter().any(|r| r.action == Action::Remove),
+                tab == Tab::Files && !discovering
+            );
+            assert_eq!(
+                palette::matches(&rows, "STANDALONE MANIFEST").len(),
+                if tab == Tab::Checks { 2 } else { 0 }
+            );
         }
     }
+    assert_eq!(union.len(), 47); // Every supported typed command has a home.
 }
 #[test]
 fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {
@@ -108,7 +123,7 @@ fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {
         terminal.draw(|f| views::draw(f, &app)).unwrap();
         let b = terminal.backend().buffer();
         let screen = render(&app, w, h);
-        for label in ["Search by label", "GROUP", "ACTION", "Item"] {
+        for label in ["Search by label", "SCOPE", "ACTION", "Item"] {
             assert!(screen.contains(label));
         }
         let arrow = b.content.iter().position(|c| c.symbol() == ">").unwrap();
@@ -153,6 +168,7 @@ fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {
 #[test]
 fn disabled_actions_stay_open_and_full_reasons_are_keyboard_reachable_without_dispatch() {
     let mut app = App::new(false);
+    app.tab = Tab::Git;
     key(&mut app, KeyCode::Char(';'));
     text(&mut app, "View patch content");
     let reason = app.action_reason(Action::GitPatch).unwrap();

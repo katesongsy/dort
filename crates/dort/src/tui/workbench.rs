@@ -24,6 +24,8 @@ fn short(action: Action) -> &'static str {
         Action::KeepMarked => "Keep marked",
         Action::RemoveMarked => "Delete marked",
         Action::ToggleMark => "Mark/group",
+        Action::IgnoreSelected => "Ignore selected",
+        Action::ManageIgnored => "Ignored paths",
         Action::AdoptSelected => "Adopt selected",
         Action::Adopt => "Manual adoption",
         Action::Keep => "Keep local file",
@@ -53,6 +55,8 @@ pub fn shortcut(action: Action) -> &'static str {
         Action::KeepMarked => "K",
         Action::RemoveMarked => "D",
         Action::ToggleMark => "x",
+        Action::IgnoreSelected => "I",
+        Action::ManageIgnored => "U",
         Action::AdoptSelected => "e",
         Action::Adopt => "o",
         Action::Keep => "k",
@@ -73,10 +77,11 @@ pub fn shortcut(action: Action) -> &'static str {
 }
 fn buttons(frame: &mut Frame, area: Rect, app: &App) {
     let mut x = area.x;
-    for action in app.page_actions() {
-        let label = short(action);
-        let key = shortcut(action);
-        let button = ui::button(label, key, false);
+    let actions = app.page_actions();
+    let mut shown = 0;
+    for action in &actions {
+        let action = *action;
+        let button = ui::button(short(action), shortcut(action), false);
         let width = button.width() as u16;
         if x + width > area.right() {
             break;
@@ -92,18 +97,24 @@ fn buttons(frame: &mut Frame, area: Rect, app: &App) {
             r,
         );
         x += width;
+        shown += 1;
     }
-    let note = ";: Actions | Click buttons | Display-only search";
-    app.hits.click(
-        Rect::new(area.x, area.y + 1, 18.min(area.width), 1),
-        super::input::Target::PaletteSearch,
+    let all = format!(
+        "[; Actions{}]",
+        if shown < actions.len() {
+            format!(" +{} more", actions.len() - shown)
+        } else {
+            String::new()
+        }
     );
-    ui::prose(
-        frame,
-        Rect::new(area.x, area.y + 1, area.width, 1),
-        note,
-        ui::muted(),
-    );
+    let width = (all.len() as u16).min(area.width);
+    let r = Rect::new(area.x, area.y + 1, width, 1);
+    app.hits.click(r, super::input::Target::PaletteSearch);
+    ui::prose(frame, r, &all, ui::accent());
+    let help = Rect::new(r.right(), r.y, area.width.saturating_sub(width), 1);
+    app.hits
+        .click(help, super::input::Target::Action(Action::Help));
+    ui::prose(frame, help, " [F1 Help]", ui::accent());
 }
 fn tabs(frame: &mut Frame, area: Rect, app: &App) {
     let mut x = area.x;
@@ -170,6 +181,10 @@ pub fn wide_details(area: Rect, header_rows: u16) -> bool {
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
     app.hits.begin(area);
+    if let Some(help) = &app.help {
+        super::help::draw(frame, app, help);
+        return;
+    }
     if area.width < 48 || area.height < 14 {
         ui::prose(
             frame,
@@ -253,23 +268,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if app.error.is_some() {
         // Error controls above are exclusive; retained forms are not active underneath.
     } else if app.busy {
-        if matches!(app.shell.overlay, Some(Overlay::Help)) {
-            app.hits.clear();
-            app.hits.wheel(content[0], super::input::Wheel::Overlay);
-            ui::report(
-                frame,
-                content[0],
-                "Help",
-                legacy_document(views::overlay_text(
-                    app,
-                    &Overlay::Help,
-                    content[0].height,
-                    content[0].width,
-                )),
-                app.shell.scroll,
-                true,
-            );
-        }
+        // Task controls above are exclusive.
     } else if app.show_result && app.preview.is_none() {
         // A returned form stays retained but inactive until the result is dismissed.
     } else if let Some(preview) = &app.preview {
@@ -377,7 +376,6 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 frame,
                 modal,
                 match overlay {
-                    Overlay::Help => "Help",
                     Overlay::About => "About",
                     Overlay::Profiles(_) => "Profiles",
                     Overlay::Repositories { .. } => "Repository selector",
@@ -471,6 +469,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             ("?", "Help"),
         ]
     };
+    let keys: Vec<_> = std::iter::once(("F1", "Help")).chain(keys).collect();
     frame.render_widget(Paragraph::new(ui::keys(&keys)), sections[4]);
     if let Some(confirmation) = &app.confirmation {
         app.hits.clear();
@@ -503,7 +502,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         };
         // Prompt scroll is independent of input; full IDs are never reconstructed from display.
         frame.render_widget(
-            ui::pane("Confirm · No writes before submission", true),
+            ui::pane("Confirm · F1 Help · No writes before submission", true),
             modal,
         );
         let inner = Rect::new(

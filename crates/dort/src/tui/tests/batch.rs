@@ -442,9 +442,21 @@ fn selected_apply_keep_delete_are_combined_and_every_delete_id_then_yes_is_requi
                 vec!["only-a"]
             );
             text(&mut app, "only-b");
+            key(&mut app, KeyCode::F(1));
+            assert!(key(&mut app, KeyCode::Enter).is_none());
+            assert_eq!(
+                app.confirmation.as_ref().unwrap().batch_acks,
+                vec!["only-a"]
+            );
+            assert_eq!(app.confirmation.as_ref().unwrap().input, "only-b");
+            assert!(!render(&app, 140, 40).contains("only-a"));
+            key(&mut app, KeyCode::Esc);
+            assert_eq!(app.confirmation.as_ref().unwrap().input, "only-b");
+            key(&mut app, KeyCode::F(1));
             app.resize(47, 14);
             assert!(app.confirmation.is_none());
             app.resize(48, 14);
+            key(&mut app, KeyCode::Esc); // return from Help; no acknowledgements restored
             key(&mut app, KeyCode::Enter);
             assert!(app.confirmation.as_ref().unwrap().batch_acks.is_empty());
             text(&mut app, "only-a");

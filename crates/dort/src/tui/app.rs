@@ -80,6 +80,7 @@ pub struct App {
     pub appearance: super::appearance::Appearance,
     pub tab: Tab,
     pub shell: Shell,
+    pub help: Option<super::help::State>,
     pub repository: Option<PathBuf>,
     pub origin: &'static str,
     pub launch_directory: PathBuf,
@@ -131,6 +132,7 @@ impl App {
             appearance: Default::default(),
             tab: Tab::Overview,
             shell: Shell::new(),
+            help: None,
             repository: None,
             origin: "registered active",
             launch_directory: PathBuf::from("/"),
@@ -284,7 +286,10 @@ impl App {
             Ok(Output::Git(report)) => {
                 self.git_view.accept(
                     report,
-                    self.tab == Tab::Git && !self.quit && self.shell.overlay.is_none(),
+                    self.tab == Tab::Git
+                        && !self.quit
+                        && self.shell.overlay.is_none()
+                        && self.help.is_none(),
                 );
                 self.status = "Git read completed. Summaries are metadata-only; patch viewing requires a new confirmation.".into();
             }
@@ -522,6 +527,25 @@ impl App {
         now: std::time::Instant,
     ) -> Option<Task> {
         self.inventory.pending_g = false;
+        if self.help.is_some() {
+            use ratatui::crossterm::event::MouseEventKind;
+            self.resize(width, height);
+            let code = match event.kind {
+                MouseEventKind::ScrollDown => Some(KeyCode::PageDown),
+                MouseEventKind::ScrollUp => Some(KeyCode::PageUp),
+                MouseEventKind::Down(ratatui::crossterm::event::MouseButton::Left)
+                    if matches!(
+                        self.hits.target(event.column, event.row),
+                        Some(super::input::Target::Back)
+                    ) =>
+                {
+                    Some(KeyCode::Esc)
+                }
+                _ => None,
+            };
+            return code
+                .and_then(|code| self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height));
+        }
         use super::input::{Target, Wheel};
         use ratatui::crossterm::event::{MouseButton, MouseEventKind};
         if self.hits.size() != (width, height) {
@@ -784,11 +808,7 @@ impl App {
                     *searching = true;
                 } else {
                     self.git_view.discard_patch();
-                    self.shell.open_actions(super::palette::entries(
-                        self.tab,
-                        self.discovering,
-                        &self.page_actions(),
-                    ));
+                    self.shell.open_actions(super::palette::entries(self));
                 }
                 None
             }
@@ -844,8 +864,19 @@ impl App {
         {
             self.inventory.pending_g = false;
         }
+        let return_content = self
+            .help
+            .as_ref()
+            .map(|h| (h.content_focus, h.content_scroll));
         let task = self.key_inner(key, width, height);
         super::discover_content::sync(self, width, height);
+        if self.help.is_none()
+            && self.content.available()
+            && let Some((focus, scroll)) = return_content
+        {
+            self.content.focused = focus;
+            self.content.scroll = scroll;
+        }
         if self.text_entry() {
             self.content.focused = false;
         }
@@ -856,12 +887,13 @@ impl App {
             key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
         if interrupt
             || (key.code == KeyCode::Char('q')
-                && self.confirmation.is_none()
-                && (self.error.is_some()
-                    || self.show_result
-                    || self.busy
-                    || self.preview.is_some()
-                    || !self.text_entry()))
+                && (self.help.is_some()
+                    || self.confirmation.is_none()
+                        && (self.error.is_some()
+                            || self.show_result
+                            || self.busy
+                            || self.preview.is_some()
+                            || !self.text_entry())))
         {
             self.git_view.discard_patch();
             if self.busy {
@@ -873,6 +905,26 @@ impl App {
             return None;
         }
         self.resize(width, height);
+        if let Some(help) = &mut self.help {
+            match key.code {
+                KeyCode::Esc | KeyCode::F(1) | KeyCode::Char('?') => self.help = None,
+                KeyCode::Home => help.scroll = 0,
+                KeyCode::PageDown | KeyCode::Down | KeyCode::Char('j') => {
+                    help.scroll = help.scroll.saturating_add(2)
+                }
+                KeyCode::PageUp | KeyCode::Up | KeyCode::Char('k') => {
+                    help.scroll = help.scroll.saturating_sub(2)
+                }
+                _ => (),
+            }
+            return None;
+        }
+        if key.code == KeyCode::F(1)
+            || (key.code == KeyCode::Char('?') && !super::help::text_input(self))
+        {
+            self.open_help();
+            return None;
+        }
         if width < 48 || height < 14 {
             if key.code == KeyCode::Esc {
                 if self.error.is_some() {
@@ -899,11 +951,6 @@ impl App {
             return None;
         }
         if self.busy {
-            if key.code == KeyCode::Char('?') {
-                self.git_view.discard_patch();
-                self.shell.scroll = 0;
-                self.shell.overlay = Some(Overlay::Help);
-            }
             if key.code == KeyCode::Esc {
                 self.shell.overlay = None;
             }
@@ -1327,6 +1374,12 @@ impl App {
             KeyCode::Char('D') if self.tab == Tab::Files => {
                 return self.activate(Action::RemoveMarked);
             }
+            KeyCode::Char('I') if self.tab == Tab::Files && self.discovering => {
+                return self.activate(Action::IgnoreSelected);
+            }
+            KeyCode::Char('U') if self.tab == Tab::Files && self.discovering => {
+                return self.activate(Action::ManageIgnored);
+            }
             KeyCode::Char('e') if self.tab == Tab::Files && self.discovering => {
                 return self.activate(Action::AdoptSelected);
             }
@@ -1336,20 +1389,12 @@ impl App {
 
                 self.result = None;
             }
-            KeyCode::Char(';') => self.shell.open_actions(super::palette::entries(
-                self.tab,
-                self.discovering,
-                &self.page_actions(),
-            )),
+            KeyCode::Char(';') => self.shell.open_actions(super::palette::entries(self)),
             KeyCode::Char('/') if self.tab == Tab::Files => {
                 self.inventory.search_mut(self.discovering).editing = true
             }
             KeyCode::Char('/') if self.tab == Tab::Recovery => self.history_search.editing = true,
-            KeyCode::Char('/') => self.shell.open_actions(super::palette::entries(
-                self.tab,
-                self.discovering,
-                &self.page_actions(),
-            )),
+            KeyCode::Char('/') => self.shell.open_actions(super::palette::entries(self)),
             KeyCode::Delete if self.tab == Tab::Recovery => {
                 self.history_search.query.clear();
                 self.clamp_history_selection();
@@ -1575,7 +1620,20 @@ impl App {
             }
         }
     }
+    fn open_help(&mut self) {
+        self.help = Some(super::help::State {
+            topic: super::help::topic(self),
+            scroll: 0,
+            content_focus: self.content.focused,
+            content_scroll: self.content.scroll,
+        });
+        super::discover_content::sync(self, self.viewport.0, self.viewport.1);
+    }
     fn activate(&mut self, action: Action) -> Option<Task> {
+        if action == Action::Help {
+            self.open_help();
+            return None;
+        }
         if let Some(reason) = self.action_reason(action) {
             self.status = reason.into();
             self.shell.overlay = None;
@@ -1689,11 +1747,13 @@ impl App {
                 self.clamp_history_selection();
                 self.status = "Recovery display filter cleared; global blockers were never hidden.".into();
             }
+            Action::ClearFilter if self.tab == Tab::Git => self.git_view.clear_filter(),
             Action::ClearFilter => {
                 self.inventory.search_mut(self.discovering).query.clear();
                 self.clamp_file_selection();
                 self.status = "File display filter cleared; apply scope was never narrowed.".into();
             }
+            Action::Inspect if self.tab == Tab::Git => self.git_view.inspect_metadata(),
             Action::Inspect if self.tab == Tab::Recovery => {
 
                 self.history_details = true;
@@ -1719,7 +1779,7 @@ impl App {
             }
             Action::Diagnostics => { self.showing_diagnostics = true; self.tab = Tab::Checks; return Some(Task::Diagnostics); }
             Action::About => self.shell.overlay = Some(Overlay::About),
-            Action::Help => self.shell.overlay = Some(Overlay::Help),
+            Action::Help => unreachable!("Help preserves the underlying surface"),
             Action::Quit => self.quit = true,
             Action::Apply if self.data.as_ref().and_then(|d| d.repository.as_ref()).is_some() => return Some(Task::Files(Request::Apply)),
             Action::Keep | Action::Remove if self.tab == Tab::Files && !self.discovering => {
@@ -2015,6 +2075,18 @@ impl App {
     }
     pub fn action_reason(&self, action: Action) -> Option<&'static str> {
         match action {
+            Action::CheckCurrent | Action::Profiles
+                if self
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.repository.as_ref())
+                    .or(self.repository.as_ref())
+                    .is_none() =>
+            {
+                Some(
+                    "Choose a repository first; standalone manifest checks have an independent path and profiles.",
+                )
+            }
             Action::IgnoreSelected
                 if self.tab != Tab::Files
                     || !self.discovering
@@ -2083,11 +2155,14 @@ impl App {
                     "No displayed transaction selected; refresh or clear the Recovery display filter.",
                 )
             }
-            Action::Inspect if !matches!(self.tab, Tab::Files | Tab::Recovery) => {
+            Action::Inspect if self.tab == Tab::Git && !self.git_view.has_selection() => {
+                Some("No displayed Git entry selected; load metadata or clear the display filter.")
+            }
+            Action::Inspect if !matches!(self.tab, Tab::Files | Tab::Recovery | Tab::Git) => {
                 Some("Select a file in Files or a transaction in Recovery to inspect.")
             }
-            Action::ClearFilter if !matches!(self.tab, Tab::Files | Tab::Recovery) => {
-                Some("Display filters are available in Files and Recovery.")
+            Action::ClearFilter if !matches!(self.tab, Tab::Files | Tab::Recovery | Tab::Git) => {
+                Some("Display filters are available in Files, Recovery and Git.")
             }
             Action::PreviewOnly if self.preview_only_locked => {
                 Some("--dry-run locks this session to preview-only; approval remains disabled.")
@@ -2146,57 +2221,7 @@ impl App {
         }
     }
     pub fn page_actions(&self) -> Vec<Action> {
-        match self.tab {
-            Tab::Overview => vec![
-                Action::Init,
-                Action::Choose,
-                Action::Discover,
-                Action::Apply,
-            ],
-            Tab::Files if self.discovering => vec![
-                Action::AdoptSelected,
-                Action::BatchAdopt,
-                Action::ToggleMark,
-                Action::Discover,
-            ],
-            Tab::Files => vec![
-                Action::Inspect,
-                Action::Apply,
-                Action::Keep,
-                Action::Discover,
-                Action::ApplyMarked,
-                Action::KeepMarked,
-                Action::RemoveMarked,
-                Action::ToggleMark,
-            ],
-            Tab::Recovery => {
-                let mut actions = vec![Action::Inspect];
-                if let Some(row) = self.history_selection() {
-                    if super::recovery::rollback(row) {
-                        actions.push(Action::Rollback);
-                    }
-                    if super::recovery::resume(row) {
-                        actions.push(Action::Resume);
-                    }
-                    if super::recovery::abandon(row) {
-                        actions.push(Action::Abandon);
-                    }
-                }
-                actions
-            }
-            Tab::Checks => vec![
-                Action::CheckCurrent,
-                Action::CheckStandalone,
-                Action::Diagnostics,
-                Action::Profiles,
-            ],
-            Tab::Git => vec![
-                Action::GitStatus,
-                Action::GitUnstaged,
-                Action::GitStaged,
-                Action::GitPatch,
-            ],
-        }
+        super::context::page_actions(self)
     }
     fn row_count(&self) -> usize {
         self.data.as_ref().map_or(0, |data| match self.tab {

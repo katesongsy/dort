@@ -363,12 +363,12 @@ fn ordinary_compact_details_have_overlapping_keyboard_pages_including_busy_help_
     assert!(paged_cells(&mut app, false).contains(&super::components::inline(&path)));
     key(&mut app, KeyCode::Char('?'));
     key(&mut app, KeyCode::PageDown);
-    assert_eq!(app.shell.scroll, 2);
+    assert_eq!(app.help.as_ref().unwrap().scroll, 2);
     app.busy = true;
     key(&mut app, KeyCode::PageDown);
-    assert_eq!(app.shell.scroll, 4);
+    assert_eq!(app.help.as_ref().unwrap().scroll, 4);
     key(&mut app, KeyCode::Home);
-    assert_eq!(app.shell.scroll, 0);
+    assert_eq!(app.help.as_ref().unwrap().scroll, 0);
     app.busy = false;
     key(&mut app, KeyCode::Esc);
     app.complete(Err(format!("metadata error {path}")));

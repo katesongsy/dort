@@ -57,6 +57,43 @@ fn key(app: &mut App, code: KeyCode) -> Option<Task> {
     app.key(KeyEvent::new(code, KeyModifiers::NONE), 140, 40)
 }
 #[test]
+fn contextual_content_help_withholds_payload_rejects_late_read_and_restores_focus() {
+    let f = Fixture::new();
+    let mut app = f.app();
+    let read = discover_content::next(&mut app).unwrap();
+    app.complete(Ok(f.finish(read)));
+    key(&mut app, KeyCode::Tab);
+    assert!(app.content.focused);
+    app.content.scroll = 2;
+    let selected = app.candidate_selected;
+    key(&mut app, KeyCode::F(1));
+    assert!(matches!(
+        app.help.as_ref().unwrap().topic,
+        super::help::Topic::Content
+    ));
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        super::files::FORMATTED_ROWS.with(|r| r.set(0));
+        let screen = render(&app, w, h);
+        assert!(!screen.contains("synthetic-preview-A") && !screen.contains("Files / Discover"));
+        assert_eq!(super::files::FORMATTED_ROWS.with(|r| r.get()), 0);
+    }
+    assert!(!app.content.text().contains("synthetic-preview-A"));
+    assert!(discover_content::next(&mut app).is_none());
+    key(&mut app, KeyCode::Esc);
+    assert!(app.content.focused);
+    assert_eq!(app.content.scroll, 2);
+    assert_eq!(app.candidate_selected, selected);
+    let late = discover_content::next(&mut app).unwrap();
+    key(&mut app, KeyCode::F(1));
+    app.complete(Ok(f.finish(late)));
+    assert!(!app.content.text().contains("synthetic-preview-A"));
+    key(&mut app, KeyCode::Esc);
+    let fresh = discover_content::next(&mut app).unwrap();
+    app.complete(Ok(f.finish(fresh)));
+    assert!(app.content.text().contains("synthetic-preview-A"));
+    assert!(app.content.focused);
+}
+#[test]
 fn content_focus_uses_wrapped_viewport_without_selection_changes_or_rereads() {
     let f = Fixture::new();
     fs::write(

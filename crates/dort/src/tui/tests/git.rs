@@ -108,6 +108,73 @@ fn patch_task(app: &mut App) -> Task {
     key(app, KeyCode::Enter).unwrap()
 }
 #[test]
+fn help_retains_disclosure_input_hides_private_patch_and_never_restores_disposed_content() {
+    let f = Fixture::new();
+    let mut app = f.app();
+    f.choose(&mut app);
+    let task = key(&mut app, KeyCode::Char('u')).unwrap();
+    f.run(&mut app, task);
+    key(&mut app, KeyCode::Char('w'));
+    text(&mut app, "view ");
+    key(&mut app, KeyCode::F(1));
+    for code in [KeyCode::Char('p'), KeyCode::Enter] {
+        assert!(key(&mut app, code).is_none());
+    }
+    assert_eq!(f.patch_calls(), 0);
+    key(&mut app, KeyCode::Esc);
+    text(&mut app, "patch");
+    let task = key(&mut app, KeyCode::Enter).expect("exact retained disclosure input");
+    f.run(&mut app, task);
+    assert_eq!(f.patch_calls(), 1);
+    assert!(render(&app, 80, 24).contains("PRIVATE-PATCH"));
+    key(&mut app, KeyCode::F(1));
+    assert!(matches!(
+        app.help.as_ref().unwrap().topic,
+        super::help::Topic::GitContent
+    ));
+    assert!(!render(&app, 140, 40).contains("PRIVATE-PATCH"));
+    key(&mut app, KeyCode::Esc);
+    assert!(render(&app, 80, 24).contains("PRIVATE-PATCH")); // same live one-view payload, no new read
+    assert_eq!(f.patch_calls(), 1);
+    key(&mut app, KeyCode::F(1));
+    app.resize(47, 13);
+    app.resize(80, 24);
+    key(&mut app, KeyCode::Esc);
+    assert!(!app.git_view.sensitive());
+    assert!(!render(&app, 80, 24).contains("PRIVATE-PATCH"));
+    let task = patch_task(&mut app);
+    app.start(false);
+    key(&mut app, KeyCode::F(1));
+    let output = actions::perform(task, &f.host, None, |_| Ok(())).unwrap();
+    app.complete(Ok(output)); // late disclosure is withheld while Help is open
+    key(&mut app, KeyCode::Esc);
+    assert!(!app.git_view.sensitive());
+    assert!(!render(&app, 80, 24).contains("PRIVATE-PATCH"));
+    assert_eq!(f.patch_calls(), 2);
+    f.readonly();
+}
+#[test]
+fn git_context_actions_inspect_and_clear_only_the_git_display_filter() {
+    let f = Fixture::new();
+    let mut app = f.app();
+    f.choose(&mut app);
+    app.inventory.managed.query = "retained-file-filter".into();
+    key(&mut app, KeyCode::Char('/'));
+    text(&mut app, "no-match");
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Char(';'));
+    text(&mut app, "Clear current display");
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(app.git_view.search.query.is_empty());
+    assert_eq!(app.inventory.managed.query, "retained-file-filter");
+    key(&mut app, KeyCode::Char(';'));
+    text(&mut app, "Inspect selected");
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(render(&app, 80, 24).contains("Git details"));
+    assert_eq!(f.patch_calls(), 0);
+    f.readonly();
+}
+#[test]
 fn independent_git_summaries_match_backend_and_never_prefetch_content() {
     let f = Fixture::new();
     let mut app = f.app();

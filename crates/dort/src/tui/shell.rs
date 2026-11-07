@@ -97,7 +97,6 @@ pub enum Overlay {
     Form(Form),
     Profiles(Box<ProfilePicker>),
     About,
-    Help,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -168,7 +167,7 @@ impl Action {
             }
             Self::ManageIgnored => "Manage ignored paths / Unignore (local preferences)",
             Self::Adopt => "Adopt a file (editable target / ID / source)",
-            Self::AdoptSelected => "Adopt selected eligible file (inspect first)",
+            Self::AdoptSelected => "Adopt selected eligible file (editable draft)",
             Self::BatchAdopt => "Adopt marked files (combined editable batch)",
             Self::ApplyMarked => "Apply marked mappings (selected batch)",
             Self::KeepMarked => "Keep marked mappings (combined batch)",
@@ -187,15 +186,15 @@ impl Action {
             Self::Remove => "Delete managed link (select in Files)",
             Self::KeepId => "Keep local file: enter exact mapping ID",
             Self::RemoveId => "Delete managed link: enter exact mapping ID",
-            Self::ClearFilter => "Clear Files / Recovery display filter (not execution scope)",
-            Self::Inspect => "Inspect selected file / recovery transaction details",
+            Self::ClearFilter => "Clear current display filter (not execution scope)",
+            Self::Inspect => "Inspect selected file / transaction / Git entry details",
             Self::Rollback => "Preview rollback (select in Recovery)",
             Self::Resume => "Preview bootstrap resume (select in Recovery)",
             Self::Abandon => "Preview bootstrap abandon (select in Recovery)",
             Self::PreviewOnly => "Toggle preview-only mode",
             Self::Diagnostics => "Diagnostics: host, paths and global write blockers",
             Self::About => "About Dort: version, capabilities and limits",
-            Self::Help => "Help: workflows and safeguards",
+            Self::Help => "Help: current context and safeguards",
             Self::Quit => "Quit (wait for worker)",
         }
     }
@@ -331,7 +330,7 @@ impl Shell {
                 }
                 _ => (),
             },
-            Overlay::Help | Overlay::About => {
+            Overlay::About => {
                 if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?')) {
                     self.overlay = None;
                 }
