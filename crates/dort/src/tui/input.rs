@@ -1,5 +1,5 @@
 //! Render-owned hit regions. Never derive requests from displayed text.
-use super::{app::Tab, shell::Action};
+use super::shell::Action;
 use ratatui::layout::{Position, Rect};
 use std::cell::{Cell, RefCell};
 
@@ -12,7 +12,9 @@ pub enum Target {
     BatchEdit,
     DiscoverFocus(bool),
     Action(Action),
-    Destination(Tab),
+    MenuOpen,
+    MenuGroup(usize),
+    MenuItem(usize),
     Row(usize),
     Filter,
     FormControl(usize, bool),

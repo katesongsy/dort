@@ -9,7 +9,6 @@ pub enum Scope {
     Item,
     Marked,
     View,
-    Global,
 }
 impl Scope {
     pub fn label(self) -> &'static str {
@@ -17,7 +16,6 @@ impl Scope {
             Self::Item => "Context: selected item",
             Self::Marked => "Context: marked items",
             Self::View => "Context: current view",
-            Self::Global => "Global: navigation / session",
         }
     }
     pub fn short(self) -> &'static str {
@@ -25,13 +23,12 @@ impl Scope {
             Self::Item => "Item",
             Self::Marked => "Marked",
             Self::View => "View",
-            Self::Global => "Global",
         }
     }
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Effect {
-    Navigate,
+    View,
     Read,
     Draft,
     Preview,
@@ -40,7 +37,7 @@ pub enum Effect {
 impl Effect {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Navigate => "Navigation / session",
+            Self::View => "View / selection",
             Self::Read => "Read-only",
             Self::Draft => "Editable draft",
             Self::Preview => "Mutation preview",
@@ -61,17 +58,17 @@ fn entry(action: Action, primary: Option<usize>) -> Entry {
         Inspect | AdoptSelected | Keep | Remove | IgnoreSelected | Rollback | Resume | Abandon
         | ToggleMark => Scope::Item,
         BatchAdopt | ApplyMarked | KeepMarked | RemoveMarked | ClearMarks => Scope::Marked,
-        Destination(_) | Choose | Init | About | Help | Quit | PreviewOnly => Scope::Global,
         _ => Scope::View,
     };
     let effect = match action {
         Apply | Keep | Remove | IgnoreSelected | Rollback | Resume | Abandon | ApplyMarked
         | KeepMarked | RemoveMarked => Effect::Preview,
-        Adopt | AdoptSelected | BatchAdopt | KeepId | RemoveId | Init => Effect::Draft,
+        Adopt | AdoptSelected | BatchAdopt | KeepId | RemoveId | Init | CheckStandalone
+        | Profiles | StandaloneProfiles => Effect::Draft,
         GitPatch => Effect::Disclosure,
         Discover | Refresh | CheckCurrent | Diagnostics | GitStatus | GitUnstaged | GitStaged
         | GitRefresh => Effect::Read,
-        _ => Effect::Navigate,
+        _ => Effect::View,
     };
     Entry {
         action,
@@ -80,14 +77,14 @@ fn entry(action: Action, primary: Option<usize>) -> Entry {
         primary,
     }
 }
-/// Only workflows belonging to this view, followed by global navigation/session controls.
+/// Only operations belonging to this view. Menus own navigation/session commands.
 /// Missing prerequisites stay visible and are explained by App's authoritative dispatch guard.
 pub fn entries(app: &App) -> Vec<Entry> {
     use Action::*;
     let (primary, other): (Vec<Action>, Vec<Action>) = match app.tab {
-        Tab::Overview => (vec![Discover, Apply], vec![Profiles, Refresh]),
+        Tab::Overview => (vec![Apply], vec![Profiles, Refresh]),
         Tab::Files if app.discovering => (
-            vec![IgnoreSelected, ManageIgnored, AdoptSelected, BatchAdopt],
+            vec![IgnoreSelected, AdoptSelected, BatchAdopt],
             vec![
                 Inspect,
                 ToggleMark,
@@ -129,52 +126,25 @@ pub fn entries(app: &App) -> Vec<Entry> {
             vec![Inspect, Rollback, Resume, Abandon],
             vec![ClearFilter, Refresh],
         ),
+        Tab::Checks if app.showing_diagnostics => (vec![Diagnostics], vec![]),
         Tab::Checks => (
-            vec![CheckCurrent, CheckStandalone, Diagnostics, Profiles],
+            vec![CheckCurrent, CheckStandalone, Profiles],
             vec![StandaloneProfiles, Refresh],
         ),
-        Tab::Git => (
-            vec![GitStatus, GitUnstaged, GitStaged, GitPatch],
-            vec![Inspect, ClearFilter, GitRoot, GitDefault, GitRefresh],
-        ),
+        Tab::Git => (vec![Inspect, GitPatch, GitRefresh], vec![ClearFilter]),
     };
     let mut rows: Vec<_> = primary
         .into_iter()
         .enumerate()
-        .map(|(i, a)| entry(a, Some(i + if app.tab == Tab::Overview { 2 } else { 0 })))
+        .map(|(i, a)| entry(a, Some(i)))
         .chain(other.into_iter().map(|a| entry(a, None)))
         .collect();
+    // Diagnostics is a refresh operation only when already in that subview.
+    rows.retain(|e| {
+        !super::navigation::owns(e.action)
+            || (e.action == Diagnostics && app.tab == Tab::Checks && app.showing_diagnostics)
+    });
     rows.sort_by_key(|e| e.scope);
-    rows.extend(
-        [
-            Destination(Tab::Overview),
-            Destination(Tab::Files),
-            Destination(Tab::Recovery),
-            Destination(Tab::Checks),
-            Destination(Tab::Git),
-            Choose,
-            Init,
-            PreviewOnly,
-            About,
-            Help,
-            Quit,
-        ]
-        .into_iter()
-        .map(|a| {
-            entry(
-                a,
-                if app.tab == Tab::Overview {
-                    match a {
-                        Init => Some(0),
-                        Choose => Some(1),
-                        _ => None,
-                    }
-                } else {
-                    None
-                },
-            )
-        }),
-    );
     rows
 }
 pub fn page_actions(app: &App) -> Vec<Action> {

@@ -224,7 +224,25 @@ fn clicks_and_wheels_use_hovered_rows_and_details_with_filtered_raw_identity() {
         if tab != Tab::Git {
             assert_eq!(app.selected, 1);
         }
-        let (x, y) = at(&app, "4 Checks", size);
+        let (x, y) = at(&app, "Checks v", size);
+        mouse(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            x,
+            y,
+            size,
+        );
+        assert!(
+            app.navigation.menu.is_some(),
+            "menu should open: files={} recovery={} git={} git_text={} overlay={} busy={}",
+            app.tab == Tab::Files,
+            app.tab == Tab::Recovery,
+            app.tab == Tab::Git,
+            app.git_view.text_entry(),
+            app.shell.overlay.is_some(),
+            app.busy
+        );
+        let (x, y) = at(&app, "Manifest checks", size);
         mouse(
             &mut app,
             MouseEventKind::Down(MouseButton::Left),
@@ -375,7 +393,7 @@ fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_ta
     );
     press(&mut app, KeyCode::Esc, size);
     press(&mut app, KeyCode::Char('n'), size);
-    let (x, y) = at(&app, "5 Git", size);
+    let (x, y) = at(&app, "Git v", size);
     mouse(
         &mut app,
         MouseEventKind::Down(MouseButton::Left),
@@ -408,7 +426,7 @@ fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_ta
     assert!(render(&app, size.0, size.1).contains("Rollback unavailable"));
     press(&mut app, KeyCode::Esc, size); // clicked results, no hidden input focus
     app.start(false);
-    let (x, y) = at(&app, "4 Checks", size);
+    let (x, y) = at(&app, "Checks v", size);
     assert!(
         mouse(
             &mut app,
@@ -419,6 +437,8 @@ fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_ta
         )
         .is_none()
     );
+    assert!(app.tab == Tab::Recovery && app.busy && app.navigation.menu.is_none());
+    press(&mut app, KeyCode::Char('4'), size); // existing task-time keyboard navigation remains
     assert!(app.tab == Tab::Checks && app.busy);
 }
 #[test]

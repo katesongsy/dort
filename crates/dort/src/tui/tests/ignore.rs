@@ -80,7 +80,9 @@ fn ignore_folder_confirm_refresh_manage_and_unignore_are_complete_tui_workflows(
             .iter()
             .all(|c| !c.entry.path.starts_with(f.host.home.join(".tool")))
     );
-    let task = action(&mut app, "Manage ignored");
+    app.open_menu(2, 100);
+    key(&mut app, KeyCode::End);
+    let task = key(&mut app, KeyCode::Enter).unwrap();
     f.finish(&mut app, task);
     assert!(matches!(app.shell.overlay, Some(Overlay::Ignored { .. })));
     assert!(render(&app, 48, 14).contains("Unignore"));
@@ -130,10 +132,10 @@ fn visible_ignore_controls_mouse_and_keyboard_work_at_all_supported_sizes() {
         let mut app = f.app(false);
         app.resize(w, h);
         let screen = render(&app, w, h);
-        assert!(screen.contains("Ignore selected") && screen.contains("Ignored paths"));
+        assert!(screen.contains("Ignore selected") && screen.contains("F10 Menu"));
         assert!(screen.contains("Actions") && screen.contains("F1 Help"));
         let mut found = Vec::new();
-        for action in [Action::IgnoreSelected, Action::ManageIgnored] {
+        for action in [Action::IgnoreSelected] {
             let mut point = None;
             for y in 0..h {
                 for x in 0..w {
@@ -167,8 +169,13 @@ fn visible_ignore_controls_mouse_and_keyboard_work_at_all_supported_sizes() {
         let task = f.finish(&mut app, task).unwrap();
         f.finish(&mut app, task);
         app.resize(w, h);
-        render(&app, w, h);
-        let (column, row) = found[1];
+        app.open_menu(2, w);
+        app.navigation.menu.as_mut().unwrap().expanded = true;
+        assert!(render(&app, w, h).contains("Ignored paths"));
+        let (column, row) = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .find(|&(x, y)| matches!(app.hits.target(x, y), Some(Target::MenuItem(2))))
+            .expect("visible Ignored paths menu item");
         let task = app
             .mouse(
                 MouseEvent {
@@ -207,6 +214,8 @@ fn help_retains_real_preview_confirmation_and_shrink_still_clears_approval() {
     let task = key(&mut app, KeyCode::Char('I')).unwrap();
     f.finish(&mut app, task);
     let original = app.preview.as_ref().unwrap().text.clone();
+    key(&mut app, KeyCode::F(10));
+    assert!(app.navigation.menu.is_none() && app.preview.is_some());
     key(&mut app, KeyCode::F(1));
     for code in [
         KeyCode::Enter,
@@ -224,6 +233,9 @@ fn help_retains_real_preview_confirmation_and_shrink_still_clears_approval() {
     key(&mut app, KeyCode::Enter);
     key(&mut app, KeyCode::Char('y'));
     key(&mut app, KeyCode::Char('e'));
+    key(&mut app, KeyCode::F(10));
+    assert!(app.navigation.menu.is_none());
+    assert_eq!(app.confirmation.as_ref().unwrap().input, "ye");
     key(&mut app, KeyCode::F(1));
     for code in [KeyCode::Char('s'), KeyCode::Enter] {
         assert!(key(&mut app, code).is_none());

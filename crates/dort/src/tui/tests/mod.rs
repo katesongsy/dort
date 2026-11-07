@@ -133,16 +133,7 @@ fn compact_navigation_and_report_home_are_readable_without_color() {
     let mut app = App::new(true);
     for (width, height) in [(48, 14), (80, 24), (140, 40)] {
         let screen = render(&app, width, height);
-        for label in [
-            "1 Overview",
-            "2 Files",
-            "3 Recovery",
-            "4 Checks",
-            "5 Git",
-            "Actions",
-            "DRY RUN",
-            ";",
-        ] {
+        for label in ["F10 Menu", "Overview", "Actions", "DRY RUN", ";"] {
             assert!(
                 screen.contains(label),
                 "missing textual {label} at {width}x{height}"
@@ -269,7 +260,7 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     for c in "Choose repository".chars() {
         app.key(key(KeyCode::Char(c)), 80, 24);
     }
-    assert!(render(&app, 80, 24).contains("Choose repository (session only)"));
+    assert!(render(&app, 80, 24).contains("No matching actions")); // session commands live in menus
     app.key(key(KeyCode::Esc), 80, 24); // search -> results
     app.key(key(KeyCode::Esc), 80, 24); // close, restoring invoking focus
     app.details_scroll = 3;

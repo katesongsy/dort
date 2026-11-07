@@ -22,6 +22,7 @@ pub enum Topic {
     Git,
     GitContent,
     Actions,
+    Menu,
     Form(Form),
     Picker,
     Ignored,
@@ -47,6 +48,7 @@ impl Topic {
             Self::Git => "Git inspection",
             Self::GitContent => "Git content disclosure",
             Self::Actions => "Actions",
+            Self::Menu => "Navigation menus",
             Self::Form(_) => "Form",
             Self::Picker => "Session picker",
             Self::Ignored => "Ignored paths / Unignore",
@@ -62,6 +64,9 @@ impl Topic {
     }
     fn instructions(self) -> &'static str {
         match self {
+            Self::Menu => {
+                "Menus own navigation and session commands. Left/Right selects a top-level menu; Up/Down or j/k chooses an item; Enter opens it. In compact layouts choose a group first; Left returns to groups. Esc/F10 closes without navigating. F1 returns to the exact menu selection. Unavailable entries keep their reason; choosing one cannot bypass its guard. No menu selection approves a write or discloses a patch."
+            }
             Self::Overview => {
                 "Choose repository selects only this session. Create/attach needs a fresh preview and literal yes. Discover works without a repository. Apply reviews the full active-profile scope."
             }
@@ -90,7 +95,7 @@ impl Topic {
                 "Patch viewing requires the separate literal view patch acknowledgement, once. Patches may expose secrets and are not secret-proof. PgUp/PgDn and arrows scroll the disclosed patch; Esc drops it.\nHelp never copies or renders the retained disclosure input/payload. Shrinking below the layout floor drops disclosure; returning from Help never restores disposed content or authorizes another read."
             }
             Self::Actions => {
-                "One searchable panel: Context sections contain selected-item, marked-items and current-view commands. Global contains destination and session controls. Other-view workflows stay in their views.\nType a label immediately; Up/Down chooses, Enter requests. / refocuses search. Esc leaves search, then closes. PgDn shows the full label, effect and unavailable reason; Home returns controls. Search is display-only. Effects are independent of scope: drafts, mutation previews and content warnings never authorize execution."
+                "Actions contains selected-item, marked-items and current-view operations only. F10 menus own navigation and session controls. Other-view workflows stay in their views.\nType a label immediately; Up/Down chooses, Enter requests. / refocuses search. Esc leaves search, then closes. PgDn shows the full label, effect and unavailable reason; Home returns controls. Search is display-only. Effects are independent of scope: drafts, mutation previews and content warnings never authorize execution."
             }
             Self::Form(Form::Adopt) => {
                 "TARGET is the exact local path; ID is the mapping identifier; SOURCE is repository-relative. Defaults preserve the HOME-relative path under files/. Edit freely before review. Enter advances through fields to Review; Tab/Shift-Tab moves controls. Choose/Create can retain this draft. Esc returns retaining edits. Only the real preview's Adopt all approves adoption; no typed yes."
@@ -147,6 +152,9 @@ pub struct State {
     pub content_scroll: u16,
 }
 pub fn topic(app: &App) -> Topic {
+    if app.navigation.menu.is_some() {
+        return Topic::Menu;
+    }
     if app.error.is_some() {
         return Topic::Error;
     }
@@ -192,6 +200,9 @@ pub fn topic(app: &App) -> Topic {
 }
 /// Text focus is surface-specific; background retained forms do not steal task/error Help.
 pub fn text_input(app: &App) -> bool {
+    if app.navigation.menu.is_some() {
+        return false;
+    }
     if app.busy
         || app.error.is_some()
         || app.show_result
@@ -229,6 +240,18 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
             .map(|s| Line::raw(s.to_owned())),
     );
     lines.push(Line::raw(""));
+    if matches!(help.topic, Topic::Menu)
+        && let Some(menu) = app.navigation.menu
+        && menu.expanded
+        && let Some(entry) = super::navigation::entries(menu.group).get(menu.selected)
+    {
+        lines.push(Line::raw(format!("Selected: {}", entry.label)));
+        if let super::navigation::Item::Action(action) = entry.item
+            && let Some(reason) = app.action_reason(action)
+        {
+            lines.push(Line::raw(super::views::safe(reason)));
+        }
+    }
     if matches!(
         help.topic,
         Topic::Overview
@@ -240,10 +263,7 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
             | Topic::Git
     ) {
         lines.push(Line::styled("Context commands (; Actions)", ui::heading()));
-        for e in super::context::entries(app)
-            .into_iter()
-            .filter(|e| e.scope != super::context::Scope::Global)
-        {
+        for e in super::context::entries(app).into_iter() {
             lines.push(Line::raw(format!(
                 "{}: {} [{}]{}",
                 e.scope.short(),
@@ -256,7 +276,7 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
         }
     }
     lines.push(Line::raw(""));
-    lines.push(Line::raw("F1 opens contextual Help everywhere. ? opens it outside text; q ? / remain literal in text/search. Ctrl-U clears a field. Global: 1..5 destinations, p repository, n create/attach, ; Actions. q outside text / Ctrl-C exits, waiting for the worker."));
+    lines.push(Line::raw("F1 opens contextual Help everywhere. ? opens it outside text; q ? / remain literal in text/search. Ctrl-U clears a field. F10 menus navigate and manage the session. Existing 1..5 destinations, f Discover, p repository and n create/attach shortcuts remain; ; opens contextual Actions. q outside text / Ctrl-C exits, waiting for the worker."));
     lines.push(Line::raw("Previews are not authorization. No automatic replay/rollback, provider execution, network or Git writes. Backups are private, not encrypted."));
     let body = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
     ui::report(

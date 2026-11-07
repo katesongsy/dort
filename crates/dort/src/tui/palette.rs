@@ -1,4 +1,4 @@
-//! Context and Global Actions. Highlighting/filtering never constructs a task.
+//! Contextual Actions. Highlighting/filtering never constructs a task.
 pub use super::context::{Entry, entries};
 use super::{app::App, components as ui};
 use ratatui::{
@@ -41,7 +41,7 @@ fn details(app: &App, rows: &[&Entry], query: &str, selected: usize) -> Text<'st
     } else {
         lines.push(Line::raw("No matching actions. Ctrl-U clears the search."));
     }
-    lines.push(Line::raw("Context commands belong to this view. Global commands navigate or change the session. Search matches labels only, case-insensitively; it never narrows execution scope. Effect labels distinguish drafts, mutation previews and content warnings."));
+    lines.push(Line::raw("Commands operate on this view or selection. F10 menus own navigation and session controls. Search matches labels only, case-insensitively; it never narrows execution scope. Effect labels distinguish drafts, mutation previews and content warnings."));
     lines.push(Line::raw("Home returns controls. Arrows choose results; / edits search. Esc leaves search, then closes Actions."));
     Text::from(lines)
 }
@@ -110,7 +110,7 @@ pub fn draw(
         .collect();
     let table = Table::new(items, [Constraint::Length(10), Constraint::Min(8)])
         .header(Row::new(["SCOPE", "ACTION / EFFECT"]).style(ui::muted()))
-        .block(ui::pane("Context + Global · Enter choose", !searching))
+        .block(ui::pane("Context actions · Enter choose", !searching))
         .highlight_symbol("> ")
         .row_highlight_style(ui::selected());
     let mut state = TableState::default().with_selected((!rows.is_empty()).then_some(selected));

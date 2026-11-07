@@ -95,7 +95,7 @@ fn workbench_has_semantic_styles_and_selected_identity_at_all_supported_sizes() 
     let app = files_app();
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let b = buffer(&app, w, h);
-        let active = locate(&b, "2 Files");
+        let active = locate(&b, "Files / Managed");
         assert!(b[active].modifier.contains(Modifier::BOLD));
         assert!(b[active].modifier.contains(Modifier::REVERSED));
         locate(&b, "STATE");

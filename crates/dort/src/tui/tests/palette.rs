@@ -87,10 +87,7 @@ fn contextual_catalog_is_unique_and_separates_scope_from_effect() {
                 Action::Quit,
                 Action::Destination(Tab::Files),
             ] {
-                assert!(
-                    rows.iter()
-                        .any(|r| r.action == global && r.scope == Scope::Global)
-                );
+                assert!(!rows.iter().any(|r| r.action == global));
             }
             assert_eq!(
                 rows.iter().any(|r| r.action == Action::StandaloneProfiles),
@@ -108,6 +105,24 @@ fn contextual_catalog_is_unique_and_separates_scope_from_effect() {
                 palette::matches(&rows, "STANDALONE MANIFEST").len(),
                 if tab == Tab::Checks { 2 } else { 0 }
             );
+        }
+    }
+    for group in 0..super::navigation::GROUPS.len() {
+        for entry in super::navigation::entries(group) {
+            if let super::navigation::Item::Action(action) = entry.item
+                && !union.contains(&action)
+            {
+                union.push(action);
+            }
+        }
+    }
+    // Existing numeric shortcuts additionally expose destination-only checks/Git routes.
+    for action in [
+        Action::Destination(Tab::Checks),
+        Action::Destination(Tab::Git),
+    ] {
+        if !union.contains(&action) {
+            union.push(action);
         }
     }
     assert_eq!(union.len(), 47); // Every supported typed command has a home.

@@ -42,6 +42,10 @@ mod ignored;
 mod input;
 mod inventory;
 #[cfg(test)]
+#[path = "tests/menus.rs"]
+mod menu_tests;
+mod navigation;
+#[cfg(test)]
 #[path = "tests/navigation.rs"]
 mod navigation_tests;
 mod observations;

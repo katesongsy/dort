@@ -137,8 +137,8 @@ fn welcome_next_steps_are_visible_at_the_floor_without_creating_state() {
     for label in [
         "Create/attach",
         "Choose repository",
-        "Discover files",
-        "Check a manifest",
+        "Files: Discover",
+        "Checks: manifest",
     ] {
         assert!(screen.contains(label), "visible Welcome action: {label}");
     }
@@ -784,17 +784,13 @@ fn bootstrap_approval_staleness_and_lock_failure_are_visible_without_retry() {
 fn dry_run_bootstrap_can_never_execute_even_after_mode_toggle() {
     let fixture = Fixture::new(false);
     let mut app = onboarding_app(&fixture, true);
-    key(&mut app, KeyCode::Char('/'));
-    type_text(&mut app, "toggle");
+    app.open_menu(0, 100);
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Down);
     key(&mut app, KeyCode::Enter);
-    assert!(app.dry_run);
-    assert!(matches!(
-        app.shell.overlay,
-        Some(super::shell::Overlay::Actions { .. })
-    ));
+    assert!(app.dry_run && app.navigation.menu.is_some());
     assert!(app.status.contains("--dry-run locks"));
-    key(&mut app, KeyCode::Esc); // leave search after disabled action
-    key(&mut app, KeyCode::Esc); // dismiss Actions, no task/approval
+    key(&mut app, KeyCode::Esc); // dismiss disabled menu, no task/approval
     key(&mut app, KeyCode::Char('n'));
     type_text(&mut app, "new");
     let task = submit_path(&mut app);

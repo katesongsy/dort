@@ -202,6 +202,14 @@ class Session:
                 return
         raise AssertionError("Click target was not visible")
 
+    def navigate(self, group, item):
+        if self.screen.columns < 80:
+            self.click_label("F10 Menu")
+            self.click_label(group + " >")
+        else:
+            self.click_label(group + " v")
+        self.click_label(item)
+
     def resize(self, size):
         self.settle()
         self.screen = Screen(size)
@@ -271,8 +279,8 @@ def run():
         # Text carries navigation/state meaning even with a low-color terminal.
         with Session([binary, "--dry-run", "tui"], dict(env, TERM="vt100", NO_COLOR="1"), (14, 48)) as session:
             session.wait(b"loaded.")
-            for label in [b"1 Overview", b"2 Files", b"3 Recovery", b"4 Checks", b"5 Git",
-                          b"DRY RUN", b"Create/attach", b"Choose repository", b"Discover files", b"Check a manifest"]:
+            for label in [b"F10 Menu", b"Overview", b"DRY RUN", b"Create/attach",
+                          b"Choose repository", b"Files: Discover", b"Checks: manifest"]:
                 session.wait(label)
             session.send(b"?")
             session.wait(b"Help: Overview")
@@ -290,6 +298,34 @@ def run():
         assert not list(home.iterdir()), "Compact navigation/help created state"
         print("PASS compact low-color navigation and Home help reset without state")
 
+        for menu_size in [(14, 48), (24, 80), (40, 140)]:
+            with Session([binary, 'tui'], env, menu_size) as session:
+                session.wait(b'loaded.')
+                session.send(b'\x1b[21~')  # F10
+                session.wait(b'Esc close')
+                session.send(b'\x1b[C')  # Overview -> Files menu/group
+                session.settle()
+                if menu_size[1] < 80:
+                    session.send(b'\r')
+                session.wait(b'Discover [f]')
+                session.send(b'\x1b[B')
+                session.settle()
+                session.send(b'\x1bOP')
+                session.wait(b'Help: Navigation menus')
+                session.send(b'\r')  # Help cannot select the retained menu entry
+                session.settle()
+                session.send(b'\x1b')
+                session.wait(b'Esc close')  # not the retained selected label in Help
+                session.send(b'\r')
+                session.wait(b'Metadata discovery loaded')
+                session.wait(b'Files / Discover')
+                session.send(b'2')
+                session.wait(b'Files / Managed')
+                session.send(b'q')
+                session.finish()
+        assert not list(home.iterdir()), 'Menu navigation created local state'
+        print('PASS keyboard dropdown navigation, contextual menu Help and preserved shortcuts at all sizes')
+
         # Capability detection uses only each child's environment; ASCII and color
         # are independent. These are VT fixture checks, not physical theme review.
         cases = [
@@ -302,7 +338,7 @@ def run():
         for child_env, ascii_only, monochrome, size in cases:
             with Session([binary, "tui"], child_env, size) as session:
                 session.wait(b"loaded.")
-                session.click_label("2 Files")
+                session.navigate("Files", "Managed [2]")
                 session.wait(b"Files / Managed")
                 session.send(b"o")
                 session.wait(b"TARGET")
@@ -395,7 +431,7 @@ def run():
             session.send(b'f')
             session.wait(b'Metadata discovery loaded')
             session.wait(b'Ignore selected')
-            session.wait(b'Ignored paths')
+            session.wait(b'F10 Menu')
             session.click_label('Ignore selected')
             session.wait(b'Ignore discovery path')
             assert not ignore_store.exists(), 'Ignore preview wrote preferences'
@@ -439,7 +475,7 @@ def run():
             session.wait(b'loaded.')
             session.send(b'f')
             session.wait(b'Metadata discovery loaded')
-            session.click_label('Ignored paths')
+            session.navigate('Files', 'Ignored paths [U]')
             session.wait(b'Enter previews Unignore')
             session.send(b'\r')
             session.wait(b'Unignore discovery path')
@@ -591,6 +627,12 @@ def run():
             session.send(b"4;")
             session.wait(b"Check current")  # current-view actions, not flat navigation first
             session.send(b"about\r")
+            session.wait(b"No matching actions")  # session commands moved out of Actions
+            session.send(b"\x1b")
+            session.settle()
+            session.send(b"\x1b")
+            session.settle()
+            session.navigate("Session", "About")
             session.wait(b"| About")
             session.send(b"\x1b")
             session.settle()
@@ -607,9 +649,7 @@ def run():
             session.send(b"r")
             session.wait(b"Read-only Diagnostics loaded")
             session.settle()  # identical refresh result may still be the prior frame
-            session.send(b";")
-            session.wait(b"Search by label")
-            session.send(b"about\r")
+            session.navigate("Session", "About")
             session.wait(b"| About")
             session.wait(b"Experimental guarded local workflows")
             session.send(b"\x1b")
@@ -646,8 +686,7 @@ def run():
         candidate.write_text("private-body-marker\n")
         with Session([binary, "tui"], env, (24, 110)) as session:
             session.wait(b"loaded.")
-            session.click_label("2 Files")
-            session.click_label("Discover files")
+            session.navigate("Files", "Discover [f]")
             session.wait(b"Eligible hint")
             session.click_label(".q?config")  # selection only; content is automatic
             session.send(b"i")  # retain inspection when shrinking to compact
@@ -674,7 +713,7 @@ def run():
             session.wait(b"NAME")
             session.send(b"\x1b[C")  # direct destination, never action selection
             session.wait(b"All repositories")
-            session.click_label("2 Files")
+            session.navigate("Files", "Managed [2]")
             session.wait(b"Files / Managed")  # destination chooses managed view
             session.resize((22, 110))
             session.wait(b"Selected item")
@@ -848,8 +887,8 @@ def run():
 
         with Session([binary, "tui"], dict(env, PATH=str(bin_dir)), (24, 110)) as session:
             session.wait(b"loaded.")
-            session.click_label("5 Git")
-            session.send(b"g" + os.fsencode(git_only) + b"\r")
+            session.navigate("Git", "Choose Git scope [g]")
+            session.send(os.fsencode(git_only) + b"\r")
             session.wait(b"Git read completed")
             session.click_label("q?name")
             session.send(b"\r\x1b[6~")
@@ -868,7 +907,7 @@ def run():
             session.wait(b"PATH")
             session.resize((23, 110))
             session.wait(b"Git details | PgUp/PgDn")
-            session.click_label("Unstaged")
+            session.navigate("Git", "Unstaged [u]")
             session.wait(b"Unstaged (worktree vs index)")
             session.wait(b"100644 -> 100644")  # loaded diff before content action
             session.click_label("View patch")
@@ -1101,7 +1140,7 @@ def run():
 
         with Session([binary, "--dry-run", "tui"], env, (24, 110)) as session:
             session.wait(b"loaded.")
-            session.click_label("3 Recovery")
+            session.navigate("Recovery", "All repositories [3]")
             session.send(b"/Completed\r")
             session.wait(b"Showing 1")
             session.click_label("Inspect")

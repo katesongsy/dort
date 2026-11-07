@@ -34,7 +34,7 @@ fn short(action: Action) -> &'static str {
         Action::Abandon => "Review abandon",
         Action::CheckCurrent => "Check repository",
         Action::CheckStandalone => "Standalone check",
-        Action::Diagnostics => "Diagnostics",
+        Action::Diagnostics => "Refresh diagnostics",
         Action::Profiles => "Profiles",
         Action::GitStatus => "Status",
         Action::GitUnstaged => "Unstaged",
@@ -66,7 +66,7 @@ pub fn shortcut(action: Action) -> &'static str {
         Action::Abandon => "x",
         Action::CheckCurrent => "c",
         Action::CheckStandalone => "v",
-        Action::Diagnostics => "j",
+        Action::Diagnostics => "r",
         Action::Profiles => "t",
         Action::GitStatus => "z",
         Action::GitUnstaged => "u",
@@ -117,45 +117,7 @@ fn buttons(frame: &mut Frame, area: Rect, app: &App) {
     ui::prose(frame, help, " [F1 Help]", ui::accent());
 }
 fn tabs(frame: &mut Frame, area: Rect, app: &App) {
-    let mut x = area.x;
-    let mut y = area.y;
-    for (i, (tab, label)) in [
-        (Tab::Overview, "1 Overview"),
-        (Tab::Files, "2 Files"),
-        (Tab::Recovery, "3 Recovery"),
-        (Tab::Checks, "4 Checks"),
-        (Tab::Git, "5 Git"),
-    ]
-    .iter()
-    .enumerate()
-    {
-        if area.width < 80 && i == 3 {
-            x = area.x;
-            y += 1;
-        }
-        let text = format!(" {label} ");
-        let width = text.len() as u16;
-        let r = Rect::new(x, y, width.min(area.right().saturating_sub(x)), 1);
-        frame.render_widget(
-            Paragraph::new(Span::styled(
-                text,
-                if *tab == app.tab {
-                    ui::selected()
-                } else {
-                    ui::muted()
-                },
-            )),
-            r,
-        );
-        if app.shell.overlay.is_none()
-            && app.preview.is_none()
-            && app.error.is_none()
-            && app.confirmation.is_none()
-        {
-            app.hits.click(r, super::input::Target::Destination(*tab));
-        }
-        x += width;
-    }
+    super::navigation::bar(frame, area, app);
 }
 fn legacy_document(text: String) -> Text<'static> {
     // Transitional report styling only: never derive identity, eligibility or requests from prose.
@@ -223,24 +185,15 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Span::styled(" Dort  ", ui::heading()),
         Span::raw(ui::clip(context, area.width.saturating_sub(28))),
         Span::styled(if app.dry_run { "  [DRY RUN]" } else { "" }, ui::warning()),
-        Span::styled("  [p Scope]", ui::accent()),
+        Span::styled(
+            if app.menus_available() {
+                format!("  {}", super::navigation::location(app))
+            } else {
+                String::new()
+            },
+            ui::selected(),
+        ),
     ]);
-    let scope_x = sections[0].x + header.width().saturating_sub("  [p Scope]".len()) as u16;
-    if scope_x < sections[0].right()
-        && app.shell.overlay.is_none()
-        && app.preview.is_none()
-        && app.error.is_none()
-    {
-        app.hits.click(
-            Rect::new(
-                scope_x,
-                sections[0].y,
-                11.min(sections[0].right() - scope_x),
-                1,
-            ),
-            super::input::Target::Action(Action::Choose),
-        );
-    }
     frame.render_widget(Paragraph::new(header), sections[0]);
     tabs(frame, sections[1], app);
     let body = sections[2];
@@ -471,6 +424,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
     };
     let keys: Vec<_> = std::iter::once(("F1", "Help")).chain(keys).collect();
     frame.render_widget(Paragraph::new(ui::keys(&keys)), sections[4]);
+    if let Some(menu) = app.navigation.menu {
+        super::navigation::popup(frame, app, menu);
+    }
     if let Some(confirmation) = &app.confirmation {
         app.hits.clear();
         let width = area.width.saturating_sub(4).min(76);

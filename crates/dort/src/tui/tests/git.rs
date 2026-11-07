@@ -221,6 +221,40 @@ fn independent_git_summaries_match_backend_and_never_prefetch_content() {
     f.readonly();
 }
 #[test]
+fn git_menu_comparisons_are_read_only_and_never_bypass_or_restore_disclosure() {
+    let f = Fixture::new();
+    let mut app = f.app();
+    f.choose(&mut app);
+    for (selected, comparison) in [
+        (0, super::git::Comparison::Status),
+        (1, super::git::Comparison::Unstaged),
+        (2, super::git::Comparison::Staged),
+    ] {
+        app.open_menu(5, 100);
+        app.navigation.menu.as_mut().unwrap().selected = selected;
+        let task = key(&mut app, KeyCode::Enter).unwrap();
+        f.run(&mut app, task);
+        assert!(app.tab == Tab::Git && app.git_view.comparison == comparison);
+        assert!(app.git_view.metadata.is_some() && !app.git_view.sensitive());
+    }
+    assert_eq!(f.patch_calls(), 0);
+    key(&mut app, KeyCode::Char('w'));
+    text(&mut app, "view ");
+    key(&mut app, KeyCode::F(10));
+    assert!(app.navigation.menu.is_none());
+    text(&mut app, "patch");
+    let task = key(&mut app, KeyCode::Enter).unwrap();
+    f.run(&mut app, task);
+    assert!(render(&app, 100, 30).contains("PRIVATE-PATCH"));
+    key(&mut app, KeyCode::F(10));
+    assert!(app.navigation.menu.is_some() && !app.git_view.sensitive());
+    assert!(!render(&app, 100, 30).contains("PRIVATE-PATCH"));
+    key(&mut app, KeyCode::Esc);
+    assert!(!render(&app, 100, 30).contains("PRIVATE-PATCH"));
+    assert_eq!(f.patch_calls(), 1);
+    f.readonly();
+}
+#[test]
 fn patch_disclosure_is_once_isolated_and_dropped_on_close_scope_resize_or_exit() {
     let f = Fixture::new();
     let mut app = f.app();
@@ -341,8 +375,8 @@ fn git_root_default_and_independent_selection_do_not_require_healthy_file_observ
     app.complete(Ok(result));
     assert_eq!(app.repository.as_ref(), Some(&other));
     assert_eq!(app.git_view.root.as_ref(), Some(&f.root));
-    key(&mut app, KeyCode::Char(';'));
-    text(&mut app, "Git: use current file repository root");
+    app.open_menu(5, 100);
+    key(&mut app, KeyCode::End);
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.run(&mut app, task);
     assert_eq!(app.git_view.root.as_ref(), Some(&other));

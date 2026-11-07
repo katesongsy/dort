@@ -172,6 +172,9 @@ impl State {
     pub fn text_entry(&self) -> bool {
         self.editing_root || self.search.editing || self.confirmation.is_some()
     }
+    pub fn navigation_input(&self) -> bool {
+        self.editing_root || self.confirmation.is_some()
+    }
     pub fn sensitive(&self) -> bool {
         self.confirmation.is_some() || self.patch.is_some() || self.awaiting_patch
     }
@@ -441,7 +444,7 @@ impl State {
             },
         );
         let scope = format!(
-            "Git-only root: {:?} ({})\n{} | g root | z Status | u Unstaged | s Staged\nr refresh | / metadata search | w View patch content\n",
+            "Git-only root: {:?} ({})\n{}\nr refresh | / metadata search | w View patch content\n",
             self.root,
             if self.follows_files {
                 "current file repository"

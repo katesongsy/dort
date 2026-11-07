@@ -89,7 +89,7 @@ fn compatible_cells_preserve_geometry_raw_mouse_identity_and_textual_states() {
             app.appearance = appearance(ascii, mono);
             let compatible = draw(&app, w, h);
             check_cells(&compatible, ascii, mono);
-            for label in ["2 Files", "Blocked", "Review apply", "\\u{e9}"] {
+            for label in ["Files / Managed", "Blocked", "Review apply", "\\u{e9}"] {
                 assert_eq!(locate(&original, label), locate(&compatible, label));
             }
             let mut index = 0;
@@ -107,7 +107,7 @@ fn compatible_cells_preserve_geometry_raw_mouse_identity_and_textual_states() {
                     index += 1;
                 }
             }
-            let active = locate(&compatible, "2 Files");
+            let active = locate(&compatible, "Files / Managed");
             assert!(
                 compatible.backend().buffer()[active]
                     .modifier

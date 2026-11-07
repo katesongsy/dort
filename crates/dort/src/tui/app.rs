@@ -81,6 +81,7 @@ pub struct App {
     pub tab: Tab,
     pub shell: Shell,
     pub help: Option<super::help::State>,
+    pub navigation: super::navigation::State,
     pub repository: Option<PathBuf>,
     pub origin: &'static str,
     pub launch_directory: PathBuf,
@@ -133,6 +134,7 @@ impl App {
             tab: Tab::Overview,
             shell: Shell::new(),
             help: None,
+            navigation: Default::default(),
             repository: None,
             origin: "registered active",
             launch_directory: PathBuf::from("/"),
@@ -180,6 +182,7 @@ impl App {
         }
     }
     pub fn start(&mut self, writing: bool) {
+        self.navigation.menu = None;
         self.last_click = None;
         self.inventory.pending_g = false;
         self.hits.clear();
@@ -289,7 +292,8 @@ impl App {
                     self.tab == Tab::Git
                         && !self.quit
                         && self.shell.overlay.is_none()
-                        && self.help.is_none(),
+                        && self.help.is_none()
+                        && self.navigation.menu.is_none(),
                 );
                 self.status = "Git read completed. Summaries are metadata-only; patch viewing requires a new confirmation.".into();
             }
@@ -557,6 +561,48 @@ impl App {
             return None;
         }
         self.viewport = (width, height);
+        if self.navigation.menu.is_some() {
+            let target = self.hits.target(event.column, event.row);
+            self.hits.clear();
+            if matches!(
+                event.kind,
+                MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+            ) {
+                let code = if event.kind == MouseEventKind::ScrollDown {
+                    KeyCode::Down
+                } else {
+                    KeyCode::Up
+                };
+                return self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height);
+            }
+            if event.kind == MouseEventKind::Down(MouseButton::Left) {
+                match target {
+                    Some(Target::MenuGroup(group)) => {
+                        self.open_menu(group, width);
+                        if let Some(menu) = &mut self.navigation.menu {
+                            menu.expanded = true;
+                        }
+                    }
+                    Some(Target::MenuItem(index)) => {
+                        let group = self.navigation.menu.as_ref()?.group;
+                        if let Some(entry) = super::navigation::entries(group).get(index) {
+                            let task = self.menu_item(entry.item);
+                            super::discover_content::sync(self, width, height);
+                            return task;
+                        }
+                    }
+                    _ => {
+                        return self.key(
+                            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                            width,
+                            height,
+                        );
+                    }
+                }
+                super::discover_content::sync(self, width, height);
+            }
+            return None;
+        }
         let code = match event.kind {
             MouseEventKind::ScrollDown => Some(KeyCode::PageDown),
             MouseEventKind::ScrollUp => Some(KeyCode::PageUp),
@@ -643,14 +689,21 @@ impl App {
             });
         }
         if self.busy {
-            if let Target::Destination(tab) = target {
-                self.tab = tab;
-                self.selected = 0;
-                self.git_view.discard_patch();
-            }
             return None;
         }
         match target {
+            Target::MenuOpen => {
+                self.open_menu(super::navigation::group(self), width);
+                None
+            }
+            Target::MenuGroup(group) => {
+                self.open_menu(group, width);
+                if let Some(menu) = &mut self.navigation.menu {
+                    menu.expanded = true;
+                }
+                None
+            }
+            Target::MenuItem(_) => None,
             Target::Feedback(control) => self.feedback(control, width, height),
             Target::Continue => {
                 if self.preview.is_some() {
@@ -711,7 +764,6 @@ impl App {
                 self.details_scroll = 0;
                 None
             }
-            Target::Destination(tab) => self.activate(Action::Destination(tab)),
             Target::Action(action) => self.activate(action),
             Target::Back => self.key(
                 KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
@@ -867,10 +919,16 @@ impl App {
         let return_content = self
             .help
             .as_ref()
-            .map(|h| (h.content_focus, h.content_scroll));
+            .map(|h| (h.content_focus, h.content_scroll))
+            .or_else(|| {
+                self.navigation
+                    .menu
+                    .map(|m| (m.content_focus, m.content_scroll))
+            });
         let task = self.key_inner(key, width, height);
         super::discover_content::sync(self, width, height);
         if self.help.is_none()
+            && self.navigation.menu.is_none()
             && self.content.available()
             && let Some((focus, scroll)) = return_content
         {
@@ -888,6 +946,7 @@ impl App {
         if interrupt
             || (key.code == KeyCode::Char('q')
                 && (self.help.is_some()
+                    || self.navigation.menu.is_some()
                     || self.confirmation.is_none()
                         && (self.error.is_some()
                             || self.show_result
@@ -926,6 +985,7 @@ impl App {
             return None;
         }
         if width < 48 || height < 14 {
+            self.navigation.menu = None;
             if key.code == KeyCode::Esc {
                 if self.error.is_some() {
                     self.error = None;
@@ -948,6 +1008,13 @@ impl App {
             }
             self.status =
                 "Resize to at least 48x14; no approval is accepted in a small layout.".into();
+            return None;
+        }
+        if self.navigation.menu.is_some() {
+            return self.menu_key(key.code, width);
+        }
+        if key.code == KeyCode::F(10) && self.menus_available() {
+            self.open_menu(super::navigation::group(self), width);
             return None;
         }
         if self.busy {
@@ -1416,22 +1483,12 @@ impl App {
             KeyCode::Char('i') if self.tab == Tab::Files => return self.activate(Action::Inspect),
             KeyCode::Char('p') => return self.activate(Action::Choose),
             KeyCode::Char('n') => return self.activate(Action::Init),
-            KeyCode::Char('1') => {
-                self.tab = Tab::Overview;
-                self.selected = 0;
-            }
-            KeyCode::Char('2') => {
-                self.discovering = false;
-                self.tab = Tab::Files;
-                self.selected = 0;
-            }
-            KeyCode::Char('3') => {
-                self.tab = Tab::Recovery;
-                self.selected = 0;
-            }
+            KeyCode::Char('1') => return self.activate(Action::Destination(Tab::Overview)),
+            KeyCode::Char('2') => return self.activate(Action::Destination(Tab::Files)),
+            KeyCode::Char('3') => return self.activate(Action::Destination(Tab::Recovery)),
             KeyCode::Char('4') => {
-                self.tab = Tab::Checks;
-                self.details_scroll = 0;
+                self.go_tab(Tab::Checks);
+                self.showing_diagnostics = false;
             }
             KeyCode::Char('5') => return self.activate(Action::Destination(Tab::Git)),
             KeyCode::Char('c') => return self.activate(Action::CheckCurrent),
@@ -1491,6 +1548,7 @@ impl App {
         }
         self.viewport = (width, height);
         if width < 48 || height < 14 {
+            self.navigation.menu = None;
             self.confirmation = None;
             self.git_view.resize();
         } else if let Some(preview) = &mut self.preview {
@@ -1629,7 +1687,7 @@ impl App {
         });
         super::discover_content::sync(self, self.viewport.0, self.viewport.1);
     }
-    fn activate(&mut self, action: Action) -> Option<Task> {
+    pub(super) fn activate(&mut self, action: Action) -> Option<Task> {
         if action == Action::Help {
             self.open_help();
             return None;
@@ -1648,7 +1706,9 @@ impl App {
             self.shell.return_to_adopt = true;
         }
         self.shell.overlay = None;
-        self.git_view.discard_patch();
+        if self.git_view.sensitive() {
+            self.git_view.discard_patch();
+        }
         match action {
             Action::ToggleMark => super::tree::toggle(self),
             Action::ClearMarks => {
@@ -1688,7 +1748,7 @@ impl App {
                 }));
             }
             Action::GitRoot => {
-                self.tab = Tab::Git;
+                self.go_tab(Tab::Git);
 
                 self.git_view.editing_root = true;
             }
@@ -1699,6 +1759,7 @@ impl App {
                 return self.git_task();
             }
             Action::GitStatus | Action::GitUnstaged | Action::GitStaged => {
+                self.go_tab(Tab::Git);
                 self.git_view.choose(match action {
                     Action::GitStatus => super::git::Comparison::Status,
                     Action::GitUnstaged => super::git::Comparison::Unstaged,
@@ -1713,7 +1774,7 @@ impl App {
                 self.git_view.confirm_patch();
                 self.status = "Patch viewing needs a loaded Unstaged or Staged summary. Type literal view patch in its warning to disclose once.".into();
             }
-            Action::Destination(tab) => { self.tab = tab; self.selected = 0;if tab == Tab::Files { self.discovering = false; } }
+            Action::Destination(tab) => { self.go_tab(tab); if tab == Tab::Files { self.discovering = false; } }
             Action::Choose => self.shell.overlay = Some(Overlay::Repositories { selected: 0 }),
             Action::Init => { self.shell.path_focused = 0; self.shell.overlay = Some(Overlay::Form(Form::Init)); }
             Action::ManageIgnored => return Some(Task::IgnoredPaths),
@@ -1723,9 +1784,8 @@ impl App {
                 }
             }
             Action::Discover => {
-                self.tab = Tab::Files;
+                self.go_tab(Tab::Files);
                 self.discovering = true;
-
                 return Some(Task::Discover);
             }
             Action::Adopt => {
@@ -1777,7 +1837,7 @@ impl App {
                 if self.preview_only_locked { self.status = "--dry-run locks this session to preview-only.".into(); }
                 else { self.dry_run = !self.dry_run; self.status = "Preview-only mode changed; approval always requires a fresh preview.".into(); }
             }
-            Action::Diagnostics => { self.showing_diagnostics = true; self.tab = Tab::Checks; return Some(Task::Diagnostics); }
+            Action::Diagnostics => { self.go_tab(Tab::Checks); self.showing_diagnostics = true; return Some(Task::Diagnostics); }
             Action::About => self.shell.overlay = Some(Overlay::About),
             Action::Help => unreachable!("Help preserves the underlying surface"),
             Action::Quit => self.quit = true,
@@ -2003,7 +2063,7 @@ impl App {
         })
     }
     fn git_task(&mut self) -> Option<Task> {
-        self.tab = Tab::Git;
+        self.go_tab(Tab::Git);
         let root = if self.git_view.follows_files {
             self.data
                 .as_ref()

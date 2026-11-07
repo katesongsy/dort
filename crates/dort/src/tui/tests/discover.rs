@@ -92,6 +92,22 @@ fn contextual_content_help_withholds_payload_rejects_late_read_and_restores_focu
     app.complete(Ok(f.finish(fresh)));
     assert!(app.content.text().contains("synthetic-preview-A"));
     assert!(app.content.focused);
+    app.content.scroll = 2;
+    key(&mut app, KeyCode::F(10));
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        assert!(!render(&app, w, h).contains("synthetic-preview-A"));
+    }
+    assert!(!app.content.available() && discover_content::next(&mut app).is_none());
+    key(&mut app, KeyCode::Esc);
+    assert!(app.content.focused && app.content.scroll == 2);
+    let late = discover_content::next(&mut app).unwrap();
+    key(&mut app, KeyCode::F(10));
+    app.complete(Ok(f.finish(late)));
+    assert!(!app.content.text().contains("synthetic-preview-A"));
+    key(&mut app, KeyCode::Esc);
+    let fresh = discover_content::next(&mut app).unwrap();
+    app.complete(Ok(f.finish(fresh)));
+    assert!(app.content.text().contains("synthetic-preview-A"));
 }
 #[test]
 fn content_focus_uses_wrapped_viewport_without_selection_changes_or_rereads() {

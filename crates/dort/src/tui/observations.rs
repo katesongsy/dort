@@ -154,14 +154,11 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
     }
     if root.is_none() {
         section(&mut lines, "Welcome | manage local files with previews");
-        lines.push(ui::keys(&[
-            ("n", "Create/attach"),
-            ("p", "Choose repository"),
-        ]));
-        lines.push(ui::keys(&[
-            ("f", "Discover files"),
-            ("v", "Check a manifest"),
-        ]));
+        lines.push(note(
+            "Session: Create/attach / Choose repository",
+            ui::accent(),
+        ));
+        lines.push(note("Files: Discover | Checks: manifest", ui::accent()));
         lines.push(note(
             "Recovery and Diagnostics work without a selected repository.",
             Style::default(),
@@ -351,11 +348,7 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
         ));
     }
     section(&mut lines, "Read-only actions");
-    lines.push(ui::keys(&[
-        ("j", "Diagnostics"),
-        ("m", "Manifest result"),
-        ("r", "Recheck this scope"),
-    ]));
+    lines.push(ui::keys(&[("r", "Recheck this scope")]));
     lines.push(ui::keys(&[("PgUp/PgDn", "details"), ("Home", "start")]));
     dashboard(
         frame,
@@ -486,10 +479,7 @@ fn diagnostics(frame: &mut Frame, area: Rect, app: &App) {
     ));
     lines.push(note("Git requires separately installed trusted Git; missing Git does not disable other workflows.", Style::default()));
     lines.push(note("Configuration errors: correct configuration privately, then r to retry. Recovery remains independent.", Style::default()));
-    lines.push(ui::keys(&[
-        ("r", "Refresh Diagnostics"),
-        ("m", "Manifest result"),
-    ]));
+    lines.push(ui::keys(&[("r", "Refresh Diagnostics")]));
     lines.push(ui::keys(&[("PgUp/PgDn", "details"), ("Home", "start")]));
     dashboard(frame, area, app, "Checks | Diagnostics", metrics, lines);
 }
