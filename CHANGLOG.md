@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tui:** add contextual actions and help with visible ignore controls ([0d98d8d](https://github.com/katesongsy/dort/commit/0d98d8dea4398ab1fb5699605f16d43f23893aea))
+
 - **discover:** add persistent ignores and focused batch editing ([ec04936](https://github.com/katesongsy/dort/commit/ec0493618720ba92cc5e0746d7ad2873fca71e17))
 
 - **tui:** support ASCII and monochrome terminals ([0e823be](https://github.com/katesongsy/dort/commit/0e823be7e385a8710b032ac50116ce64e283baaf))
