@@ -63,6 +63,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Fixes
 
+- **tui:** polish navigation, reviews and managed-file workflows ([065d364](https://github.com/katesongsy/dort/commit/065d3647b2cd62f3bdb9eaae9a6ca1725e94ff6c))
+
 - **tui:** improve compact navigation and discovery eligibility ([57dc8d3](https://github.com/katesongsy/dort/commit/57dc8d3ea7429fee3ba5d54676a0b2aad0fab50c))
 
 ### Maintenance
