@@ -70,3 +70,7 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 ### Maintenance
 
 - init ([bc0198e](https://github.com/katesongsy/dort/commit/bc0198eae64ec98af0aa2bcd8a7bb6a8da1ee5c8))
+
+### Tests
+
+- validate bounded macOS cross-device refusals ([5db5157](https://github.com/katesongsy/dort/commit/5db5157ecaeb7b9fc55be8458de19112171849bc))
