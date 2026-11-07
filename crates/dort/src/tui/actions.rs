@@ -217,13 +217,13 @@ impl Pending {
             Self::Ignore(preview) => preview.human(),
             Self::Batch(plan) => plan.human(),
             Self::Files(plan) => format!(
-                "Repository: {:?}\nEffective profiles: {:?}\nScope: all mappings selected by this request; display filters never narrow it.\n{}",
+                "Repository: {:?}\nEffective profiles: {:?}\nScope: all mappings selected by this request; the preview defines execution scope.\n{}",
                 plan.inputs.repository,
                 plan.inputs.active_profiles,
                 plan.human()
             ),
             Self::Init(preview) => format!(
-                "{} local repository\nResolved path: {:?}\nRepository ID: {}\n\nEffects:\n- {}\n\nRegistration and active selection are persistent only after approval.\nPrivate artifacts are retained on failure; inspect Recovery.\nNo network, cloning or live dotfile changes.",
+                "{} local repository\nResolved path: {:?}\nRepository ID: {}\n\nEffects:\n- {}\n\nRegistration and active selection are persistent only after approval.\nPrivate artifacts are retained on failure; inspect Recovery.\nExisting live dotfiles remain in place.",
                 if preview.report.create {
                     "Create"
                 } else {
@@ -234,7 +234,7 @@ impl Pending {
                 preview.report.effects.join("\n- ")
             ),
             Self::Rollback(preview) => format!(
-                "Rollback schema {}\nRepository ID: {}\nTransaction ID: {}\nJournal head: {}\nInverse paths:\n{}\nLater edits can block execution. Schema-1 rollback withdraws its new source into private transaction storage; schema-2 leaves repository sources unchanged. Private backups/artifacts are retained; no garbage collection.",
+                "Rollback schema {}\nRepository ID: {}\nTransaction ID: {}\nJournal head: {}\nInverse paths:\n{}\nLater edits can block execution. Schema-1 rollback withdraws its new source into private transaction storage; schema-2 leaves repository sources unchanged. Private backups and artifacts are retained.",
                 preview.journal_schema,
                 preview.repository_id,
                 preview.transaction_id,
@@ -247,7 +247,7 @@ impl Pending {
                     .join("\n")
             ),
             Self::Bootstrap(preview) => format!(
-                "{} bootstrap\nRepository: {:?}\nRepository ID: {}\nTransaction ID: {}\nJournal head: {}\nRepository published: {}\nRegistration published: {}\nEffects:\n- {}\nAbandon retains published repositories, registration and private artifacts. It does not undo publication.\nResume publishes only the exact retained preparation; later changes can block execution. Preparing transactions must be abandoned before retrying Create/attach with a new transaction. No network or live dotfile changes.",
+                "{} bootstrap\nRepository: {:?}\nRepository ID: {}\nTransaction ID: {}\nJournal head: {}\nRepository published: {}\nRegistration published: {}\nEffects:\n- {}\nAbandon retains published repositories, registration and private artifacts. Published state remains available.\nResume publishes only the exact retained preparation; later changes can block execution. Preparing transactions must be abandoned before retrying Create/attach with a new transaction. Existing live dotfiles remain in place.",
                 match preview.action {
                     bootstrap::RecoveryAction::Resume => "Resume",
                     bootstrap::RecoveryAction::Abandon => "Abandon",

@@ -132,8 +132,8 @@ fn visible_ignore_controls_mouse_and_keyboard_work_at_all_supported_sizes() {
         let mut app = f.app(false);
         app.resize(w, h);
         let screen = render(&app, w, h);
-        assert!(screen.contains("Ignore selected") && screen.contains("F10 Menu"));
-        assert!(screen.contains("Actions") && screen.contains("F1 Help"));
+        assert!(screen.contains("Ignore selected") && screen.contains("F10"));
+        assert!(screen.contains("Actions") && screen.contains("F1") && screen.contains("Help"));
         let mut found = Vec::new();
         for action in [Action::IgnoreSelected] {
             let mut point = None;
@@ -190,6 +190,14 @@ fn visible_ignore_controls_mouse_and_keyboard_work_at_all_supported_sizes() {
             .unwrap();
         f.finish(&mut app, task);
         assert!(matches!(app.shell.overlay, Some(Overlay::Ignored { .. })));
+        let screen = render(&app, w, h);
+        let footer = screen.lines().last().unwrap();
+        assert!(
+            footer.contains("Enter") && footer.contains("Unignore"),
+            "contextual footer at {w}"
+        );
+        assert!(!footer.contains("Actions") && !footer.contains("Menu"));
+        assert!(app.preview.is_none() && app.confirmation.is_none());
         key(&mut app, KeyCode::Esc);
         let task = app
             .key(KeyEvent::new(KeyCode::Char('U'), KeyModifiers::NONE), w, h)

@@ -108,11 +108,6 @@ fn details(view: &View<'_>) -> Text<'static> {
     lines.push(Line::raw("No patch content requested. Filtering and row selection never narrow a later patch request."));
     lines.push(Line::raw("Git requires a trusted executable and exact non-bare root; no manifest or registration required."));
     lines.push(Line::raw("No staging, commits, network or live-file writes. Untracked contents are not included in diffs."));
-    lines.push(ui::keys(&[
-        ("PgUp/PgDn", "details"),
-        ("Home", "start"),
-        ("Esc", "list"),
-    ]));
     Text::from(lines)
 }
 fn filter(frame: &mut Frame, area: Rect, view: &View<'_>) {
@@ -274,7 +269,7 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         ui::report(
             frame,
             panes[1],
-            "Git details | PgUp/PgDn",
+            "Git details",
             details(&view),
             view.scroll,
             true,

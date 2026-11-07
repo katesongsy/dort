@@ -44,6 +44,8 @@ impl Appearance {
                     }
                     "─" => Some("-"),
                     "│" | "·" => Some("|"),
+                    "▾" => Some("v"),
+                    "▸" => Some(">"),
                     _ => None,
                 };
                 if let Some(symbol) = replacement {
@@ -116,7 +118,8 @@ mod tests {
         use ratatui::layout::Rect;
         let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 1));
         let symbols = [
-            "┌", "┐", "└", "┘", "├", "┤", "┬", "┴", "┼", "─", "│", "·", "é", "x", "\\", "+",
+            "┌", "┐", "└", "┘", "├", "┤", "┬", "┴", "┼", "─", "│", "·", "é", "x", "\\", "+", "▾",
+            "▸",
         ];
         for (cell, symbol) in buffer.content.iter_mut().zip(symbols) {
             cell.set_symbol(symbol);
@@ -131,7 +134,8 @@ mod tests {
         }
         .apply(&mut buffer);
         for (cell, expected) in buffer.content.iter().zip([
-            "+", "+", "+", "+", "+", "+", "+", "+", "+", "-", "|", "|", "é", "x", "\\", "+",
+            "+", "+", "+", "+", "+", "+", "+", "+", "+", "-", "|", "|", "é", "x", "\\", "+", "v",
+            ">",
         ]) {
             assert_eq!(cell.symbol(), expected);
             assert_eq!((cell.fg, cell.bg), (Color::Reset, Color::Reset));

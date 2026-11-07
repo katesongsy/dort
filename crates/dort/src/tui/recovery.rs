@@ -90,7 +90,7 @@ fn details(app: &App) -> Text<'static> {
             "Integrity",
             row.problem
                 .as_deref()
-                .unwrap_or("validated journal; live drift not inspected"),
+                .unwrap_or("validated journal; preview checks live drift"),
         ),
         field("Blocks new writes", row.blocks_writes()),
         Line::default(),
@@ -128,13 +128,8 @@ fn details(app: &App) -> Text<'static> {
     }
     lines.push(Line::default());
     lines.push(Line::styled("Guards & retained artifacts", ui::heading()));
-    lines.push(note("Core preview independently checks live paths and artifacts. Completed history is not proof of safe rollback. No automatic recovery or repair.", Style::default()));
+    lines.push(note("Core preview independently checks live paths and artifacts. Each requested recovery action obtains a fresh, guarded preview.", Style::default()));
     lines.push(note("Adoption rollback (schema 1 or 4) withdraws new sources into private storage; lifecycle rollback (schema 2 or 4) leaves repository sources unchanged. Backups/private artifacts are retained; no garbage collection.", ui::warning()));
-    lines.push(ui::keys(&[
-        ("PgUp/PgDn", "full details"),
-        ("Home", "start"),
-        ("Esc", "list"),
-    ]));
     Text::from(lines)
 }
 
@@ -232,8 +227,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             "Recovery diagnosis unavailable",
             Text::from(vec![
                 note(error, ui::warning()),
-                Line::raw("Global write safety is unknown, not healthy empty history."),
-                Line::raw("r: retry diagnosis | No automatic repair."),
+                Line::raw("Global write safety is unavailable until diagnosis succeeds."),
+                Line::raw("r: retry diagnosis"),
             ]),
             app.details_scroll,
             focused,
@@ -271,9 +266,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             frame,
             inner,
             Text::raw(if data.history.is_empty() {
-                "No retained transactions. Diagnosis is read-only; no state created."
+                "History is empty."
             } else {
-                "No matches. Global blockers above are never filtered away."
+                "No matches. Global blockers remain visible above."
             }),
             0,
         );
@@ -314,7 +309,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         ui::report(
             frame,
             panes[1],
-            "Transaction details | PgUp/PgDn",
+            "Transaction details",
             details(app),
             app.details_scroll,
             true,

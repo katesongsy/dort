@@ -34,7 +34,7 @@ pub(super) fn short_field(label: &str, value: &str, width: u16) -> String {
 fn window_rows(title: &str, rows: &[String], selected: usize, height: u16, width: u16) -> String {
     let width = usize::from(width.saturating_sub(4));
     let mut text = format!(
-        "{}\nItem {}/{} | Tab/Arrows | PgDn details\n",
+        "{}\nItem {}/{}\n",
         safe(title).chars().take(width).collect::<String>(),
         selected + 1,
         rows.len()
@@ -90,7 +90,7 @@ fn adoption_text(app: &App, height: u16, width: u16) -> String {
             .or(app.repository.as_ref()),
         app.data.as_ref().map(|d| &d.profiles)
     ));
-    text.push_str("Tab/Shift-Tab: fields/buttons | Enter: advance field or activate button\nEsc: back, retaining draft | Ctrl-U: clear current field | PgUp/PgDn: scroll\nMissing repository? Choose or Create/attach above, then return to this draft.\nSOURCE is repository-relative. Review content privately before adoption.\nOnly owned, single-link ordinary files; core refusals are authoritative.\nDiscover alone previews selected content. No writes before fresh preview + Adopt all.");
+    text.push_str("Tab/Shift-Tab: fields/buttons | Enter: advance field or activate button\nEsc: back, retaining draft | Ctrl-U: clear current field\nMissing repository? Choose or Create/attach above, then return to this draft.\nSOURCE is repository-relative. Review content privately before adoption.\nOnly owned, single-link ordinary files; core refusals are authoritative.\nDiscover previews selected content; Adopt all explicitly approves a fresh review.");
     text
 }
 
@@ -119,7 +119,7 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16
                 height,
                 width,
             );
-            text.push_str(&format!("\nFull ID: {:?}\nTab: field/review | Enter: advance or review\nFilters never constrain this input. Core validates exact ID and scope.\nBoth modes retain source. Keep materializes an ordinary file; delete removes the link.\nDeletion additionally needs a separate exact-ID acknowledgement then literal yes.\nEsc returns without writing; draft retained.\n", app.shell.unmanage_id));
+            text.push_str(&format!("\nFull ID: {:?}\nTab: field/review | Enter: advance or review\nThe preview uses this exact ID. Core validates exact ID and scope.\nBoth modes retain source. Keep materializes an ordinary file; delete removes the link.\nDeletion additionally needs a separate exact-ID acknowledgement then literal yes.\nEsc returns to the retained draft.\n", app.shell.unmanage_id));
             text
         }
         Overlay::Form(Form::Check) => {
@@ -136,11 +136,11 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16
                 height,
                 width,
             );
-            text.push_str(&format!("\nFull path: {:?}\nRequested additions: {:?}\nRelative path base: {:?}\nTab/Shift-Tab fields/buttons; Enter advances/activates\nEsc back, retaining draft | Ctrl-U clear path | PgUp/PgDn scroll\nNo repository/registration/Git needed. Local profiles still contribute.\nStructural/dependency/capability check only; live files/tools not inspected.", app.shell.manifest_draft, app.shell.check_profiles, app.launch_directory));
+            text.push_str(&format!("\nFull path: {:?}\nRequested additions: {:?}\nRelative path base: {:?}\nTab/Shift-Tab fields/buttons; Enter advances/activates\nEsc back, retaining draft | Ctrl-U clear path\nAn independent manifest path is accepted. Local profiles still contribute.\nValidates declarations, dependencies and capabilities. Files inspects live state; verify installed tools separately.", app.shell.manifest_draft, app.shell.check_profiles, app.launch_directory));
             text
         }
         Overlay::About => format!(
-            "Dort {} | About\nGit-native developer environment manager\nExperimental guarded local workflows. MIT license.\n\nSupported hosts: macOS and Ubuntu, ARM64 / x86_64.\nLocal create/attach, discovery/adoption, link apply/unmanage, guarded recovery, structural checks and read-only Git.\n\nNot implemented: providers/package managers, templates, secrets, cloning/sync, network, Git staging/commit/push.\nPreviews are not authorization. Failed writes may retain partial effects; inspect Recovery. No automatic rollback/repair.\nGit patches require a separate one-view disclosure; not secret-proof.\nBackups are private, not encrypted. Process-exit tests do not prove power-loss safety.\n\nEsc/Enter: return to prior destination and focus | PgUp/PgDn: scroll",
+            "Dort {} | About\nGit-native developer environment manager\nExperimental guarded local workflows. MIT license.\n\nSupported hosts: macOS and Ubuntu, ARM64 / x86_64.\nLocal create/attach, discovery/adoption, link apply/unmanage, guarded recovery, structural checks and read-only Git.\n\nUse external tools for package managers, templates, secrets, synchronization and Git writes.\nExecution requires reviewed, explicit approval. Failed writes may retain partial effects; inspect Recovery.\nGit patches may expose secrets; each view requires deliberate disclosure.\nBackups are private and unencrypted. Keep independent backups for hardware or power failures.\n\nEsc: return to prior destination and focus",
             env!("CARGO_PKG_VERSION")
         ),
         Overlay::Form(Form::Adopt) => adoption_text(app, height, width),
@@ -149,7 +149,7 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16
             let root =
                 crate::services::resolve_root(std::path::Path::new(draft), &app.launch_directory);
             format!(
-                "{}\n{}\n\nFull draft: {draft:?}\nResolved path: {root:?}\nLaunch directory: {:?}\nEnter: advance field, then {} | Esc: back, retaining draft\nCtrl-U: discard draft | PgUp/PgDn: scroll\n{}",
+                "{}\n{}\n\nFull draft: {draft:?}\nResolved path: {root:?}\nLaunch directory: {:?}\nEnter: advance field, then {} | Esc: back, retaining draft\nCtrl-U: discard draft\n{}",
                 match form {
                     Form::Choose => "Choose exact root (session only)",
                     Form::Init => "Create/attach local repository",
@@ -163,9 +163,9 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16
                     "prepare read-only preview"
                 },
                 if *form == Form::Choose {
-                    "No upward search, registration or configuration write."
+                    "The exact root becomes this session's selection."
                 } else {
-                    "Absent destination: create; existing valid Git+dort.toml: attach.\nExisting safe parent required. No tilde/environment expansion.\nNo writes until preview + literal yes; previews never authorize execution."
+                    "Absent destination: create; existing valid Git+dort.toml: attach.\nExisting safe parent required. Enter literal paths.\nReview the preview, then type literal yes to approve."
                 }
             )
         }

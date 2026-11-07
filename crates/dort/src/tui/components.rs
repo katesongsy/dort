@@ -88,6 +88,32 @@ pub fn keys(items: &[(&str, &str)]) -> Line<'static> {
     }
     Line::from(spans)
 }
+/// Visual hierarchy for an operation's existing human report. This presentation
+/// never supplies identity, eligibility or approval data to the executor.
+pub fn review_text(body: &str) -> Text<'static> {
+    let escaped = super::views::safe(body);
+    let lines = escaped.lines().enumerate().map(|(index, line)| {
+        let trimmed = line.trim_start();
+        if index == 0 || trimmed.ends_with(':') {
+            Line::styled(line.to_owned(), heading())
+        } else if trimmed.starts_with("BLOCKED") || trimmed.starts_with("Blocker") {
+            Line::styled(line.to_owned(), danger())
+        } else if let Some(effect) = trimmed.strip_prefix("- ") {
+            Line::from(vec![
+                Span::styled("▸ ", accent()),
+                Span::raw(effect.to_owned()),
+            ])
+        } else if let Some((label, value)) = line.split_once(": ") {
+            Line::from(vec![
+                Span::styled(format!("{label}: "), heading()),
+                Span::raw(value.to_owned()),
+            ])
+        } else {
+            Line::raw(line.to_owned())
+        }
+    });
+    Text::from(lines.collect::<Vec<_>>())
+}
 /// Scroll an ASCII-safe report by rendered cells, not unbounded paragraph offsets.
 /// Splitting long lines at cells preserves all metadata and avoids silently clipped paths.
 pub fn report(

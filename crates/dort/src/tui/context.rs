@@ -86,7 +86,6 @@ pub fn entries(app: &App) -> Vec<Entry> {
         Tab::Files if app.discovering => (
             vec![IgnoreSelected, AdoptSelected, BatchAdopt],
             vec![
-                Inspect,
                 ToggleMark,
                 ClearMarks,
                 ExpandAll,
@@ -100,7 +99,6 @@ pub fn entries(app: &App) -> Vec<Entry> {
         ),
         Tab::Files => (
             vec![
-                Inspect,
                 Apply,
                 Keep,
                 Discover,
@@ -122,16 +120,13 @@ pub fn entries(app: &App) -> Vec<Entry> {
                 Profiles,
             ],
         ),
-        Tab::Recovery => (
-            vec![Inspect, Rollback, Resume, Abandon],
-            vec![ClearFilter, Refresh],
-        ),
+        Tab::Recovery => (vec![Rollback, Resume, Abandon], vec![ClearFilter, Refresh]),
         Tab::Checks if app.showing_diagnostics => (vec![Diagnostics], vec![]),
         Tab::Checks => (
             vec![CheckCurrent, CheckStandalone, Profiles],
             vec![StandaloneProfiles, Refresh],
         ),
-        Tab::Git => (vec![Inspect, GitPatch, GitRefresh], vec![ClearFilter]),
+        Tab::Git => (vec![GitPatch, GitRefresh], vec![ClearFilter]),
     };
     let mut rows: Vec<_> = primary
         .into_iter()
@@ -152,11 +147,7 @@ pub fn page_actions(app: &App) -> Vec<Action> {
     let mut rows: Vec<_> = entries(app)
         .into_iter()
         .filter(|e| e.primary.is_some())
-        .filter(|e| {
-            app.tab != Tab::Recovery
-                || e.action == Action::Inspect
-                || app.action_reason(e.action).is_none()
-        })
+        .filter(|e| app.tab != Tab::Recovery || app.action_reason(e.action).is_none())
         .collect();
     rows.sort_by_key(|e| e.primary);
     rows.into_iter().map(|e| e.action).collect()

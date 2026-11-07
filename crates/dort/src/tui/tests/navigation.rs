@@ -87,6 +87,38 @@ fn vim_pages_use_the_rendered_viewport_and_chords_reset() {
     assert_eq!(app.inventory.managed.query, "gg ;jk");
     assert!(!app.inventory.pending_g && !app.quit);
 }
+#[test]
+fn selected_keep_uses_u_while_jk_and_ctrl_u_keep_their_navigation_meaning() {
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        let mut app = app();
+        app.selected = 20;
+        render(&app, w, h);
+        for (code, want) in [(KeyCode::Char('j'), 21), (KeyCode::Char('k'), 20)] {
+            assert!(
+                app.key(KeyEvent::new(code, KeyModifiers::NONE), w, h)
+                    .is_none()
+            );
+            assert_eq!(app.selected, want);
+            assert!(app.preview.is_none() && app.confirmation.is_none());
+        }
+        let page = app.inventory.page_capacity.get().max(1);
+        assert!(
+            app.key(
+                KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+                w,
+                h
+            )
+            .is_none()
+        );
+        assert_eq!(app.selected, 20usize.saturating_sub((page / 2).max(1)));
+        let selected = app.data.as_ref().unwrap().files[app.selected].0.clone();
+        let task = app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE), w, h);
+        assert!(
+            matches!(task, Some(super::actions::Task::Files(dort_core::planner::Request::Unmanage { id, mode: dort_core::planner::UnmanageMode::Keep })) if id == selected)
+        );
+        assert!(app.preview.is_none() && app.confirmation.is_none());
+    }
+}
 fn row_point(app: &App, raw: usize) -> (u16, u16) {
     (0..40)
         .flat_map(|y| (0..70).map(move |x| (x, y)))

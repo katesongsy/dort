@@ -31,19 +31,59 @@ fn click(app: &mut App, width: u16, height: u16, want: impl Fn(Target) -> bool) 
     )
 }
 #[test]
+fn navigation_hints_are_consolidated_and_numeric_destination_aliases_are_inert() {
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        let mut app = App::new(false);
+        let screen = render(&app, w, h);
+        let rows: Vec<_> = screen.lines().collect();
+        assert!(!rows[..2].join(" ").contains("F10"));
+        let footer = rows.last().unwrap();
+        for label in ["F10", "Menu", "F1", "Help", ";", "Actions"] {
+            assert!(footer.contains(label), "{label} at {w}");
+        }
+        assert_eq!(screen.matches("F1").count(), 2); // F1 and F10, one each.
+        for digit in '1'..='5' {
+            assert!(key(&mut app, KeyCode::Char(digit), w, h).is_none());
+            assert!(app.tab == Tab::Overview && app.shell.overlay.is_none());
+        }
+        key(&mut app, KeyCode::F(10), w, h);
+        if w < 80 {
+            key(&mut app, KeyCode::Enter, w, h);
+        }
+        let screen = render(&app, w, h);
+        assert!(!screen.contains("Arrows move"));
+        assert!(!screen.contains("Esc close"));
+        assert!(!screen.contains("F1 Help"));
+        assert!(!screen.contains("[1]"));
+    }
+}
+#[test]
+fn review_report_has_hierarchy_and_preserves_escaped_metadata() {
+    use super::components as ui;
+    let text = ui::review_text(
+        "Review\nEffects:\n- Create link\nPath: odd\\u{1b}name\nBLOCKED: unsafe parent",
+    );
+    assert_eq!(text.lines[0].style, ui::heading());
+    assert_eq!(text.lines[1].style, ui::heading());
+    assert_eq!(text.lines[2].spans[0].style, ui::accent());
+    assert_eq!(text.lines[3].spans[0].style, ui::heading());
+    assert!(text.lines[3].to_string().contains("\\u{1b}"));
+    assert_eq!(text.lines[4].style, ui::danger());
+}
+#[test]
 fn menus_are_keyboard_and_mouse_accessible_at_every_supported_size() {
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let mut app = App::new(false);
         app.tab = Tab::Files;
         let screen = render(&app, w, h);
-        assert!(screen.contains("F10 Menu") && screen.contains("Files / Managed"));
+        assert!(screen.contains("F10") && screen.contains("Files / Managed"));
         key(&mut app, KeyCode::F(10), w, h);
         assert!(app.navigation.menu.is_some());
         if w < 80 {
             key(&mut app, KeyCode::Enter, w, h);
         }
         let screen = render(&app, w, h);
-        for label in ["Managed [2]", "Discover [f]", "Ignored paths [U]"] {
+        for label in ["Managed", "Discover [f]", "Ignored paths [U]"] {
             assert!(screen.contains(label), "{label} at {w}");
         }
         key(&mut app, KeyCode::Down, w, h);

@@ -125,7 +125,8 @@ fn contextual_catalog_is_unique_and_separates_scope_from_effect() {
             union.push(action);
         }
     }
-    assert_eq!(union.len(), 47); // Every supported typed command has a home.
+    assert!(!union.contains(&Action::Inspect)); // Enter exposes details directly.
+    assert_eq!(union.len(), 46); // Every advertised typed command has a home.
 }
 #[test]
 fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {
@@ -191,16 +192,25 @@ fn disabled_actions_stay_open_and_full_reasons_are_keyboard_reachable_without_di
     assert!(matches!(app.shell.overlay, Some(Overlay::Actions { .. })));
     assert_eq!(app.status, reason);
     assert!(app.preview.is_none() && app.confirmation.is_none() && !app.git_view.sensitive());
-    key(&mut app, KeyCode::PageDown);
-    assert_eq!(app.shell.scroll, 1);
-    assert!(render(&app, 48, 14).contains("Actions | No work while browsing"));
+    assert!(render(&app, 48, 14).contains("Action details"));
+    assert_eq!(app.shell.scroll, 0);
     let mut joined = String::new();
     for _ in 0..60 {
         let mut terminal = Terminal::new(TestBackend::new(48, 14)).unwrap();
         terminal.draw(|f| views::draw(f, &app)).unwrap();
         let b = terminal.backend().buffer();
         let mut viewport = String::new();
-        for y in 4..11 {
+        assert!(render(&app, 48, 14).contains("Search by label"));
+        assert!(render(&app, 48, 14).contains("ACTION"));
+        let detail = (0..14)
+            .find(|y| {
+                (0..48)
+                    .map(|x| b[(x, *y)].symbol())
+                    .collect::<String>()
+                    .contains("Action details")
+            })
+            .unwrap();
+        for y in detail + 1..detail + 2 {
             for x in 1..47 {
                 viewport.push_str(b[(x, y)].symbol());
             }
@@ -213,7 +223,7 @@ fn disabled_actions_stay_open_and_full_reasons_are_keyboard_reachable_without_di
         assert!(key(&mut app, KeyCode::PageDown).is_none());
     }
     assert!(joined.contains(reason));
-    assert!(joined.contains("Literal view patch is separately required"));
+    assert!(joined.contains("Type literal view patch there to disclose"));
     assert!(joined.contains(Action::GitPatch.label()));
     key(&mut app, KeyCode::PageUp);
     key(&mut app, KeyCode::Home);

@@ -31,7 +31,7 @@ fn path(label: &str, path: &std::path::Path) -> Line<'static> {
 }
 fn detail(plan: &Plan, selected: usize) -> Text<'static> {
     let Some(file) = plan.files.get(selected) else {
-        return Text::from("No changes needed; no transaction will be created.");
+        return Text::from("Everything is up to date.");
     };
     let mut lines = vec![Line::styled(
         format!("{}  [{}]", safe(&file.id), outcome(&file.outcome)),
@@ -59,8 +59,12 @@ fn detail(plan: &Plan, selected: usize) -> Text<'static> {
             ui::danger(),
         ));
     }
-    for e in &file.effects {
-        lines.push(Line::styled(effect(e), ui::heading()));
+    for (index, e) in file.effects.iter().enumerate() {
+        lines.push(Line::default());
+        lines.push(Line::styled(
+            format!("{}. {}", index + 1, effect(e)),
+            ui::accent(),
+        ));
         match e {
             Effect::Backup { path: p } => lines.push(path("Backup", p)),
             Effect::EnsureParents {
@@ -107,7 +111,7 @@ fn detail(plan: &Plan, selected: usize) -> Text<'static> {
         }
     }
     lines.push(Line::styled(
-        "i: full report, permissions, warnings and guards · PgDn: effects",
+        "i: full report, permissions, warnings and guards",
         ui::muted(),
     ));
     Text::from(lines)
@@ -221,7 +225,7 @@ fn draw_inner(
             Constraint::Min(8),
         ],
     )
-    .header(Row::new(["FILE", "STATUS", "FIRST EFFECT"]).style(ui::heading()))
+    .header(Row::new(["FILE", "STATUS", "PLANNED CHANGE"]).style(ui::heading()))
     .row_highlight_style(ui::selected())
     .highlight_symbol("> ");
     let mut state =
@@ -241,7 +245,7 @@ fn draw_inner(
         ui::report(
             frame,
             parts[2],
-            "Selected effects · i full report",
+            "Change details · i full report",
             detail(plan, preview.selected),
             preview.effect_scroll,
             true,

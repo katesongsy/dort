@@ -8,7 +8,6 @@ use super::{
 use ratatui::{
     Frame,
     layout::Rect,
-    text::Line,
     widgets::{Clear, Paragraph},
 };
 
@@ -35,21 +34,21 @@ pub fn entries(group: usize) -> Vec<Entry> {
         0 => vec![
             action("Choose repository [p]", Choose),
             action("Create/attach [n]", Init),
-            action("Preview-only mode", PreviewOnly),
+            action("Preview-only mode [v]", PreviewOnly),
             action("Help [F1]", Help),
-            action("About", About),
+            action("About [a]", About),
             action("Quit [q]", Quit),
         ],
-        1 => vec![action("Overview [1]", Destination(Tab::Overview))],
+        1 => vec![action("Overview [o]", Destination(Tab::Overview))],
         2 => vec![
-            action("Managed [2]", Destination(Tab::Files)),
+            action("Managed [m]", Destination(Tab::Files)),
             action("Discover [f]", Discover),
             action("Ignored paths [U]", ManageIgnored),
         ],
-        3 => vec![action("All repositories [3]", Destination(Tab::Recovery))],
+        3 => vec![action("All repositories [r]", Destination(Tab::Recovery))],
         4 => vec![
             Entry {
-                label: "Manifest checks [4, m]",
+                label: "Manifest checks [m]",
                 item: Item::Manifest,
             },
             action("Diagnostics [j]", Diagnostics),
@@ -59,9 +58,37 @@ pub fn entries(group: usize) -> Vec<Entry> {
             action("Unstaged [u]", GitUnstaged),
             action("Staged [s]", GitStaged),
             action("Choose Git scope [g]", GitRoot),
-            action("Follow selected repository", GitDefault),
+            action("Follow selected repository [f]", GitDefault),
         ],
     }
+}
+/// Item shortcuts apply inside their open menu, independently of workspace keys.
+pub fn shortcut(item: Item) -> ratatui::crossterm::event::KeyCode {
+    use Action::*;
+    use ratatui::crossterm::event::KeyCode;
+    KeyCode::Char(match item {
+        Item::Manifest => 'm',
+        Item::Action(action) => match action {
+            Choose => 'p',
+            Init => 'n',
+            PreviewOnly => 'v',
+            Help => return KeyCode::F(1),
+            About => 'a',
+            Quit => 'q',
+            Destination(Tab::Overview) => 'o',
+            Destination(Tab::Files) => 'm',
+            Destination(Tab::Recovery) => 'r',
+            Discover => 'f',
+            ManageIgnored => 'U',
+            Diagnostics => 'j',
+            GitStatus => 'z',
+            GitUnstaged => 'u',
+            GitStaged => 's',
+            GitRoot => 'g',
+            GitDefault => 'f',
+            _ => unreachable!("navigation items have explicit shortcuts"),
+        },
+    })
 }
 pub fn owns(action: Action) -> bool {
     matches!(action, Action::Destination(_))
@@ -174,6 +201,14 @@ impl App {
         width: u16,
     ) -> Option<super::actions::Task> {
         use ratatui::crossterm::event::KeyCode;
+        let menu = self.navigation.menu?;
+        if menu.expanded
+            && let Some(entry) = entries(menu.group)
+                .into_iter()
+                .find(|e| shortcut(e.item) == key)
+        {
+            return self.menu_item(entry.item);
+        }
         let menu = self.navigation.menu.as_mut()?;
         match key {
             KeyCode::Esc | KeyCode::F(10) => self.navigation.menu = None,
@@ -191,16 +226,12 @@ impl App {
                     % GROUPS.len();
                 menu.selected = 0;
             }
-            KeyCode::Up | KeyCode::Char('k') if !menu.expanded => {
+            KeyCode::Up if !menu.expanded => {
                 menu.group = (menu.group + GROUPS.len() - 1) % GROUPS.len()
             }
-            KeyCode::Down | KeyCode::Char('j') if !menu.expanded => {
-                menu.group = (menu.group + 1) % GROUPS.len()
-            }
-            KeyCode::Up | KeyCode::Char('k') => menu.selected = menu.selected.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => {
-                menu.selected = (menu.selected + 1).min(entries(menu.group).len() - 1)
-            }
+            KeyCode::Down if !menu.expanded => menu.group = (menu.group + 1) % GROUPS.len(),
+            KeyCode::Up => menu.selected = menu.selected.saturating_sub(1),
+            KeyCode::Down => menu.selected = (menu.selected + 1).min(entries(menu.group).len() - 1),
             KeyCode::Home if !menu.expanded => menu.group = 0,
             KeyCode::End if !menu.expanded => menu.group = GROUPS.len() - 1,
             KeyCode::Home => menu.selected = 0,
@@ -221,9 +252,9 @@ impl App {
 pub fn bar(frame: &mut Frame, area: Rect, app: &App) {
     if area.width < 80 {
         let label = if app.menus_available() {
-            format!(" [F10 Menu]  {}", location(app))
+            format!(" [Menu]  {}", location(app))
         } else {
-            " [Menu unavailable during this interaction]".into()
+            " [Menu available after this interaction]".into()
         };
         ui::prose(
             frame,
@@ -233,7 +264,7 @@ pub fn bar(frame: &mut Frame, area: Rect, app: &App) {
         );
         if app.menus_available() {
             app.hits.click(
-                Rect::new(area.x, area.y, 12.min(area.width), 1),
+                Rect::new(area.x, area.y, 8.min(area.width), 1),
                 Target::MenuOpen,
             );
         }
@@ -241,7 +272,7 @@ pub fn bar(frame: &mut Frame, area: Rect, app: &App) {
     }
     let mut x = area.x;
     for (i, name) in GROUPS.iter().enumerate() {
-        let label = format!(" {name} v ");
+        let label = format!(" {name} ▾ ");
         let width = label.chars().count() as u16;
         let rect = Rect::new(x, area.y, width.min(area.right().saturating_sub(x)), 1);
         let selected = app.navigation.menu.is_some_and(|m| m.group == i)
@@ -259,12 +290,6 @@ pub fn bar(frame: &mut Frame, area: Rect, app: &App) {
         }
         x += width;
     }
-    ui::prose(
-        frame,
-        Rect::new(x, area.y, area.right().saturating_sub(x), 1),
-        " F10 Menu",
-        ui::muted(),
-    );
 }
 pub fn popup(frame: &mut Frame, app: &App, menu: Menu) {
     let area = frame.area();
@@ -273,6 +298,14 @@ pub fn popup(frame: &mut Frame, app: &App, menu: Menu) {
     bar(frame, bar_area, app);
     let compact = area.width < 80;
     let items = entries(menu.group);
+    let footer_reason = if menu.expanded {
+        match items[menu.selected].item {
+            Item::Action(a) => app.action_reason(a),
+            Item::Manifest => None,
+        }
+    } else {
+        None
+    };
     let labels: Vec<String> = if menu.expanded {
         items
             .iter()
@@ -304,7 +337,8 @@ pub fn popup(frame: &mut Frame, app: &App, menu: Menu) {
         x,
         area.y + 2,
         width,
-        (labels.len() as u16 + 4).min(area.height.saturating_sub(2)),
+        (labels.len() as u16 + 2 + u16::from(footer_reason.is_some()))
+            .min(area.height.saturating_sub(2)),
     );
     frame.render_widget(Clear, rect);
     let title = if menu.expanded {
@@ -315,11 +349,11 @@ pub fn popup(frame: &mut Frame, app: &App, menu: Menu) {
     let block = ui::pane(title, true);
     let inner = block.inner(rect);
     frame.render_widget(block, rect);
-    for (i, label) in labels
-        .iter()
-        .enumerate()
-        .take(inner.height.saturating_sub(2) as usize)
-    {
+    for (i, label) in labels.iter().enumerate().take(
+        inner
+            .height
+            .saturating_sub(u16::from(footer_reason.is_some())) as usize,
+    ) {
         let selected = if menu.expanded {
             menu.selected == i
         } else {
@@ -361,21 +395,8 @@ pub fn popup(frame: &mut Frame, app: &App, menu: Menu) {
             },
         );
     }
-    let reason = if menu.expanded {
-        match items[menu.selected].item {
-            Item::Action(a) => app.action_reason(a),
-            Item::Manifest => None,
-        }
-    } else {
-        None
-    };
-    let hint = reason.unwrap_or("Arrows move · Enter opens · Esc back");
-    let footer = Rect::new(inner.x, inner.bottom().saturating_sub(2), inner.width, 2);
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::raw(ui::clip(hint, inner.width)),
-            Line::raw("F1 Help · Esc close"),
-        ]),
-        footer,
-    );
+    if let Some(reason) = footer_reason {
+        let footer = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
+        ui::prose(frame, footer, &ui::clip(reason, inner.width), ui::warning());
+    }
 }

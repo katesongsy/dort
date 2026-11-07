@@ -29,13 +29,14 @@ impl Read {
 }
 pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &State) {
     use ratatui::{
-        text::{Line, Text},
+        text::{Line, Span, Text},
         widgets::Paragraph,
     };
     let block = super::components::pane("Content · Tab focus · Esc list", state.focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let width = usize::from(inner.width);
+    let gutter = usize::from(inner.width.min(7));
+    let width = usize::from(inner.width).saturating_sub(gutter);
     state.page.set(inner.height.max(1));
     if width == 0 {
         state.end.set(0);
@@ -45,12 +46,14 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &Sta
     // one styled span per byte of the entire selected file on every frame.
     let escaped = super::views::safe(state.text());
     let rows = || {
-        escaped.lines().flat_map(|line| {
+        escaped.lines().enumerate().flat_map(|(number, line)| {
             let chunks = line.as_bytes().chunks(width);
             let empty = line.is_empty().then_some("");
             empty
                 .into_iter()
                 .chain(chunks.map(|part| std::str::from_utf8(part).expect("escaped ASCII")))
+                .enumerate()
+                .map(move |(part, text)| (number + 1, part, text))
         })
     };
     let end = rows()
@@ -62,7 +65,26 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &Sta
     let visible: Vec<_> = rows()
         .skip(start)
         .take(usize::from(inner.height))
-        .map(Line::raw)
+        .map(|(number, part, text)| {
+            let label = if part == 0 {
+                format!("{number:>5} │")
+            } else {
+                "      │".into()
+            };
+            let mut spans = vec![Span::styled(label, super::components::muted())];
+            if part == 0 && !text.trim_start().starts_with('#') {
+                if let Some((key, value)) = text.split_once('=') {
+                    spans.push(Span::styled(key.to_owned(), super::components::heading()));
+                    spans.push(Span::styled("=", super::components::accent()));
+                    spans.push(Span::raw(value.to_owned()));
+                } else {
+                    spans.push(Span::raw(text.to_owned()));
+                }
+            } else {
+                spans.push(Span::raw(text.to_owned()));
+            }
+            Line::from(spans)
+        })
         .collect();
     frame.render_widget(Paragraph::new(Text::from(visible)), inner);
 }

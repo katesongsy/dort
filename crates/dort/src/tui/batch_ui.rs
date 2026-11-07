@@ -16,6 +16,7 @@ pub struct Editor {
     pub item_form: bool,
     pub scroll: u16,
     offset: std::cell::Cell<usize>,
+    page_rows: std::cell::Cell<u16>,
 }
 impl Editor {
     pub fn new(
@@ -39,6 +40,7 @@ impl Editor {
             item_form: false,
             scroll: 0,
             offset: Default::default(),
+            page_rows: std::cell::Cell::new(2),
         }
     }
     pub fn sync(
@@ -133,8 +135,12 @@ impl Editor {
                     self.focused = self.item * 3 + self.focused % 3;
                 }
             }
-            KeyCode::PageDown => self.scroll = self.scroll.saturating_add(2),
-            KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(2),
+            KeyCode::PageDown => {
+                self.scroll = self.scroll.saturating_add(self.page_rows.get().max(1))
+            }
+            KeyCode::PageUp => {
+                self.scroll = self.scroll.saturating_sub(self.page_rows.get().max(1))
+            }
             KeyCode::Home => self.scroll = 0,
             KeyCode::Enter if self.focused < review => {
                 self.focused += 1;
@@ -194,27 +200,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
     let editing = editor.focused < review;
     let sections = Layout::vertical([
         Constraint::Min(2),
-        Constraint::Length(if editing { 3 } else { 1 }),
-        Constraint::Length(2),
+        Constraint::Length(if editing { 3 } else { 0 }),
+        Constraint::Length(1),
+        Constraint::Length(if inner.height >= 14 { 6 } else { 2 }),
     ])
     .split(inner);
-    if editor.scroll > 0 {
-        let mut text = String::new();
-        for d in &editor.drafts {
-            text.push_str(&format!(
-                "TARGET: {}\nID: {}\nSOURCE: {}\n\n",
-                ui::inline(&d.target),
-                ui::inline(&d.id),
-                ui::inline(&d.source)
-            ));
-        }
-        ui::text_view(
-            frame,
-            sections[0],
-            Text::from(text),
-            editor.scroll.saturating_sub(2),
-        );
-    } else {
+    {
         let rows = editor.drafts.iter().map(|d| {
             Row::new(vec![
                 Cell::from(ui::inline(&d.target)),
@@ -258,26 +249,17 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
             }
         }
     }
-    if editing {
-        if let Some(d) = editor.drafts.get(editor.focused / 3) {
-            let (label, value) = match editor.focused % 3 {
-                0 => ("TARGET", &d.target),
-                1 => ("ID", &d.id),
-                _ => ("SOURCE", &d.source),
-            };
-            ui::input(frame, sections[1], label, value, true);
-        }
-    } else {
-        frame.render_widget(
-            Paragraph::new(Line::styled(
-                "j/k selects · e edits item · Enter reviews ALL",
-                ui::muted(),
-            )),
-            sections[1],
-        );
+    if editing && let Some(d) = editor.drafts.get(editor.focused / 3) {
+        let (label, value) = match editor.focused % 3 {
+            0 => ("TARGET", &d.target),
+            1 => ("ID", &d.id),
+            _ => ("SOURCE", &d.source),
+        };
+        ui::input(frame, sections[1], label, value, true);
     }
+    let edit_width = ui::button("Edit item", "e", false).width() as u16;
     let controls =
-        Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(sections[2]);
+        Layout::horizontal([Constraint::Length(edit_width), Constraint::Min(1)]).split(sections[2]);
     frame.render_widget(
         Paragraph::new(Line::from(ui::button("Edit item", "e", false))),
         controls[0],
@@ -287,6 +269,16 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
     frame.render_widget(Paragraph::new(Line::from(button)), controls[1]);
     app.hits
         .click(controls[1], Target::BatchControl(review, true));
+    editor.page_rows.set(sections[3].height.max(1));
+    if let Some(draft) = editor.drafts.get(editor.item) {
+        let text = Text::from(vec![
+            Line::styled("Selected paths", ui::heading()),
+            ui::metadata("TARGET: ", &draft.target),
+            ui::metadata("ID: ", &draft.id),
+            ui::metadata("SOURCE: ", &draft.source),
+        ]);
+        ui::text_view(frame, sections[3], text, editor.scroll);
+    }
 }
 
 fn draw_item(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {

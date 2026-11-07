@@ -83,8 +83,8 @@ fn recovery_search_preserves_raw_identity_and_never_hides_global_blockers() {
     assert_eq!(app.selected, 1);
     assert_eq!(app.visible_history_rows(), vec![1]);
     key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Char('1'));
-    key(&mut app, KeyCode::Char('3'));
+    super::tests::destination(&mut app, super::app::Tab::Overview, 80, 24);
+    super::tests::destination(&mut app, super::app::Tab::Recovery, 80, 24);
     assert_eq!(
         app.selected, 1,
         "returning to filtered history selects a displayed row"
@@ -199,9 +199,13 @@ fn preparing_table_enter_inspects_then_the_visible_action_uses_raw_identity() {
         rows: vec![row(Some(3), Some(Phase::Preparing), None, 'b')],
         error: None,
     }));
+    for code in [KeyCode::PageDown, KeyCode::PageUp, KeyCode::Home] {
+        assert!(key(&mut app, code).is_none());
+        assert!(!app.history_details && app.preview.is_none() && app.confirmation.is_none());
+    }
     assert!(key(&mut app, KeyCode::Enter).is_none());
     assert!(app.history_details && app.preview.is_none() && app.confirmation.is_none());
-    assert_eq!(app.page_actions().len(), 2);
+    assert!(app.page_actions() == vec![Action::Abandon]);
     key(&mut app, KeyCode::Tab); // no region focus cycle
     assert!(render(&app, 80, 24).contains("[Review abandon · x]"));
     assert!(
@@ -213,9 +217,12 @@ fn preparing_table_enter_inspects_then_the_visible_action_uses_raw_identity() {
     for c in "resume".chars() {
         key(&mut app, KeyCode::Char(c));
     }
-    let screen = render(&app, 100, 30);
-    assert!(screen.contains("Resume unavailable"));
+    assert!(matches!(
+        app.shell.overlay,
+        Some(super::shell::Overlay::Actions { .. })
+    ));
     assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(app.status.contains("Resume unavailable"));
 }
 #[test]
 fn error_retry_never_retains_approval_and_failed_writes_offer_read_only_recovery() {
@@ -270,7 +277,7 @@ fn about_reports_build_version_and_returns_to_prior_focus_and_details() {
     app.shell.overlay = Some(Overlay::About);
     let text = render(&app, 120, 45);
     assert!(text.contains(env!("CARGO_PKG_VERSION")));
-    assert!(text.contains("Not implemented:"));
+    assert!(text.contains("Use external tools for"));
     key(&mut app, KeyCode::Esc);
     assert!(app.tab == Tab::Recovery);
     assert_eq!(app.details_scroll, 8);

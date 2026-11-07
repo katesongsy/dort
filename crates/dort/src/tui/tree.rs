@@ -248,5 +248,5 @@ pub fn toggle(app: &mut App) {
             }
         }
     }
-    app.status="Marks retained across filters/folds. Group marking includes matching descendants, even folded rows; discovery directories/links are not adoption items. E reviews discovery marks; A/K/D preview managed marks.".into();
+    app.status="Marks retained across filters/folds. Group marking includes matching descendants, even folded rows; adoption uses eligible regular files. E reviews discovery marks; A/K/D preview managed marks.".into();
 }

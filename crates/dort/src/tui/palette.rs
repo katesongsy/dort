@@ -5,7 +5,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     text::{Line, Text},
-    widgets::{Paragraph, Row, Table, TableState},
+    widgets::{Row, Table, TableState},
 };
 
 pub fn matches<'a>(entries: &'a [Entry], query: &str) -> Vec<&'a Entry> {
@@ -17,7 +17,7 @@ pub fn matches<'a>(entries: &'a [Entry], query: &str) -> Vec<&'a Entry> {
 }
 fn details(app: &App, rows: &[&Entry], query: &str, selected: usize) -> Text<'static> {
     let mut lines = vec![
-        Line::styled("Actions | No work while browsing", ui::heading()),
+        Line::styled("Actions | Available operations", ui::heading()),
         ui::metadata("Full query: ", query),
     ];
     if let Some(entry) = rows.get(selected) {
@@ -29,20 +29,19 @@ fn details(app: &App, rows: &[&Entry], query: &str, selected: usize) -> Text<'st
             lines.push(Line::raw(ui::inline(reason)));
         } else {
             lines.push(Line::styled(
-                "Enter requests this action; it is not approval.",
+                "Enter opens this action's next step.",
                 ui::accent(),
             ));
         }
         lines.push(Line::raw(match entry.effect {
             super::context::Effect::Preview | super::context::Effect::Draft => "Opens an editable draft or requests a read-only preview. Core guards remain authoritative; execution requires a fresh preview and separate explicit confirmation.",
-            super::context::Effect::Disclosure => "Only opens the content warning. Literal view patch is separately required. Highlighting/search never reads patch content.",
-            _ => "Navigation, drafts and read requests do not authorize writes.",
+            super::context::Effect::Disclosure => "Opens a content warning. Type literal view patch there to disclose the comparison.",
+            _ => "Writes require a reviewed, explicit approval.",
         }));
     } else {
         lines.push(Line::raw("No matching actions. Ctrl-U clears the search."));
     }
-    lines.push(Line::raw("Commands operate on this view or selection. F10 menus own navigation and session controls. Search matches labels only, case-insensitively; it never narrows execution scope. Effect labels distinguish drafts, mutation previews and content warnings."));
-    lines.push(Line::raw("Home returns controls. Arrows choose results; / edits search. Esc leaves search, then closes Actions."));
+    lines.push(Line::raw("Commands operate on this view or selection. F10 menus own navigation and session controls. Search matches labels case-insensitively; the operation's review defines execution scope. Effect labels distinguish drafts, mutation previews and content warnings."));
     Text::from(lines)
 }
 pub fn draw(
@@ -55,21 +54,10 @@ pub fn draw(
     searching: bool,
 ) {
     let rows = matches(entries, query);
-    if app.shell.scroll > 0 {
-        ui::report(
-            frame,
-            area,
-            "Actions | Full selected action",
-            details(app, &rows, query, selected),
-            app.shell.scroll - 1,
-            true,
-        );
-        return;
-    }
     let parts = Layout::vertical([
         Constraint::Length(3),
-        Constraint::Min(3),
-        Constraint::Length(2),
+        Constraint::Min(4),
+        Constraint::Length(if area.height >= 14 { 6 } else { 3 }),
     ])
     .split(area);
     ui::input(
@@ -110,7 +98,14 @@ pub fn draw(
         .collect();
     let table = Table::new(items, [Constraint::Length(10), Constraint::Min(8)])
         .header(Row::new(["SCOPE", "ACTION / EFFECT"]).style(ui::muted()))
-        .block(ui::pane("Context actions · Enter choose", !searching))
+        .block(ui::pane(
+            if rows.is_empty() {
+                "No matching actions"
+            } else {
+                "Context actions · Enter choose"
+            },
+            !searching,
+        ))
         .highlight_symbol("> ")
         .row_highlight_style(ui::selected());
     let mut state = TableState::default().with_selected((!rows.is_empty()).then_some(selected));
@@ -134,30 +129,15 @@ pub fn draw(
             super::input::Target::Palette(entry.action),
         );
     }
-    let note = if let Some(entry) = rows.get(selected) {
-        format!(
-            "{} | {}\n{}",
-            entry.scope.label(),
-            entry.effect.label(),
-            app.action_reason(entry.action)
-                .unwrap_or("Enter request · PgDn full details · Esc back")
-        )
-    } else {
-        "No matching actions. Ctrl-U clears search.".into()
-    };
-    frame.render_widget(
-        Paragraph::new(ui::inline(&note))
-            .style(
-                if rows
-                    .get(selected)
-                    .is_some_and(|e| app.action_reason(e.action).is_some())
-                {
-                    ui::warning()
-                } else {
-                    ui::muted()
-                },
-            )
-            .wrap(ratatui::widgets::Wrap { trim: false }),
+    app.shell
+        .page_rows
+        .set(parts[2].height.saturating_sub(2).max(1));
+    ui::report(
+        frame,
         parts[2],
+        "Action details",
+        details(app, &rows, query, selected),
+        app.shell.scroll,
+        false,
     );
 }

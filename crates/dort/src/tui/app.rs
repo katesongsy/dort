@@ -42,18 +42,14 @@ pub struct Preview {
 }
 impl Preview {
     fn clamp_scroll(&mut self, width: u16, height: u16) {
-        // Chrome, action bar and preview borders; compact navigation uses one extra row.
+        // Header, navigation, status, footer, approval row and preview borders.
         // Escaped report bytes are ASCII, so byte lengths equal terminal columns.
         let escaped = super::views::safe(&self.text);
         let lines = escaped.lines().count();
         let columns = escaped.lines().map(str::len).max().unwrap_or(0);
         self.scroll = self.scroll.min(
             lines
-                .saturating_sub(usize::from(height.saturating_sub(if width < 80 {
-                    9
-                } else {
-                    8
-                })))
+                .saturating_sub(usize::from(height.saturating_sub(7)))
                 .min(u16::MAX as usize) as u16,
         );
         self.horizontal = self.horizontal.min(
@@ -239,9 +235,7 @@ impl App {
                         "Error: {error}\nA failed write may leave partial effects. Inspect Recovery; nothing is automatically undone."
                     )
                 } else {
-                    format!(
-                        "Read failed: {error}\nNo operation was approved by this read. Esc returns to retained input/scope."
-                    )
+                    format!("Read failed: {error}\nEsc returns to retained input and scope.")
                 };
                 self.preview = None;
                 self.confirmation = None;
@@ -271,7 +265,7 @@ impl App {
                     self.status =
                         "Selected transaction disappeared; showing nearest remaining row.".into();
                 } else {
-                    self.status = "All-repository diagnosis refreshed; journal integrity is not a live-drift check.".into();
+                    self.status = "All-repository diagnosis refreshed; live drift is assessed by each recovery preview.".into();
                 }
                 self.selected = position
                     .unwrap_or(self.selected)
@@ -284,7 +278,9 @@ impl App {
                 self.tab = Tab::Checks;
                 self.shell.overlay = None;
                 self.details_scroll = 0;
-                self.status = "Read-only Diagnostics loaded; unavailable observations are labeled, never repaired.".into();
+                self.status =
+                    "Read-only Diagnostics loaded; unavailable observations include their cause."
+                        .into();
             }
             Ok(Output::Git(report)) => {
                 self.git_view.accept(
@@ -318,7 +314,7 @@ impl App {
                 self.shell.overlay = None;
                 self.details_scroll = 0;
                 self.status =
-                    "Structural check passed; live files and installed tools not inspected.".into();
+                    "Declarations validated; inspect Files for live state and verify installed tools separately.".into();
             }
             Ok(Output::Profiles {
                 report,
@@ -377,8 +373,7 @@ impl App {
                     self.status =
                         "Selected candidate disappeared; showing nearest remaining row.".into();
                 } else {
-                    self.status =
-                        "Metadata discovery loaded; candidates are not a safety guarantee.".into();
+                    self.status = "Discovery loaded; review each candidate before adoption.".into();
                 }
                 self.candidate_selected = position
                     .unwrap_or(self.candidate_selected)
@@ -436,10 +431,11 @@ impl App {
                         effect_scroll: 0,
                     });
                     self.status = if self.preview.as_ref().is_some_and(|p| p.pending.adoption()) {
-                        "Review all mappings; Enter / Adopt all approves once. Esc returns without writing."
+                        "Review all mappings; Adopt all approves once. Esc returns to the draft."
                     } else {
                         "Review effects; Enter opens confirmation, Esc dismisses."
-                    }.into();
+                    }
+                    .into();
                 }
                 Err(error) => self.status = super::actions::diagnostic(&error),
             },
@@ -494,7 +490,7 @@ impl App {
                     completion
                         .transaction_id
                         .map(|id| format!("Transaction ID: {id}"))
-                        .unwrap_or_else(|| "No changes needed; no transaction created.".into())
+                        .unwrap_or_else(|| "Everything is up to date.".into())
                 ));
                 self.status = "Operation completed. Refreshing observations...".into();
                 if adopted {
@@ -957,7 +953,7 @@ impl App {
             self.git_view.discard_patch();
             if self.busy {
                 self.exit_requested = true;
-                self.status = "Exit requested; waiting for the active worker. Approved writes are not cancelled.".into();
+                self.status = "Exit requested; waiting for the active worker. Approved writes run to completion.".into();
             } else {
                 self.quit = true;
             }
@@ -1006,8 +1002,7 @@ impl App {
                     self.history_details = false;
                 }
             }
-            self.status =
-                "Resize to at least 48x14; no approval is accepted in a small layout.".into();
+            self.status = "Resize to at least 48x14 to review and approve.".into();
             return None;
         }
         if self.navigation.menu.is_some() {
@@ -1024,11 +1019,6 @@ impl App {
             let destination = match key.code {
                 KeyCode::Left => Some(self.tab.previous()),
                 KeyCode::Right => Some(self.tab.next()),
-                KeyCode::Char('1') => Some(Tab::Overview),
-                KeyCode::Char('2') => Some(Tab::Files),
-                KeyCode::Char('3') => Some(Tab::Recovery),
-                KeyCode::Char('4') => Some(Tab::Checks),
-                KeyCode::Char('5') => Some(Tab::Git),
                 _ => None,
             };
             if let Some(tab) = destination {
@@ -1036,22 +1026,11 @@ impl App {
                 self.selected = 0;
                 self.git_view.discard_patch();
             }
-            if self.shell.overlay.is_some() {
-                match key.code {
-                    KeyCode::Home => self.shell.scroll = 0,
-                    KeyCode::PageDown => self.shell.page(true),
-                    KeyCode::PageUp => self.shell.page(false),
-                    _ => (),
-                }
-            } else {
-                match key.code {
-                    KeyCode::Home => self.details_scroll = 0,
-                    KeyCode::PageDown => {
-                        self.details_scroll = self.details_scroll.saturating_add(2)
-                    }
-                    KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(2),
-                    _ => (),
-                }
+            match key.code {
+                KeyCode::Home => self.details_scroll = 0,
+                KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(2),
+                KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(2),
+                _ => (),
             }
             return None;
         }
@@ -1176,7 +1155,7 @@ impl App {
                 }
                 KeyCode::Esc => {
                     self.preview = None;
-                    self.status = "Preview dismissed; no writes.".into();
+                    self.status = "Returned to the draft.".into();
                 }
                 KeyCode::Down | KeyCode::PageDown => {
                     preview.scroll = preview
@@ -1295,6 +1274,19 @@ impl App {
             };
             return self.activate(Action::Destination(tab));
         }
+        let content_area = ratatui::layout::Rect::new(
+            0,
+            2,
+            self.viewport.0,
+            self.viewport
+                .1
+                .saturating_sub(4 + u16::from(!self.page_actions().is_empty())),
+        );
+        let split_details = if self.tab == Tab::Git {
+            self.git_view.wide_metadata(content_area)
+        } else {
+            super::workbench::wide_details(content_area, 2)
+        };
         if self.tab == Tab::Files
             && self.discovering
             && !self.text_entry()
@@ -1304,7 +1296,16 @@ impl App {
                 KeyCode::PageDown | KeyCode::PageUp | KeyCode::Home
             )
         {
-            self.inventory.details = true;
+            if !self.inventory.details && !split_details {
+                let backwards = key.code != KeyCode::PageDown;
+                let count = if key.code == KeyCode::Home {
+                    usize::MAX
+                } else {
+                    self.inventory.page_capacity.get().max(1)
+                };
+                self.move_files(backwards, count);
+                return None;
+            }
             if key.code == KeyCode::Home {
                 self.content.scroll = 0;
             } else {
@@ -1312,15 +1313,40 @@ impl App {
             }
             return None;
         }
-        if !self.text_entry() && matches!(key.code, KeyCode::PageDown | KeyCode::PageUp) {
-            if self.tab == Tab::Files {
-                self.inventory.details = true;
+        if !self.text_entry()
+            && matches!(
+                key.code,
+                KeyCode::PageDown | KeyCode::PageUp | KeyCode::Home
+            )
+            && !split_details
+        {
+            let backwards = key.code != KeyCode::PageDown;
+            let count = if key.code == KeyCode::Home {
+                usize::MAX
+            } else {
+                2
+            };
+            if self.tab == Tab::Files && !self.inventory.details {
+                self.move_files(backwards, count);
+                return None;
             }
-            if self.tab == Tab::Recovery {
-                self.history_details = true;
+            if self.tab == Tab::Recovery
+                && !self.history_details
+                && self
+                    .data
+                    .as_ref()
+                    .is_some_and(|d| d.history_error.is_none())
+            {
+                self.page_history(backwards, count);
+                return None;
             }
-            if self.tab == Tab::Git && !self.git_view.sensitive() {
-                self.git_view.inspect_metadata();
+            if self.tab == Tab::Git
+                && !self.git_view.browsing_details()
+                && !self.git_view.navigation_input()
+                && !self.git_view.sensitive()
+            {
+                self.git_view.page_metadata(backwards, count);
+                return None;
             }
         }
         if self.tab == Tab::Git {
@@ -1424,7 +1450,7 @@ impl App {
             KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(2),
             KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(2),
             KeyCode::Home => self.details_scroll = 0,
-            KeyCode::Char('x' | ' ') if self.tab == Tab::Files => {
+            KeyCode::Char(' ') if self.tab == Tab::Files => {
                 return self.activate(Action::ToggleMark);
             }
             KeyCode::Char('h') if self.tab == Tab::Files => super::tree::fold(self, true),
@@ -1434,6 +1460,15 @@ impl App {
             }
             KeyCode::Char('A') if self.tab == Tab::Files => {
                 return self.activate(Action::ApplyMarked);
+            }
+            KeyCode::Char('u')
+                if self.tab == Tab::Files
+                    && !self.discovering
+                    && !key
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                return self.activate(Action::Keep);
             }
             KeyCode::Char('K') if self.tab == Tab::Files => {
                 return self.activate(Action::KeepMarked);
@@ -1466,7 +1501,7 @@ impl App {
                 self.history_search.query.clear();
                 self.clamp_history_selection();
             }
-            KeyCode::Char('i') | KeyCode::Enter if self.tab == Tab::Recovery => {
+            KeyCode::Enter if self.tab == Tab::Recovery => {
                 self.history_details = true;
                 self.details_scroll = 0;
             }
@@ -1480,17 +1515,8 @@ impl App {
                 self.details_scroll = 0;
             }
             KeyCode::Delete if self.tab == Tab::Files => return self.activate(Action::ClearFilter),
-            KeyCode::Char('i') if self.tab == Tab::Files => return self.activate(Action::Inspect),
             KeyCode::Char('p') => return self.activate(Action::Choose),
             KeyCode::Char('n') => return self.activate(Action::Init),
-            KeyCode::Char('1') => return self.activate(Action::Destination(Tab::Overview)),
-            KeyCode::Char('2') => return self.activate(Action::Destination(Tab::Files)),
-            KeyCode::Char('3') => return self.activate(Action::Destination(Tab::Recovery)),
-            KeyCode::Char('4') => {
-                self.go_tab(Tab::Checks);
-                self.showing_diagnostics = false;
-            }
-            KeyCode::Char('5') => return self.activate(Action::Destination(Tab::Git)),
             KeyCode::Char('c') => return self.activate(Action::CheckCurrent),
             KeyCode::Char('v') => return self.activate(Action::CheckStandalone),
             KeyCode::Char('t') => return self.activate(Action::Profiles),
@@ -1498,16 +1524,6 @@ impl App {
             KeyCode::Char('r') => return self.activate(Action::Refresh),
             KeyCode::Char('f') => return self.activate(Action::Discover),
             KeyCode::Char('o') => return self.activate(Action::Adopt),
-            KeyCode::Enter if self.tab == Tab::Files && self.inventory.group.is_some() => {
-                if let Some(node) = super::tree::selected(self) {
-                    let folded = if self.discovering {
-                        &self.inventory.candidate_folded
-                    } else {
-                        &self.inventory.managed_folded
-                    };
-                    super::tree::fold(self, !folded.contains(&node.path));
-                }
-            }
             KeyCode::Enter if self.tab == Tab::Files && self.discovering => {
                 self.inventory.details = true;
                 self.details_scroll = 0;
@@ -1577,6 +1593,15 @@ impl App {
         if had_selection && position.is_none() {
             self.status = "Selected item disappeared; showing the nearest remaining row.".into();
         }
+        // Only a successful full inventory establishes that a marked ID is gone.
+        // Display filters and unavailable observations must preserve valid marks.
+        if data.repository.is_some() && data.files_error.is_none() {
+            let ids: std::collections::BTreeSet<_> =
+                data.files.iter().map(|(id, _)| id.as_str()).collect();
+            self.inventory
+                .managed_marks
+                .retain(|id| ids.contains(id.as_str()));
+        }
         let git_default = data.repository.clone().or(self.repository.clone());
         if self.git_view.follows_files && self.git_view.root != git_default {
             self.git_view.scope_changed();
@@ -1614,7 +1639,7 @@ impl App {
             Intent::Submit(form @ (Form::KeepId | Form::RemoveId)) => {
                 if self.shell.unmanage_id.is_empty() {
                     self.status =
-                        "Enter an exact mapping ID; filters never limit this input.".into();
+                        "Enter an exact mapping ID; the preview uses this exact ID.".into();
                     return None;
                 }
                 Some(Task::Files(Request::Unmanage {
@@ -1794,7 +1819,7 @@ impl App {
             }
             Action::AdoptSelected => {
                 if self.tab == Tab::Files && self.discovering {self.adopt_candidate(); }
-                else { self.status = "Discover and inspect an eligible regular file first.".into(); }
+                else { self.status = "Open Files > Discover and select an eligible regular file.".into(); }
             }
             Action::KeepId | Action::RemoveId => {
                 self.tab = Tab::Files;
@@ -1805,13 +1830,13 @@ impl App {
             Action::ClearFilter if self.tab == Tab::Recovery => {
                 self.history_search.query.clear();
                 self.clamp_history_selection();
-                self.status = "Recovery display filter cleared; global blockers were never hidden.".into();
+                self.status = "Recovery display filter cleared; global blockers remain visible.".into();
             }
             Action::ClearFilter if self.tab == Tab::Git => self.git_view.clear_filter(),
             Action::ClearFilter => {
                 self.inventory.search_mut(self.discovering).query.clear();
                 self.clamp_file_selection();
-                self.status = "File display filter cleared; apply scope was never narrowed.".into();
+                self.status = "File display filter cleared; Apply uses the full active scope.".into();
             }
             Action::Inspect if self.tab == Tab::Git => self.git_view.inspect_metadata(),
             Action::Inspect if self.tab == Tab::Recovery => {
@@ -1863,7 +1888,7 @@ impl App {
                     };
                     if !eligible {
                         self.history_details = true;
-                        self.status = "Action unavailable for this diagnosis. Inspect details; no automatic recovery. Refresh if history changed.".into();
+                        self.status = "Action unavailable for this diagnosis. Inspect details and request an eligible recovery preview. Refresh if history changed.".into();
                         return None;
                     }
                     let (r, t) = (row.repository_id.clone(), row.transaction_id.clone());
@@ -1991,16 +2016,19 @@ impl App {
         }
     }
     fn move_history_selection(&mut self, backwards: bool) {
+        self.page_history(backwards, 1);
+    }
+    fn page_history(&mut self, backwards: bool, count: usize) {
         let visible = self.visible_history_rows();
         let position = visible
             .iter()
             .position(|&i| i == self.selected)
             .unwrap_or(0);
         let next = if backwards {
-            position.saturating_sub(1)
+            position.saturating_sub(count)
         } else {
             position
-                .saturating_add(1)
+                .saturating_add(count)
                 .min(visible.len().saturating_sub(1))
         };
         if let Some(&index) = visible.get(next) {
@@ -2074,8 +2102,7 @@ impl App {
         };
         let Some(root) = root else {
             self.git_view.editing_root = true;
-            self.status =
-                "Choose an exact Git-only root; no manifest or registration required.".into();
+            self.status = "Choose an independent Git root for this session.".into();
             return None;
         };
         match &self.git {
@@ -2124,7 +2151,7 @@ impl App {
             .and_then(|d| d.report.candidates.get(self.candidate_selected))
         {
             if !candidate.supported_for_adoption {
-                self.status = "Not eligible for adoption: select an owned, single-link regular file. Directories cannot be adopted; use i for details or o for a manual draft.".into();
+                self.status = "Not eligible for adoption: select an owned, single-link regular file. Directories cannot be adopted; use Enter for details or o for a manual draft.".into();
                 return;
             }
             let home = &self.discovery.as_ref().expect("selected discovery").home;
@@ -2167,7 +2194,7 @@ impl App {
                     || self.inventory.candidate_marks.is_empty() =>
             {
                 Some(
-                    "Mark discovered regular files with x before opening a combined adoption draft.",
+                    "Mark discovered regular files with Space before opening a combined adoption draft.",
                 )
             }
             Action::BatchAdopt
@@ -2181,14 +2208,14 @@ impl App {
                     || self.inventory.managed_marks.is_empty() =>
             {
                 Some(
-                    "Mark managed mappings with x; uppercase A/K/D request a selected batch, not full-scope Apply.",
+                    "Mark managed mappings with Space; uppercase A/K/D review the marked batch; Apply reviews the full active scope.",
                 )
             }
             Action::Keep | Action::Remove | Action::AdoptSelected
                 if self.inventory.group.is_some() =>
             {
                 Some(
-                    "Not eligible for adoption or single-file actions: select a file, not a tree directory/group; x marks matching descendants, including folded rows.",
+                    "Not eligible for adoption or single-file actions: select a regular file; Space marks matching descendants, including folded rows.",
                 )
             }
             Action::Apply
@@ -2316,7 +2343,7 @@ impl App {
                 confirmation.input.clear();
                 confirmation.prompt_scroll = 0;
             } else {
-                self.status = "Exact batch file ID does not match; nothing executed.".into();
+                self.status = "Exact batch file ID mismatch; re-enter the requested ID.".into();
             }
             return None;
         }
@@ -2379,7 +2406,7 @@ impl App {
                         confirmation.prompt_scroll = 0;
                         confirmation.input.clear();
                     } else {
-                        self.status = "Exact file ID does not match; nothing executed.".into();
+                        self.status = "Exact file ID mismatch; re-enter the requested ID.".into();
                     }
                 } else if confirmation.input == "yes" {
                     let ack = confirmation.removal_ack.clone();

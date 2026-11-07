@@ -12,6 +12,9 @@ mod appearance_tests;
 mod batch_tests;
 mod batch_ui;
 mod components;
+#[cfg(test)]
+#[path = "tests/consistency.rs"]
+mod consistency_tests;
 mod context;
 #[cfg(test)]
 #[path = "tests/design.rs"]
@@ -35,6 +38,7 @@ mod help;
 #[cfg(test)]
 #[path = "tests/help.rs"]
 mod help_tests;
+mod hints;
 #[cfg(test)]
 #[path = "tests/ignore.rs"]
 mod ignore_tests;

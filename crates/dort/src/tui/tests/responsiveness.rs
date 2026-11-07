@@ -119,7 +119,7 @@ fn large_preparation_is_passive_coalesces_search_and_rejects_late_results() {
     assert_eq!(&*discovery_tree::snapshot(&app).matching, &[99_999]);
     assert_eq!(app.candidate_selected, 99_999);
     let current = discovery_tree::snapshot(&app);
-    key(&mut app, KeyCode::Char('x'));
+    key(&mut app, KeyCode::Char(' '));
     assert!(
         app.inventory
             .candidate_marks
@@ -180,7 +180,7 @@ fn local_folds_keep_the_snapshot_and_marks_and_scope_changes_drop_old_preparatio
     assert!(tree::visible(&app).iter().all(|n| n.branch));
     app.inventory.candidate_folded = Arc::new(super::visibility::Folds::all(false));
     tree::select(&mut app, 9999);
-    key(&mut app, KeyCode::Char('x'));
+    key(&mut app, KeyCode::Char(' '));
     let marked = app.inventory.candidate_marks.clone();
     assert_eq!(discovery_tree::shown_marks(&app), 1);
     let snapshot = discovery_tree::snapshot(&app);

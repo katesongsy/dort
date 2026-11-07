@@ -16,21 +16,16 @@ pub fn draw(
     selected: usize,
 ) {
     let parts = Layout::vertical([
-        Constraint::Length(2),
+        Constraint::Length(1),
         Constraint::Min(3),
-        Constraint::Length(3),
+        Constraint::Length(2),
     ])
     .split(area);
     frame.render_widget(
-        Paragraph::new("Local HOME discovery preferences\nEnter previews Unignore · Esc returns")
-            .style(ui::muted()),
+        Paragraph::new("Local HOME discovery preferences").style(ui::muted()),
         parts[0],
     );
     app.hits.wheel(parts[1], super::input::Wheel::Choices);
-    if !paths.is_empty() {
-        app.hits
-            .click(parts[0], super::input::Target::Picker(selected, true));
-    }
     let rows = paths.iter().map(|path| {
         Row::new(vec![ui::inline(
             path.to_str().expect("validated ignore path"),
@@ -71,7 +66,6 @@ pub fn draw(
     frame.render_widget(
         Paragraph::new(vec![
             Line::raw(detail),
-            Line::raw("↑/↓ j/k · PgUp/PgDn · Home/End"),
             Line::raw("Ancestor rules and safety exclusions still apply."),
         ]),
         parts[2],

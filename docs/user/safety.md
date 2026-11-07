@@ -2,7 +2,7 @@
 
 [User guide](README.md) · [Command reference](commands.md)
 
-## Read-only does not mean secret-proof
+## Content disclosure and secrets
 
 Checks/discovery/plans/status/history/Git inspection do not write. Explicit init/file/recovery mutations can change repositories and live files only after approval. Start with a disposable HOME; these are experimental prototypes. `--dry-run` never creates state/locks/artifacts or prompts. JSON/nonterminal writes require `--yes`; link deletion additionally requires exact-ID acknowledgement. Manifest checks validate declarations; file plans may read/hash ordinary files. CLI discovery reports contain metadata only. TUI Discover additionally reads only the selected eligible regular file for an automatic bounded content preview.
 
@@ -84,7 +84,7 @@ On macOS, aliases such as `/var` may be symlinks. When supplying explicit state 
 dort --json recovery list
 ```
 
-In the TUI, Recovery (`3`) provides the same independent all-repository diagnosis, searchable metadata and unfiltered global blocker count. Select a row and press `i`/Enter for full IDs and contextual recovery actions; no hash transcription is needed. Checks → Diagnostics (`j`) reports host/registry metadata and labels unavailable configuration/history separately, never displaying local variable values. Errors offer `h` for Recovery and `r` for a read/fresh preview; after a failed write `r` only refreshes, never replays approval. Every new write needs a new preview and confirmation.
+In the TUI, Recovery → All repositories provides the same independent all-repository diagnosis, searchable metadata and unfiltered global blocker count. Select a row and press Enter for full IDs and contextual recovery actions; no hash transcription is needed. Checks → Diagnostics (`j`) reports host/registry metadata and labels unavailable configuration/history separately, never displaying local variable values. Errors offer `h` for Recovery and `r` for a read/fresh preview; after a failed write `r` only refreshes, never replays approval. Every new write needs a new preview and confirmation.
 
 This command never creates state, takes a write lock, repairs records or changes files. Exit 4 means at least one incomplete or malformed transaction blocks subsequent new writes, not that recovery has occurred.
 

@@ -160,7 +160,7 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
         ));
         lines.push(note("Files: Discover | Checks: manifest", ui::accent()));
         lines.push(note(
-            "Recovery and Diagnostics work without a selected repository.",
+            "Recovery and Diagnostics are available independently of repository selection.",
             Style::default(),
         ));
     }
@@ -185,7 +185,7 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
     if let Some(error) = observation.and_then(|o| o.configuration_error.as_ref()) {
         lines.push(field("Configuration unavailable", error));
         lines.push(note(
-            "Registry count and active selection unknown (not zero).",
+            "Registry metadata unavailable; counts and active selection unresolved.",
             ui::warning(),
         ));
     }
@@ -208,7 +208,7 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
             Style::default(),
         ));
     } else {
-        lines.push(note("File counts unknown, not zero.", ui::warning()));
+        lines.push(note("File counts unavailable.", ui::warning()));
     }
     if let Some(error) = &data.files_error {
         lines.extend(error.lines().map(|line| note(line, ui::warning())));
@@ -237,18 +237,13 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
         ));
     }
     lines.push(note(
-        "No tool execution, templates, secrets, network, staging or commits.",
+        "Use your preferred tools for providers, templates, secrets and Git writes.",
         ui::muted(),
     ));
     lines.push(note(
-        "Previews never authorize execution. Failed writes may retain partial effects.",
+        "Execution requires explicit approval of a fresh preview. Failed writes may retain partial effects.",
         ui::warning(),
     ));
-    lines.push(ui::keys(&[
-        ("PgUp/PgDn", "details"),
-        ("Home", "start"),
-        (";", "Actions"),
-    ]));
     dashboard(
         frame,
         area,
@@ -278,7 +273,7 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
         ];
         section(&mut lines, "Structural check only");
         lines.push(note(
-            "Read-only structural check; live files and installed tools were not inspected.",
+            "Declarations validated; inspect Files for live state and verify installed tools separately.",
             ui::warning(),
         ));
         lines.push(field(
@@ -291,7 +286,7 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
         ));
         lines.push(field("Valid manifest", format!("{:?}", report.manifest)));
         lines.push(field("Schema", report.schema));
-        section(&mut lines, "Effective profiles | union, not replacement");
+        section(&mut lines, "Effective profiles | combined contributors");
         lines.push(field(
             "Effective profiles",
             format!("{:?}", report.active_profiles),
@@ -313,10 +308,10 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
             "Tool dependency order",
             format!("{:?}", report.tool_dependency_order),
         ));
-        section(&mut lines, "Capability limits | not execution readiness");
+        section(&mut lines, "Capability limits");
         if report.unsupported_capabilities.is_empty() {
             lines.push(note(
-                "No unsupported declarations in this selection. This does not verify live state.",
+                "Selected declarations are supported. Files shows live state.",
                 Style::default(),
             ));
         }
@@ -324,7 +319,7 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
             lines.push(field("Not implemented", capability));
         }
         lines.push(note(
-            "No tool execution, templates, secrets or prerequisite verification.",
+            "Verify tool readiness and prerequisites separately.",
             ui::muted(),
         ));
     } else {
@@ -343,13 +338,12 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
             Style::default(),
         ));
         lines.push(note(
-            "Checks validate declarations only, not live files or installed tools.",
+            "Checks validate declarations. Files inspects live state; verify installed tools separately.",
             ui::warning(),
         ));
     }
     section(&mut lines, "Read-only actions");
     lines.push(ui::keys(&[("r", "Recheck this scope")]));
-    lines.push(ui::keys(&[("PgUp/PgDn", "details"), ("Home", "start")]));
     dashboard(
         frame,
         area,
@@ -432,7 +426,7 @@ fn diagnostics(frame: &mut Frame, area: Rect, app: &App) {
     if let Err(error) = &report.registry {
         lines.push(field("Configuration unavailable", error));
         lines.push(note(
-            "Registry count and active selection unknown (not zero).",
+            "Registry metadata unavailable; counts and active selection unresolved.",
             ui::warning(),
         ));
     }
@@ -468,18 +462,20 @@ fn diagnostics(frame: &mut Frame, area: Rect, app: &App) {
     lines.push(field("Git follows file root", app.git_view.follows_files));
     section(&mut lines, "Capability limits");
     lines.push(note(
-        "Live files/tools not inspected by Diagnostics.",
+        "Files inspects live state; verify installed tools separately.",
         ui::warning(),
     ));
-    lines.push(note("No directories, locks or repairs created. No local variable values or file contents displayed.", Style::default()));
+    lines.push(note(
+        "Diagnostics shows host and path metadata.",
+        Style::default(),
+    ));
     lines.push(note("Supported: guarded local file workflows and recovery; structural checks; hardened read-only Git.", Style::default()));
     lines.push(note(
         "Unavailable: providers, templates, secrets, cloning/sync, network and Git writes.",
         ui::muted(),
     ));
-    lines.push(note("Git requires separately installed trusted Git; missing Git does not disable other workflows.", Style::default()));
+    lines.push(note("Git requires separately installed trusted Git; other workflows remain available when Git is missing.", Style::default()));
     lines.push(note("Configuration errors: correct configuration privately, then r to retry. Recovery remains independent.", Style::default()));
     lines.push(ui::keys(&[("r", "Refresh Diagnostics")]));
-    lines.push(ui::keys(&[("PgUp/PgDn", "details"), ("Home", "start")]));
     dashboard(frame, area, app, "Checks | Diagnostics", metrics, lines);
 }

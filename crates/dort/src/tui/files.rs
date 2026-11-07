@@ -33,7 +33,7 @@ fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
         ui::report(
             frame,
             parts[1],
-            "Details · Alt+PgUp/PgDn",
+            "Metadata",
             details(app),
             app.details_scroll,
             false,
@@ -42,7 +42,7 @@ fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
         ui::report(
             frame,
             area,
-            "Selected item · PgUp/PgDn · Esc list",
+            "Selected item · Esc list",
             details(app),
             app.details_scroll,
             true,
@@ -76,7 +76,7 @@ fn details(app: &App) -> Text<'static> {
                 "Full path",
                 node.path.to_str().unwrap_or("unavailable"),
             ));
-            lines.push(Line::raw("Enter or h/l folds/unfolds. Space/x marks/unmarks matching descendants, including folded rows; discovery directories/links are never adopted. Marks survive filters and folding."));
+            lines.push(Line::raw("h/l folds/unfolds. Space marks/unmarks matching descendants, including folded rows; adoption uses eligible regular files. Marks survive filters and folding."));
         }
     } else if app.discovering {
         if let Some(candidate) = app
@@ -101,9 +101,9 @@ fn details(app: &App) -> Text<'static> {
             ));
             lines.push(Line::raw(""));
             lines.push(Line::raw(if eligible {
-                "Metadata eligibility is a hint, not approval."
+                "Review this candidate before adoption."
             } else {
-                "Directories, links and special files cannot be adopted."
+                "Adoption requires an eligible regular file."
             }));
             lines.push(Line::raw(if eligible { "Choose Adopt selected to edit target, ID and source." } else { "Only owned, single-link regular files without special permission bits are candidates." }));
             lines.push(Line::raw(

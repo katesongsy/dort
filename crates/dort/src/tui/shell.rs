@@ -11,7 +11,7 @@ pub fn scroll_details(scroll: &mut u16, code: KeyCode) -> bool {
         KeyCode::Up | KeyCode::PageUp => {
             *scroll = scroll.saturating_sub(if code == KeyCode::Up { 1 } else { 2 })
         }
-        KeyCode::Home | KeyCode::Enter | KeyCode::Char('i') => *scroll = 0,
+        KeyCode::Home => *scroll = 0,
         _ => return false,
     }
     true
@@ -202,6 +202,7 @@ impl Action {
 pub struct Shell {
     pub overlay: Option<Overlay>,
     pub scroll: u16,
+    pub page_rows: std::cell::Cell<u16>,
     pub init_draft: String,
     pub path_focused: usize,
     pub choose_draft: String,
@@ -229,6 +230,7 @@ impl Shell {
         Self {
             overlay: None,
             scroll: 0,
+            page_rows: std::cell::Cell::new(1),
             init_draft: String::new(),
             path_focused: 0,
             choose_draft: String::new(),
@@ -250,26 +252,13 @@ impl Shell {
             entries,
         });
     }
-    /// Ordinary metadata pages overlap even at the compact floor. Picker details
-    /// use one as a sentinel so the first PgDn reveals their first rendered row.
+    /// Page the currently visible inline metadata viewport.
     pub fn page(&mut self, down: bool) {
+        let rows = self.page_rows.get().max(1);
         self.scroll = if down {
-            if self.scroll == 0
-                && matches!(
-                    self.overlay,
-                    Some(
-                        Overlay::Profiles(_)
-                            | Overlay::Repositories { .. }
-                            | Overlay::Actions { .. }
-                    )
-                )
-            {
-                1
-            } else {
-                self.scroll.saturating_add(2)
-            }
+            self.scroll.saturating_add(rows)
         } else {
-            self.scroll.saturating_sub(2)
+            self.scroll.saturating_sub(rows)
         };
     }
     pub fn text_entry(&self) -> bool {

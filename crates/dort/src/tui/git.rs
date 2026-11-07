@@ -6,6 +6,8 @@ use ratatui::{
     Frame,
     crossterm::event::{KeyCode, KeyEvent},
     layout::Rect,
+    style::{Color, Style},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 use std::path::PathBuf;
@@ -83,6 +85,49 @@ pub struct Patch {
     lines: Vec<usize>,
 }
 impl Patch {
+    fn styled_viewport(
+        &self,
+        line: usize,
+        column: usize,
+        width: usize,
+        height: usize,
+    ) -> Text<'static> {
+        let digits = line.saturating_add(height).to_string().len().max(5);
+        let visible = self.viewport(line, column, width.saturating_sub(digits + 2), height);
+        Text::from(
+            visible
+                .lines()
+                .enumerate()
+                .map(|(offset, text)| {
+                    let index = line + offset;
+                    let start = self.lines[index];
+                    let original = &self.text[start..];
+                    let style = if original.starts_with("diff ")
+                        || original.starts_with("index ")
+                        || original.starts_with("---")
+                        || original.starts_with("+++")
+                    {
+                        super::components::heading()
+                    } else if original.starts_with("@@") {
+                        super::components::accent()
+                    } else if original.starts_with('+') {
+                        Style::default().fg(Color::Green)
+                    } else if original.starts_with('-') {
+                        super::components::danger()
+                    } else {
+                        Style::default()
+                    };
+                    Line::from(vec![
+                        Span::styled(
+                            format!("{:>digits$} │", index + 1),
+                            super::components::muted(),
+                        ),
+                        Span::styled(text.to_owned(), style),
+                    ])
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
     fn new(text: String) -> Self {
         // Backend reports are ASCII-escaped, with LF as the sole raw control byte.
         let lines = std::iter::once(0)
@@ -109,6 +154,23 @@ impl Patch {
             .collect::<Vec<_>>()
             .join("\n")
     }
+}
+#[cfg(test)]
+#[test]
+fn patch_viewport_styles_hunks_and_changes_even_when_scrolled_horizontally() {
+    let patch = Patch::new("diff --git a/x b/x\n@@ -1 +1 @@\n-old\n+new\n context".into());
+    let text = patch.styled_viewport(0, 0, 40, 5);
+    assert_eq!(text.lines[0].spans[1].style, super::components::heading());
+    assert_eq!(text.lines[1].spans[1].style, super::components::accent());
+    assert_eq!(text.lines[2].spans[1].style, super::components::danger());
+    assert_eq!(text.lines[3].spans[1].style.fg, Some(Color::Green));
+    assert!(text.lines[3].to_string().contains("4 │+new"));
+    let horizontal = patch.styled_viewport(2, 1, 30, 1);
+    assert_eq!(
+        horizontal.lines[0].spans[1].style,
+        super::components::danger()
+    );
+    assert!(horizontal.lines[0].to_string().ends_with("old"));
 }
 #[cfg(test)]
 #[test]
@@ -323,6 +385,11 @@ impl State {
                         .patch_scroll
                         .saturating_sub(if key.code == KeyCode::Up { 1 } else { 8 })
                 }
+                KeyCode::Home => {
+                    self.patch_scroll = 0;
+                    self.horizontal = 0;
+                }
+                KeyCode::End => self.patch_scroll = patch.lines.len().saturating_sub(1),
                 KeyCode::Right => self.horizontal = self.horizontal.saturating_add(4),
                 KeyCode::Left => self.horizontal = self.horizontal.saturating_sub(4),
                 _ => {
@@ -378,7 +445,7 @@ impl State {
                 }
                 self.scroll = 0;
             }
-            KeyCode::Enter | KeyCode::Char('i') => {
+            KeyCode::Enter => {
                 self.details = true;
                 self.scroll = 0;
             }
@@ -394,6 +461,28 @@ impl State {
             _ => return None,
         }
         Some(None)
+    }
+    pub fn wide_metadata(&self, area: Rect) -> bool {
+        metadata::wide_details(area, self.metadata.as_ref())
+    }
+    pub fn browsing_details(&self) -> bool {
+        self.details
+    }
+    pub fn page_metadata(&mut self, backwards: bool, count: usize) {
+        let visible = self.visible();
+        let pos = visible
+            .iter()
+            .position(|&i| i == self.selected)
+            .unwrap_or(0);
+        let next = if backwards {
+            pos.saturating_sub(count)
+        } else {
+            pos.saturating_add(count)
+                .min(visible.len().saturating_sub(1))
+        };
+        if let Some(&index) = visible.get(next) {
+            self.select_metadata(index);
+        }
     }
     pub fn has_selection(&self) -> bool {
         self.visible().contains(&self.selected)
@@ -478,7 +567,7 @@ impl State {
                 area.height.saturating_sub(2),
             );
             frame.render_widget(
-                Paragraph::new(patch.viewport(
+                Paragraph::new(patch.styled_viewport(
                     self.patch_scroll,
                     self.horizontal,
                     usize::from(area.width.saturating_sub(2)),
@@ -486,7 +575,7 @@ impl State {
                 ))
                 .block(
                     Block::default()
-                        .title(" PATCH CONTENT: may contain secrets | Esc drops view ")
+                        .title(" Patch · + added · - removed · May contain secrets ")
                         .borders(Borders::ALL),
                 ),
                 area,
@@ -495,12 +584,12 @@ impl State {
         }
         let body = if let Some(input) = &self.confirmation {
             format!(
-                "May expose secrets: whole comparison\nType literal view patch; Enter once\n{}\n\n{scope}\nNo history/export. Esc cancels.\nClosing drops reference, not secure memory erasure.\nFull confirmation input: {input:?}",
+                "May expose secrets: whole comparison\nType literal view patch; Enter once\n{}\n\n{scope}\nEsc cancels.\nClosing releases the view; bytes may remain in memory.\nFull confirmation input: {input:?}",
                 super::views::short_field("Confirm", input, area.width)
             )
         } else if self.editing_root {
             format!(
-                "Exact Git root (no manifest needed)\nEnter reads; Esc back; PgDn full input\n{}\n\n{scope}\nFull path input: {:?}",
+                "Exact Git root (independent scope)\nSelection applies to this session\n{}\n\n{scope}\nFull path input: {:?}",
                 super::views::short_field("Path", &self.draft, area.width),
                 self.draft
             )

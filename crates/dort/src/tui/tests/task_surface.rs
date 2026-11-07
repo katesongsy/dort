@@ -74,7 +74,7 @@ fn activity_keeps_scope_and_real_boundary_through_navigation_and_quit_waits() {
     });
     let first = render(&app, 48, 14);
     assert!(first.contains("Approved execution") && first.contains("quit waits"));
-    assert!(key(&mut app, KeyCode::Char('2')).is_none());
+    assert!(key(&mut app, KeyCode::Right).is_none());
     assert!(app.tab == Tab::Files);
     for code in [
         KeyCode::Char('a'),
@@ -264,7 +264,7 @@ fn receipt_preserves_raw_transaction_scope_and_noop_through_refresh_without_time
             pages.push_str(&render(&app, 48, 14));
             key(&mut app, KeyCode::PageDown);
         }
-        assert!(pages.contains("Transaction ID") || pages.contains("no transaction created"));
+        assert!(pages.contains("Transaction ID") || pages.contains("Everything is up to date"));
         key(&mut app, KeyCode::Home);
         assert!(key(&mut app, KeyCode::Tab).is_none() && app.show_result);
         assert!(click(&mut app, "[Back").is_none());

@@ -184,7 +184,7 @@ fn content_focus_uses_wrapped_viewport_without_selection_changes_or_rereads() {
     key(&mut app, KeyCode::Char('j'));
     assert_eq!(app.candidate_selected, selected + 1);
     key(&mut app, KeyCode::Up);
-    key(&mut app, KeyCode::Char('i'));
+    key(&mut app, KeyCode::Enter);
     assert!(!app.content.focused); // Wide inspection leaves the visible list active.
     key(&mut app, KeyCode::Char('j'));
     assert_eq!(app.candidate_selected, selected + 1);
@@ -257,7 +257,7 @@ fn content_focus_mouse_compact_text_modal_and_floor_guards() {
     app.resize(140, 40);
     assert!(!app.content.focused);
     assert!(discover_content::next(&mut app).is_none());
-    key(&mut app, KeyCode::Char('5'));
+    super::tests::destination(&mut app, super::app::Tab::Git, 80, 24);
     key(&mut app, KeyCode::Tab);
     assert!(!app.content.focused && app.tab == Tab::Git);
 }
@@ -282,7 +282,7 @@ fn selected_content_is_passive_escaped_ephemeral_and_late_results_are_dropped() 
     let content_row = screen.lines().position(|l| l.contains("Content")).unwrap();
     let details_row = screen
         .lines()
-        .position(|l| l.contains("Details · Alt"))
+        .position(|l| l.contains("Metadata") && l.contains('┌'))
         .unwrap();
     assert!(details_row > content_row + 10);
     key(&mut app, KeyCode::Up);
@@ -300,7 +300,7 @@ fn selected_content_is_passive_escaped_ephemeral_and_late_results_are_dropped() 
     assert!(!app.content.text().contains("synthetic-preview-A"));
     app.resize(140, 40);
     let read = discover_content::next(&mut app).unwrap();
-    key(&mut app, KeyCode::Char('5'));
+    super::tests::destination(&mut app, super::app::Tab::Git, 80, 24);
     app.complete(Ok(f.finish(read)));
     assert!(!app.content.text().contains("synthetic-preview-A"));
 }
@@ -356,7 +356,7 @@ fn discover_page_is_not_cluttered_and_ineligible_marking_is_prominent() {
     app.complete(Ok(f.finish(Task::Discover)));
     key(&mut app, KeyCode::Down);
     key(&mut app, KeyCode::Down);
-    key(&mut app, KeyCode::Char('x'));
+    key(&mut app, KeyCode::Char(' '));
     assert!(app.inventory.candidate_marks.is_empty());
     assert!(render(&app, 140, 40).contains("Cannot mark"));
 }

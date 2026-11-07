@@ -47,9 +47,7 @@ pub fn profile_details(picker: &ProfilePicker) -> Text<'static> {
             "Manifest",
             picker.report.manifest.to_str().unwrap_or("Unavailable"),
         ),
-        Line::raw(
-            "Base is always active. OR selection; mandatory contributors cannot be unchecked.",
-        ),
+        Line::raw("Base is always active. Additional profiles join mandatory contributors."),
     ];
     if let Some(name) = choices.known.iter().nth(picker.selected) {
         lines.push(field("Selected", name));
@@ -84,7 +82,7 @@ pub fn repository_details(app: &App, selected: usize) -> Text<'static> {
         .unwrap_or_default();
     let mut lines = vec![
         Line::styled("Choose repository | Session only", ui::heading()),
-        Line::raw("Selection never registers, persists or searches upward."),
+        Line::raw("The exact root becomes this session's selection."),
         field(
             "Session root",
             app.data
@@ -124,7 +122,7 @@ pub fn repository_details(app: &App, selected: usize) -> Text<'static> {
         }
         1 => {
             lines.push(field("Selected", "Use registered active repository"));
-            lines.push(Line::raw("The read-only service resolves the registered active root, not the current explicit session root. Missing or invalid configuration is an error; the old scope is retained."));
+            lines.push(Line::raw("The read-only service resolves the registered active root. The explicit session root remains separately selectable. Missing or invalid configuration is an error; the old scope is retained."));
         }
         i if i == roots.len() + 2 => {
             lines.push(field("Selected", "Create/attach"));
@@ -206,20 +204,24 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
         ),
         _ => unreachable!("only typed pickers use this renderer"),
     };
-    if app.shell.scroll > 0 {
-        ui::report(frame, area, title, details, app.shell.scroll - 1, true);
-        return;
-    }
     let parts = Layout::vertical([
-        Constraint::Length(1),
+        Constraint::Length(0),
         Constraint::Min(4),
         Constraint::Length(1),
-        Constraint::Length(1),
+        Constraint::Length(0),
+        Constraint::Length(if area.height >= 14 { 6 } else { 4 }),
     ])
     .split(area);
-    frame.render_widget(
-        Paragraph::new("Session only | PgDn details | Home controls").style(ui::muted()),
-        parts[0],
+    app.shell
+        .page_rows
+        .set(parts[4].height.saturating_sub(2).max(1));
+    ui::report(
+        frame,
+        parts[4],
+        "Selection details",
+        details,
+        app.shell.scroll,
+        false,
     );
     match overlay {
         Overlay::Profiles(picker) => {
@@ -275,10 +277,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
                 Paragraph::new(Line::from(ui::button("Apply additions", "Enter", apply))),
                 parts[2],
             );
-            frame.render_widget(
-                Paragraph::new("Up/Down choose | Click/Space toggle | Esc back").style(ui::muted()),
-                parts[3],
-            );
         }
         Overlay::Repositories { selected } => {
             let roots = app
@@ -324,10 +322,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
             frame.render_widget(
                 Paragraph::new(Line::from(ui::button("Create/attach", "Enter", create))),
                 parts[2],
-            );
-            frame.render_widget(
-                Paragraph::new("Up/Down/Click choose | Enter select | Esc back").style(ui::muted()),
-                parts[3],
             );
         }
         _ => unreachable!(),

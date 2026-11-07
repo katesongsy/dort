@@ -160,7 +160,7 @@ fn preview_scroll_is_bounded_by_escaped_metadata_and_resets_on_home() {
     }
     let p = app.preview.as_ref().unwrap();
     assert_eq!(p.horizontal, 120 - 46); // Each é becomes six ASCII escape bytes.
-    assert_eq!(p.scroll, 33 - 5);
+    assert_eq!(p.scroll, 33 - 7);
     app.key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), 48, 14);
     assert_eq!(app.preview.as_ref().unwrap().horizontal, 120 - 46 - 8);
     app.resize(140, 60);
@@ -197,7 +197,7 @@ fn structured_review_selection_never_reduces_scope_and_full_report_remains_avail
     };
     let original = snapshot(&app);
     let screen = super::tests::render(&app, 80, 24);
-    assert!(screen.contains("2 changes") && screen.contains("FIRST EFFECT"));
+    assert!(screen.contains("2 changes") && screen.contains("PLANNED CHANGE"));
     key(&mut app, KeyCode::Down);
     assert_eq!(app.preview.as_ref().unwrap().selected, 1);
     key(&mut app, KeyCode::Char('i'));
@@ -327,7 +327,7 @@ fn confirmation_snapshots_and_resize_guard() {
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let expected = "Approve reviewed effects\nType literal yes, then Enter.\nExecution independently revalidates all gu\nards.\n┌ Confirmation · Focus ──────────────────┐\n│                                        │\n└────────────────────────────────────────┘\n Enter  Submit   PgDn  Details   Esc  Canc";
+    let expected = "Approve reviewed effects\nType literal yes, then Enter.\nExecution independently revalidates all gu\nards.\n┌ Confirmation · Focus ──────────────────┐\n│                                        │\n└────────────────────────────────────────┘\n Enter  Submit   PgDn  Scroll   Esc  Cance";
     assert_eq!(modal(&screen), expected);
     type_text(&mut app, "yes");
     assert!(
@@ -1337,7 +1337,7 @@ fn file_search_is_text_only_and_never_narrows_approved_apply() {
     manifest.push_str("[[files]]\nid='second'\nsource='second'\ntarget='~/.second'\nmode='link'\n");
     fs::write(fixture.root.join("dort.toml"), manifest).unwrap();
     let mut app = onboarding_app(&fixture, false);
-    key(&mut app, KeyCode::Char('2'));
+    super::tests::destination(&mut app, super::app::Tab::Files, 80, 24);
     key(&mut app, KeyCode::Char('/'));
     type_text(&mut app, "q?/");
     assert!(!app.quit && app.visible_file_rows().is_empty());
@@ -1347,7 +1347,7 @@ fn file_search_is_text_only_and_never_narrows_approved_apply() {
     let task = key(&mut app, KeyCode::Char('a')).unwrap();
     run_task(&mut app, &fixture, task);
     let preview = app.preview.as_ref().unwrap();
-    assert!(preview.text.contains("display filters never narrow"));
+    assert!(preview.text.contains("the preview defines execution scope"));
     let super::actions::Pending::Files(plan) = &preview.pending else {
         panic!("plan")
     };
@@ -1385,7 +1385,7 @@ fn file_search_is_text_only_and_never_narrows_approved_apply() {
         app.result
             .as_ref()
             .unwrap()
-            .contains("no transaction created")
+            .contains("Everything is up to date")
     );
     assert_eq!(app.data.as_ref().unwrap().history.len(), 1);
 }
@@ -1399,7 +1399,7 @@ fn exact_id_forms_can_keep_or_delete_a_mapping_outside_the_display_filter() {
         app.complete(Ok(fixture.prepare(Request::Apply)));
         fixture.execute(approve(&mut app));
         let mut app = onboarding_app(&fixture, false);
-        key(&mut app, KeyCode::Char('2'));
+        super::tests::destination(&mut app, super::app::Tab::Files, 80, 24);
         key(&mut app, KeyCode::Char('/'));
         type_text(&mut app, "not-editor");
         key(&mut app, KeyCode::Esc);
@@ -1499,7 +1499,7 @@ fn failed_profile_union_leaves_prior_scope_and_invalid_inventory_is_not_empty_su
     let data = actions::load(&fixture.host, Some(&fixture.root)).unwrap();
     assert!(data.files_error.is_some() && data.history_error.is_none());
     app.complete(Ok(Output::Data(data)));
-    key(&mut app, KeyCode::Char('2'));
+    super::tests::destination(&mut app, super::app::Tab::Files, 80, 24);
     assert!(super::tests::render(&app, 80, 24).contains("observation failed"));
     assert!(!fixture.host.state_dir.exists() && !fixture.host.config_dir.exists());
 }
@@ -1543,7 +1543,7 @@ fn structural_check_reports_dependencies_and_capability_limits_without_observing
     let mut app = App::new(false);
     app.complete(Ok(output));
     let screen = super::tests::render(&app, 160, 40);
-    assert!(screen.contains("live files and installed tools were not inspected"));
+    assert!(screen.contains("Declarations validated"));
     assert!(screen.contains("tool inventory and installation"));
     assert!(!fixture.root.join("templates").exists() && !fixture.root.join("secrets").exists());
     assert!(!fixture.host.config_dir.exists() && !fixture.host.state_dir.exists());
@@ -1656,7 +1656,7 @@ fn diagnostics_share_doctor_metadata_and_keep_configuration_failure_content_free
     let fixture = Fixture::new(false);
     let mut app = onboarding_app(&fixture, false);
     app.repository = Some(fixture.root.clone());
-    key(&mut app, KeyCode::Char('4'));
+    super::tests::destination(&mut app, super::app::Tab::Checks, 80, 24);
     let task = key(&mut app, KeyCode::Char('j')).unwrap();
     run_task(&mut app, &fixture, task);
     let report = app.diagnostics.as_ref().unwrap();
@@ -1669,7 +1669,7 @@ fn diagnostics_share_doctor_metadata_and_keep_configuration_failure_content_free
     assert!(!fixture.host.state_dir.exists() && !fixture.host.config_dir.exists());
     let text = super::tests::render(&app, 140, 45);
     assert!(text.contains("Diagnostics | Dort") && text.contains("Global write blockers: 0"));
-    assert!(text.contains("Session file root:") && text.contains("Live files/tools not inspected"));
+    assert!(text.contains("Session file root:") && text.contains("Files inspects live state"));
     let task = key(&mut app, KeyCode::Char('r')).unwrap();
     assert!(matches!(task, Task::Diagnostics));
     run_task(&mut app, &fixture, task);
@@ -1682,7 +1682,9 @@ fn diagnostics_share_doctor_metadata_and_keep_configuration_failure_content_free
     run_task(&mut app, &fixture, Task::Diagnostics);
     let text = super::tests::render(&app, 140, 45);
     assert!(text.contains("Configuration unavailable:"));
-    assert!(text.contains("unknown (not zero)"));
+    assert!(
+        text.contains("Registry metadata unavailable; counts and active selection unresolved.")
+    );
     assert!(!text.contains("private-config-body-marker"));
     assert_eq!(
         *app.diagnostics.as_ref().unwrap().history.as_ref().unwrap(),

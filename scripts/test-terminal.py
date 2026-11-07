@@ -192,23 +192,33 @@ class Session:
         if button == 0:
             self.send(f"\x1b[<0;{column + 1};{row + 1}m".encode())
 
-    def click_label(self, label, offset=0):
+    def click_label(self, label, offset=0, min_row=0):
         self.wait(label.encode())
         self.settle()
         for row, cells in enumerate(self.screen.cells):
             text = "".join(cells)
-            if label in text:
+            if row >= min_row and label in text:
                 self.mouse(0, text.index(label) + offset, row)
                 return
         raise AssertionError("Click target was not visible")
 
     def navigate(self, group, item):
         if self.screen.columns < 80:
-            self.click_label("F10 Menu")
+            self.click_label("F10")
             self.click_label(group + " >")
         else:
-            self.click_label(group + " v")
-        self.click_label(item)
+            self.click_label(group + (" ▾" if (group + " ▾").encode() in self.screen.text() else " v"))
+        self.click_label(item, min_row=3)
+
+    def destination(self, group):
+        items = {"Overview": "Overview", "Files": "Managed",
+                 "Recovery": "All repositories", "Checks": "Manifest checks [m]"}
+        if group == "Git":
+            self.navigate("Git", "Choose Git scope [g]")
+            self.send(b"\x1b")
+            self.settle()
+        else:
+            self.navigate(group, items[group])
 
     def resize(self, size):
         self.settle()
@@ -279,7 +289,7 @@ def run():
         # Text carries navigation/state meaning even with a low-color terminal.
         with Session([binary, "--dry-run", "tui"], dict(env, TERM="vt100", NO_COLOR="1"), (14, 48)) as session:
             session.wait(b"loaded.")
-            for label in [b"F10 Menu", b"Overview", b"DRY RUN", b"Create/attach",
+            for label in [b"F10", b"Overview", b"DRY RUN", b"Create/attach",
                           b"Choose repository", b"Files: Discover", b"Checks: manifest"]:
                 session.wait(label)
             session.send(b"?")
@@ -302,7 +312,7 @@ def run():
             with Session([binary, 'tui'], env, menu_size) as session:
                 session.wait(b'loaded.')
                 session.send(b'\x1b[21~')  # F10
-                session.wait(b'Esc close')
+                session.settle(); assert b'Help:' not in session.screen.text()
                 session.send(b'\x1b[C')  # Overview -> Files menu/group
                 session.settle()
                 if menu_size[1] < 80:
@@ -315,16 +325,29 @@ def run():
                 session.send(b'\r')  # Help cannot select the retained menu entry
                 session.settle()
                 session.send(b'\x1b')
-                session.wait(b'Esc close')  # not the retained selected label in Help
+                session.settle(); assert b'Help:' not in session.screen.text()  # not the retained selected label in Help
                 session.send(b'\r')
-                session.wait(b'Metadata discovery loaded')
+                session.wait(b'Discovery loaded')
                 session.wait(b'Files / Discover')
-                session.send(b'2')
-                session.wait(b'Files / Managed')
+                session.send(b'12345')
+                session.settle()
+                assert b'Files / Discover' in session.screen.text(), 'Numeric aliases changed destination'
+                session.send(b"\x1b[21~")  # F10: local menu shortcuts work at every width
+                if menu_size[1] < 80:
+                    session.send(b"\r")
+                session.wait(b"Managed [m]")
+                session.send(b"m")
+                session.wait(b"Files / Managed")
+                session.send(b"\x1b[21~\x1b[C\x1b[C")  # Checks group
+                if menu_size[1] < 80:
+                    session.send(b"\r")
+                session.wait(b"Diagnostics [j]")
+                session.send(b"j")
+                session.wait(b"Checks | Diagnostics")
                 session.send(b'q')
                 session.finish()
         assert not list(home.iterdir()), 'Menu navigation created local state'
-        print('PASS keyboard dropdown navigation, contextual menu Help and preserved shortcuts at all sizes')
+        print('PASS keyboard dropdown navigation, contextual menu Help and consolidated hints at all sizes')
 
         # Capability detection uses only each child's environment; ASCII and color
         # are independent. These are VT fixture checks, not physical theme review.
@@ -338,7 +361,7 @@ def run():
         for child_env, ascii_only, monochrome, size in cases:
             with Session([binary, "tui"], child_env, size) as session:
                 session.wait(b"loaded.")
-                session.navigate("Files", "Managed [2]")
+                session.navigate("Files", "Managed")
                 session.wait(b"Files / Managed")
                 session.send(b"o")
                 session.wait(b"TARGET")
@@ -368,13 +391,12 @@ def run():
         with Session([binary, "tui"], discovery_env, (24, 80)) as session:
             session.wait(b"loaded.")
             session.send(b"f")
-            session.wait(b"Metadata discovery loaded")
+            session.wait(b"Discovery loaded")
             session.send(b"/nvim\x1b")
             session.settle()
             session.send(b"\r")
-            session.settle()  # Enter folds a directory, never opens an adoption form.
+            session.settle()  # Enter inspects a directory; adoption is a separate action.
             assert b"TARGET >" not in session.screen.text()
-            session.send(b"i")
             session.wait(b"Directory / tree group")
             session.send(b"e")
             session.settle()
@@ -397,12 +419,12 @@ def run():
         with Session([binary, 'tui'], discovery_env, (32, 140)) as session:
             session.wait(b'loaded.')
             session.send(b'f')
-            session.wait(b'Metadata discovery loaded')
+            session.wait(b'Discovery loaded')
             session.send(b'/settings.json\rljlj')  # Open .pi and agent.
             session.click_label('[ ] settings.json', offset=5)
             session.wait(b'synthetic-agent-preview')
             assert b'private-auth-fixture' not in session.screen.text()
-            session.send(b'5')
+            session.destination("Git")
             session.settle()
             assert b'synthetic-agent-preview' not in session.screen.text()
             session.send(b'f')
@@ -429,9 +451,9 @@ def run():
         with Session([binary, 'tui'], ignore_env, (14, 48)) as session:
             session.wait(b'loaded.')
             session.send(b'f')
-            session.wait(b'Metadata discovery loaded')
+            session.wait(b'Discovery loaded')
             session.wait(b'Ignore selected')
-            session.wait(b'F10 Menu')
+            session.wait(b'F10')
             session.click_label('Ignore selected')
             session.wait(b'Ignore discovery path')
             assert not ignore_store.exists(), 'Ignore preview wrote preferences'
@@ -443,14 +465,14 @@ def run():
             session.send(b'\x1b')
             session.wait(b'Ignore discovery path')
             session.send(b'\r')
-            session.wait(b'No writes before')
+            session.wait(b'Submit to execute')
             session.send(b'ye\x1bOP')
             session.wait(b'Help: Confirmation')
             session.send(b's\r')
             session.settle()
             assert not ignore_store.exists(), 'Help submitted confirmation input'
             session.send(b'\x1b')
-            session.wait(b'No writes before')
+            session.wait(b'Submit to execute')
             session.send(b's')  # retained ye becomes yes, without submitting
             session.send(b'\x1bOP')
             session.wait(b'Help: Confirmation')
@@ -461,9 +483,9 @@ def run():
             session.send(b'\x1b')  # Help closes to preview; fresh confirmation required
             session.wait(b'Ignore discovery path')
             session.send(b'\r')
-            session.wait(b'No writes before')
+            session.wait(b'Submit to execute')
             session.send(b'yes\r')
-            session.wait(b'Metadata discovery loaded')
+            session.wait(b'Discovery loaded')
             session.send(b'q')
             session.finish()
         assert '.editor' in ignore_store.read_text()
@@ -474,15 +496,16 @@ def run():
         with Session([binary, 'tui'], ignore_env, (14, 48)) as session:
             session.wait(b'loaded.')
             session.send(b'f')
-            session.wait(b'Metadata discovery loaded')
+            session.wait(b'Discovery loaded')
             session.navigate('Files', 'Ignored paths [U]')
-            session.wait(b'Enter previews Unignore')
+            session.wait(b'Unignore')
+            assert b'Enter' in session.screen.text().splitlines()[-1]
             session.send(b'\r')
             session.wait(b'Unignore discovery path')
             session.send(b'\r')
             session.wait(b'Confirm')
             session.send(b'yes\r')
-            session.wait(b'Metadata discovery loaded')
+            session.wait(b'Discovery loaded')
             session.send(b'q')
             session.finish()
         assert '.editor' not in ignore_store.read_text()
@@ -525,10 +548,10 @@ def run():
             session.send(b"v")
             session.wait("Manifest path · Focus".encode())
             session.send(os.fsencode(standalone) + b"\r\r")
-            session.wait(b"Structural check passed")
+            session.wait(b"Declarations validated")
             session.wait(b"Checks | Standalone manifest")
             session.wait(b"Valid")
-            session.wait(b"live files and installed tools were not inspected")
+            session.wait(b"Declarations validated")
             session.send(b"\x1b[6~" * 6)
             session.wait(b"Capability limits")
             session.send(b"\x1b[H")
@@ -542,7 +565,7 @@ def run():
             session.send(b"\x1b[B\r\x1b[B\r")  # dev toggle, Apply
             session.wait(b"Standalone profile additions validated")
             session.send(b"\x1b[Z\r")  # previous field: Check
-            session.wait(b"Structural check passed")
+            session.wait(b"Declarations validated")
             session.send(b"q")
             session.finish()
         assert not (home / ".config").exists() and not (home / ".local").exists()
@@ -553,8 +576,10 @@ def run():
             session.send(b"p")
             session.wait(b"REPOSITORY")
             session.wait(b"CHOICE")
+            session.wait(b"The exact root becomes")
             session.send(b"\x1b[6~")
-            session.wait(b"Selection never registers")
+            session.settle()
+            assert b"REPOSITORY" in session.screen.text(), "Paging replaced repository controls"
             session.send(b"\x1b[H")
             session.wait(b"REPOSITORY")
             session.send(b"\x1b[B\x1b[B")  # no roots: active, Create/attach
@@ -568,8 +593,10 @@ def run():
             session.send(os.fsencode(standalone) + b"\r\t\r")
             session.wait(b"PROFILE")
             session.wait(b"Mandatory")
-            session.send(b"\x1b[6~")
             session.wait(b"Temporary profiles | Never persisted")
+            session.send(b"\x1b[6~")
+            session.settle()
+            assert b"PROFILE" in session.screen.text(), "Paging replaced profile controls"
             reached = False
             for _ in range(40):
                 if b"Effective union" in session.screen.text():
@@ -606,10 +633,13 @@ def run():
             session.settle()
             session.send(b"\x1b")  # close
             session.settle()
-            session.send(b"3;rollback\r")  # disabled Enter in its relevant view
+            session.destination("Recovery")
+            session.send(b";rollback\r")  # disabled Enter in its relevant view
             session.wait(b"Rollback unavailable")
+            session.wait(b"Action details")
             session.send(b"\x1b[6~")
-            session.wait(b"Actions | No work while browsing")
+            session.settle()
+            assert b"SCOPE" in session.screen.text(), "Paging replaced Actions controls"
             reached = False
             for _ in range(30):
                 if b"transaction." in session.screen.text(): # final wrapped reason row
@@ -624,7 +654,8 @@ def run():
             session.settle()
             session.send(b"\x1b")  # close, restoring Recovery
             session.settle()
-            session.send(b"4;")
+            session.destination("Checks")
+            session.send(b";")
             session.wait(b"Check current")  # current-view actions, not flat navigation first
             session.send(b"about\r")
             session.wait(b"No matching actions")  # session commands moved out of Actions
@@ -643,7 +674,7 @@ def run():
 
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
-            session.send(b"4j")
+            session.navigate("Checks", "Diagnostics [j]")
             session.wait(b"Diagnostics | Dort")
             session.wait(b"Registered repositories: 0")
             session.send(b"r")
@@ -665,7 +696,7 @@ def run():
         (config / "local.toml").write_text("selected_repository = 'private-config-marker'\ninvalid toml")
         with Session([binary, "tui"], env, (14, 48)) as session:
             session.wait(b"loaded.")
-            session.send(b"4j")
+            session.navigate("Checks", "Diagnostics [j]")
             session.wait(b"Registry Unknown")
             session.wait(b"History 0")
             session.wait(b"Blocks: 0")
@@ -689,7 +720,7 @@ def run():
             session.navigate("Files", "Discover [f]")
             session.wait(b"Eligible hint")
             session.click_label(".q?config")  # selection only; content is automatic
-            session.send(b"i")  # retain inspection when shrinking to compact
+            session.send(b"\r")  # retain inspection when shrinking to compact
             session.wait(b"private-body-marker")
             session.wait("Content · Tab focus".encode())
             session.mouse(65, 90, 10)  # detail viewport, not row selection
@@ -707,17 +738,18 @@ def run():
             session.wait(b"mouse-id")
             session.send(b"\x1b")
             session.settle()
+            session.send(b"\r")  # Explicit inspection, independent of earlier paging/focus
             session.resize((14, 48))
             session.wait(b"Content")
             session.send(b"\x1b")
             session.wait(b"NAME")
             session.send(b"\x1b[C")  # direct destination, never action selection
             session.wait(b"All repositories")
-            session.navigate("Files", "Managed [2]")
+            session.navigate("Files", "Managed")
             session.wait(b"Files / Managed")  # destination chooses managed view
-            session.resize((22, 110))
-            session.wait(b"Selected item")
             session.resize((21, 110))
+            session.wait(b"Selected item")
+            session.resize((20, 110))
             session.wait(b"Files / Managed")
             assert b"Selected item" not in session.screen.text()
             assert b"private-body-marker" not in session.screen.text(), "Discover content survived leaving its scope"
@@ -806,7 +838,8 @@ def run():
         git_only.mkdir(mode=0o700)
         with Session([binary, "tui"], dict(env, PATH=str(bin_dir))) as session:
             session.wait(b"loaded.")
-            session.send(b"5g" + os.fsencode(git_only) + b"\r")
+            session.navigate("Git", "Choose Git scope [g]")
+            session.send(os.fsencode(git_only) + b"\r")
             session.wait(b"Git read completed")
             session.wait(b"q?name")
             session.send(b"/q?/\x1b")  # literal text, no quit/help/actions
@@ -816,8 +849,10 @@ def run():
             session.wait(b"1 entries")
             session.send(b";View patch content")
             session.wait(b"Search by label")
+            session.wait(b"Action details")
             session.send(b"\x1b[6~")
-            session.wait(b"Actions | No work while browsing")
+            session.settle()
+            assert b"SCOPE" in session.screen.text(), "Paging replaced Actions controls"
             session.send(b"\x1b[H")
             session.wait(b"SCOPE")
             session.send(b"\x1b")
@@ -851,7 +886,8 @@ def run():
         patch_calls = (base / "patch-calls").read_text()
         with Session([binary, "tui"], dict(env, PATH=str(bin_dir)), (14, 48)) as session:
             session.wait(b"loaded.")
-            session.send(b"5g" + os.fsencode(git_only) + b"\r")
+            session.navigate("Git", "Choose Git scope [g]")
+            session.send(os.fsencode(git_only) + b"\r")
             session.wait(b"Git read completed")
             for column in [b"PATH", b"KIND", b"XY"]:
                 session.wait(column)
@@ -892,7 +928,7 @@ def run():
             session.wait(b"Git read completed")
             session.click_label("q?name")
             session.send(b"\r\x1b[6~")
-            session.wait(b"Git details | PgUp/PgDn")
+            session.wait(b"Git details")
             session.mouse(65, 90, 10)
             session.settle()
             scrolled = session.screen.text()
@@ -901,12 +937,13 @@ def run():
             assert scrolled == session.screen.text(), "Tab changed Git metadata scroll"
             session.send(b"\x1b[H")
             session.wait(b'Path: "q?name"')
-            session.resize((22, 110))
+            session.resize((21, 110))
             session.wait(b"Git details | Esc list")
             session.send(b"\x1b")
             session.wait(b"PATH")
-            session.resize((23, 110))
-            session.wait(b"Git details | PgUp/PgDn")
+            session.resize((22, 110))
+            session.wait(b"PATH")
+            session.wait(b"Git details")
             session.navigate("Git", "Unstaged [u]")
             session.wait(b"Unstaged (worktree vs index)")
             session.wait(b"100644 -> 100644")  # loaded diff before content action
@@ -939,7 +976,7 @@ def run():
                 session.send(b"n")
                 session.wait("Path · Focus".encode())
                 session.send(os.fsencode(created) + b"\r\r")
-                session.wait(b"Preview (metadata only)")
+                session.wait("Review ·".encode())
                 session.send(b"\x1b")
                 session.settle()
                 assert not list(onboarding_home.iterdir()), "Preview/back created local state"
@@ -982,7 +1019,7 @@ def run():
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"a")
-            session.wait(b"Preview (metadata only)")
+            session.wait("Review ·".encode())
             session.send(b"\r")
             session.wait(b"Confirm")
             session.send(b"yes\x1b")
@@ -997,7 +1034,7 @@ def run():
         with Session([binary, "--dry-run", "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"a")
-            session.wait(b"Preview (metadata only)")
+            session.wait("Review ·".encode())
             session.send(b"\r")
             session.settle()
             assert b"Confirm" not in session.data, "Dry-run opened confirmation"
@@ -1009,7 +1046,7 @@ def run():
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"a")
-            session.wait(b"Preview (metadata only)")
+            session.wait("Review ·".encode())
             session.send(b"\r")
             session.wait(b"Confirm")
             session.send(b"yes\r")
@@ -1030,15 +1067,15 @@ def run():
         with Session([binary, "tui"], env, (14, 48)) as session:
             session.wait(b"loaded.")
             session.send(b"a")
-            session.wait(b"Preview (metadata only)")
+            session.wait("Review ·".encode())
             session.send(b"\r")
             session.wait(b"Confirm")
             session.send(b"yes\r")
             session.wait(b"Operation result")
-            session.wait(b"no transaction created.")
+            session.wait(b"Everything is up to date.")
             session.click_label("[Refresh")
             session.settle()
-            session.wait(b"no transaction created.")
+            session.wait(b"Everything is up to date.")
             session.click_label("[Back")
             session.settle()
             assert b"Operation result" not in session.screen.text()
@@ -1054,7 +1091,7 @@ def run():
             with Session([binary, "tui"], env, (14, 48)) as session:
                 session.wait(b"loaded.")
                 session.send(b"a")
-                session.wait(b"Preview (metadata only)")
+                session.wait("Review ·".encode())
                 session.send(b"\r")
                 session.wait(b"Confirm")
                 session.send(b"yes\r")
@@ -1065,7 +1102,7 @@ def run():
                 assert b"Retry execution" not in session.screen.text()
                 session.click_label("[Refresh")  # Must work while the writer lock is held.
                 session.wait(b"Earlier write failed:")
-                session.send(b"3")
+                session.destination("Recovery")
                 session.wait(b"Blockers: 0")
                 session.wait(b"Earlier write failed:")
                 session.send(b"q")
@@ -1077,7 +1114,8 @@ def run():
 
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
-            session.send(b"3/q?/\x1b")
+            session.destination("Recovery")
+            session.send(b"/q?/\x1b")
             session.wait(b"No matches")
             session.send(b"\x1b[3~")  # clear display filter, no ID transcription
             session.wait(b"Showing 1")
@@ -1097,9 +1135,12 @@ def run():
             session.send(b"yes\r")
             session.wait(b"Observations refreshed.")
             assert not target.exists() and not target.is_symlink()
+            # Return from the retained receipt before opening navigation menus.
+            session.click_label("[Back")
             # A new action needs a new actual preview and confirmation.
-            session.send(b"1a")
-            session.wait(b"Preview (metadata only)")
+            session.destination("Overview")
+            session.send(b"a")
+            session.wait("Review ·".encode())
             session.send(b"\r")
             session.wait(b"Confirm")
             session.send(b"yes\r")
@@ -1113,7 +1154,8 @@ def run():
                        for path in state.rglob("*.json")}
         with Session([binary, "--dry-run", "tui"], env, (14, 48)) as session:
             session.wait(b"loaded.")
-            session.send(b"3/Completed\r")
+            session.destination("Recovery")
+            session.send(b"/Completed\r")
             session.wait(b"Blockers: 0")
             session.wait(b"Showing 1")
             session.wait(b"Completed")
@@ -1140,11 +1182,12 @@ def run():
 
         with Session([binary, "--dry-run", "tui"], env, (24, 110)) as session:
             session.wait(b"loaded.")
-            session.navigate("Recovery", "All repositories [3]")
+            session.navigate("Recovery", "All repositories")
             session.send(b"/Completed\r")
             session.wait(b"Showing 1")
-            session.click_label("Inspect")
-            session.wait(b"Transaction details | PgUp/PgDn")
+            session.click_label("Completed", min_row=6)  # phase cell, below the retained filter
+            session.send(b"\r")
+            session.wait(b"Transaction details")
             session.mouse(65, 90, 10)
             session.settle()
             scrolled = session.screen.text()
@@ -1157,7 +1200,8 @@ def run():
             session.wait(b"Transaction details")
             session.send(b"\x1b")
             session.wait(b"TX ID")
-            session.click_label("Inspect")
+            session.click_label("Completed", min_row=6)
+            session.send(b"\r")
             session.wait(b"Transaction details")
             session.send(b"\x1b")
             session.wait(b"TX ID")
@@ -1170,11 +1214,12 @@ def run():
 
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
-            session.send(b"2/q?/\x1b")
+            session.destination("Files")
+            session.send(b"/q?/\x1b")
             session.settle()
             session.wait(b"No matches")
             session.send(b"a")
-            session.wait(b"Preview (metadata only)")
+            session.wait("Review ·".encode())
             session.wait(b"display filters never narrow")
             session.send(b"\x1b")
             session.settle()
@@ -1191,7 +1236,7 @@ def run():
             session.wait("TARGET · Focus".encode())
             session.send(b"~/.q?config\rconfig\rfiles/config\r")
             session.send(b"\r")  # Review button, not an ordinary field
-            session.wait(b"Preview (metadata only)")
+            session.wait("Review ·".encode())
             session.send(b"\x1b")
             session.settle()
             assert not candidate.is_symlink() and not (repo / "files/config").exists()
@@ -1207,12 +1252,13 @@ def run():
 
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
-            session.send(b"2/notconfig\x1b")
+            session.destination("Files")
+            session.send(b"/notconfig\x1b")
             session.settle()
             session.send(b";delete managed link: enter\r")
             session.wait("Exact ID · Focus".encode())
             session.send(b"config\r\r")
-            session.wait(b"Preview (metadata only)")
+            session.wait("Review ·".encode())
             session.send(b"\r")
             session.wait(b"Separate deletion acknowledgement")
             session.send(b"yes\r")
@@ -1264,7 +1310,7 @@ def run():
         with Session([binary, 'tui'], batch_env) as session:
             session.wait(b'loaded.')
             session.send(b'f')
-            session.wait(b'Metadata discovery loaded')
+            session.wait(b'Discovery loaded')
             session.send(b'/bundle\rlljlj')  # Open .config and bundle, then select a leaf.
             session.click_label('[ ] only-a')
             session.click_label('[ ] only-b')
@@ -1295,7 +1341,8 @@ def run():
             for name in ('only-a', 'only-b'):
                 assert (targets / name).resolve() == batch_repo / 'files/.config/bundle' / name
             batch_heads(batch_home, 1)
-            session.send(b'3b')
+            session.destination("Recovery")
+            session.send(b'b')
             session.wait(b'Rollback schema 4')
             session.send(b'\r')
             session.wait(b'Confirm')
@@ -1314,7 +1361,8 @@ def run():
             batch_home, batch_repo, targets, batch_env = batch_fixture('batch-' + operation, True)
             with Session([binary, 'tui'], batch_env) as session:
                 session.wait(b'loaded.')
-                session.send(b'2ljlj')  # Folders start closed.
+                session.destination("Files")
+                session.send(b'ljlj')  # Folders start closed.
                 session.click_label('[ ] only-a')
                 session.click_label('[ ] only-b')
                 session.send(b'/only-a\rA')  # Hidden only-b remains explicitly included.
@@ -1365,6 +1413,50 @@ def run():
             assert 'only-a' not in remaining and 'only-b' not in remaining and 'only-c' in remaining
             batch_heads(batch_home, 2)
             print('PASS selected Apply and combined', operation, 'with hidden marks and guarded approval')
+
+        batch_home, batch_repo, targets, batch_env = batch_fixture('sequential-keep', True)
+        with Session([binary, 'tui'], batch_env) as session:
+            session.wait(b'loaded.')
+            session.destination('Files')
+            session.send(b'a')
+            session.wait('Review ·'.encode())
+            session.send(b'\r')
+            session.wait(b'Confirm')
+            session.send(b'yes\r')
+            session.wait(b'Observations refreshed.')
+            session.send(b'\x1b')
+            session.settle()
+            session.send(b'ljlj')
+            session.click_label('only-a')
+            session.send(b' u')  # Mark A, then Keep selected with the advertised key.
+            session.wait('Review ·'.encode())
+            session.send(b'\r')
+            session.wait(b'Confirm')
+            session.send(b'yes\r')
+            session.wait(b'Selected item disappeared')  # successful refresh removed the old mapping
+            session.send(b'\x1b')
+            session.wait(b'0 marked (0 hidden)')
+            session.click_label('only-b')
+            session.send(b' K')
+            session.wait(b'Combined batch preview')
+            assert b'only-a' not in session.screen.text(), 'Completed Keep leaked into a later batch'
+            session.send(b'\r')
+            session.wait(b'Confirm')
+            session.send(b'yes\r')
+            session.wait(b'Selected item disappeared')
+            session.send(b'\x1b')
+            session.wait(b'0 marked (0 hidden)')
+            session.send(b'q')
+            session.finish()
+        for name in ('only-a', 'only-b'):
+            assert not (targets / name).is_symlink()
+            assert (targets / name).read_text() == 'ordinary source settings\n'
+            assert (batch_repo / name).is_file()
+        assert (targets / 'only-c').is_symlink()
+        remaining = (batch_repo / 'dort.toml').read_text()
+        assert 'only-a' not in remaining and 'only-b' not in remaining and 'only-c' in remaining
+        assert len(list((batch_home / '.local/state/dort/repositories').glob('*/transactions/*'))) == 3
+        print('PASS selected u Keep and sequential marked Keep without stale hidden marks')
 
         for mode, code in [("normal", 0), ("error", 0), ("panic", 101)]:
             with Session(

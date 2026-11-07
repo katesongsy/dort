@@ -20,6 +20,42 @@ impl Control<'_> {
         }
     }
 }
+pub fn enter_hint(app: &App, form: Form) -> &'static str {
+    let shell = &app.shell;
+    match form {
+        Form::Adopt => match shell.adoption.focused {
+            0..=2 => "Next",
+            3 => "Review",
+            4 => "Choose",
+            5 => "Create/attach",
+            _ => "Discard",
+        },
+        Form::Check => match shell.manifest_focused {
+            0 => "Next",
+            1 => "Check",
+            2 => "Profiles",
+            _ => "Discard",
+        },
+        Form::KeepId | Form::RemoveId => {
+            if shell.unmanage_focused == 0 {
+                "Next"
+            } else {
+                "Review"
+            }
+        }
+        Form::Choose | Form::Init => match shell.path_focused {
+            0 => "Next",
+            1 => {
+                if form == Form::Choose {
+                    "Select"
+                } else {
+                    "Review"
+                }
+            }
+            _ => "Back",
+        },
+    }
+}
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
     let shell = &app.shell;
     let (title, focused, controls, help): (&str, usize, Vec<Control<'_>>, &str) = match form {
@@ -46,7 +82,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                 Control::Button("Temporary profiles"),
                 Control::Button("Discard standalone draft and additions"),
             ],
-            "Structural check only. No repository or Git needed; live files/tools not inspected.",
+            "Validate manifest declarations and effective profiles using an independent path.",
         ),
         Form::KeepId | Form::RemoveId => (
             if form == Form::KeepId {
@@ -77,7 +113,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                 }),
                 Control::Button("Back"),
             ],
-            "Exact path; relative to launch directory. No tilde/environment expansion. Enter advances to the action.",
+            "Exact path; relative to launch directory. Enter literal paths. Enter advances to the action.",
         ),
     };
     let block = ui::pane(title, true);
@@ -145,13 +181,10 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
         );
     }
     frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                format!(" Control {}/{}  ", focused + 1, controls.len()),
-                ui::muted(),
-            ),
-            Span::raw("Tab next · PgDn full details · Esc back"),
-        ])),
+        Paragraph::new(Line::from(vec![Span::styled(
+            format!(" Control {}/{}  ", focused + 1, controls.len()),
+            ui::muted(),
+        )])),
         Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
     );
 }

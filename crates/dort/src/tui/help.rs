@@ -65,82 +65,82 @@ impl Topic {
     fn instructions(self) -> &'static str {
         match self {
             Self::Menu => {
-                "Menus own navigation and session commands. Left/Right selects a top-level menu; Up/Down or j/k chooses an item; Enter opens it. In compact layouts choose a group first; Left returns to groups. Esc/F10 closes without navigating. F1 returns to the exact menu selection. Unavailable entries keep their reason; choosing one cannot bypass its guard. No menu selection approves a write or discloses a patch."
+                "Menus organize navigation and session commands. Left/Right selects a menu; Up/Down chooses an item; Enter opens it, or press its labeled shortcut. In compact layouts choose a group first; Left returns to groups. Esc closes. Unavailable entries show the requirement to continue. Operation and patch commands open their respective review screens."
             }
             Self::Overview => {
-                "Choose repository selects only this session. Create/attach needs a fresh preview and literal yes. Discover works without a repository. Apply reviews the full active-profile scope."
+                "Overview summarizes repository, profiles and file state. Session selects a repository or creates/attaches one. Files offers discovery and managed mappings; Checks validates declarations; Recovery inspects retained transactions; Git shows status and diffs."
             }
             Self::Discover => {
-                "j/k or arrows select; h/l folds; gg/G first/last. Ctrl-F/B pages; Ctrl-D/U half pages. Space/x marks eligible files or matching descendants. e adopts selected; E edits marked files.\nIgnore selected previews a persistent exact HOME-relative exclusion for a file/folder. Literal yes saves preferences only, never changes live files. Ignored paths opens the list: Enter previews Unignore, then literal yes restores discovery visibility.\nTab/Shift-Tab or click switches list/content focus. Enter folds/inspects; i details. / searches metadata only; filters/folds retain marks. ; opens all commands for this context."
+                "Up/Down selects a path; h/l folds directories. Space marks eligible files, including matching folded descendants. Enter inspects metadata. Adopt selected edits target, ID and source; E reviews marked adoption. I reviews Ignore selected; Files > Ignored paths manages saved exclusions. / filters the list."
             }
             Self::Content => {
-                "Tab/Shift-Tab returns list focus; Esc returns the compact list. j/k, gg/G and Ctrl-F/B/D/U scroll wrapped content without moving the selected file. PgUp/PgDn scrolls content; Alt+PgUp/PgDn metadata.\nOnly eligible selected files are read, bounded to 64 KiB. Sensitive/binary/unsafe content is withheld; heuristics are not proof of secrecy. Help withholds the private preview; returning can reread the current eligible file."
+                "Tab switches the file list and content pane. Up/Down scrolls the focused pane; Ctrl-F/B pages and gg/G moves to the ends. Line numbers identify source lines; continuation rows share a gutter. Configuration keys are emphasized. Content reads are bounded; sensitive/binary files are withheld. Help and menus release content; returning rereads the selected eligible file."
             }
             Self::Managed => {
-                "j/k or arrows select; h/l folds; gg/G first/last. Ctrl-F/B pages; Ctrl-D/U half pages. Space/x marks an item/group, including folded descendants. Enter/i inspects.\nApply always uses the full active-profile scope. A/K/D request marked apply/keep/delete. Single Keep/Delete and exact-ID drafts are in Actions. Keep materializes a local file; Delete removes only the link. Sources remain. / filters display only; marks survive filters."
+                "Up/Down selects; h/l folds; gg/G moves to the ends. Space marks an item or group, including folded descendants. Enter inspects. u reviews Keep for the selected mapping. Apply uses the full active-profile scope; A/K/D review marked apply/keep/delete. Keep materializes an ordinary local file; Delete removes the managed link. Repository sources remain. / filters the display."
             }
             Self::Recovery => {
-                "All repositories, independent of selected file scope. Up/Down selects; Enter/i shows full raw IDs and eligibility. b rollback, s resume, x abandon request read-only previews.\nRollback: eligible schema-1/2/4. Resume: intact Running bootstrap only. Preparing can be abandoned, not resumed. Abandon never deletes a published repository. Global blockers remain visible despite / display search. No automatic replay or repair."
+                "Recovery lists transactions across repositories. Select one to inspect history, integrity and eligibility. Rollback, Resume and Abandon each request a fresh core preview. Review exact paths and effects before approval. Later edits may block execution. Abandon retains published repositories, registration and private artifacts."
             }
             Self::Checks => {
-                "c checks the current repository; v opens an independent standalone manifest form. t chooses temporary repository profiles; standalone additions are separate. j opens Diagnostics; m returns to manifest results.\nStructural/dependency checks are not live file/tool inspection. Profiles combine mandatory contributors and validated session additions; choices never save configuration."
+                "Manifest checks inspect declarations and effective profiles. Check current validates the selected repository; Check manifest accepts an independent path. Profiles adds session contributors to the mandatory profile union. Diagnostics shows host, paths and registry observations."
             }
             Self::Diagnostics => {
-                "Read-only host, registry and history metadata; unavailable observations are unknown, not zero. m returns to manifest results. PgUp/PgDn scrolls; Home returns top. No local variable values or file bodies are included."
+                "Diagnostics summarizes the host, capabilities, resolved paths and registry metadata. Unavailable observations carry their cause. Refresh diagnostics retries the read. Live file inspection belongs in Files; installed tool readiness requires your own verification."
             }
             Self::Git => {
-                "g chooses an exact independent root; z Status, u Unstaged, s Staged. r refreshes metadata, / filters display, i inspects. w opens a separate patch content warning after a comparison summary.\nNo staging, commits, network, hooks or external diff. Summary/status stays metadata-only."
+                "Choose Status, Unstaged or Staged in the Git menu. Choose Git scope selects an independent root; Follow selected repository restores repository scope. / searches metadata; Enter inspects; View patch opens a content warning. Manage commits, branches and synchronization with your preferred Git tool."
             }
             Self::GitContent => {
-                "Patch viewing requires the separate literal view patch acknowledgement, once. Patches may expose secrets and are not secret-proof. PgUp/PgDn and arrows scroll the disclosed patch; Esc drops it.\nHelp never copies or renders the retained disclosure input/payload. Shrinking below the layout floor drops disclosure; returning from Help never restores disposed content or authorizes another read."
+                "A patch may expose secrets. Type literal view patch once to disclose the requested comparison. Headers and hunks are emphasized; + marks additions and - marks removals. PgUp/PgDn scrolls vertically; Left/Right scrolls horizontally. Esc releases the view. Help hides the retained view; shrinking below the layout floor releases it. Released bytes may remain in memory."
             }
             Self::Actions => {
-                "Actions contains selected-item, marked-items and current-view operations only. F10 menus own navigation and session controls. Other-view workflows stay in their views.\nType a label immediately; Up/Down chooses, Enter requests. / refocuses search. Esc leaves search, then closes. PgDn shows the full label, effect and unavailable reason; Home returns controls. Search is display-only. Effects are independent of scope: drafts, mutation previews and content warnings never authorize execution."
+                "Actions contains operations for the current view, selection and marked set. Menus organize navigation and session controls. Type a label to search; Up/Down selects; Enter requests. / refocuses search. Esc leaves search, then closes. Selected action details stay below the list. PgUp/PgDn scroll that pane; Home goes to its top. Execution scope comes from the operation's review."
             }
             Self::Form(Form::Adopt) => {
-                "TARGET is the exact local path; ID is the mapping identifier; SOURCE is repository-relative. Defaults preserve the HOME-relative path under files/. Edit freely before review. Enter advances through fields to Review; Tab/Shift-Tab moves controls. Choose/Create can retain this draft. Esc returns retaining edits. Only the real preview's Adopt all approves adoption; no typed yes."
+                "Enter advances TARGET, ID and SOURCE, then requests a review. Tab moves controls. SOURCE is repository-relative. Inspect contents privately before adoption. Esc retains the draft. Explicit Adopt all on the combined preview approves adoption."
             }
             Self::Form(Form::KeepId | Form::RemoveId) => {
-                "Enter the exact mapping ID, independent of display filters. Enter advances to Review, then requests a read-only preview. Keep materializes an ordinary local file; Delete removes the link, retaining source. Deletion needs a separate exact-ID acknowledgement before literal yes."
+                "Enter an exact mapping ID and request its preview. Keep materializes an ordinary file; Delete removes the managed link. Both retain the repository source. Deletion requires exact-ID acknowledgement followed by literal yes."
             }
             Self::Form(Form::Check) => {
-                "Enter an exact manifest path, relative to the supplied launch directory if not absolute. No repository or Git required. Tab/Shift-Tab moves to Check or temporary standalone profiles. Enter advances/activates. Esc retains the draft and additions."
+                "Enter a manifest path and optional profile additions. Relative paths resolve from the launch directory. Enter requests a structural check. Local profiles contribute to the effective union. Esc retains the draft."
             }
             Self::Form(Form::Choose) => {
-                "Enter an exact repository root. Relative paths resolve from the launch directory, without tilde/environment expansion. Selection is read-only and session-only, not registration. Enter advances to the selection button; Esc retains the draft."
+                "Enter an exact repository root. Selection stays in this session. Relative paths resolve from the launch directory; enter literal paths. Esc retains the draft."
             }
             Self::Form(Form::Init) => {
-                "Missing destination creates a local repository; an existing valid Git root with dort.toml attaches. Existing safe parent required. Relative paths use the launch directory; no tilde/environment expansion. Enter advances then requests a read-only preview. Only separate literal yes can approve registration/publication."
+                "Enter a repository path and ID. An absent destination creates a repository; an existing valid Git repository with dort.toml attaches it. Review effects, then type literal yes to approve persistent registration and selection. Failed preparation retains private artifacts for Recovery."
             }
             Self::Picker => {
-                "Up/Down chooses; Enter selects/activates the typed row. Profile choices are temporary additions, not saved configuration. Tab moves controls; PgDn shows full identity/details; Home returns controls. Esc returns without writing."
+                "Up/Down selects a repository or profile; Enter activates it. Repository choices update session scope. Profile additions join mandatory contributors. Esc returns with your previous draft intact."
             }
             Self::Ignored => {
-                "Up/Down selects an exact HOME-relative ignored path. Enter requests an Unignore preview; literal yes saves the removal from local preferences. Esc returns without writing. Ignoring/unignoring never changes live files or repository mappings. Discovery omits descendants of ignored folders; unignoring a child cannot override an ignored parent."
+                "Saved HOME-relative exclusions prune matching paths and descendants from discovery. Select a path and request Unignore to review removal of that exclusion. Type literal yes to approve. Live files remain in place. Esc returns."
             }
             Self::About => {
-                "Capabilities and limitations are read-only session information. PgUp/PgDn scrolls; Home top; Esc returns to the previous destination."
+                "About summarizes Dort's local workflows, host support and license. Diagnostics provides host and path metadata."
             }
             Self::Batch => {
-                "j/k or arrows selects an item; e/Edit item opens a separate TARGET/ID/SOURCE form. Review all is initially focused: Enter reviews all marked files using their editable defaults. Tab moves controls. Esc returns to Discover retaining drafts/marks. No individual preview/write is requested by item editing."
+                "Up/Down selects a marked file; e opens its TARGET, ID and SOURCE form. Review all is initially focused: Enter reviews the complete marked set. Tab moves controls. Selected-item paths remain inline; PgUp/PgDn scrolls them and Home goes to their top. Esc retains drafts and marks."
             }
             Self::BatchItem => {
-                "Enter advances TARGET, ID, SOURCE, then Done. Tab/Shift-Tab or clicks move fields. Ctrl-U clears the current field. Done or Esc returns to the combined editor with in-memory edits retained. Only Review all requests the combined core preview; only Adopt all approves it."
+                "Enter advances TARGET, ID and SOURCE; Done returns to the marked set. Tab moves fields. Esc retains edits. Review all requests the combined preview."
             }
             Self::Preview => {
-                "Review typed counts and per-mapping effects. Up/Down selects mappings; i toggles full report. PgUp/PgDn scrolls; Home resets both axes. Esc returns without writing, retaining drafts.\nAdoption uses one explicit Adopt all activation (Enter/click), without typed yes. Other writes: Enter opens confirmation, then literal yes. Deletion first requires each exact ID separately. Blocked, preview-only and below-floor layouts cannot approve."
+                "Review outcome, paths, ordered effects and blockers. File reviews pair a summary table with numbered change details; i opens the full report. Up/Down selects a file; PgDn scrolls details. Enter continues to approval. Adopt all explicitly approves adoption. Esc returns."
             }
             Self::Confirmation => {
-                "Type each required exact deletion ID separately, then literal yes and Enter. No mouse approval. Esc cancels to the preview. PgUp/PgDn scrolls the prompt independently of input.\nHelp retains the real pending preview and input but cannot submit it. Enter, yes and clicks in Help do nothing. Shrinking below 48x14 clears the entire acknowledgement sequence even while Help is open. Execution independently revalidates under the writer lock."
+                "Confirm the reviewed operation using literal yes. Managed-link deletion first requires each exact mapping ID. Enter submits for fresh core revalidation. Esc returns to review. Shrinking below the layout floor clears typed approval and removal acknowledgements."
             }
             Self::Task => {
-                "The owned worker continues while Help is open. Progress is metadata-only and reports actual boundaries, not a percentage. q/Ctrl-C requests exit after completion; no cooperative cancellation, detached worker or automatic rollback. Completion may update the underlying screen while Help stays open."
+                "The active task keeps its original scope while observations remain on screen. Progress describes metadata and stages. q requests exit after the joined worker finishes. Approved writes run to completion; inspect their result and Recovery if a write fails."
             }
             Self::Error => {
-                "Cause and retained scope are separate. r retries only a read or fresh preview; h opens independent Recovery; Esc returns. Failed writes may have partial effects: inspect Recovery before another write. No automatic undo. The earlier-write warning remains for the session."
+                "The error shows its cause and retained scope. Retry repeats a read or requests a fresh preview. Failed writes may have partial effects: inspect Recovery before another write. Back returns to retained input."
             }
             Self::Result => {
-                "Completion retains the transaction ID or explicit no-op outcome. Refresh rereads observations; Recovery inspects history; Back returns. A receipt is metadata, never approval or proof that later rollback is safe."
+                "Completion records a transaction ID or an up-to-date outcome. Refresh rereads observations; Recovery inspects history; Back returns. Future recovery obtains a fresh preview against current live state."
             }
         }
     }
@@ -230,7 +230,7 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
             format!("Dort | Help: {}", help.topic.title()),
             ui::heading(),
         ),
-        Line::raw("Esc / F1: return exactly | PgUp/PgDn: scroll | Home: top"),
+        Line::raw("Esc: return | PgUp/PgDn: scroll | Home: top"),
         Line::raw(""),
     ];
     lines.extend(
@@ -276,8 +276,8 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
         }
     }
     lines.push(Line::raw(""));
-    lines.push(Line::raw("F1 opens contextual Help everywhere. ? opens it outside text; q ? / remain literal in text/search. Ctrl-U clears a field. F10 menus navigate and manage the session. Existing 1..5 destinations, f Discover, p repository and n create/attach shortcuts remain; ; opens contextual Actions. q outside text / Ctrl-C exits, waiting for the worker."));
-    lines.push(Line::raw("Previews are not authorization. No automatic replay/rollback, provider execution, network or Git writes. Backups are private, not encrypted."));
+    lines.push(Line::raw("F1 opens contextual Help. Fields accept printable keys literally; Ctrl-U clears a field. F10 opens navigation menus."));
+    lines.push(Line::raw("Writes require explicit reviewed approval and fresh revalidation. Recovery is deliberate. Private backups are stored unencrypted."));
     let body = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
     ui::report(
         frame,
@@ -289,11 +289,6 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
     );
     app.hits.wheel(body, super::input::Wheel::Overlay);
     let back = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
-    ui::prose(
-        frame,
-        back,
-        "[Esc / F1 Back]  Help never submits or approves",
-        ui::accent(),
-    );
+    ui::prose(frame, back, " [Esc Back] ", ui::accent());
     app.hits.click(back, super::input::Target::Back);
 }

@@ -127,6 +127,17 @@ fn help_retains_disclosure_input_hides_private_patch_and_never_restores_disposed
     f.run(&mut app, task);
     assert_eq!(f.patch_calls(), 1);
     assert!(render(&app, 80, 24).contains("PRIVATE-PATCH"));
+    for code in [
+        KeyCode::End,
+        KeyCode::PageUp,
+        KeyCode::PageDown,
+        KeyCode::Home,
+    ] {
+        assert!(key(&mut app, code).is_none());
+        assert!(app.git_view.sensitive());
+        assert_eq!(f.patch_calls(), 1);
+    }
+    assert!(render(&app, 80, 24).contains("PRIVATE-PATCH"));
     key(&mut app, KeyCode::F(1));
     assert!(matches!(
         app.help.as_ref().unwrap().topic,
@@ -170,6 +181,10 @@ fn git_context_actions_inspect_and_clear_only_the_git_display_filter() {
     key(&mut app, KeyCode::Char(';'));
     text(&mut app, "Inspect selected");
     assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(render(&app, 80, 24).contains("No matching actions"));
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Esc);
+    assert!(key(&mut app, KeyCode::Enter).is_none());
     assert!(render(&app, 80, 24).contains("Git details"));
     assert_eq!(f.patch_calls(), 0);
     f.readonly();
@@ -211,7 +226,7 @@ fn independent_git_summaries_match_backend_and_never_prefetch_content() {
         key(&mut app, KeyCode::Esc);
         assert!(!app.quit && render(&app, 100, 30).contains("0 displayed"));
         key(&mut app, KeyCode::Delete);
-        key(&mut app, KeyCode::Char('i'));
+        key(&mut app, KeyCode::Enter);
         assert!(render(&app, 100, 30).contains("100644 -> 100755"));
         let task = key(&mut app, KeyCode::Char('r')).unwrap();
         f.run(&mut app, task);
@@ -408,7 +423,12 @@ fn git_selection_uses_raw_identity_across_refresh_and_compact_search_is_visible(
     key(&mut app, KeyCode::Down);
     app.git_view
         .accept(summary(&["second\u{202e}", "first"]), true);
-    key(&mut app, KeyCode::Char('i'));
+    for code in [KeyCode::PageDown, KeyCode::PageUp, KeyCode::Home] {
+        assert!(key(&mut app, code).is_none());
+        assert!(!app.git_view.browsing_details());
+        assert!(!app.git_view.sensitive());
+    }
+    key(&mut app, KeyCode::Enter);
     let screen = render(&app, 100, 30);
     assert!(
         screen.contains("second\\u{202e}")

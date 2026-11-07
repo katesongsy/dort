@@ -187,7 +187,7 @@ impl Activity {
             Task::Files(Request::Unmanage { id, .. }) => scope.push(("Mapping ID", id.clone())),
             Task::Files(Request::Apply) => scope.push((
                 "Scope",
-                "Full active profile union; display filters do not narrow it".into(),
+                "Full active profile union; reviewed execution scope".into(),
             )),
             Task::Batch(request) => {
                 let ids = match request {
@@ -419,7 +419,7 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
             &mut lines,
             app.failure.as_ref().and_then(|f| f.activity.as_ref()),
         );
-        lines.push(Line::raw(if app.failed_write { "No automatic undo. Inspect Recovery before another write. Refresh reads only; execution cannot be retried here." } else { "Input and scope retained. Retry repeats a read or requests a fresh preview, never execution. Back returns to retained input." }));
+        lines.push(Line::raw(if app.failed_write { "Inspect Recovery before another write. Refresh rereads observations." } else { "Input and scope retained. Retry repeats a read or requests a fresh preview. Back returns to retained input." }));
         panel(
             frame,
             area,
@@ -445,7 +445,7 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
         if let Some(id) = &receipt.transaction_id {
             lines.push(ui::metadata("Transaction ID", id));
         } else {
-            lines.push(Line::raw("No changes needed; no transaction created."));
+            lines.push(Line::raw("Everything is up to date."));
         }
         scope(&mut lines, receipt.activity.as_ref());
         if app.busy {
@@ -478,7 +478,7 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
                 "Waiting for service metadata; no percentage is estimated.",
             ));
         }
-        lines.push(Line::raw("Scope above is fixed for this task. Destination changes do not change it. Prior observations are not refreshed until the read finishes."));
+        lines.push(Line::raw("Scope above is fixed for this task. Navigation preserves this scope. Observations update when the read finishes."));
         panel(
             frame,
             area,
@@ -499,7 +499,7 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
             lines,
         );
         frame.render_widget(
-            Paragraph::new(ui::keys(&[("q/Ctrl-C", "Quit waits"), ("PgDn", "Details")])),
+            Paragraph::new(ui::keys(&[("q", "Quit waits"), ("PgDn", "Scroll")])),
             actions,
         );
     }

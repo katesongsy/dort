@@ -49,17 +49,17 @@ pub fn shortcut(action: Action) -> &'static str {
         Action::Choose => "p",
         Action::Discover => "f",
         Action::Apply => "a",
-        Action::Inspect => "i",
+        Action::Inspect => "Enter",
         Action::BatchAdopt => "E",
         Action::ApplyMarked => "A",
         Action::KeepMarked => "K",
         Action::RemoveMarked => "D",
-        Action::ToggleMark => "x",
+        Action::ToggleMark => "Space",
         Action::IgnoreSelected => "I",
         Action::ManageIgnored => "U",
         Action::AdoptSelected => "e",
         Action::Adopt => "o",
-        Action::Keep => "k",
+        Action::Keep => "u",
         Action::Remove => "d",
         Action::Rollback => "b",
         Action::Resume => "s",
@@ -78,7 +78,6 @@ pub fn shortcut(action: Action) -> &'static str {
 fn buttons(frame: &mut Frame, area: Rect, app: &App) {
     let mut x = area.x;
     let actions = app.page_actions();
-    let mut shown = 0;
     for action in &actions {
         let action = *action;
         let button = ui::button(short(action), shortcut(action), false);
@@ -97,24 +96,7 @@ fn buttons(frame: &mut Frame, area: Rect, app: &App) {
             r,
         );
         x += width;
-        shown += 1;
     }
-    let all = format!(
-        "[; Actions{}]",
-        if shown < actions.len() {
-            format!(" +{} more", actions.len() - shown)
-        } else {
-            String::new()
-        }
-    );
-    let width = (all.len() as u16).min(area.width);
-    let r = Rect::new(area.x, area.y + 1, width, 1);
-    app.hits.click(r, super::input::Target::PaletteSearch);
-    ui::prose(frame, r, &all, ui::accent());
-    let help = Rect::new(r.right(), r.y, area.width.saturating_sub(width), 1);
-    app.hits
-        .click(help, super::input::Target::Action(Action::Help));
-    ui::prose(frame, help, " [F1 Help]", ui::accent());
 }
 fn tabs(frame: &mut Frame, area: Rect, app: &App) {
     super::navigation::bar(frame, area, app);
@@ -151,12 +133,12 @@ pub fn draw(frame: &mut Frame, app: &App) {
         ui::prose(
             frame,
             area,
-            "Dort: terminal too small\nResize to 48x14; approval disabled.\nq/Ctrl-C: exit (waits for worker)",
+            "Dort: terminal too small\nResize to 48x14; approval disabled.\nq: exit (waits for worker)",
             ui::warning(),
         );
         return;
     }
-    let top = if area.width < 80 { 3 } else { 2 };
+    let top = 2;
     let sections = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(top - 1),
@@ -197,7 +179,17 @@ pub fn draw(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(header), sections[0]);
     tabs(frame, sections[1], app);
     let body = sections[2];
-    let content = Layout::vertical([Constraint::Min(3), Constraint::Length(2)]).split(body);
+    let toolbar = app.preview.is_some()
+        || app.error.is_some()
+        || app.show_result
+        || (!app.busy
+            && app.error.is_none()
+            && !app.show_result
+            && app.shell.overlay.is_none()
+            && !app.batch_editor.as_ref().is_some_and(|e| e.open)
+            && !app.page_actions().is_empty());
+    let content =
+        Layout::vertical([Constraint::Min(3), Constraint::Length(u16::from(toolbar))]).split(body);
     app.hits.wheel(content[0], super::input::Wheel::Details);
     if !app.busy
         && !app.show_result
@@ -264,7 +256,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         if let super::actions::Pending::Files(plan) = &preview.pending
             && !preview.full
         {
-            let block = ui::pane("Preview (metadata only) · Review effects", true);
+            let block = ui::pane("Review · Planned file changes", true);
             let inner = block.inner(content[0]);
             frame.render_widget(block, content[0]);
             super::review::draw(frame, inner, plan, preview, &app.hits);
@@ -277,8 +269,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
             super::review::draw_batch(frame, inner, plan, preview, &app.hits);
         } else {
             frame.render_widget(
-                Paragraph::new(safe(&preview.text))
-                    .block(ui::pane("Preview (metadata only) · Full report", true))
+                Paragraph::new(ui::review_text(&preview.text))
+                    .block(ui::pane("Review · Effects and safeguards", true))
                     .scroll((preview.scroll, preview.horizontal)),
                 content[0],
             );
@@ -316,8 +308,24 @@ pub fn draw(frame: &mut Frame, app: &App) {
             Overlay::Profiles(_) | Overlay::Repositories { .. } => {
                 super::pickers::draw(frame, modal, app, overlay)
             }
-            Overlay::Form(form) if app.shell.scroll == 0 => {
-                super::forms::draw(frame, modal, app, *form)
+            Overlay::Form(form) => {
+                let parts = Layout::vertical([
+                    Constraint::Min(4),
+                    Constraint::Length(if modal.height >= 14 { 6 } else { 3 }),
+                ])
+                .split(modal);
+                super::forms::draw(frame, parts[0], app, *form);
+                app.shell
+                    .page_rows
+                    .set(parts[1].height.saturating_sub(2).max(1));
+                ui::report(
+                    frame,
+                    parts[1],
+                    "Draft details",
+                    legacy_document(views::overlay_text(app, overlay, modal.height, modal.width)),
+                    app.shell.scroll,
+                    false,
+                );
             }
             Overlay::Actions {
                 query,
@@ -357,73 +365,30 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Paragraph::new(ui::clip(status, sections[3].width)).style(status_style),
         sections[3],
     );
-    let keys = if app.busy {
-        vec![
-            ("q/Ctrl-C", "Quit waits"),
-            ("PgDn", "Details"),
-            ("?", "Help"),
-        ]
-    } else if app.error.is_some() || app.show_result {
-        vec![("PgDn", "Details"), ("Home", "Top"), ("Esc", "Back")]
-    } else if app.confirmation.is_some() {
-        vec![("Enter", "Submit"), ("Esc", "Back")]
-    } else if app.preview.is_some() {
-        vec![
-            ("Enter", "Continue"),
-            ("i", "Full report"),
-            ("PgDn", "Effects"),
-            ("Esc", "Back"),
-        ]
-    } else if app
-        .batch_editor
-        .as_ref()
-        .is_some_and(|e| e.open && !e.item_form)
-    {
-        vec![
-            ("j/k", "Select"),
-            ("e", "Edit item"),
-            ("Enter", "Review all"),
-            ("Esc", "Back"),
-        ]
-    } else if matches!(app.shell.overlay, Some(Overlay::Form(_)))
-        || app.batch_editor.as_ref().is_some_and(|e| e.open)
-    {
-        vec![
-            ("Enter", "Next"),
-            ("Tab", "Field"),
-            ("Esc", "Back"),
-            ("Ctrl-C", "Quit"),
-        ]
-    } else if app.text_entry() {
-        vec![
-            ("Enter", "Submit/Done"),
-            ("Esc", "Back"),
-            ("Ctrl-C", "Quit"),
-        ]
-    } else if app.tab == Tab::Files && app.discovering {
-        vec![
-            ("Tab", "List/content"),
-            (
-                "j/k",
-                if app.content.focused {
-                    "Scroll"
-                } else {
-                    "Select"
-                },
-            ),
-            ("Esc", "List"),
-            (";", "Actions"),
-        ]
-    } else {
-        vec![
-            ("Up/Down", "Select"),
-            ("PgDn", "Details"),
-            (";", "Actions"),
-            ("?", "Help"),
-        ]
-    };
-    let keys: Vec<_> = std::iter::once(("F1", "Help")).chain(keys).collect();
+    let keys = super::hints::keys(app);
     frame.render_widget(Paragraph::new(ui::keys(&keys)), sections[4]);
+    let mut x = sections[4].x;
+    for (key, label) in &keys {
+        let width = ui::keys(&[(key, label)]).width() as u16;
+        let target = match *key {
+            "F10" => Some(super::input::Target::MenuOpen),
+            "F1" => Some(super::input::Target::Action(Action::Help)),
+            ";" => Some(super::input::Target::PaletteSearch),
+            _ => None,
+        };
+        if let Some(target) = target {
+            app.hits.click(
+                Rect::new(
+                    x,
+                    sections[4].y,
+                    width.min(sections[4].right().saturating_sub(x)),
+                    1,
+                ),
+                target,
+            );
+        }
+        x += width + 2;
+    }
     if let Some(menu) = app.navigation.menu {
         super::navigation::popup(frame, app, menu);
     }
@@ -457,10 +422,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             "Approve reviewed effects\nType literal yes, then Enter.\nExecution independently revalidates all guards.".into()
         };
         // Prompt scroll is independent of input; full IDs are never reconstructed from display.
-        frame.render_widget(
-            ui::pane("Confirm · F1 Help · No writes before submission", true),
-            modal,
-        );
+        frame.render_widget(ui::pane("Confirm · Submit to execute", true), modal);
         let inner = Rect::new(
             modal.x + 1,
             modal.y + 1,
@@ -484,7 +446,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         frame.render_widget(
             Paragraph::new(ui::keys(&[
                 ("Enter", "Submit"),
-                ("PgDn", "Details"),
+                ("PgDn", "Scroll"),
                 ("Esc", "Cancel"),
             ])),
             Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),

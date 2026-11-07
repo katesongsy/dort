@@ -159,6 +159,10 @@ fn compatible_forms_keep_caret_tab_and_mouse_controls_at_all_sizes() {
         assert_eq!(compatible.get_cursor_position().unwrap(), caret);
         check_cells(&compatible, true, true);
         locate(&compatible, "TARGET | Focus");
+        if w == 48 {
+            key(&mut app, KeyCode::Tab, w, h);
+            compatible = draw(&app, w, h);
+        }
         let (x, y) = locate(&compatible, "ID");
         assert!(
             app.mouse(
@@ -189,20 +193,17 @@ fn every_destination_and_common_overlays_use_supported_ascii_decoration() {
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let mut app = fixture();
         app.appearance = appearance(true, true);
-        for destination in '1'..='5' {
-            key(&mut app, KeyCode::Char(destination), w, h);
+        for destination in [
+            Tab::Overview,
+            Tab::Files,
+            Tab::Recovery,
+            Tab::Checks,
+            Tab::Git,
+        ] {
+            super::tests::destination(&mut app, destination, w, h);
             check_cells(&draw(&app, w, h), true, true);
             key(&mut app, KeyCode::Tab, w, h);
-            assert!(
-                app.tab
-                    == match destination {
-                        '1' => Tab::Overview,
-                        '2' => Tab::Files,
-                        '3' => Tab::Recovery,
-                        '4' => Tab::Checks,
-                        _ => Tab::Git,
-                    }
-            );
+            assert!(app.tab == destination);
             key(&mut app, KeyCode::Char('?'), w, h);
             check_cells(&draw(&app, w, h), true, true);
             key(&mut app, KeyCode::Esc, w, h);

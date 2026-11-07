@@ -42,6 +42,14 @@ fn terminal_cleanup_probe() {
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
+pub(super) fn destination(app: &mut App, tab: super::app::Tab, width: u16, height: u16) {
+    app.activate(super::shell::Action::Destination(tab));
+    app.key(
+        KeyEvent::new(KeyCode::Null, KeyModifiers::NONE),
+        width,
+        height,
+    );
+}
 pub(super) fn render(app: &App, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal.draw(|frame| views::draw(frame, app)).unwrap();
@@ -121,7 +129,7 @@ fn small_layout_snapshot_disables_approval() {
     let mut app = App::new(false);
     assert_eq!(
         render(&app, 40, 6),
-        "Dort: terminal too small\nResize to 48x14; approval disabled.\nq/Ctrl-C: exit (waits for worker)\n\n\n"
+        "Dort: terminal too small\nResize to 48x14; approval disabled.\nq: exit (waits for worker)\n\n\n"
     );
     assert!(app.key(key(KeyCode::Enter), 40, 6).is_none());
     assert!(!app.busy);
@@ -133,7 +141,7 @@ fn compact_navigation_and_report_home_are_readable_without_color() {
     let mut app = App::new(true);
     for (width, height) in [(48, 14), (80, 24), (140, 40)] {
         let screen = render(&app, width, height);
-        for label in ["F10 Menu", "Overview", "Actions", "DRY RUN", ";"] {
+        for label in ["F10", "Overview", "Actions", "DRY RUN", ";"] {
             assert!(
                 screen.contains(label),
                 "missing textual {label} at {width}x{height}"
@@ -242,7 +250,7 @@ fn navigation_and_metadata_escaping() {
     assert!(screen.contains("DRY RUN"));
     assert!(screen.contains("\\u{1b}[31m\\u{202e}"));
     app.data.as_mut().unwrap().files_error = None;
-    app.key(key(KeyCode::Char('2')), 80, 24);
+    destination(&mut app, Tab::Files, 80, 24);
     assert!(app.tab == Tab::Files);
     app.key(key(KeyCode::Down), 80, 24);
     assert_eq!(app.selected, 0);
@@ -369,7 +377,7 @@ fn completion_keeps_noop_result_visible_through_refresh_and_read_failure() {
         app.result
             .as_ref()
             .unwrap()
-            .contains("no transaction created")
+            .contains("Everything is up to date")
     );
     app.start(false);
     app.complete(Ok(Output::Data(Data {
@@ -383,14 +391,14 @@ fn completion_keeps_noop_result_visible_through_refresh_and_read_failure() {
         history: vec![],
         history_error: None,
     })));
-    assert!(render(&app, 80, 24).contains("no transaction created"));
+    assert!(render(&app, 80, 24).contains("Everything is up to date"));
     app.start(false);
     app.complete(Err("later read failure".into()));
     assert!(
         app.result
             .as_ref()
             .unwrap()
-            .contains("no transaction created")
+            .contains("Everything is up to date")
     );
     assert!(!app.error.as_ref().unwrap().contains("partial effects"));
 }

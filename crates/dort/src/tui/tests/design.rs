@@ -210,7 +210,7 @@ fn typed_overview_cards_keep_unknown_distinct_from_zero_and_metadata_inspectable
         let initial = render(&app, w, h);
         assert!(initial.contains("Unknown"));
         let details = inspect_all(&mut app, w, h);
-        assert!(details.contains("File counts unknown, not zero."));
+        assert!(details.contains("File counts unavailable."));
         assert!(details.contains("Registration: Unknown"));
         assert!(details.contains("session-root-end"));
         assert!(!details.contains("Welcome | manage local files"));
@@ -253,7 +253,7 @@ fn diagnostic_cards_independently_render_registry_and_history_availability() {
                 assert!(details.contains(if registry_ok {
                     "Registered repositories: 0"
                 } else {
-                    "Registry count and active selection"
+                    "Registry metadata unavailable"
                 }));
                 assert!(details.contains(if history_ok {
                     "Global write blockers: 0"
@@ -264,7 +264,7 @@ fn diagnostic_cards_independently_render_registry_and_history_availability() {
                     "Session file root:",
                     "Git executable:",
                     "Capability limits",
-                    "Live files/tools not inspected",
+                    "Files inspects live state",
                     "synthetic/home",
                 ] {
                     assert!(details.contains(value), "inspectable {value} at {w}x{h}");

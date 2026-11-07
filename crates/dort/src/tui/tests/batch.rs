@@ -267,9 +267,9 @@ fn tree_folds_marks_hidden_items_and_batch_editor_retains_real_fields_at_floor()
     let task = key(&mut app, KeyCode::Char('f')).unwrap();
     f.run(&mut app, task);
     select(&mut app, "only-a");
-    assert!(key(&mut app, KeyCode::Char('x')).is_none());
+    assert!(key(&mut app, KeyCode::Char(' ')).is_none());
     select(&mut app, "only-b");
-    key(&mut app, KeyCode::Char('x'));
+    key(&mut app, KeyCode::Char(' '));
     assert_eq!(app.inventory.candidate_marks.len(), 2);
     key(&mut app, KeyCode::Char('h'));
     assert!(app.inventory.group.is_some());
@@ -367,7 +367,7 @@ fn same_named_files_adopt_into_preserved_subtrees_without_moving_existing_mappin
     key(&mut app, KeyCode::Char('/'));
     text(&mut app, "init.lua");
     key(&mut app, KeyCode::Enter);
-    key(&mut app, KeyCode::Char('x')); // Closed .config group marks both matches.
+    key(&mut app, KeyCode::Char(' ')); // Closed .config group marks both matches.
     assert_eq!(app.inventory.candidate_marks.len(), 2);
     key(&mut app, KeyCode::Char('E'));
     let task = key(&mut app, KeyCode::Enter).unwrap();
@@ -412,9 +412,9 @@ fn selected_apply_keep_delete_are_combined_and_every_delete_id_then_yes_is_requi
         let f = Fixture::new(true);
         let mut app = f.app(false);
         select(&mut app, "only-a");
-        key(&mut app, KeyCode::Char('x'));
+        key(&mut app, KeyCode::Char(' '));
         select(&mut app, "only-b");
-        key(&mut app, KeyCode::Char('x'));
+        key(&mut app, KeyCode::Char(' '));
         key(&mut app, KeyCode::Char('/'));
         text(&mut app, "only-a");
         key(&mut app, KeyCode::Enter);
@@ -484,6 +484,7 @@ fn selected_apply_keep_delete_are_combined_and_every_delete_id_then_yes_is_requi
         let task = key(&mut app, KeyCode::Enter).unwrap();
         let refresh = f.run(&mut app, task).unwrap();
         f.run(&mut app, refresh);
+        assert!(app.inventory.managed_marks.is_empty());
         for id in ["only-a", "only-b"] {
             let path = f.host.home.join(".config/editor").join(id);
             if operation == 'K' {
@@ -503,7 +504,7 @@ fn selected_apply_keep_delete_are_combined_and_every_delete_id_then_yes_is_requi
         assert_eq!(manifest.files.len(), 1);
         assert_eq!(manifest.files[0].id, "only-c");
         // Schema-4 rollback is offered by the real Recovery action guard.
-        key(&mut app, KeyCode::Char('3'));
+        super::tests::destination(&mut app, super::app::Tab::Recovery, 80, 24);
         let index = app
             .data
             .as_ref()
@@ -517,6 +518,84 @@ fn selected_apply_keep_delete_are_combined_and_every_delete_id_then_yes_is_requi
         }
         assert!(app.page_actions().contains(&super::shell::Action::Rollback));
     }
+}
+#[test]
+fn sequential_keep_removes_completed_marks_and_preserves_other_hidden_marks() {
+    for first in ['u', 'K'] {
+        let f = Fixture::new(true);
+        let mut app = f.app(false);
+        let task = key(&mut app, KeyCode::Char('a')).unwrap();
+        f.run(&mut app, task);
+        let task = approve(&mut app);
+        let refresh = f.run(&mut app, task).unwrap();
+        f.run(&mut app, refresh);
+        key(&mut app, KeyCode::Esc);
+        select(&mut app, "only-a");
+        key(&mut app, KeyCode::Char(' '));
+        if first == 'u' {
+            select(&mut app, "only-c");
+            key(&mut app, KeyCode::Char(' '));
+            select(&mut app, "only-a");
+        }
+        key(&mut app, KeyCode::Char('/'));
+        text(&mut app, "only-a");
+        key(&mut app, KeyCode::Enter);
+        let task = key(&mut app, KeyCode::Char(first)).unwrap();
+        f.run(&mut app, task);
+        assert!(app.error.is_none() && app.confirmation.is_none());
+        let task = approve(&mut app);
+        let refresh = f.run(&mut app, task).unwrap();
+        f.run(&mut app, refresh);
+        assert!(!app.inventory.managed_marks.contains("only-a"));
+        assert_eq!(app.inventory.managed_marks.len(), usize::from(first == 'u'));
+        if first == 'u' {
+            assert!(app.inventory.managed_marks.contains("only-c"));
+        }
+        key(&mut app, KeyCode::Esc);
+        key(&mut app, KeyCode::Delete);
+        select(&mut app, "only-b");
+        key(&mut app, KeyCode::Char(' '));
+        let task = key(&mut app, KeyCode::Char('K')).unwrap();
+        assert!(
+            matches!(&task, Task::Batch(dort_core::batch::Request::Keep(ids)) if ids.contains(&"only-b".to_owned()) && !ids.contains(&"only-a".to_owned()) && ids.len() == if first == 'u' { 2 } else { 1 })
+        );
+        f.run(&mut app, task);
+        assert!(app.error.is_none());
+        let task = approve(&mut app);
+        let refresh = f.run(&mut app, task).unwrap();
+        f.run(&mut app, refresh);
+        assert!(app.error.is_none() && app.inventory.managed_marks.is_empty());
+        for id in ["only-a", "only-b"] {
+            let target = f.host.home.join(".config/editor").join(id);
+            assert!(target.is_file() && !target.is_symlink());
+            assert_eq!(
+                fs::read_to_string(target).unwrap(),
+                "ordinary source settings\n"
+            );
+            assert!(f.repo.join(id).is_file());
+        }
+    }
+}
+#[test]
+fn unavailable_inventory_preserves_marks_until_a_healthy_full_refresh() {
+    let f = Fixture::new(true);
+    let mut app = f.app(false);
+    app.inventory.managed_marks = ["only-a".to_owned(), "only-b".to_owned()].into();
+    app.inventory.managed.query = "only-a".into();
+    let manifest = fs::read_to_string(f.repo.join("dort.toml")).unwrap();
+    f.run(&mut app, Task::Refresh);
+    assert_eq!(app.inventory.managed_marks.len(), 2);
+    fs::write(f.repo.join("dort.toml"), "schema=\"invalid\"\n").unwrap();
+    f.run(&mut app, Task::Refresh);
+    assert!(app.data.as_ref().unwrap().files_error.is_some());
+    assert_eq!(app.inventory.managed_marks.len(), 2);
+    fs::write(f.repo.join("dort.toml"), manifest).unwrap();
+    f.run(&mut app, Task::Refresh);
+    assert_eq!(app.inventory.managed_marks.len(), 2);
+    fs::write(f.repo.join("dort.toml"), "schema=1\n").unwrap();
+    f.run(&mut app, Task::Refresh);
+    assert!(app.data.as_ref().unwrap().files_error.is_none());
+    assert!(app.inventory.managed_marks.is_empty());
 }
 #[test]
 fn mouse_tree_controls_use_rendered_geometry_and_never_open_previews_or_approve() {
@@ -537,9 +616,9 @@ fn mouse_tree_controls_use_rendered_geometry_and_never_open_previews_or_approve(
     assert!(journal::diagnose(&f.host).unwrap().is_empty());
     // Group toggling explicitly marks matching regular descendants, including folded rows.
     key(&mut app, KeyCode::Char('h'));
-    key(&mut app, KeyCode::Char('x'));
+    key(&mut app, KeyCode::Char(' '));
     assert_eq!(app.inventory.candidate_marks.len(), 3);
-    key(&mut app, KeyCode::Char('x'));
+    key(&mut app, KeyCode::Char(' '));
     assert!(app.inventory.candidate_marks.is_empty());
 }
 #[test]
@@ -547,9 +626,9 @@ fn blocked_item_never_silently_skips_and_dry_run_cannot_approve_batch() {
     let f = Fixture::new(true);
     let mut app = f.app(false);
     select(&mut app, "only-a");
-    key(&mut app, KeyCode::Char('x'));
+    key(&mut app, KeyCode::Char(' '));
     select(&mut app, "only-b");
-    key(&mut app, KeyCode::Char('x'));
+    key(&mut app, KeyCode::Char(' '));
     fs::remove_file(f.host.home.join(".config/editor/only-b")).unwrap();
     std::os::unix::fs::symlink("/foreign", f.host.home.join(".config/editor/only-b")).unwrap();
     let task = key(&mut app, KeyCode::Char('A')).unwrap();
@@ -561,7 +640,7 @@ fn blocked_item_never_silently_skips_and_dry_run_cannot_approve_batch() {
     assert!(journal::diagnose(&f.host).unwrap().is_empty());
     let mut dry = f.app(true);
     select(&mut dry, "only-a");
-    key(&mut dry, KeyCode::Char('x'));
+    key(&mut dry, KeyCode::Char(' '));
     let task = key(&mut dry, KeyCode::Char('A')).unwrap();
     f.run(&mut dry, task);
     key(&mut dry, KeyCode::Enter);
