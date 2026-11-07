@@ -25,7 +25,9 @@ SIZE = 128 * 1024 * 1024
 
 def run(*args, **kwargs):
     # Own/reap the test process group before attempting to unmount on errors/timeouts.
-    process = subprocess.Popen(args, start_new_session=True, **kwargs)
+    # Fixture Git must create private entries even if the guest login umask is 0002.
+    # Set only the child mask; never mutate the supervisor's process-global mask.
+    process = subprocess.Popen(args, start_new_session=True, umask=0o077, **kwargs)
     try:
         code = process.wait(timeout=300)
     except BaseException:

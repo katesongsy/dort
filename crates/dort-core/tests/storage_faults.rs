@@ -4,6 +4,7 @@
 use dort_core::{
     Error,
     adoption::{self, Boundary, Event},
+    batch,
     bootstrap::{self, RecoveryAction},
     context::HostContext,
     journal,
@@ -35,6 +36,31 @@ enum Action {
     Keep,
     Remove,
     Attach,
+    Create,
+    BatchAdopt,
+    BatchApply,
+    BatchKeep,
+    BatchRemove,
+}
+impl Action {
+    fn bootstrap(self) -> bool {
+        matches!(self, Self::Attach | Self::Create)
+    }
+    fn adopt(self) -> bool {
+        matches!(self, Self::Adopt | Self::BatchAdopt)
+    }
+    fn linked(self) -> bool {
+        matches!(
+            self,
+            Self::Keep | Self::Remove | Self::BatchKeep | Self::BatchRemove
+        )
+    }
+    fn batch(self) -> bool {
+        matches!(
+            self,
+            Self::BatchAdopt | Self::BatchApply | Self::BatchKeep | Self::BatchRemove
+        )
+    }
 }
 #[derive(Clone, Copy, Debug)]
 enum At {
@@ -65,8 +91,10 @@ impl Fixture {
         };
         let host = HostContext::new(home, None, None, Platform::Ubuntu, architecture).unwrap();
         let repo = root.path().join("repository");
-        fs::create_dir(&repo).unwrap();
-        fs::set_permissions(&repo, fs::Permissions::from_mode(0o700)).unwrap();
+        if !matches!(action, Action::Create) {
+            fs::create_dir(&repo).unwrap();
+            fs::set_permissions(&repo, fs::Permissions::from_mode(0o700)).unwrap();
+        }
         if matches!(action, Action::Attach) {
             assert!(
                 Command::new("/usr/bin/git")
@@ -78,28 +106,43 @@ impl Fixture {
                     .unwrap()
                     .success()
             );
-        } else {
+        } else if !matches!(action, Action::Create) {
             fs::create_dir(repo.join(".git")).unwrap();
         }
-        fs::create_dir(repo.join("files")).unwrap();
+        if !matches!(action, Action::Create) {
+            fs::create_dir(repo.join("files")).unwrap();
+        }
         // Large enough to require actual data blocks, without sensitivity-looking values.
         let bytes = b"ordinary editor setting\n".repeat(3000);
-        if !matches!(action, Action::Adopt) {
+        if !action.adopt() && !matches!(action, Action::Create) {
             fs::write(repo.join("files/editor"), &bytes).unwrap();
         }
-        let manifest = if matches!(action, Action::Adopt | Action::Attach) {
+        let mut manifest = if action.adopt() || action.bootstrap() {
             "schema = 1\n"
         } else {
             "schema = 1\n[[files]]\nid = 'editor'\nsource = 'files/editor'\ntarget = '~/.editor'\nmode = 'link'\n"
-        };
-        fs::write(repo.join("dort.toml"), manifest).unwrap();
-        if matches!(action, Action::Keep | Action::Remove) {
+        }.to_owned();
+        if action.batch() {
+            if !action.adopt() {
+                manifest.push_str("[[files]]\nid='second'\nsource='files/second'\ntarget='~/.second'\nmode='link'\n");
+                fs::write(repo.join("files/second"), &bytes).unwrap();
+            }
+            if action.linked() {
+                symlink(repo.join("files/second"), host.home.join(".second")).unwrap();
+            } else {
+                fs::write(host.home.join(".second"), &bytes).unwrap();
+            }
+        }
+        if !matches!(action, Action::Create) {
+            fs::write(repo.join("dort.toml"), manifest).unwrap();
+        }
+        if action.linked() {
             symlink(repo.join("files/editor"), host.home.join(".editor")).unwrap();
         } else {
             fs::write(host.home.join(".editor"), bytes).unwrap();
         }
         let lock = WriterLock::acquire(&host).unwrap();
-        let id = if matches!(action, Action::Attach) {
+        let id = if action.bootstrap() {
             String::new()
         } else {
             RepositoryRegistry::register(&host, &lock, &repo).unwrap()
@@ -117,7 +160,7 @@ impl Fixture {
         &self,
         observer: impl FnMut(&Event) -> dort_core::Result<()>,
     ) -> dort_core::Result<()> {
-        if matches!(self.action, Action::Attach) {
+        if self.action.bootstrap() {
             let git = Path::new("/usr/bin/git");
             let p = bootstrap::preview(&self.host, &self.repo, git)?;
             return bootstrap::execute(
@@ -128,6 +171,28 @@ impl Fixture {
                 observer,
             )
             .map(|_| ());
+        }
+        if self.action.batch() {
+            let ids = vec!["editor".into(), "second".into()];
+            let request = match self.action {
+                Action::BatchAdopt => {
+                    batch::Request::Adopt(["editor", "second"].into_iter().map(mapping).collect())
+                }
+                Action::BatchApply => batch::Request::Apply(ids),
+                Action::BatchKeep => batch::Request::Keep(ids),
+                Action::BatchRemove => batch::Request::Remove(ids),
+                _ => unreachable!(),
+            };
+            let plan = batch::plan(batch::observe(&self.host, &self.repo, &[], request)?);
+            let approval = if matches!(self.action, Action::BatchRemove) {
+                batch::Approval::from_removal_plan(
+                    plan,
+                    batch::RemovalAcknowledgements::confirm(vec!["editor".into(), "second".into()]),
+                )?
+            } else {
+                batch::Approval::from_plan(plan)?
+            };
+            return batch::execute(&self.host, &self.lock, approval, observer).map(|_| ());
         }
         let request = match self.action {
             Action::Adopt => Request::Adopt {
@@ -151,7 +216,7 @@ impl Fixture {
                     UnmanageMode::Remove
                 },
             },
-            Action::Attach => unreachable!(),
+            _ => unreachable!(),
         };
         let plan = planner::plan(planner::observe(&self.host, &self.repo, &[], request)?);
         if matches!(self.action, Action::Adopt) {
@@ -175,12 +240,19 @@ impl Fixture {
         }
     }
     fn paths(&self) -> Vec<PathBuf> {
-        vec![
+        let mut paths = vec![
             self.repo.join("dort.toml"),
             self.repo.join("files/editor"),
             self.host.home.join(".editor"),
             self.host.local_config_path(),
-        ]
+        ];
+        if self.action.batch() {
+            paths.extend([
+                self.repo.join("files/second"),
+                self.host.home.join(".second"),
+            ]);
+        }
+        paths
     }
     fn txdir(&self, event: &Event) -> PathBuf {
         let id = if self.id.is_empty() {
@@ -198,6 +270,18 @@ impl Fixture {
     }
 }
 
+fn mapping(id: &str) -> ManagedFile {
+    ManagedFile {
+        id: id.into(),
+        source: format!("files/{id}").into(),
+        target: format!("~/.{id}").into(),
+        mode: FileMode::Link,
+        profiles: vec!["base".into()],
+        requires: vec![],
+        overrides: BTreeMap::new(),
+        permissions: None,
+    }
+}
 // Metadata/hashes only; never display fixture bytes on failure.
 fn identity(path: &Path) -> Option<(u64, u64, u32, Vec<u8>)> {
     let m = match fs::symlink_metadata(path) {
@@ -294,6 +378,11 @@ fn kernel_enospc_preserves_intent_and_refuses_uncertain_recovery() {
         Action::Keep,
         Action::Remove,
         Action::Attach,
+        Action::Create,
+        Action::BatchAdopt,
+        Action::BatchApply,
+        Action::BatchKeep,
+        Action::BatchRemove,
     ] {
         let baseline = Fixture::new(&volume, action);
         let mut previous_checkpoint = None;
@@ -392,11 +481,17 @@ fn kernel_enospc_preserves_intent_and_refuses_uncertain_recovery() {
                     "live input changed before publication"
                 );
             }
-            if !matches!(action, Action::Adopt) {
+            if !action.adopt() {
                 assert!(
                     identity(&paths[1]) == before[1],
                     "watched repository source changed"
                 );
+                if action.batch() {
+                    assert!(
+                        identity(&paths[4]) == before[4],
+                        "second watched source changed"
+                    );
+                }
             }
             if matches!(at, At::PartialCheckpoint) {
                 let txdir = durable.keys().next().unwrap().parent().unwrap();
@@ -421,7 +516,7 @@ fn kernel_enospc_preserves_intent_and_refuses_uncertain_recovery() {
             if let Some(d) = diagnosis.first() {
                 assert_eq!(diagnosis.len(), 1);
                 assert!(RepositoryRegistry::register(&f.host, &f.lock, &f.repo).is_err());
-                let recovered = if matches!(action, Action::Attach) {
+                let recovered = if action.bootstrap() {
                     bootstrap::recovery_preview(
                         &f.host,
                         &d.repository_id,
@@ -452,7 +547,7 @@ fn kernel_enospc_preserves_intent_and_refuses_uncertain_recovery() {
                             .iter()
                             .all(|d| !d.blocks_writes())
                     );
-                    if !matches!(action, Action::Attach) {
+                    if !action.bootstrap() {
                         assert!(
                             paths.iter().zip(&before).all(|(p, b)| identity(p) == *b),
                             "explicit rollback did not restore live identities"
@@ -476,6 +571,172 @@ fn kernel_enospc_preserves_intent_and_refuses_uncertain_recovery() {
             }
         }
     }
+    inverse_enospc(&volume);
     // Catch a delayed allocation error from the volume while space is available again.
     File::open(&volume).unwrap().sync_all().unwrap();
+}
+
+fn rollback(
+    f: &Fixture,
+    observer: impl FnMut(&Event) -> dort_core::Result<()>,
+) -> dort_core::Result<()> {
+    let diagnosis = journal::diagnose(&f.host)?;
+    let d = diagnosis.first().expect("executed transaction");
+    let approval = recovery::Approval::from_preview(recovery::preview(
+        &f.host,
+        &d.repository_id,
+        &d.transaction_id,
+    )?)?;
+    recovery::execute_with_observer(&f.host, &f.lock, approval, observer)
+}
+
+fn inverse_enospc(volume: &Path) {
+    for action in [
+        Action::Adopt,
+        Action::Apply,
+        Action::Keep,
+        Action::Remove,
+        Action::BatchAdopt,
+        Action::BatchApply,
+        Action::BatchKeep,
+        Action::BatchRemove,
+    ] {
+        let baseline = Fixture::new(volume, action);
+        baseline.execute(|_| Ok(())).unwrap();
+        let mut previous = None;
+        let mut intent = None;
+        let mut postcheckpoint = None;
+        rollback(&baseline, |e| {
+            if e.boundary == Boundary::Checkpoint {
+                previous = Some(e.sequence);
+            } else if intent.is_none() {
+                intent = previous;
+                postcheckpoint = Some(
+                    baseline
+                        .txdir(e)
+                        .join(format!("{:06}.json", e.sequence + 1)),
+                );
+            }
+            Ok(())
+        })
+        .unwrap();
+        let intent = intent.expect("rollback must mutate");
+        assert!(fs::metadata(postcheckpoint.unwrap()).unwrap().len() > 8192);
+        drop(baseline);
+        for at in [
+            At::Allocation,
+            At::Intent,
+            At::PostMutation,
+            At::PartialCheckpoint,
+        ] {
+            let f = Fixture::new(volume, action);
+            let paths = f.paths();
+            let original: Vec<_> = paths.iter().map(|p| identity(p)).collect();
+            f.execute(|_| Ok(())).unwrap();
+            let applied: Vec<_> = paths.iter().map(|p| identity(p)).collect();
+            let d = journal::diagnose(&f.host).unwrap().remove(0);
+            let txdir = repository_state_path(&f.host, &d.repository_id)
+                .unwrap()
+                .join("transactions")
+                .join(&d.transaction_id);
+            let mut durable = checkpoints(&txdir);
+            let mut filler = if matches!(at, At::Allocation) {
+                Some(Filler::fill(volume))
+            } else {
+                None
+            };
+            let mut mutations = 0;
+            let result = rollback(&f, |e| {
+                if e.boundary == Boundary::Mutation {
+                    mutations += 1;
+                }
+                let trigger = match at {
+                    At::Allocation => false,
+                    At::Intent => e.boundary == Boundary::Checkpoint && e.sequence == intent,
+                    At::PostMutation | At::PartialCheckpoint => e.boundary == Boundary::Mutation,
+                    At::Backup => unreachable!(),
+                };
+                if trigger && filler.is_none() {
+                    durable = checkpoints(&txdir);
+                    filler = Some(Filler::fill(volume));
+                    if matches!(at, At::PartialCheckpoint) {
+                        let file = OpenOptions::new()
+                            .write(true)
+                            .open(&filler.as_ref().unwrap().0)
+                            .unwrap();
+                        file.set_len(file.metadata().unwrap().len() - 8192).unwrap();
+                        file.sync_all().unwrap();
+                        rustix::fs::syncfs(&file).unwrap();
+                    }
+                }
+                Ok(())
+            });
+            assert!(
+                filler.is_some(),
+                "inverse fault boundary not reached: {action:?}/{at:?}"
+            );
+            drop(filler);
+            let operation = match result.expect_err("full volume must interrupt rollback") {
+                Error::Io {
+                    operation, source, ..
+                } => {
+                    assert_eq!(source.raw_os_error(), Some(28));
+                    operation
+                }
+                _ => panic!("expected real inverse ENOSPC: {action:?}/{at:?}"),
+            };
+            for (p, hash) in &durable {
+                assert_eq!(&Sha256::digest(fs::read(p).unwrap()).to_vec(), hash);
+            }
+            if matches!(at, At::Allocation) {
+                assert_eq!(mutations, 0);
+                assert!(paths.iter().zip(&applied).all(|(p, b)| identity(p) == *b));
+            }
+            if matches!(at, At::PartialCheckpoint) {
+                assert!(
+                    fs::read_dir(&txdir)
+                        .unwrap()
+                        .map(|e| e.unwrap().path())
+                        .any(|p| {
+                            p.extension().is_some_and(|e| e == "json")
+                                && !durable.contains_key(&p)
+                                && {
+                                    let bytes = fs::read(p).unwrap();
+                                    !bytes.is_empty()
+                                        && serde_json::from_slice::<serde_json::Value>(&bytes)
+                                            .is_err()
+                                }
+                        }),
+                    "inverse checkpoint must be genuinely partial and nonempty"
+                );
+            }
+            let d = journal::diagnose(&f.host).unwrap().remove(0);
+            assert!(d.blocks_writes());
+            assert!(RepositoryRegistry::register(&f.host, &f.lock, &f.repo).is_err());
+            let retried = rollback(&f, |_| Ok(())); // Fresh preview/approval, never replay the old one.
+            if d.problem.is_some() {
+                assert!(
+                    retried.is_err(),
+                    "malformed inverse tail must refuse recovery"
+                );
+                assert!(journal::diagnose(&f.host).unwrap()[0].blocks_writes());
+            } else {
+                retried.unwrap();
+                assert!(paths.iter().zip(&original).all(|(p, b)| identity(p) == *b));
+                assert!(
+                    journal::diagnose(&f.host)
+                        .unwrap()
+                        .iter()
+                        .all(|d| !d.blocks_writes())
+                );
+            }
+            for (p, hash) in &durable {
+                assert_eq!(&Sha256::digest(fs::read(p).unwrap()).to_vec(), hash);
+            }
+            println!(
+                "{action:?}/inverse/{at:?}: kernel errno=28; failed operation={operation}; mutations={mutations}; malformed={}",
+                d.problem.is_some()
+            );
+        }
+    }
 }
