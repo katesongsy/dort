@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tui:** separate menu navigation from contextual actions ([0d9e482](https://github.com/katesongsy/dort/commit/0d9e48225904690caeac61b3e45fd786fd1086bc))
+
 - **tui:** add contextual actions and help with visible ignore controls ([0d98d8d](https://github.com/katesongsy/dort/commit/0d98d8dea4398ab1fb5699605f16d43f23893aea))
 
 - **discover:** add persistent ignores and focused batch editing ([ec04936](https://github.com/katesongsy/dort/commit/ec0493618720ba92cc5e0746d7ad2873fca71e17))
