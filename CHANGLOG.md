@@ -7,6 +7,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Documentation
 
+- align architecture with bounded storage coverage ([a0bf1cf](https://github.com/katesongsy/dort/commit/a0bf1cf56161d824be74f3b24232ad366b4e2f26))
+
 - migrate end-user guides to docs/user and add validation gates ([cfaea64](https://github.com/katesongsy/dort/commit/cfaea6432c9875f129caba4e7f4f548d0e6d6fd6))
 
 - Add initial README ([1f32976](https://github.com/katesongsy/dort/commit/1f3297636c7d64be7d7d13fb979e6ca6caab5348))
