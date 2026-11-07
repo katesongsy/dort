@@ -73,4 +73,6 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Tests
 
+- cover batch and inverse ENOSPC failures ([8a715d8](https://github.com/katesongsy/dort/commit/8a715d8647fd7679e04de1775dedbddb182dde3b))
+
 - validate bounded macOS cross-device refusals ([5db5157](https://github.com/katesongsy/dort/commit/5db5157ecaeb7b9fc55be8458de19112171849bc))
