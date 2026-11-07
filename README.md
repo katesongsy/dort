@@ -236,6 +236,7 @@ cargo build --workspace --locked
 python3 scripts/check-docs.py --self-test
 python3 scripts/check-docs.py
 python3 scripts/test-terminal.py
+python3 scripts/test-cross-device-macos.py --self-test
 git diff --check
 ```
 

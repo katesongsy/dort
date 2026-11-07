@@ -44,6 +44,8 @@ jobs:
         run: |
           python3 scripts/check-docs.py --self-test
           python3 scripts/check-docs.py
+      - name: Mount-free cross-device launcher guard checks
+        run: python3 scripts/test-cross-device-macos.py --self-test
       - name: Disposable terminal lifecycle gate
         run: python3 scripts/test-terminal.py
       - run: git diff --exit-code

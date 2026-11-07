@@ -16,6 +16,7 @@ cargo build --workspace --locked
 python3 scripts/check-docs.py --self-test
 python3 scripts/check-docs.py
 python3 scripts/test-terminal.py
+python3 scripts/test-cross-device-macos.py --self-test
 git diff --check
 ```
 
@@ -72,6 +73,20 @@ Menu fixtures also check bottom-only navigation hints, numeric-key inertness and
 Appearance PTY fixtures pass explicit child-only TERM/locale/NO_COLOR environments to the binary, avoiding Python supervisor locale coercion. They independently check ASCII vs Unicode output, absence/presence of explicit color SGR, real tab clicks and form text/Tab input, no state creation and clean restoration. The bounded VT view and synthetic palettes are not evidence of physical terminal/theme/font review.
 
 The terminal-session failure/panic probe exists only in isolated test children, not as a production fault switch. Preserve the approved finish-writes-before-exit policy: preapproval cancel does nothing, an approved write is never detached/cooperatively stopped/automatically undone, and errors restore the terminal and join the owned worker. Forced termination cannot promise cleanup.
+
+## Opt-in macOS cross-device refusal checks
+
+The [macOS launcher](../scripts/test-cross-device-macos.py) requires separate explicit approval for its disposable mounted image; it is not part of ordinary CI:
+
+```sh
+python3 scripts/test-cross-device-macos.py --self-test
+# Only after approving this bounded disposable-image scope:
+python3 scripts/test-cross-device-macos.py --approved-disposable-image
+```
+
+It builds fresh test binaries before mounting, then creates only a fresh temporary scope and a 128 MiB HFS+ image. It requires a non-root macOS user, uses system disk tools without sudo, verifies the exact image/device/mount, enabled ownership, bounded volume and distinct filesystem identities, and supplies private marked fixture directories to isolated test children. HOME/XDG/TMPDIR changes apply only to those children. No existing volume, real dotfile, disk filling or fault injection is used. The opt-in run requires all three adoption, apply and bootstrap refusal tests to pass without skips; ordinary macOS tests explicitly skip when this image fixture is absent. Linux retains its `/dev/shm` probe.
+
+The launcher owns and reaps its child process groups before normal detach and removes only its own scope afterward. An uncertain attachment or failed detach/verification retains the exact scope and stops; never force/lazy detach or delete a mounted scope. Its marker is a fixture guard, not protection against a malicious same-user race. These tests establish same-filesystem refusal and guarded recovery only, not inverse exhaustion, failing sync or power-loss safety. Candidate-specific results belong in ignored evidence records.
 
 ## Opt-in bounded storage checks
 

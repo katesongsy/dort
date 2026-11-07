@@ -585,15 +585,15 @@ fn every_resumed_bootstrap_boundary_is_restartable_and_approval_is_head_bound() 
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn cross_device_bootstrap_refuses_before_repository_or_registration_publication() {
     let Some(git) = git() else {
+        eprintln!("SKIP cross-device case: Git unavailable");
         return;
     };
     let mut t = TestHome::new();
-    let Ok(other) = tempfile::tempdir_in("/dev/shm") else {
-        eprintln!("SKIP cross-device case: /dev/shm is unavailable");
+    let Some(other) = support::cross_device_dir() else {
         return;
     };
     let other_path = other.path().canonicalize().unwrap();

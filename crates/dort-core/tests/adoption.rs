@@ -750,11 +750,10 @@ fn another_context_lock_or_an_unregistered_repository_cannot_authorize_adoption(
     assert!(journal::diagnose(&f.host).unwrap().is_empty());
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn different_filesystem_state_has_no_cross_device_copy_fallback() {
-    let Ok(state) = tempfile::tempdir_in("/dev/shm") else {
-        eprintln!("SKIP cross-device case: /dev/shm is unavailable");
+    let Some(state) = support::cross_device_dir() else {
         return;
     };
     let f = support::TestHome::new();

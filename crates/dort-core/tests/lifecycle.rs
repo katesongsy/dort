@@ -873,11 +873,10 @@ fn wrong_lock_and_unregistered_repository_are_refused_before_journalling() {
     assert!(journal::diagnose(&f.home.host).unwrap().is_empty());
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn separate_filesystems_are_refused_without_live_mutations_when_available() {
-    let Ok(other) = tempfile::tempdir_in("/dev/shm") else {
-        eprintln!("SKIP cross-device case: /dev/shm is unavailable");
+    let Some(other) = support::cross_device_dir() else {
         return;
     };
     let home = support::TestHome::new();

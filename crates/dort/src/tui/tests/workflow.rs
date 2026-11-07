@@ -58,7 +58,7 @@ impl Fixture {
 }
 // Sequential observations are not globally atomic: sibling test directories churn.
 // Match the core approval digest's parent-only normalization, retaining identity/mode/owner.
-fn assert_plan_parity(actual: &dort_core::planner::Plan, expected: &dort_core::planner::Plan) {
+fn assert_observation_parity(actual: &impl serde::Serialize, expected: &impl serde::Serialize) {
     fn normalize(value: &mut serde_json::Value) {
         match value {
             serde_json::Value::Object(map) => {
@@ -89,7 +89,7 @@ fn assert_plan_parity(actual: &dort_core::planner::Plan, expected: &dort_core::p
     normalize(&mut expected);
     assert!(
         actual == expected,
-        "CLI/shared and TUI plans differ after parent-only churn normalization"
+        "CLI/shared and TUI observations differ after parent-only churn normalization"
     );
 }
 fn key(app: &mut App, code: KeyCode) -> Option<Task> {
@@ -925,10 +925,7 @@ fn discovery_is_independent_metadata_only_and_keeps_exact_candidate_identity() {
     let discovery = app.discovery.as_ref().unwrap();
     assert!(discovery.repository.is_none());
     let core = dort_core::discovery::discover(&fixture.host, None).unwrap();
-    assert_eq!(
-        serde_json::to_value(&discovery.report).unwrap(),
-        serde_json::to_value(core).unwrap()
-    );
+    assert_observation_parity(&discovery.report, &core);
     let screen = super::tests::render(&app, 240, 50);
     assert!(
         screen.contains(".q?config") && screen.contains("Eligible hint"),
@@ -1090,7 +1087,7 @@ fn adoption_retains_all_input_through_missing_repository_picker_and_attachment()
     let super::actions::Pending::Files(plan) = &app.preview.as_ref().unwrap().pending else {
         panic!("file plan")
     };
-    assert_plan_parity(plan, &expected);
+    assert_observation_parity(plan, &expected);
     let task = approve(&mut app);
     let refresh = run_task(&mut app, &fixture, task).unwrap();
     let discover = run_task(&mut app, &fixture, refresh).unwrap();
@@ -1291,7 +1288,7 @@ fn temporary_profiles_are_mandatory_union_and_drive_full_inventory_and_plans() {
         )
         .unwrap(),
     );
-    assert_plan_parity(plan, &expected);
+    assert_observation_parity(plan, &expected);
     assert!(plan.inputs.active_profiles.contains("extra"));
     key(&mut app, KeyCode::Esc);
     let task = key(&mut app, KeyCode::Char('c')).unwrap();
