@@ -67,6 +67,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Fixes
 
+- **release:** bundle dependency and Rust library notices ([09d3d4f](https://github.com/katesongsy/dort/commit/09d3d4fc5b1bac6d521c2adf01d7f26cadcfe5b1))
+
 - **tui:** polish navigation, reviews and managed-file workflows ([065d364](https://github.com/katesongsy/dort/commit/065d3647b2cd62f3bdb9eaae9a6ca1725e94ff6c))
 
 - **tui:** improve compact navigation and discovery eligibility ([57dc8d3](https://github.com/katesongsy/dort/commit/57dc8d3ea7429fee3ba5d54676a0b2aad0fab50c))
