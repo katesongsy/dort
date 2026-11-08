@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tools:** add explicitly approved provider inspection core ([593f64e](https://github.com/katesongsy/dort/commit/593f64e05606a0a03f035f6f2cd600ff8cfd3c1f))
+
 - prepare crates.io source packages ([3a941af](https://github.com/katesongsy/dort/commit/3a941af1ec58c5d46bfcf4372563ff7cf9297d8d))
 
 ### Maintenance
