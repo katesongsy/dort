@@ -8,6 +8,10 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 ### Features
 
 - prepare crates.io source packages ([3a941af](https://github.com/katesongsy/dort/commit/3a941af1ec58c5d46bfcf4372563ff7cf9297d8d))
+
+### Tests
+
+- isolate bootstrap subprocess fixtures ([2f93d88](https://github.com/katesongsy/dort/commit/2f93d88b815c77d05417b525eae663fde244ae02))
 ## v0.1.0 — 2026-11-08
 
 ### Documentation
