@@ -15,6 +15,10 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 - prepare crates.io source packages ([3a941af](https://github.com/katesongsy/dort/commit/3a941af1ec58c5d46bfcf4372563ff7cf9297d8d))
 
+### Maintenance
+
+- validate mise independently from Homebrew ([bbf8e0d](https://github.com/katesongsy/dort/commit/bbf8e0d6e21a6ca9e45740ec911e91bcb33f3117))
+
 ### Tests
 
 - serialize independent workspace test cases ([cfe38c7](https://github.com/katesongsy/dort/commit/cfe38c70d18bffea02f43130382ebd97db98c535))
