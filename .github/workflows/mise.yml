@@ -1,0 +1,33 @@
+name: Mise installation
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up pinned mise without installing project tools
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b
+        with:
+          version: "2026.11.4"
+          install: false
+          cache: false
+      - name: Runtime evidence
+        run: |
+          uname -sm
+          python3 --version
+          mise --version
+      - name: Test GitHub backend in disposable HOME
+        run: python3 scripts/test-mise.py
+      - name: Check source remained unchanged
+        run: |
+          git diff --exit-code
+          git diff --check

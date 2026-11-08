@@ -31,9 +31,17 @@ The [documentation checker](../scripts/check-docs.py) scans maintained root Mark
 
 The [source-package guards](../scripts/check-crates.py) check registry-restricted metadata, matching core dependency versions, canonical license/example copies and literal Rust include resources. Cargo packages and builds both workspace archives, staging interdependent crates in a temporary local registry before initial publication. Archive guards then bind the exact clean commit and compare source/resource bytes and standalone manifests. Mount-free self-tests exercise missing/out-of-package resources and unsafe/duplicate tar paths. These checks do not authenticate or upload; `cargo publish --dry-run` is an additional non-upload check, never permission to publish. See [release mechanics](releases.md) for the separate irreversible publication boundary.
 
-## Package-manager integration checks
+## Homebrew integration checks
 
-The separate [Homebrew tap CI](https://github.com/katesongsy/homebrew-tap/actions) validates all four supported native OS/CPU combinations against the published release assets. It checks formula URL/digest selection and Linux compatibility refusals, installs/tests the real formula in disposable runners, and tests mise's direct GitHub backend with isolated canonical HOME/config/cache/data/state. The mise-selected executable must match the independently verified native release binary; application `--version` runs in a separate empty HOME and must create no state. License/notices/provenance are retained by the formula. Pinned official setup actions install tools only in those disposable runners; a temporary verified mise binary can run the same fixture locally without changing workstation installations. This is installation/selection evidence, not new dotfile workflow or OS-support coverage. See [release mechanics](releases.md#homebrew-and-mise-distribution) for maintenance and publication boundaries.
+The separate [Homebrew tap CI](https://github.com/katesongsy/homebrew-tap/actions) owns only Homebrew checks across the four supported native OS/CPU combinations. It checks formula URL/digest selection and Linux compatibility refusals, installs/tests the real formula in disposable runners, retains license/notices/provenance and runs application `--version` in a separate empty child HOME. It does not install or validate mise. See [Homebrew release mechanics](releases.md#homebrew-distribution).
+
+## Mise integration checks
+
+This repository's separate [mise workflow](../.github/workflows/mise.yml) runs [the GitHub-backend integration check](../scripts/test-mise.py) on all four supported native OS/CPU combinations. It uses isolated canonical HOME/config/cache/data/state, requires the selected executable to match the independently verified release-binary receipt and runs application `--version` in a separate empty HOME without creating state. The pinned official mise setup action installs tools only in disposable runners. A temporary verified mise binary can run the same fixture locally without changing workstation installations. This is installation/selection evidence, not new dotfile workflow or OS-support coverage. See [mise release mechanics](releases.md#mise-distribution). With a trusted mise executable, run the optional integration fixture explicitly:
+
+```sh
+python3 scripts/test-mise.py --mise /absolute/path/to/mise
+```
 
 ## Fixture and external-tool boundaries
 

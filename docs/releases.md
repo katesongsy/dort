@@ -37,13 +37,19 @@ Each package includes its own README, MIT license, source/tests and example mani
 
 The initial [`dort`](https://crates.io/crates/dort/0.1.0) and [`dort-core`](https://crates.io/crates/dort-core/0.1.0) Cargo 0.1.0 packages originate from later packaging-only commits than the already published GitHub `v0.1.0` tag. Their `.cargo_vcs_info.json` records the source commit; keep the existing tag and assets unchanged rather than implying the snapshots are identical. Package verification is not publication, and registry package versions cannot be overwritten.
 
-## Homebrew and mise distribution
+## Homebrew distribution
 
-The separate public [Homebrew tap](https://github.com/katesongsy/homebrew-tap) installs the existing native release archives with platform-specific SHA-256 values; it does not rebuild Dort or publish upstream assets. Its formula supports macOS 15+ and Ubuntu 24.04+ on x86_64/ARM64, refuses older/non-Ubuntu Linux hosts and retains licenses/notices/provenance. A fully qualified install automatically taps the repository; a bare `brew install dort` requires the one-time tap. This is not Homebrew Core inclusion.
+The separate public [Homebrew tap](https://github.com/katesongsy/homebrew-tap) owns only Homebrew packaging and validation. Its formula installs existing native release archives with platform-specific SHA-256 values; it does not rebuild Dort or publish upstream assets. It supports macOS 15+ and Ubuntu 24.04+ on x86_64/ARM64, refuses older/non-Ubuntu Linux hosts and retains licenses/notices/provenance. A fully qualified install automatically taps the repository; a bare `brew install dort` requires the one-time tap. This is not Homebrew Core inclusion.
 
-Mise uses the built-in `github:katesongsy/dort` backend with a pinned release version; no separate plugin, upload or registry alias is involved. The tap's four-platform CI checks real Homebrew install/test and real mise selection against independently verified release-binary hashes. Application version checks use disposable child HOME/config/state; workstation package managers and real dotfiles are not test fixtures. These checks establish installation/version behavior, not real-home workflow usability or broader OS compatibility.
+After a separately authorized upstream release is published and verified, update the tap formula's version/URLs/checksums and release receipts together, then validate the exact tap candidate. Its read-only four-platform CI installs/tests only the Homebrew formula in disposable runners. It never publishes releases or updates formulae automatically. Existing release tags/assets remain immutable.
 
-After a separately authorized upstream release is published and verified, update the tap formula's version/URLs/checksums and its release-binary receipts together, then validate the exact tap candidate. The tap CI has read-only repository permissions and never publishes releases or updates formulae automatically. Existing release tags/assets remain immutable. Homebrew Core or mise short-name submissions are separate upstream processes; APT repository hosting/signing is not configured.
+## Mise distribution
+
+Mise uses the built-in `github:katesongsy/dort` backend with a pinned release version; no separate plugin, upload or registry alias is involved. This repository owns the separate [mise workflow](../.github/workflows/mise.yml), [integration check](../scripts/test-mise.py) and native release-binary receipts. Mise support does not live in the Homebrew tap.
+
+The mise check installs the real tool through the GitHub backend into disposable canonical HOME/config/cache/data/state, verifies selection against independently verified release-binary hashes, and runs the application version check in a separate empty child HOME. No workstation installation or real dotfile is a fixture. The read-only four-platform workflow uses a pinned mise setup action and never changes upstream assets or submits registry entries. This establishes installation/version behavior, not real-home workflow usability or broader OS compatibility. Update the mise receipt when validating a newer pinned release.
+
+Homebrew Core and mise short-name submissions are separate upstream processes. APT repository hosting/signing is not configured.
 
 ## Generated history
 

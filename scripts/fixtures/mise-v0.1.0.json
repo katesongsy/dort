@@ -1,0 +1,27 @@
+{
+  "version": "0.1.0",
+  "tag": "v0.1.0",
+  "commit": "8d6cb77f1a9847279f3a608f5a495825058e101e",
+  "targets": {
+    "aarch64-apple-darwin": {
+      "url": "https://github.com/katesongsy/dort/releases/download/v0.1.0/dort-v0.1.0-aarch64-apple-darwin.tar.gz",
+      "archive_sha256": "aaa271c5b864b76a6fed2b6169ed43649313615d8de0a20497ffbbe02c028ab5",
+      "binary_sha256": "b0ecf5ca6e321ca15a50c8ba3bb67478f89b3049ecf162d3a9700d7d9464d2bf"
+    },
+    "aarch64-unknown-linux-gnu": {
+      "url": "https://github.com/katesongsy/dort/releases/download/v0.1.0/dort-v0.1.0-aarch64-unknown-linux-gnu.tar.gz",
+      "archive_sha256": "c22ffeeeede8ccf9697d7ed5cfa6ad3091a65d9ecc02e650124621ffea04d226",
+      "binary_sha256": "ada41600fbe9b383418d9261d270de021ebc4f99a53eefc680a26640bbdfd174"
+    },
+    "x86_64-apple-darwin": {
+      "url": "https://github.com/katesongsy/dort/releases/download/v0.1.0/dort-v0.1.0-x86_64-apple-darwin.tar.gz",
+      "archive_sha256": "b0dd05a3e2fdaad00436fd45d26c07333e748c38dd0a6478b027859bf645499e",
+      "binary_sha256": "415ba745a52cd4460953c6ab4bfe177fc4e151f528b8fa7546b03d4e6bbc90d3"
+    },
+    "x86_64-unknown-linux-gnu": {
+      "url": "https://github.com/katesongsy/dort/releases/download/v0.1.0/dort-v0.1.0-x86_64-unknown-linux-gnu.tar.gz",
+      "archive_sha256": "4679bec0653ce963c762a95063bd2badcead12a99fb8d0352653a85c508388c6",
+      "binary_sha256": "125e152c8004491288891f387bffb0425ce0405c3cf4c0cdc14c4b76a319f0a6"
+    }
+  }
+}
