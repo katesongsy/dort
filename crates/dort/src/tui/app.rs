@@ -16,6 +16,7 @@ pub enum Tab {
     Recovery,
     Checks,
     Git,
+    Tools,
 }
 impl Tab {
     pub fn next(self) -> Self {
@@ -24,11 +25,12 @@ impl Tab {
             Self::Files => Self::Recovery,
             Self::Recovery => Self::Checks,
             Self::Checks => Self::Git,
-            Self::Git => Self::Overview,
+            Self::Git => Self::Tools,
+            Self::Tools => Self::Overview,
         }
     }
     pub fn previous(self) -> Self {
-        self.next().next().next().next()
+        self.next().next().next().next().next()
     }
 }
 pub struct Preview {
@@ -83,6 +85,7 @@ pub struct App {
     pub launch_directory: PathBuf,
     pub git: Result<PathBuf, String>,
     pub git_view: super::git::State,
+    pub tools_view: super::tools::State,
     pub result: Option<String>,
     pub receipt: Option<super::task_surfaces::Receipt>,
     pub show_result: bool,
@@ -136,6 +139,7 @@ impl App {
             launch_directory: PathBuf::from("/"),
             git: Err("Git unavailable; install Git separately and restart Dort".into()),
             git_view: super::git::State::new(),
+            tools_view: Default::default(),
             result: None,
             receipt: None,
             show_result: false,
@@ -281,6 +285,18 @@ impl App {
                 self.status =
                     "Read-only Diagnostics loaded; unavailable observations include their cause."
                         .into();
+            }
+            Ok(Output::ToolsPreview(preview)) => {
+                if self.tab == Tab::Tools && !self.quit {
+                    self.tools_view.reviewed(preview);
+                    self.status =
+                        "Review exact query and risks. No provider has executed yet.".into();
+                }
+            }
+            Ok(Output::ToolsReport(report)) => {
+                let available = report.available();
+                self.tools_view.completed(report);
+                self.status = if available { "Inspection complete: provider claims only; no ownership or binary identity verified." } else { "Provider observation unavailable; a retry requires a fresh review and approval." }.into();
             }
             Ok(Output::Git(report)) => {
                 self.git_view.accept(
@@ -792,6 +808,25 @@ impl App {
                 }
                 None
             }
+            Target::ToolsRow(index) => {
+                self.tools_view.selected = index;
+                None
+            }
+            Target::ToolsControl(index, activate) => {
+                if self.tab != Tab::Tools || !self.tools_view.configuring {
+                    return None;
+                }
+                self.tools_view.focus = index;
+                if activate {
+                    self.key(
+                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                        width,
+                        height,
+                    )
+                } else {
+                    None
+                }
+            }
             Target::FormControl(index, activate) => {
                 match self.shell.overlay {
                     Some(Overlay::Form(Form::Adopt)) => self.shell.adoption.focused = index,
@@ -1022,6 +1057,7 @@ impl App {
                 _ => None,
             };
             if let Some(tab) = destination {
+                self.tools_view.leave();
                 self.tab = tab;
                 self.selected = 0;
                 self.git_view.discard_patch();
@@ -1057,6 +1093,9 @@ impl App {
                     }
                     if self.tab == Tab::Git {
                         return self.git_task();
+                    }
+                    if self.tab == Tab::Tools {
+                        return Some(self.tools_view.prepare());
                     }
                     return Some(self.refresh_task());
                 }
@@ -1214,6 +1253,11 @@ impl App {
                 return self.intent(intent);
             }
             return None;
+        }
+        if self.tab == Tab::Tools
+            && let Some(task) = self.tools_view.key(key, self.dry_run)
+        {
+            return task;
         }
         // Only Discover offers region focus; forms and disclosures retain local routing.
         if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) && !self.text_entry() {
@@ -1567,6 +1611,7 @@ impl App {
             self.navigation.menu = None;
             self.confirmation = None;
             self.git_view.resize();
+            self.tools_view.shrink();
         } else if let Some(preview) = &mut self.preview {
             preview.clamp_scroll(width, height);
         }
@@ -1800,6 +1845,7 @@ impl App {
                 self.status = "Patch viewing needs a loaded Unstaged or Staged summary. Type literal view patch in its warning to disclose once.".into();
             }
             Action::Destination(tab) => { self.go_tab(tab); if tab == Tab::Files { self.discovering = false; } }
+            Action::ToolsConfigure => { self.go_tab(Tab::Tools); self.tools_view.configure(); }
             Action::Choose => self.shell.overlay = Some(Overlay::Repositories { selected: 0 }),
             Action::Init => { self.shell.path_focused = 0; self.shell.overlay = Some(Overlay::Form(Form::Init)); }
             Action::ManageIgnored => return Some(Task::IgnoredPaths),
@@ -1910,6 +1956,7 @@ impl App {
         self.batch_editor.as_ref().is_some_and(|e| e.open)
             || self.shell.text_entry()
             || (self.tab == Tab::Git && self.git_view.text_entry())
+            || (self.tab == Tab::Tools && self.tools_view.text_entry())
             || (self.tab == Tab::Recovery && self.history_search.editing)
             || (self.shell.overlay.is_none()
                 && self.tab == Tab::Files

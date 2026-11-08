@@ -76,6 +76,10 @@ mod task_surface_tests;
 mod task_surfaces;
 #[cfg(test)]
 mod tests;
+mod tools;
+#[cfg(test)]
+#[path = "tests/tools.rs"]
+mod tools_tests;
 mod tree;
 mod views;
 mod visibility;

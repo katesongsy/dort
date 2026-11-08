@@ -21,6 +21,7 @@ pub enum Topic {
     Diagnostics,
     Git,
     GitContent,
+    Tools,
     Actions,
     Menu,
     Form(Form),
@@ -46,6 +47,7 @@ impl Topic {
             Self::Checks => "Manifest checks",
             Self::Diagnostics => "Diagnostics",
             Self::Git => "Git inspection",
+            Self::Tools => "Explicit provider inspection",
             Self::GitContent => "Git content disclosure",
             Self::Actions => "Actions",
             Self::Menu => "Navigation menus",
@@ -64,11 +66,14 @@ impl Topic {
     }
     fn instructions(self) -> &'static str {
         match self {
+            Self::Tools => {
+                "Tools never queries providers on entry. c configures trusted absolute paths; Space cycles the provider. Tab moves fields and Enter advances to Review. Inspect exact arguments and config/cache risks; type inspect then Enter to execute once. Preview-only and small layouts cannot execute. Results are provider claims, not ownership. / searches metadata; d shows full scope; r prepares a fresh review, never replays approval. Esc retains drafts. No installs are available."
+            }
             Self::Menu => {
                 "Menus organize navigation and session commands. Left/Right selects a menu; Up/Down chooses an item; Enter opens it, or press its labeled shortcut. In compact layouts choose a group first; Left returns to groups. Esc closes. Unavailable entries show the requirement to continue. Operation and patch commands open their respective review screens."
             }
             Self::Overview => {
-                "Overview summarizes repository, profiles and file state. Session selects a repository or creates/attaches one. Files offers discovery and managed mappings; Checks validates declarations; Recovery inspects retained transactions; Git shows status and diffs."
+                "Overview summarizes repository, profiles and file state. Session selects a repository or creates/attaches one. Files offers discovery and managed mappings; Checks validates declarations; Recovery inspects retained transactions; Git shows status and diffs; Tools separately reviews and approves provider queries."
             }
             Self::Discover => {
                 "Up/Down selects a path; h/l folds directories. Space marks eligible files, including matching folded descendants. Enter inspects metadata. Adopt selected edits target, ID and source; E reviews marked adoption. I reviews Ignore selected; Files > Ignored paths manages saved exclusions. / filters the list."
@@ -196,6 +201,7 @@ pub fn topic(app: &App) -> Topic {
         Tab::Checks => Topic::Checks,
         Tab::Git if app.git_view.sensitive() => Topic::GitContent,
         Tab::Git => Topic::Git,
+        Tab::Tools => Topic::Tools,
     }
 }
 /// Text focus is surface-specific; background retained forms do not steal task/error Help.

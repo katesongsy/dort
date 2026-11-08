@@ -459,6 +459,8 @@ pub enum Task {
     History,
     Diagnostics,
     Git(super::git::Read),
+    ToolsPrepare(crate::services::tools::Request),
+    ToolsInspect(crate::services::tools::Approval),
     Refresh,
     Discover,
     Check {
@@ -491,6 +493,8 @@ pub enum Output {
     },
     Diagnostics(Diagnostics),
     Git(super::git::Report),
+    ToolsPreview(crate::services::tools::Preview),
+    ToolsReport(crate::services::tools::Report),
     Data(Data),
     Discovery(crate::services::Discovery),
     Checked {
@@ -524,6 +528,8 @@ pub fn perform_scoped(
     observer: impl FnMut(&Event) -> Result<()>,
 ) -> Result<Output> {
     match task {
+        Task::ToolsPrepare(request) => request.prepare(host).map(Output::ToolsPreview),
+        Task::ToolsInspect(approval) => Ok(Output::ToolsReport(approval.inspect())),
         Task::IgnoredPaths => Ok(Output::IgnoredPaths(
             dort_core::discovery_ignore::Rules::load(host)?
                 .paths()

@@ -64,7 +64,7 @@ fn entry(action: Action, primary: Option<usize>) -> Entry {
         Apply | Keep | Remove | IgnoreSelected | Rollback | Resume | Abandon | ApplyMarked
         | KeepMarked | RemoveMarked => Effect::Preview,
         Adopt | AdoptSelected | BatchAdopt | KeepId | RemoveId | Init | CheckStandalone
-        | Profiles | StandaloneProfiles => Effect::Draft,
+        | Profiles | StandaloneProfiles | ToolsConfigure => Effect::Draft,
         GitPatch => Effect::Disclosure,
         Discover | Refresh | CheckCurrent | Diagnostics | GitStatus | GitUnstaged | GitStaged
         | GitRefresh => Effect::Read,
@@ -127,6 +127,7 @@ pub fn entries(app: &App) -> Vec<Entry> {
             vec![StandaloneProfiles, Refresh],
         ),
         Tab::Git => (vec![GitPatch, GitRefresh], vec![ClearFilter]),
+        Tab::Tools => (vec![ToolsConfigure], vec![]),
     };
     let mut rows: Vec<_> = primary
         .into_iter()

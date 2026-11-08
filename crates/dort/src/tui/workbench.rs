@@ -160,6 +160,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
         "All repositories"
     } else if app.tab == Tab::Git {
         "Independent Git scope"
+    } else if app.tab == Tab::Tools {
+        "Explicit provider scope"
     } else {
         name
     };
@@ -201,6 +203,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
         match app.tab {
             Tab::Files => super::files::draw(frame, content[0], app),
             Tab::Git => app.git_view.draw(frame, content[0], app.busy, &app.hits),
+            Tab::Tools => app
+                .tools_view
+                .draw(frame, content[0], app.dry_run, &app.hits),
             Tab::Overview => super::observations::overview(frame, content[0], app),
             Tab::Checks => super::observations::checks(frame, content[0], app),
             Tab::Recovery => super::recovery::draw(frame, content[0], app),

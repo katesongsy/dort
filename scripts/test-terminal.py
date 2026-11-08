@@ -226,7 +226,7 @@ class Session:
         fcntl.ioctl(self.slave, termios.TIOCSWINSZ, struct.pack("HHHH", *size, 0, 0))
         os.killpg(self.process.pid, signal.SIGWINCH)
 
-    def finish(self, expected=0):
+    def finish(self, expected=0, tui=True):
         deadline = time.monotonic() + TIMEOUT
         while self.code is None and time.monotonic() < deadline:
             self.pump()
@@ -242,8 +242,9 @@ class Session:
         before[3] &= ~getattr(termios, "PENDIN", 0)
         after[3] &= ~getattr(termios, "PENDIN", 0)
         assert after == before, "Terminal attributes were not restored"
-        assert b"\x1b[?1049l" in self.data, "Alternate screen was not left"
-        for mode in (1000, 1002, 1003, 1015, 1006):
+        if tui:
+            assert b"\x1b[?1049l" in self.data, "Alternate screen was not left"
+        for mode in ((1000, 1002, 1003, 1015, 1006) if tui else ()):
             enabled = f"\x1b[?{mode}h".encode()
             disabled = f"\x1b[?{mode}l".encode()
             assert enabled in self.data, "Mouse capture was not enabled"
@@ -258,6 +259,76 @@ def has_color_sgr(data):
                or value in range(90, 108)
                for match in re.finditer(rb"\x1b\[([0-9;]*)m", data)
                for value in [int(part or b"0") for part in match[1].split(b";")])
+
+
+def tools_workflows(binary, base, env):
+    home = base / 'tools-home'
+    home.mkdir(mode=0o700)
+    tools_env = dict(env, HOME=str(home), XDG_CONFIG_HOME=str(home / '.config'),
+                     XDG_STATE_HOME=str(home / '.local/state'))
+    executable = base / 'fake-provider'
+    executable.write_text('#!/bin/sh\nprintf ran >> "$HOME/calls"\n'
+                          "printf '{\"formulae\":[{\"full_name\":\"ripgrep\",\"installed\":[{\"version\":\"14.1.0\"}]}]}'\n")
+    executable.chmod(0o700)
+    with Session([binary, 'tui'], tools_env) as session:
+        session.wait(b'loaded.')
+        session.send(b'\x1b[D')  # Overview -> Tools, no provider query on entry.
+        session.wait(b'No provider has been queried')
+        session.send(b'c\t' + str(executable).encode() + b'\t/no-external-programs\t\r')
+        session.wait(b'Type inspect')
+        assert not (home / 'calls').exists(), 'Provider executed during review'
+        session.send(b'yes\r')
+        session.settle()
+        assert not (home / 'calls').exists(), 'Write confirmation approved inspection'
+        session.send(b'\x15inspect')
+        session.resize((13, 47))
+        session.wait(b'terminal too small')
+        session.resize((24, 80))
+        session.wait(b'Type inspect')
+        session.send(b'\r')
+        session.settle()
+        assert not (home / 'calls').exists(), 'Resize retained inspection approval'
+        session.send(b'inspect\r')
+        session.wait(b'1 shown / 1 provider claims')
+        session.send(b'/RIPGREP\r')
+        session.wait(b'ripgrep')
+        session.send(b'r')
+        session.wait(b'Type inspect')
+        session.send(b'\r')
+        session.settle()
+        assert (home / 'calls').read_text() == 'ran', 'Retry replayed inspection approval'
+        session.send(b'\x1b')
+        session.wait(b'Trusted executable')
+        session.send(b'\x1b')
+        session.wait(b'Provider claims')
+        session.send(b'q')
+        session.finish()
+    assert sorted(p.name for p in home.iterdir()) == ['calls'], 'Inspection created Dort state'
+    print('PASS Tools explicit query review, literal confirmation, resize, search and fresh retry')
+    with Session([binary, '--dry-run', 'tui'], tools_env, (14, 48)) as session:
+        session.wait(b'loaded.')
+        session.send(b'\x1b[Dc\t' + str(executable).encode() + b'\t/no-external-programs\t\r')
+        session.wait(b'execution disabled')
+        session.send(b'inspect\r')
+        session.settle()
+        assert (home / 'calls').read_text() == 'ran'
+        session.send(b'\x1b')
+        session.wait(b'Review exact query')
+        session.settle()
+        session.send(b'\x1b')
+        session.wait(b'No provider has been queried')
+        session.send(b'q')
+        session.finish()
+    print('PASS compact preview-only Tools cannot execute providers')
+    with Session([binary, 'tools', 'inspect', 'brew', '--executable', str(executable),
+                  '--search-dir', '/no-external-programs'], tools_env) as session:
+        session.wait(b'Type inspect')
+        assert (home / 'calls').read_text() == 'ran'
+        session.send(b'inspect\n')
+        session.finish(tui=False)
+    assert (home / 'calls').read_text() == 'ranran'
+    assert sorted(p.name for p in home.iterdir()) == ['calls']
+    print('PASS interactive CLI provider inspection requires literal inspect')
 
 
 def run():
@@ -285,6 +356,8 @@ def run():
                 session.finish()
             assert not list(home.iterdir()), "Read-only TUI startup created state"
             print("PASS entry/exit", args, size)
+
+        tools_workflows(binary, base, env)
 
         # Text carries navigation/state meaning even with a low-color terminal.
         with Session([binary, "--dry-run", "tui"], dict(env, TERM="vt100", NO_COLOR="1"), (14, 48)) as session:

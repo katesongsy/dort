@@ -14,7 +14,7 @@ Start with the [user guide](user/README.md):
 ## Durable technical references
 
 - [Architecture](../ARCHITECTURE.md): implemented module boundaries, execution, persistence and recovery contracts.
-- [Provider inspection](tools-inspection.md): core-only approval, process, metadata and runtime-binding boundaries.
+- [Provider inspection](tools-inspection.md): shared CLI/TUI approval, process, metadata and runtime-binding boundaries.
 - [Validation methods](validation.md): test isolation, repeatable checks, terminal/storage harnesses and what their results mean.
 - [Release mechanics](releases.md): native artifacts, provenance and tag-triggered publication guards.
 - [Contributor instructions](../AGENTS.md): workflow, safety constraints and documentation maintenance.

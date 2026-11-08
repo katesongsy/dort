@@ -6,9 +6,9 @@ Dort is a Git-native developer environment manager. It is designed to reconcile 
 
 ## Current status
 
-**v0.1.0 — experimental CLI and TUI.** Dort provides strict manifest validation, profile/dependency resolution, bounded discovery, descriptor-safe observation, pure previews, hardened read-only Git status/diff, local repository init/attach, and approved adoption, link apply, unmanage and guarded recovery with immutable journals.
+**Experimental CLI and TUI — development after v0.1.0.** Dort provides strict manifest validation, profile/dependency resolution, bounded discovery, descriptor-safe observation, pure previews, hardened read-only Git status/diff, local repository init/attach, and approved adoption, link apply, unmanage and guarded recovery with immutable journals.
 
-A Ratatui interface provides Overview, session repository selection, guided local create/attach, temporary profiles, Files discovery/adoption, manifest checks, host Diagnostics/About, searchable all-repository Recovery, read-only Git inspection, previews, explicit approval and responsive progress over the same core services. The CLI/TUI do not execute package managers. A [core-only, explicitly approved inspection service](docs/tools-inspection.md) exists, but frontend tool inventory and package installation remain unimplemented. Remote cloning/sync, Git staging/commit/push, templates and secrets are **not implemented**. A successful preview is not permission or an executable artifact for a later write. The executor is tested only against disposable homes; this is not yet a production-ready dotfile manager.
+A Ratatui interface provides Overview, session repository selection, guided local create/attach, temporary profiles, Files discovery/adoption, manifest checks, host Diagnostics/About, searchable all-repository Recovery, read-only Git inspection, previews, explicit approval and responsive progress over the same core services. Tools offers [explicitly approved provider inspection](docs/user/commands.md#provider-inspection): fixed Homebrew/dpkg/mise/npm queries with trusted paths, risk disclosure, bounded execution and searchable metadata-only results. Provider configuration/plugins may execute code and caches/logs may change; this is not a sandbox. Passive checks/plans/status remain provider-free. Declared-tool reconciliation and package installation remain unimplemented. These Tools workflows are in the current source build, not the published v0.1.0 binaries. Remote cloning/sync, Git staging/commit/push, templates and secrets are **not implemented**. A successful preview is not permission or an executable artifact for a later write. The executor is tested only against disposable homes; this is not yet a production-ready dotfile manager.
 
 ## Documentation
 
@@ -71,7 +71,7 @@ cargo run -p dort -- --repo /path/to/dotfiles manifest check
 
 Without `--manifest` or `--repo`, repository commands use the active repository selected by `dort init PATH`. Discovery also works without a repository. Repeatable `--profile` affects only the current check/list/plan/file operation.
 
-JSON reports go to stdout; JSON errors go to stderr. Exit codes are 0 for success, 1 for I/O failure, 2 for invalid input/configuration or unsupported hosts, 3 for a held writer lock, and **4 for a blocked plan or recovery diagnosis reporting write blockers**. Those reports are still emitted in full on stdout (not as a separate stderr error). Mutations require confirmation or `--yes`; JSON/nonterminal writes require `--yes` and never prompt. `--dry-run` never creates state or locks.
+JSON reports go to stdout; JSON errors go to stderr. Exit codes are 0 for success, 1 for I/O failure or unavailable provider observation, 2 for invalid input/configuration or unsupported hosts, 3 for a held writer lock, and **4 for a blocked plan or recovery diagnosis reporting write blockers**. Those reports are still emitted in full on stdout (not as a separate stderr error). Mutations require confirmation or `--yes`; JSON/nonterminal writes require `--yes` and never prompt. `--dry-run` never creates state or locks.
 
 ## Interactive interface
 
@@ -190,7 +190,7 @@ mode = "link"
 
 `base` is built in and always active. Other profiles must appear in `profiles.available`. Effective profiles are the union of base, defaults, platform selections, and explicit local/requested profiles. Multiple profiles on a resource use OR semantics; an explicit empty resource profile list is invalid.
 
-See [examples/dort.toml](examples/dort.toml) for tool and future file-mode declarations. The checker validates these declarations but explicitly reports unsupported runtime capabilities. `manifest check` does not inspect provider availability, source contents, live symlinks, or installed versions. Use the separate file observation/preview commands for live-file diagnostics; tools remain unverified.
+See [examples/dort.toml](examples/dort.toml) for tool and future file-mode declarations. The checker validates these declarations but explicitly reports unsupported runtime capabilities. `manifest check` does not inspect provider availability, source contents, live symlinks, or installed versions. Use the separate file observation/preview commands for live-file diagnostics; tools remain unverified. Separate Tools inspection reports provider claims, not ownership or proof that a declared binary satisfies its policy.
 
 ## Local state and safety
 

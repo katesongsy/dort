@@ -56,6 +56,7 @@ python3 scripts/test-mise.py --mise /absolute/path/to/mise
 
 | Area | Suites / boundary |
 | --- | --- |
+| Explicit provider inspection | Core protocol/process fixtures and CLI/TUI state/view/PTY checks cover fixed queries, real-preview approval, explicit npm runtime binding, bounds/redaction, unavailable versus empty observations, retained drafts, caret/focus/selection styling, resize/preview-only guards and fresh retries. No installed provider/Node is required or queried; these checks do not establish real-provider compatibility or sandboxing. |
 | Manifest/profiles/planning | Core unit/integration tests verify strict parsing, dependency/selection rules, deterministic pure plans, unsupported effects and no-op behavior. |
 | Filesystem observation | [Observation](../crates/dort-core/tests/observation.rs) tests no-follow parents/terminal entries, unsafe paths, unreadable files, special files, hard links, bounds and sensitivity heuristics. Linux additionally permits real non-UTF-8/FIFO fixtures. |
 | File lifecycle | [Adoption](../crates/dort-core/tests/adoption.rs) and [lifecycle](../crates/dort-core/tests/lifecycle.rs) exercise fresh approvals, backup failures/corruption, immutable intent, forward/inverse interruption, stale/edit/parent guards, source preservation, separate removal acknowledgement and repeated apply. |

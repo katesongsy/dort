@@ -119,7 +119,7 @@ fn compact_forms_and_profile_picker_always_show_focused_control() {
     app.shell.overlay = None;
     app.tab = Tab::Overview;
     app.key(key(KeyCode::Left), 80, 24);
-    assert!(app.tab == Tab::Git);
+    assert!(app.tab == Tab::Tools);
     app.key(key(KeyCode::Right), 80, 24);
     assert!(app.tab == Tab::Overview);
 }

@@ -95,6 +95,28 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
             ),
             ("Esc", "Back"),
         ]);
+    } else if app.tab == Tab::Tools {
+        if app.tools_view.preview.is_some() {
+            keys.extend([
+                ("Enter", "Inspect once"),
+                ("Esc", "Draft"),
+                ("PgDn", "Query details"),
+            ]);
+        } else if app.tools_view.configuring {
+            keys.extend([
+                ("Tab", "Field"),
+                ("Enter", "Next / Review"),
+                ("Esc", "Back"),
+            ]);
+        } else {
+            keys.extend([
+                ("F10", "Menu"),
+                ("c", "Configure"),
+                ("r", "Fresh review"),
+                ("/", "Search"),
+                ("d", "Scope"),
+            ]);
+        }
     } else if app.text_entry() {
         keys.extend([("Enter", "Done"), ("Esc", "Back")]);
     } else {

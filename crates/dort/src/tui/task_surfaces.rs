@@ -39,6 +39,7 @@ pub struct Activity {
     pub operation: &'static str,
     pub scope: Vec<(&'static str, String)>,
     pub progress: Option<Progress>,
+    pub provider_inspection: bool,
 }
 pub struct Failure {
     pub cause: String,
@@ -99,6 +100,8 @@ impl Activity {
             Task::Rollback(..) => "Preview guarded rollback",
             Task::Bootstrap(..) => "Preview bootstrap recovery",
             Task::Git(_) => "Read Git",
+            Task::ToolsPrepare(_) => "Review provider query (no execution)",
+            Task::ToolsInspect(_) => "Execute explicitly approved provider inspection",
             Task::Execute(approved) => {
                 if let Some(reviewed) = &app.reviewed_activity {
                     return reviewed.clone();
@@ -115,6 +118,17 @@ impl Activity {
         };
         let mut scope = vec![];
         match task {
+            Task::ToolsPrepare(request) => {
+                scope.push(("Provider query", format!("{:?}", request.query)));
+                scope.push((
+                    "Trusted executable",
+                    request.executable.display().to_string(),
+                ));
+            }
+            Task::ToolsInspect(_) => scope.push((
+                "Scope",
+                "Explicit provider query; no package installation".into(),
+            )),
             // Only public scope metadata; never inspect Read, disclosure state or Diff.patch.
             Task::Git(_) => {
                 scope.push((
@@ -206,6 +220,7 @@ impl Activity {
             operation,
             scope,
             progress: None,
+            provider_inspection: matches!(task, Task::ToolsInspect(_)),
         }
     }
     pub fn for_pending(pending: &Pending) -> Self {
@@ -300,6 +315,7 @@ impl Activity {
             operation,
             scope,
             progress: None,
+            provider_inspection: false,
         }
     }
 }
@@ -492,6 +508,8 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
                 "Exit requested; waiting for worker"
             } else if app.writing {
                 "Approved work; quit waits for completion"
+            } else if app.activity.as_ref().is_some_and(|a| a.provider_inspection) {
+                "Approved provider query; configuration/cache side effects possible"
             } else {
                 "Read-only task in progress"
             },

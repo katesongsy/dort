@@ -22,10 +22,11 @@ Dort helps describe a development environment in a Git repository. The experimen
 | Create/attach a local repository | Experimental: interactive Actions → Create/attach, or `init PATH`. |
 | Adopt/deploy/unmanage regular-file links | Experimental: `files add`, `files apply`, `files remove`. |
 | Guarded rollback / bootstrap recovery | Experimental: `rollback`, `recovery resume` / `abandon`. |
+| Inspect provider-reported installed packages | Yes: Tools or `tools inspect`; [explicit approval and config/cache risks](commands.md#provider-inspection). No ownership inference. |
 | Install tools or Git staging/commit/push | Not yet. |
-| Interactive onboarding, Files, profiles/checks/diagnostics, Recovery and read-only Git | Experimental: terminal `dort` or `dort tui`; [keys and limitations](commands.md#interactive-interface). |
+| Interactive onboarding, Files, profiles/checks/diagnostics, Recovery, Tools and read-only Git | Experimental: terminal `dort` or `dort tui`; [keys and limitations](commands.md#interactive-interface). |
 | Templates, secrets or Git clone/sync | Not yet. |
 
-Use `--dry-run` to inspect effects without writes, locks or prompts. Writes require terminal confirmation or `--yes`; JSON/nonterminal writes always need `--yes`. Destructive link deletion needs a separate exact-ID acknowledgement. These sandbox-tested prototypes are not a production deployment guarantee.
+Use `--dry-run` to inspect effects without writes, locks or prompts. Provider inspection separately needs literal `inspect` or explicit CLI `--yes`. Writes require terminal confirmation or `--yes`; JSON/nonterminal writes always need `--yes`. Destructive link deletion needs a separate exact-ID acknowledgement. These sandbox-tested prototypes are not a production deployment guarantee.
 
 See the [project overview](../../README.md) and [release history](../../CHANGLOG.md) for more information.

@@ -18,6 +18,8 @@ pub enum Target {
     Row(usize),
     Filter,
     FormControl(usize, bool),
+    ToolsControl(usize, bool),
+    ToolsRow(usize),
     Picker(usize, bool),
     Palette(Action),
     PaletteSearch,
@@ -36,6 +38,7 @@ pub enum Wheel {
     PreviewRows,
     Confirmation,
     GitPrivate,
+    Tools,
 }
 struct Region {
     area: Rect,

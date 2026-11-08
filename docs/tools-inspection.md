@@ -1,6 +1,14 @@
 # Core provider inspection
 
-`dort_core::tools::inspection` implements deliberate local provider queries. It is not called by existing CLI/TUI workflows. Frontend tool inventory and package installation are not exposed. Pure version policies in `tools.rs`, manifest checks, filesystem observation and planners do not execute providers.
+`dort_core::tools::inspection` implements deliberate local provider queries. CLI `tools inspect` and the Tools TUI expose the same live-preview/approval capability through `services::tools`. Package installation and declared-tool/binary reconciliation are not exposed. Pure version policies in `tools.rs`, manifest checks, filesystem observation and planners do not execute providers. End-user usage is in the [command reference](user/commands.md#provider-inspection).
+
+## Frontend workflow
+
+`services::tools::Request` prepares the core preview without executing a provider or loading repository registration. npm alone reads an explicit absolute manifest using the bounded no-follow stable-identity manifest service; source-bearing parser/read errors are replaced with static diagnostics. The shared wrapper retains manifest scope alongside the opaque core preview/approval and metadata report. Other providers reject npm-only fields.
+
+CLI terminal execution displays the exact preview and requires literal `inspect`; explicit `--yes` is required for nonterminal/JSON execution. `--dry-run` returns only the preview even with `--yes`. A completed unavailable observation is emitted as a report with exit 1; invalid input/approval is exit 2. No serialized preview can be executed.
+
+The Tools destination never queries on entry/navigation. Its retained draft, review and typed metadata result state are distinct from filesystem mutation previews/confirmations. Preparing the review and consuming inspection approval both use the existing single owned joined worker. Typing `inspect` consumes the real preview once. Entry preview-only mode, below-floor layouts and shrinking follow the existing approval guards; shrink clears typed input. Leaving the view drops pending previews/confirmation, and preparation finishing in a different view cannot revive them. Retry prepares a new preview, never replays approval or automatically refreshes a provider. Search is display-only; full selected package/version and exact query scope remain inspectable in compact layouts. No provider payload enters generic diagnostics/progress or write receipts/journals. Activity labels explicitly distinguish provider execution with possible configuration/cache effects from ordinary read-only tasks.
 
 ## Authority and trust
 
@@ -31,6 +39,6 @@ Raw stdout is private to execution/parsing; stderr is counted and discarded. Nei
 
 ## Validation
 
-Core unit tests exercise protocol whitelisting, empty versus malformed/unavailable results, multiple versions, incomplete package states, limits, concurrent pipe drains and descendant-held-pipe deadlines. Integration tests use canonical disposable homes and deterministic fake providers, covering inert previews, fixed arguments, sanitized environments, explicit npm bindings, path rejection and raw-output redaction. They require no installed package manager or Node. These fixtures establish adapter behavior, not real-provider compatibility or sandboxing. See [validation methods](validation.md) for ordinary gates and fixture boundaries.
+Core unit tests exercise protocol whitelisting, empty versus malformed/unavailable results, multiple versions, incomplete package states, limits, concurrent pipe drains and descendant-held-pipe deadlines. Integration tests use canonical disposable homes and deterministic fake providers, covering inert previews, fixed arguments, sanitized environments, explicit npm bindings, path rejection and raw-output redaction. Frontend CLI/state/view tests exercise approval modes, independent scope, retained fields, literal shortcut input, resize/preview-only guards, late-preview discard, search/full metadata and unavailable results. Caret/focus/cell-style checks supplement disposable PTY tests for real interactive CLI/TUI confirmation and fresh-review behavior. They require no installed package manager or Node. These fixtures establish adapter behavior, not real-provider compatibility or sandboxing. See [validation methods](validation.md) for ordinary gates and fixture boundaries.
 
 Protocol references: [Homebrew](https://docs.brew.sh/Manpage), [dpkg-query](https://manpages.ubuntu.com/manpages/noble/en/man1/dpkg-query.1.html), [mise ls](https://mise.jdx.dev/cli/ls.html), [mise settings](https://mise.jdx.dev/configuration/settings.html), [npm ls](https://docs.npmjs.com/cli/v11/commands/npm-ls/).

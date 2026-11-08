@@ -27,7 +27,9 @@ fn action(label: &'static str, action: Action) -> Entry {
         item: Item::Action(action),
     }
 }
-pub const GROUPS: [&str; 6] = ["Session", "Overview", "Files", "Recovery", "Checks", "Git"];
+pub const GROUPS: [&str; 7] = [
+    "Session", "Overview", "Files", "Recovery", "Checks", "Git", "Tools",
+];
 pub fn entries(group: usize) -> Vec<Entry> {
     use Action::*;
     match group {
@@ -53,12 +55,16 @@ pub fn entries(group: usize) -> Vec<Entry> {
             },
             action("Diagnostics [j]", Diagnostics),
         ],
-        _ => vec![
+        5 => vec![
             action("Status [z]", GitStatus),
             action("Unstaged [u]", GitUnstaged),
             action("Staged [s]", GitStaged),
             action("Choose Git scope [g]", GitRoot),
             action("Follow selected repository [f]", GitDefault),
+        ],
+        _ => vec![
+            action("Tools [t]", Destination(Tab::Tools)),
+            action("Configure inspection [c]", ToolsConfigure),
         ],
     }
 }
@@ -78,6 +84,8 @@ pub fn shortcut(item: Item) -> ratatui::crossterm::event::KeyCode {
             Destination(Tab::Overview) => 'o',
             Destination(Tab::Files) => 'm',
             Destination(Tab::Recovery) => 'r',
+            Destination(Tab::Tools) => 't',
+            ToolsConfigure => 'c',
             Discover => 'f',
             ManageIgnored => 'U',
             Diagnostics => 'j',
@@ -107,8 +115,8 @@ pub struct Menu {
 #[derive(Default)]
 pub struct State {
     pub menu: Option<Menu>,
-    selected: [usize; 5],
-    scroll: [u16; 5],
+    selected: [usize; 6],
+    scroll: [u16; 6],
 }
 fn index(tab: Tab) -> usize {
     match tab {
@@ -117,6 +125,7 @@ fn index(tab: Tab) -> usize {
         Tab::Recovery => 2,
         Tab::Checks => 3,
         Tab::Git => 4,
+        Tab::Tools => 5,
     }
 }
 pub fn group(app: &App) -> usize {
@@ -125,6 +134,7 @@ pub fn group(app: &App) -> usize {
 pub fn location(app: &App) -> &'static str {
     match app.tab {
         Tab::Overview => "Overview",
+        Tab::Tools => "Tools / Explicit inspection",
         Tab::Files if app.discovering => "Files / Discover",
         Tab::Files => "Files / Managed",
         Tab::Recovery => "Recovery / All repositories",
@@ -140,6 +150,7 @@ pub fn location(app: &App) -> &'static str {
 impl App {
     pub(super) fn go_tab(&mut self, tab: Tab) {
         if self.tab != tab {
+            self.tools_view.leave();
             self.navigation.selected[index(self.tab)] = self.selected;
             self.navigation.scroll[index(self.tab)] = self.details_scroll;
             self.selected = self.navigation.selected[index(tab)];
@@ -156,6 +167,7 @@ impl App {
             && self.shell.overlay.is_none()
             && !self.batch_editor.as_ref().is_some_and(|e| e.open)
             && !(self.tab == Tab::Git && self.git_view.navigation_input())
+            && !(self.tab == Tab::Tools && self.tools_view.text_entry())
     }
     pub(super) fn open_menu(&mut self, selected_group: usize, width: u16) {
         if !self.menus_available() {

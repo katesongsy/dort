@@ -2,14 +2,14 @@
 
 [User guide](README.md) · [Getting started](getting-started.md)
 
-Checks, discovery, inventory, plans, status, history and Git inspection are read-only. Explicit mutation commands are experimental and require approval. None installs tools, clones/syncs, stages, commits or pushes. Use `dort --help` and `dort <command> --help` for syntax.
+Checks, discovery, file inventory, plans, status, history and Git inspection are read-only and never run providers. Separate Tools inspection requires approval: provider configuration/plugins may execute code and caches/logs may change. Explicit mutation commands are experimental and require approval. No command installs tools, clones/syncs, stages, commits or pushes. Use `dort --help` and `dort <command> --help` for syntax.
 
 ## Global options
 
 - `--json`: structured reports on stdout; structured errors on stderr.
 - `--repo PATH`: override the selected environment directory for repository commands. It does not register the directory.
-- `--dry-run`: mutation preview only; never creates state/directories/locks/backups/journals or prompts. Read-only commands remain read-only regardless.
-- `--yes`: explicit CLI write approval without prompting. Required for JSON/nonterminal writes; does not bypass guards. Not accepted by the TUI.
+- `--dry-run`: preview writes or provider inspection without execution; never creates state/directories/locks/backups/journals or prompts. Read-only commands remain read-only regardless.
+- `--yes`: explicit CLI write or provider-inspection approval without prompting. Required for JSON/nonterminal writes or provider queries; does not bypass guards. Not accepted by the TUI.
 - `--confirm-remove ID`: separate exact-ID acknowledgement for deleting a managed link with `files remove --mode remove`.
 - `--help`, `--version`: available without a configured HOME.
 
@@ -17,7 +17,7 @@ Other commands require a supported host and HOME. Terminal invocation without a 
 
 ## Interactive interface
 
-The interface provides Overview/Welcome, guided local create/attach, session repository/profile selection, Files discovery/adoption/apply/unmanage, structural Checks, all-repository Recovery and read-only Git inspection. The workbench uses navigation menus, a persistent current-subview label, focused pane borders, state columns, contextual action buttons, and bordered fields with a caret. Color supplements explicit selection markers and state labels. F10 opens menus; `;` opens contextual Actions; F1 or `?` outside text opens Help, and Session → About shows the build version and capability limits.
+The interface provides Overview/Welcome, guided local create/attach, session repository/profile selection, Files discovery/adoption/apply/unmanage, structural Checks, all-repository Recovery, explicit Tools provider inspection and read-only Git inspection. The workbench uses navigation menus, a persistent current-subview label, focused pane borders, state columns, contextual action buttons, and bordered fields with a caret. Color supplements explicit selection markers and state labels. F10 opens menus; `;` opens contextual Actions; F1 or `?` outside text opens Help, and Session → About shows the build version and capability limits.
 
 ```sh
 dort                       # terminal only; same as dort tui
@@ -119,6 +119,41 @@ A batch contains 1–32 explicitly chosen files, one action and one repository. 
 Actions includes a session preview-only switch; it cannot change mode during a preview/worker. An entry `--dry-run` locks the entire session to preview-only and cannot be switched off.
 
 Esc does **not** interrupt an approved write. q/Ctrl-C requests exit after it finishes, including on a small screen. Input/render errors restore the terminal then wait for the worker; no write is detached or automatically rolled back. A failed write may leave durable partial effects: dismiss the error, refresh Recovery, and explicitly preview the appropriate recovery action. Panics restore the terminal where cleanup is possible; forced termination cannot guarantee this. See [terminal/interruption safety](safety.md#terminal-and-interruption).
+
+## Provider inspection
+
+Tools inspection runs a trusted local provider only after approval. Configuration/plugins may execute code; caches/logs may change. Offline/no-update settings are hardening, **not a sandbox or a network guarantee**. No package installation, provider rollback or ownership verification is performed. Startup, navigation, checks, plans and status never query providers automatically.
+
+In the TUI, open **Tools → Configure inspection**, or select Tools with Left/Right and press `c`. Space cycles Homebrew, apt (using dpkg-query), mise and npm. Supply a trusted absolute executable and colon-separated trusted absolute search directories. For npm, also supply the absolute manifest, declared runtime tool ID, trusted npm CLI script and absolute global prefix; the executable is the selected Node, which runs that script directly, not an npm launcher found on PATH. All paths are explicit; there is no automatic candidate probing or persisted trust.
+
+Tab/Shift-Tab moves fields; Enter advances. Activate **Review exact query**, inspect the exact executable/arguments/home/runtime scope and warning (PgUp/PgDn scroll), then type literal `inspect` and Enter to execute once. Esc returns to retained input. Preview-only and layouts below 48×14 cannot execute; shrinking clears typed confirmation. Quit/Ctrl-C during a query waits for the bounded worker. Nothing is automatically undone.
+
+Results are provider-reported installed package/version metadata, including inactive mise versions, not proof of which binary PATH selects or what Dort owns. `/` searches the display, Enter/`d` shows full selected metadata and query scope, and `r` prepares a **fresh review**, never replays approval. Unavailable/malformed/incomplete observations are not healthy empty catalogs. No automatic refresh occurs.
+
+CLI equivalents (replace these examples with paths you trust for your installation):
+
+```sh
+# Review only; no provider process, even with --yes.
+dort tools inspect brew --executable /opt/homebrew/bin/brew \
+  --search-dir /opt/homebrew/bin --search-dir /usr/bin --search-dir /bin --dry-run
+
+# Ubuntu package database inspection; requires explicit approval in automation.
+dort tools inspect apt --executable /usr/bin/dpkg-query \
+  --search-dir /usr/bin --search-dir /bin --json --yes
+
+# Independent mise installation catalog, not a repository/profile activation.
+dort tools inspect mise --executable /trusted/bin/mise \
+  --search-dir /trusted/bin --search-dir /usr/bin --search-dir /bin --dry-run
+
+# npm requires all binding fields; runtime ID node must be declared in this manifest.
+dort tools inspect npm --executable /trusted/node/bin/node \
+  --search-dir /trusted/node/bin --search-dir /usr/bin --search-dir /bin \
+  --manifest /absolute/path/dort.toml --runtime-tool node \
+  --npm-cli /trusted/node/lib/node_modules/npm/bin/npm-cli.js \
+  --prefix /trusted/npm-global --dry-run
+```
+
+Remove `--dry-run` to execute after terminal confirmation (`inspect`), or use explicit `--yes` for JSON/nonterminal execution. `--repo` and `--confirm-remove` do not apply; npm-only fields are rejected for other providers. Reports include the exact query scope; stdout/stderr payloads, configuration, resolved URLs, scripts and parser excerpts are withheld. Exit 0 means a completed observation (possibly empty), 1 means an unavailable provider observation, and 2 means invalid input/approval/manifest. The runtime binding records your selection, not proof that the declared runtime owns that Node or prefix.
 
 ## Initialization and approval
 
@@ -260,7 +295,7 @@ The table below describes explicit CLI commands. A clean TUI exit returns 0 even
 | Code | Meaning |
 | --- | --- |
 | 0 | Read succeeded or explicitly approved operation completed; not a production-safety guarantee. |
-| 1 | I/O failure. |
+| 1 | Unavailable provider observation or I/O failure. |
 | 2 | Invalid input/configuration/approval, stale or unsafe guards, malformed history, unsupported host/arguments, unavailable or failed/refused/bounded Git operation. |
 | 3 | Writer lock contention; dry runs/read-only commands never acquire it. |
 | 4 | A file plan is blocked, or recovery diagnosis reports write blockers. |

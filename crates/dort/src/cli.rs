@@ -24,10 +24,10 @@ struct Cli {
     /// Override the locally registered active repository.
     #[arg(long, global = true)]
     repo: Option<PathBuf>,
-    /// Preview mutations without creating state, locks, backups or journals.
+    /// Preview writes or provider inspection without executing or creating state.
     #[arg(long, global = true)]
     dry_run: bool,
-    /// Explicitly approve writes without prompting (required for JSON/nonterminal use).
+    /// Explicitly approve writes or provider inspection without prompting.
     #[arg(long, global = true)]
     yes: bool,
     /// Separate acknowledgement for deleting the managed link of this exact file ID.
@@ -76,6 +76,11 @@ enum Command {
     Git {
         #[command(subcommand)]
         command: GitCommand,
+    },
+    /// Explicitly review/approve bounded local provider inspection; no installations.
+    Tools {
+        #[command(subcommand)]
+        command: ToolsCommand,
     },
     /// Read-only manifest diagnostics.
     Manifest {
@@ -199,6 +204,50 @@ enum PlanCommand {
     },
 }
 
+#[derive(Subcommand)]
+enum ToolsCommand {
+    /// Query a trusted provider; configuration/plugins may run and caches may change.
+    Inspect {
+        #[arg(value_enum)]
+        provider: InspectionProvider,
+        /// Trusted absolute provider path (dpkg-query for apt, Node for npm).
+        #[arg(long)]
+        executable: PathBuf,
+        /// Explicit trusted absolute child search directory; repeat for each directory.
+        #[arg(long = "search-dir", required = true)]
+        search_dirs: Vec<PathBuf>,
+        /// Absolute manifest declaring npm's runtime tool (npm only).
+        #[arg(long)]
+        manifest: Option<PathBuf>,
+        #[arg(long)]
+        runtime_tool: Option<String>,
+        /// Trusted absolute npm CLI script, executed by the selected Node (npm only).
+        #[arg(long)]
+        npm_cli: Option<PathBuf>,
+        /// Explicit absolute global npm prefix (npm only).
+        #[arg(long)]
+        prefix: Option<PathBuf>,
+    },
+}
+#[derive(Clone, Copy, ValueEnum)]
+enum InspectionProvider {
+    Brew,
+    Apt,
+    Mise,
+    Npm,
+}
+impl InspectionProvider {
+    fn query(self) -> dort_core::tools::inspection::Query {
+        use dort_core::tools::inspection::Query;
+        match self {
+            Self::Brew => Query::BrewFormulae,
+            Self::Apt => Query::DpkgPackages,
+            Self::Mise => Query::MiseInstalled,
+            Self::Npm => Query::NpmGlobals,
+        }
+    }
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 enum RemovalMode {
     Keep,
@@ -238,6 +287,65 @@ pub fn run() -> ExitCode {
     }
 }
 
+fn tools_inspect(
+    cli: &Cli,
+    host: &HostContext,
+    command: &ToolsCommand,
+) -> dort_core::Result<ExitCode> {
+    if cli.repo.is_some() || cli.confirm_remove.is_some() {
+        return Err(Error::Invalid(
+            "tools inspection uses its explicit scope; omit --repo/--confirm-remove".into(),
+        ));
+    }
+    let ToolsCommand::Inspect {
+        provider,
+        executable,
+        search_dirs,
+        manifest,
+        runtime_tool,
+        npm_cli,
+        prefix,
+    } = command;
+    let preview = crate::services::tools::Request {
+        query: provider.query(),
+        executable: executable.clone(),
+        search_dirs: search_dirs.clone(),
+        manifest: manifest.clone(),
+        runtime_tool: runtime_tool.clone(),
+        npm_cli: npm_cli.clone(),
+        prefix: prefix.clone(),
+    }
+    .prepare(host)?;
+    if cli.dry_run {
+        print_git_json(&preview.review())?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    if !cli.json {
+        print_git_json(&preview.review())?;
+    }
+    if !cli.yes {
+        if !interactive(cli) {
+            return Err(Error::Invalid("provider inspection requires --yes in JSON/nonterminal mode, or use --dry-run to review without execution".into()));
+        }
+        if answer(
+            "Provider config/plugins may execute; caches may change. Type inspect to run this exact query: ",
+        )? != "inspect"
+        {
+            return Err(Error::Invalid(
+                "provider inspection not approved; nothing executed".into(),
+            ));
+        }
+    }
+    let report = preview.approve().inspect();
+    let available = report.available();
+    print_git_json(&report)?;
+    Ok(if available {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    })
+}
+
 fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
     let command = cli.command.as_ref().unwrap_or(&Command::Tui);
     if matches!(command, Command::Tui) {
@@ -255,6 +363,9 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     let host = HostContext::from_env()?;
+    if let Command::Tools { command } = command {
+        return tools_inspect(cli, &host, command);
+    }
     // Read only; missing configuration uses defaults without creating directories.
     let local = LocalConfig::load(&host)?;
     if cli.repo.is_some()
@@ -273,7 +384,7 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
         ));
     }
     match command {
-        Command::Tui => unreachable!(),
+        Command::Tui | Command::Tools { .. } => unreachable!(),
         Command::Init { path } => {
             if cli.repo.is_some() {
                 return Err(Error::Invalid(
