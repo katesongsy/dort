@@ -234,7 +234,7 @@ The lock coordinates Dort writers, not arbitrary editors or a malicious same-use
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
+cargo test --workspace --locked -- --test-threads=1
 cargo build --workspace --locked
 python3 scripts/check-docs.py --self-test
 python3 scripts/check-docs.py

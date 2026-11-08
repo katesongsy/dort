@@ -43,7 +43,7 @@ Update documentation in the same change as the behaviour it describes:
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
+cargo test --workspace --locked -- --test-threads=1
 cargo build --workspace --locked
 python3 scripts/check-docs.py --self-test
 python3 scripts/check-docs.py
@@ -56,6 +56,8 @@ cargo package --workspace --locked
 python3 scripts/check-crates.py --archives
 git diff --check
 ```
+
+Run independent Rust test cases serially (`--test-threads=1`) so sibling fork/exec activity cannot transiently retain another fixture's closed file-lock descriptor. This does not disable explicit worker/writer-contention/process-crash concurrency within tests; the four runtime CI jobs remain parallel.
 
 The Python gates use the standard library; terminal tests discover fresh Cargo artifacts and operate only on disposable fixtures. CI runs all four runtime platforms, exposes optional skip messages, requires non-root permission tests and distinct Linux cross-device fixtures, and rejects tracked-file changes. See [validation methods](docs/validation.md) for maintained coverage, isolation and harness guidance; candidate-specific evidence and remaining release blockers belong in ignored planning notes. Do not equate an earlier commit's CI result with validation of new work. Real ENOSPC/power-loss or mounted-volume fault injection needs a separately approved disposable environment; never fill a workstation disk or automate real-home smoke tests. `scripts/test-cross-device-macos.py` separately requires explicit approval for a fresh 128 MiB HFS+ image and private temporary fixtures; it verifies exact image/device/ownership, runs refusal-only tests and normally detaches. It never uses existing volumes, sudo or disk filling; uncertain attach/failed detach retains the exact scope and stops without force/lazy cleanup. Ordinary macOS tests explicitly skip without its marked fixture; the launcher requires no skips. Its mount-free `--self-test` checks fixture/identity/result guards. `scripts/test-storage-vm.py` is an opt-in launcher restricted to the reviewed `lima-a12` guest with an administrative approval marker, no host shares and a verified 128 MiB ext4 loop image. Its Linux Rust probe is ignored by ordinary tests. Do not create the marker on a workstation, add privileged fault injection to normal CI, enlarge the volume or infer failing-sync/power-loss safety from ENOSPC results.
 

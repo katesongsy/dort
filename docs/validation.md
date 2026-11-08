@@ -11,7 +11,7 @@ From the repository root, with the pinned Rust toolchain and Python 3:
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked -- --nocapture
+cargo test --workspace --locked -- --test-threads=1 --nocapture
 cargo build --workspace --locked
 python3 scripts/check-docs.py --self-test
 python3 scripts/check-docs.py
@@ -36,7 +36,7 @@ The [source-package guards](../scripts/check-crates.py) check registry-restricte
 - Use disposable canonical HOME/config/state/repository roots and explicit core `HostContext` inputs. macOS `/var` aliases need their physical path spelling.
 - Never change process-global HOME/XDG in Rust tests; set isolated child environments instead. Never automate destructive real-home smoke tests or provider/package-manager execution on a workstation.
 - CLI tests use deterministic fake/missing Git fixtures. Optional core real-Git tests use disposable repositories and announce missing-Git skips; examine those messages rather than treating skips as exercised coverage.
-- Bootstrap integration fixtures serialize their subprocess-spawning tests with one process-local lease. A concurrent sibling fork can briefly retain a closed parent's file-lock descriptor until exec applies CLOEXEC; this must not turn sequential reacquisition assertions into scheduler races. Production locks remain nonblocking, and the dedicated writer-contention/process-exit assertions are not bypassed.
+- Workspace validation runs independent Rust test cases serially with `--test-threads=1`. A concurrent sibling fork can briefly retain a closed parent's file-lock descriptor until exec applies CLOEXEC; this must not turn sequential reacquisition assertions into scheduler races. Bootstrap integration fixtures also retain a process-local lease for direct suite runs. Production locks remain nonblocking. Explicit worker/writer-contention/process-exit concurrency within tests is preserved, and the four runtime CI jobs still run in parallel; no assertions are skipped or retried.
 - Permission-denial tests cannot establish refusal when run as root. Linux cross-device tests need a genuinely distinct device, not a second directory on the same filesystem; unavailable fixtures must be reported explicitly.
 - Ordinary reports/events/logs must remain metadata-only. Do not retain file bodies, local variable values, credentials or raw terminal buffers in evidence. Explicit escaped Git patch reports and the ephemeral selected-file Discover pane are separate bounded content exceptions; neither belongs in validation artifacts.
 
