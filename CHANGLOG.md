@@ -3,6 +3,11 @@
 Generated with git-cliff from committed Git history. Do not edit entries by hand.
 Uncommitted changes are not included. Untagged history appears under Unreleased.
 
+## Unreleased
+
+### Features
+
+- prepare crates.io source packages ([3a941af](https://github.com/katesongsy/dort/commit/3a941af1ec58c5d46bfcf4372563ff7cf9297d8d))
 ## v0.1.0 — 2026-11-08
 
 ### Documentation
