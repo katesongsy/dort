@@ -13,6 +13,17 @@ use std::{
 };
 use support::TestHome;
 
+// A sibling test's concurrent fork can briefly retain our flock after the parent
+// descriptor closes, until CLOEXEC takes effect in that child. Serialize this
+// binary's process-spawning fixtures so immediate reacquisition assertions test
+// Dort writers, not unrelated fork/exec timing. This lease protects no shared data.
+fn process_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    GUARD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn git() -> Option<PathBuf> {
     [
         "/usr/bin/git",
@@ -67,6 +78,7 @@ fn assert_complete(t: &TestHome) {
 }
 #[test]
 fn preview_has_no_effects_and_creation_then_attach_preserves_sources() {
+    let _process_test = process_test_guard();
     let Some(git) = git() else {
         eprintln!("SKIP: Git unavailable");
         return;
@@ -113,6 +125,7 @@ fn preview_has_no_effects_and_creation_then_attach_preserves_sources() {
 }
 #[test]
 fn every_bootstrap_boundary_recovers_explicitly_and_blocks_new_writes() {
+    let _process_test = process_test_guard();
     let Some(git) = git() else {
         eprintln!("SKIP: Git unavailable");
         return;
@@ -206,6 +219,7 @@ fn every_bootstrap_boundary_recovers_explicitly_and_blocks_new_writes() {
 }
 #[test]
 fn approval_tampering_stale_inputs_unsafe_paths_and_missing_git_are_refused() {
+    let _process_test = process_test_guard();
     let Some(git) = git() else {
         eprintln!("SKIP: Git unavailable");
         return;
@@ -278,6 +292,7 @@ fn interrupted_published(t: &TestHome, git: &Path) -> (String, String) {
 }
 #[test]
 fn published_repository_is_never_deleted_and_edits_block_recovery() {
+    let _process_test = process_test_guard();
     let Some(git) = git() else {
         eprintln!("SKIP: Git unavailable");
         return;
@@ -308,6 +323,7 @@ fn published_repository_is_never_deleted_and_edits_block_recovery() {
 }
 #[test]
 fn config_values_stay_private_and_backup_corruption_or_parent_substitution_blocks_resume() {
+    let _process_test = process_test_guard();
     let Some(git) = git() else {
         eprintln!("SKIP: Git unavailable");
         return;
@@ -384,6 +400,7 @@ fn config_values_stay_private_and_backup_corruption_or_parent_substitution_block
 
 #[test]
 fn existing_config_exchange_preserves_values_and_retains_original_inode() {
+    let _process_test = process_test_guard();
     let Some(git) = git() else {
         return;
     };
@@ -439,6 +456,7 @@ fn existing_config_exchange_preserves_values_and_retains_original_inode() {
 }
 #[test]
 fn bootstrap_recovery_guards_config_parent_and_journal_tail() {
+    let _process_test = process_test_guard();
     let Some(git) = git() else {
         return;
     };
@@ -491,6 +509,7 @@ fn bootstrap_recovery_guards_config_parent_and_journal_tail() {
 }
 #[test]
 fn published_checkpoint_cannot_be_treated_as_unpublished_preparation() {
+    let _process_test = process_test_guard();
     let Some(git) = git() else {
         return;
     };
@@ -532,6 +551,7 @@ fn published_checkpoint_cannot_be_treated_as_unpublished_preparation() {
 
 #[test]
 fn every_resumed_bootstrap_boundary_is_restartable_and_approval_is_head_bound() {
+    let _process_test = process_test_guard();
     let Some(git) = git() else {
         return;
     };
@@ -588,6 +608,7 @@ fn every_resumed_bootstrap_boundary_is_restartable_and_approval_is_head_bound() 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn cross_device_bootstrap_refuses_before_repository_or_registration_publication() {
+    let _process_test = process_test_guard();
     let Some(git) = git() else {
         eprintln!("SKIP cross-device case: Git unavailable");
         return;
@@ -628,6 +649,7 @@ fn cross_device_bootstrap_refuses_before_repository_or_registration_publication(
 // Isolated process helper: never changes this test process's HOME/XDG.
 #[test]
 fn bootstrap_crash_helper() {
+    let _process_test = process_test_guard();
     let Ok(root) = std::env::var("DORT_BOOTSTRAP_TEST_ROOT") else {
         return;
     };
@@ -661,6 +683,7 @@ fn bootstrap_crash_helper() {
 }
 #[test]
 fn process_exit_at_every_bootstrap_boundary_requires_explicit_recovery() {
+    let _process_test = process_test_guard();
     let Some(git) = git() else {
         eprintln!("SKIP: Git unavailable");
         return;
