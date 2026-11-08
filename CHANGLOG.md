@@ -15,6 +15,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Tests
 
+- serialize independent workspace test cases ([cfe38c7](https://github.com/katesongsy/dort/commit/cfe38c70d18bffea02f43130382ebd97db98c535))
+
 - isolate bootstrap subprocess fixtures ([2f93d88](https://github.com/katesongsy/dort/commit/2f93d88b815c77d05417b525eae663fde244ae02))
 ## v0.1.0 — 2026-11-08
 
