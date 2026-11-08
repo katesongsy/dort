@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require successful exact-commit CI
+        id: ci
+        run: python3 scripts/release.py --check-ci --tag "$RELEASE_TAG"
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.ci.outputs.run_id }}
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - name: Verify all native archives and provenance
+        run: python3 scripts/release.py --verify --tag "$RELEASE_TAG"
+      - name: Create fully populated draft, then publish
+        run: |
+          gh release create "$RELEASE_TAG" dist/*.tar.gz dist/SHA256SUMS \
+            --verify-tag --draft --title "Dort $RELEASE_TAG" --notes-file dist/RELEASE.md
+          gh release edit "$RELEASE_TAG" --draft=false --latest

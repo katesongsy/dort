@@ -48,6 +48,7 @@ python3 scripts/check-docs.py --self-test
 python3 scripts/check-docs.py
 python3 scripts/test-terminal.py
 python3 scripts/test-cross-device-macos.py --self-test
+python3 scripts/release.py --self-test
 git diff --check
 ```
 
@@ -83,11 +84,15 @@ scripts/changelog.sh
 scripts/changelog.sh --check
 ```
 
-The script uses `cliff.toml`, disables network metadata/command hooks, and changes only the generated file (plus ignored temporary tooling). It does not install tools, commit, create tags or change releases.
+The script uses `cliff.toml`, disables network metadata/command hooks, and changes only the generated file (plus ignored temporary tooling). Its optional `--tag vMAJOR.MINOR.PATCH` labels committed history for release preparation without creating/moving/pushing a Git tag; combine with `--check` before the actual tag exists. It does not install tools, commit, create tags or change releases.
 
 Prefer descriptive Conventional Commit subjects (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`). Legacy non-conventional commits remain included. Release tags follow `vMAJOR.MINOR.PATCH` with optional prereleases.
 
 Generation uses committed history, not the working tree. Regenerate after authorized feature/fix/documentation commits or before release preparation. If committing only the regenerated file, use `chore(changelog): regenerate history`; this maintenance subject is excluded to avoid self-referential churn. `chore(release):` commits are also excluded. Never fabricate commits or tag a release merely to populate the file. A full-history checkout (including tags) is required for reproducible generation.
+
+## Release packaging
+
+See [release mechanics](docs/releases.md). Explicit release approval is required. Stable-version CI retains four native archives for 14 days; tag-triggered publication accepts only successful exact-commit CI artifacts, checks all targets/checksums/provenance and populates a draft before publishing. Keep crate publication disabled, binaries experimental and minimum-runtime claims accurate. Do not overwrite releases or move published tags. Packaging guard tests are mount-free and use disposable synthetic archives; native binary version checks use isolated child homes, never real-home write smoke tests.
 
 ## License
 

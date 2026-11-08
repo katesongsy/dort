@@ -6,7 +6,7 @@ Dort is a Git-native developer environment manager. It is designed to reconcile 
 
 ## Current status
 
-**Experimental CLI and TUI.** Dort provides strict manifest validation, profile/dependency resolution, bounded discovery, descriptor-safe observation, pure previews, hardened read-only Git status/diff, local repository init/attach, and approved adoption, link apply, unmanage and guarded recovery with immutable journals.
+**v0.1.0 — experimental CLI and TUI.** Dort provides strict manifest validation, profile/dependency resolution, bounded discovery, descriptor-safe observation, pure previews, hardened read-only Git status/diff, local repository init/attach, and approved adoption, link apply, unmanage and guarded recovery with immutable journals.
 
 A Ratatui interface provides Overview, session repository selection, guided local create/attach, temporary profiles, Files discovery/adoption, manifest checks, host Diagnostics/About, searchable all-repository Recovery, read-only Git inspection, previews, explicit approval and responsive progress over the same core services. Package-manager execution, remote cloning/sync, Git staging/commit/push, templates and secrets are **not implemented**. A successful preview is not permission or an executable artifact for a later write. The executor is tested only against disposable homes; this is not yet a production-ready dotfile manager.
 
@@ -15,14 +15,17 @@ A Ratatui interface provides Overview, session repository selection, guided loca
 - [User guide](docs/user/README.md): [getting started](docs/user/getting-started.md), [manifest guide](docs/user/manifest.md), [commands](docs/user/commands.md), and [safety/troubleshooting](docs/user/safety.md).
 - [Documentation index](docs/README.md): end-user guides and maintained technical references.
 - [Validation methods](docs/validation.md): test infrastructure, isolation and interpretation of results.
+- [Release mechanics](docs/releases.md): native packaging, provenance and publication guards.
 - [Architecture](ARCHITECTURE.md): module boundaries, data flow, journal/recovery contracts and limitations.
 - [Contributor/agent instructions](AGENTS.md): development checks and documentation-maintenance rules.
 - [Changelog](CHANGLOG.md): generated with git-cliff from committed Git history (uncommitted work is excluded).
 - [MIT license](LICENSE).
 
-## Build and run
+## Install, build and run
 
-Requires a supported host: macOS (Apple Silicon or Intel), or Ubuntu (ARM64 or x86_64). Rust **1.99.1** is the pinned toolchain and current minimum supported Rust version; `rustup` will use `rust-toolchain.toml`.
+[GitHub Releases](https://github.com/katesongsy/dort/releases) provide native archives and SHA-256 checksums for macOS 15+ (Apple Silicon or Intel) and Ubuntu 24.04+ (ARM64 or x86_64; glibc 2.39+). See [installation instructions](docs/user/getting-started.md#installation) to select and verify an archive. The binaries do not require Rust; neither crate is published to crates.io.
+
+For source builds, Rust **1.99.1** is the pinned toolchain and current minimum supported Rust version; `rustup` will use `rust-toolchain.toml`.
 
 ```bash
 cargo build --workspace --locked
@@ -237,6 +240,7 @@ python3 scripts/check-docs.py --self-test
 python3 scripts/check-docs.py
 python3 scripts/test-terminal.py
 python3 scripts/test-cross-device-macos.py --self-test
+python3 scripts/release.py --self-test
 git diff --check
 ```
 

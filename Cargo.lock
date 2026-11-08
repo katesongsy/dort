@@ -348,7 +348,7 @@ dependencies = [
 
 [[package]]
 name = "dort"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -363,7 +363,7 @@ dependencies = [
 
 [[package]]
 name = "dort-core"
-version = "0.1.0-dev"
+version = "0.1.0"
 dependencies = [
  "rustix",
  "semver",

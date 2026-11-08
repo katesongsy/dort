@@ -2,22 +2,51 @@
 
 [User guide](README.md) · [Command reference](commands.md)
 
-## Requirements and build
+## Installation
 
-Supported hosts are **macOS or Ubuntu**, on Intel/x86_64 or ARM64. Other Linux distributions are not currently supported. You need a Rust installation capable of using pinned **Rust 1.99.1**; Cargo/rustup may download dependencies/toolchain components. Local init/attach and Git inspection additionally need an installed trusted Git executable in an absolute PATH directory. Dort never installs Git.
+Supported hosts are **macOS or Ubuntu**, on Intel/x86_64 or ARM64. Other Linux distributions are not currently supported. Local init/attach and Git inspection additionally need an installed trusted Git executable in an absolute PATH directory. Dort never installs Git.
 
-From the Dort checkout:
+### Prebuilt archives
+
+Download an archive and `SHA256SUMS` from [GitHub Releases](https://github.com/katesongsy/dort/releases). Rust is not needed to run these binaries.
+
+| Host | v0.1.0 archive |
+| --- | --- |
+| macOS 15+, Apple Silicon | `dort-v0.1.0-aarch64-apple-darwin.tar.gz` |
+| macOS 15+, Intel | `dort-v0.1.0-x86_64-apple-darwin.tar.gz` |
+| Ubuntu 24.04+, ARM64 | `dort-v0.1.0-aarch64-unknown-linux-gnu.tar.gz` |
+| Ubuntu 24.04+, x86_64 | `dort-v0.1.0-x86_64-unknown-linux-gnu.tar.gz` |
+
+Linux binaries require glibc 2.39 or newer. Choose your archive, then verify its matching checksum before extracting. For example, on Apple Silicon macOS:
+
+```sh
+archive=dort-v0.1.0-aarch64-apple-darwin.tar.gz
+curl -fLO "https://github.com/katesongsy/dort/releases/download/v0.1.0/$archive"
+curl -fLO https://github.com/katesongsy/dort/releases/download/v0.1.0/SHA256SUMS
+awk -v file="$archive" '$2 == file' SHA256SUMS > selected.sha256
+test -s selected.sha256 && shasum -a256 -c selected.sha256
+# On Ubuntu, use: sha256sum -c selected.sha256
+# Continue only when the selected checksum reports OK.
+mkdir dort-v0.1.0 && tar -xzf "$archive" -C dort-v0.1.0
+./dort-v0.1.0/dort --version
+```
+
+Use an empty download directory, not an existing configuration repository. Archives contain `dort`, the MIT `LICENSE` and `BUILD-INFO.json` (version, target, commit, Rust toolchain and minimum runtime). Checksums detect corruption; they are not an independent publisher signature. Use the binary's absolute path, or place it in a directory you already manage on PATH. Dort has no installer and does not bypass operating-system download/security prompts; do not disable platform protections to run it.
+
+### Build from source
+
+You need pinned **Rust 1.99.1**; Cargo/rustup may download dependencies/toolchain components. From the Dort checkout:
 
 ```sh
 cargo build --release --workspace --locked
 ./target/release/dort --version
 ```
 
-There is no installer or package-manager execution yet. Elsewhere, `dort` means this executable; use its absolute path if necessary. Run `dort` or `dort tui` with terminal stdin/stdout/stderr for the interactive interface. Use at least 48×14; 80×24 or larger gives more room for reports.
+Neither crate is published to crates.io. Elsewhere, `dort` means your chosen executable; use its absolute path if necessary. Run `dort` or `dort tui` with terminal stdin/stdout/stderr for the interactive interface. Use at least 48×14; 80×24 or larger gives more room for reports.
 
 ## Start in a disposable HOME
 
-Dort is experimental. Try this walkthrough before using your own configuration, and read the [safety guide](safety.md). Keep one shell session, starting from the Dort checkout:
+Dort is experimental. Try this walkthrough before using your own configuration, and read the [safety guide](safety.md). Keep one shell session. The example below uses a source build from the Dort checkout; for a prebuilt archive, set `dort_bin` to the extracted binary's absolute path instead:
 
 ```sh
 dort_bin="$(pwd -P)/target/release/dort"
