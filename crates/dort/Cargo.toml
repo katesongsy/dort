@@ -4,12 +4,18 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish = false
+repository.workspace = true
+description = "Experimental, TUI-first local dotfile manager with guarded recovery"
+readme = "README.md"
+keywords = ["dotfiles", "configuration", "tui", "cli"]
+categories = ["command-line-utilities", "config"]
+publish = ["crates-io"]
+include = ["/src/**", "/tests/**", "/examples/dort.toml", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE"]
 
 [dependencies]
 clap.workspace = true
 ratatui.workspace = true
-dort-core = { path = "../dort-core" }
+dort-core = { path = "../dort-core", version = "0.1.0" }
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true

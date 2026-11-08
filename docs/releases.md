@@ -4,7 +4,7 @@
 
 ## Scope and authorization
 
-Releases are GitHub source releases plus native binary archives, not crates.io publication. Both workspace crates retain `publish = false`. Version, tag and release publication require explicit operator approval. A release does not remove Dort's experimental status or its documented safety limitations. Maintainer and unfamiliar-user acceptance remain distinct from automated validation.
+GitHub releases provide tagged source snapshots and native binary archives. Cargo source packaging is a separate distribution path: both workspace crates allow only the `crates-io` registry, but packaging/validation never uploads them. Version, tag, GitHub release and irreversible registry publication require explicit operator approval. A release does not remove Dort's experimental status or its documented safety limitations. Maintainer and unfamiliar-user acceptance remain distinct from automated validation.
 
 ## Native build artifacts
 
@@ -28,6 +28,14 @@ The release workflow runs only on pushed `v*` tags. It validates the exact stabl
 Only the publication job has repository-content write permission; it also has read access to CI artifacts. Credentials come from the job-scoped GitHub token and are never placed in archives or notes. After verification, GitHub CLI creates a draft containing all four archives, `SHA256SUMS` and user-facing notes, then publishes it as the latest release. It verifies the tag already exists remotely; it never invents a tag or silently overwrites an existing release. Failed drafts require explicit operator inspection, not automatic replacement/deletion. Per-tag concurrency prevents simultaneous publication jobs.
 
 Before pushing an authorized annotated tag, validate the final candidate locally and observe successful four-platform CI for the exact commit. Source archives are GitHub's tag snapshots. Never move a published release tag to hide a failed candidate or overwrite published assets.
+
+## Cargo source packages
+
+`cargo package --workspace --locked` assembles and builds both source archives, including a temporary local registry for the versioned `dort-core` dependency before initial publication. `cargo publish --workspace --dry-run --locked --registry crates-io` additionally exercises publication checks without uploading. Do not substitute `--no-verify` or a path-only dependency. `scripts/check-crates.py` validates metadata, package-local license/example copies and literal Rust include resources; `--archives` also checks the complete file set, source bytes and clean current-commit provenance. Its `--self-test` is mount-free and does not contact a registry.
+
+Each package includes its own README, MIT license, source/tests and example manifest. CI checks the source archives on all four supported runtime platforms; no workflow automatically publishes crates or receives registry credentials. A separately approved upload publishes `dort-core` before `dort` and waits for registry availability. Never print tokens or place them in source, logs, commands, archives or release notes; configure Cargo credentials through an approved local credential provider.
+
+The initial Cargo 0.1.0 packages can originate from later packaging-only commits than the already published GitHub `v0.1.0` tag. Their `.cargo_vcs_info.json` records the source commit; keep the existing tag and assets unchanged rather than implying the snapshots are identical. Package verification is not publication, and registry package versions cannot be overwritten.
 
 ## Generated history
 

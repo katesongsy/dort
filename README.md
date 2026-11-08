@@ -241,6 +241,10 @@ python3 scripts/check-docs.py
 python3 scripts/test-terminal.py
 python3 scripts/test-cross-device-macos.py --self-test
 python3 scripts/release.py --self-test
+python3 scripts/check-crates.py --self-test
+python3 scripts/check-crates.py
+cargo package --workspace --locked
+python3 scripts/check-crates.py --archives
 git diff --check
 ```
 

@@ -29,6 +29,7 @@ Update documentation in the same change as the behaviour it describes:
 - After implementation, promote only enduring, implemented technical facts into `docs/`/`ARCHITECTURE.md` and user-facing behavior into `docs/user/`; do not copy completed task lists into maintained documentation. Move obsolete planning notes out of public docs rather than retaining them as a public archive.
 - Do not describe planned features as shipped. Every later CLI capability needs a usable TUI workflow in the same milestone. State local validation separately from unobserved remote CI, recording transient evidence in ignored planning/artifact locations.
 - Scan maintained Markdown recursively, including `docs/user/`, with the documentation checker. Moving a page requires updating relative links in root documents, nested guides and local planning notes; tracked pages must never link into ignored `specs/`.
+- Keep package-local MIT licenses and example manifests byte-identical to root `LICENSE` and `examples/dort.toml`; `scripts/check-crates.py` checks these copies and literal Rust include resources. Cargo source archives must bind a clean commit and include their standalone metadata, README, license and test resources. Registry upload requires separate explicit approval; never move an existing GitHub release tag to match later packaging-only commits.
 - Keep relative links valid. Keep the requested spelling `CHANGLOG.md`; do not create a competing `CHANGELOG.md`.
 
 ## Rust workflow
@@ -49,6 +50,10 @@ python3 scripts/check-docs.py
 python3 scripts/test-terminal.py
 python3 scripts/test-cross-device-macos.py --self-test
 python3 scripts/release.py --self-test
+python3 scripts/check-crates.py --self-test
+python3 scripts/check-crates.py
+cargo package --workspace --locked
+python3 scripts/check-crates.py --archives
 git diff --check
 ```
 
@@ -92,7 +97,7 @@ Generation uses committed history, not the working tree. Regenerate after author
 
 ## Release packaging
 
-See [release mechanics](docs/releases.md). Explicit release approval is required. Stable-version CI retains four native archives for 14 days; tag-triggered publication accepts only successful exact-commit CI artifacts, checks all targets/checksums/provenance and populates a draft before publishing. Keep crate publication disabled, binaries experimental and minimum-runtime claims accurate. Do not overwrite releases or move published tags. Packaging guard tests are mount-free and use disposable synthetic archives; native binary version checks use isolated child homes, never real-home write smoke tests.
+See [release mechanics](docs/releases.md). Explicit release approval is required. Stable-version CI retains four native archives for 14 days; tag-triggered publication accepts only successful exact-commit CI artifacts, checks all targets/checksums/provenance and populates a draft before publishing. Keep registry publication separately approved and manual; CI source-package checks must never upload or receive registry credentials. Keep binaries experimental and minimum-runtime claims accurate. Do not overwrite releases or move published tags. Packaging guard tests are mount-free and use disposable synthetic archives; native binary version checks use isolated child homes, never real-home write smoke tests.
 
 ## License
 

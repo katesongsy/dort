@@ -56,6 +56,12 @@ jobs:
         run: python3 scripts/test-cross-device-macos.py --self-test
       - name: Disposable terminal lifecycle gate
         run: python3 scripts/test-terminal.py
+      - name: Cargo source package guards
+        run: |
+          python3 scripts/check-crates.py --self-test
+          python3 scripts/check-crates.py
+          cargo package --workspace --locked
+          python3 scripts/check-crates.py --archives
       - name: Release packaging guard tests
         run: python3 scripts/release.py --self-test
       - name: Package stable-version native binary

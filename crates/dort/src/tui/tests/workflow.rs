@@ -1506,7 +1506,7 @@ fn structural_check_reports_dependencies_and_capability_limits_without_observing
     let fixture = Fixture::new(false);
     fs::write(
         fixture.root.join("dort.toml"),
-        include_str!("../../../../../examples/dort.toml"),
+        include_str!("../../../examples/dort.toml"),
     )
     .unwrap();
     let output = actions::perform(

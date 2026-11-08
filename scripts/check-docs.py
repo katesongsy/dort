@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check maintained root/docs Markdown recursively, without depending on ignored specs."""
+"""Check maintained root/docs/crate README Markdown, without depending on ignored specs."""
 
 import re
 from pathlib import Path
@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def maintained_paths(root):
     paths = [root / name for name in ("README.md", "ARCHITECTURE.md", "AGENTS.md", "CHANGLOG.md")]
     paths.extend(sorted((root / "docs").rglob("*.md")))
+    paths.extend(sorted((root / "crates").rglob("README.md")))
     return paths
 
 
@@ -122,12 +123,14 @@ class CheckerTests(unittest.TestCase):
             root = Path(temporary).resolve()
             user = root / "docs" / "user" / "README.md"
             technical = root / "docs" / "internals" / "note.md"
-            for page in (user, technical):
+            crate = root / "crates" / "example" / "README.md"
+            for page in (user, technical, crate):
                 page.parent.mkdir(parents=True, exist_ok=True)
                 page.write_text("# Maintained documentation\n")
             paths = maintained_paths(root)
             self.assertIn(user, paths)
             self.assertIn(technical, paths)
+            self.assertIn(crate, paths)
             self.assertTrue(all(not p.is_relative_to(root / "specs") for p in paths))
 
 

@@ -17,12 +17,19 @@ python3 scripts/check-docs.py --self-test
 python3 scripts/check-docs.py
 python3 scripts/test-terminal.py
 python3 scripts/test-cross-device-macos.py --self-test
+python3 scripts/release.py --self-test
+python3 scripts/check-crates.py --self-test
+python3 scripts/check-crates.py
+cargo package --workspace --locked
+python3 scripts/check-crates.py --archives
 git diff --check
 ```
 
 The Python scripts use only the standard library. Ordinary checks do not install tools, mount volumes, fill disks or operate on real dotfiles. Cargo may fetch locked dependencies/toolchain components as needed. [CI](../.github/workflows/ci.yml) runs the ordinary gates on Ubuntu x86_64/ARM64 and macOS Intel/Apple Silicon, records platform/tool versions and requires a non-root user plus distinct Linux cross-device fixture filesystems. A configured matrix is not proof that a particular run passed.
 
-The [documentation checker](../scripts/check-docs.py) scans maintained root Markdown and `docs/` recursively, including `docs/user/`. It validates inline local links/fragments, ignores fenced examples and rejects links to ignored specifications. It is not a general Markdown parser or external-URL checker. Keep its self-tests aligned with the documentation layout.
+The [documentation checker](../scripts/check-docs.py) scans maintained root Markdown, `docs/` recursively (including `docs/user/`) and crate READMEs recursively. It validates inline local links/fragments, ignores fenced examples and rejects links to ignored specifications. It is not a general Markdown parser or external-URL checker. Keep its self-tests aligned with the documentation layout.
+
+The [source-package guards](../scripts/check-crates.py) check registry-restricted metadata, matching core dependency versions, canonical license/example copies and literal Rust include resources. Cargo packages and builds both workspace archives, staging interdependent crates in a temporary local registry before initial publication. Archive guards then bind the exact clean commit and compare source/resource bytes and standalone manifests. Mount-free self-tests exercise missing/out-of-package resources and unsafe/duplicate tar paths. These checks do not authenticate or upload; `cargo publish --dry-run` is an additional non-upload check, never permission to publish. See [release mechanics](releases.md) for the separate irreversible publication boundary.
 
 ## Fixture and external-tool boundaries
 

@@ -1,0 +1,57 @@
+schema = 1
+
+[profiles]
+available = ["dev", "macos", "ubuntu"]
+default = ["base"]
+
+[profiles.platform]
+macos = ["macos"]
+ubuntu = ["ubuntu"]
+
+[[tools]]
+id = "git"
+binary = "git"
+
+[tools.install]
+macos = { provider = "brew", package = "git" }
+ubuntu = { provider = "apt", package = "git" }
+
+[[tools]]
+id = "node"
+binary = "node"
+profiles = ["dev"]
+
+[tools.install]
+macos = { provider = "mise", package = "node", version = "24" }
+ubuntu = { provider = "mise", package = "node", version = "24" }
+
+[[tools]]
+id = "pi"
+binary = "pi"
+profiles = ["dev"]
+requires = ["node"]
+
+[tools.install]
+macos = { provider = "npm", package = "@mariozechner/pi-coding-agent", runtime_tool = "node" }
+ubuntu = { provider = "npm", package = "@mariozechner/pi-coding-agent", runtime_tool = "node" }
+
+[[files]]
+id = "zshrc"
+source = "files/common/zshrc"
+target = "~/.zshrc"
+mode = "link"
+
+[[files]]
+id = "gitconfig"
+source = "templates/gitconfig.j2"
+target = "~/.gitconfig"
+mode = "template"
+permissions = "0644"
+
+[[files]]
+id = "example-secret"
+source = "secrets/example.age"
+target = "~/.config/example/credentials"
+mode = "secret"
+permissions = "0600"
+profiles = ["dev"]

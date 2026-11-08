@@ -44,7 +44,7 @@ fn minimal_manifest_defaults_to_base() {
 
 #[test]
 fn versioned_example_is_valid_on_both_platforms() {
-    let manifest = Manifest::parse(include_str!("../../../examples/dort.toml")).unwrap();
+    let manifest = Manifest::parse(include_str!("../examples/dort.toml")).unwrap();
     for platform in [Platform::Macos, Platform::Ubuntu] {
         let host = HostContext::new(
             "/home/example".into(),

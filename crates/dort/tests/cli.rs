@@ -82,7 +82,7 @@ fn doctor_reports_host_without_creating_state_or_running_external_commands() {
 #[test]
 fn example_check_reports_unsupported_features_without_deployment() {
     let sandbox = Sandbox::new();
-    let path = sandbox.manifest(include_str!("../../../examples/dort.toml"));
+    let path = sandbox.manifest(include_str!("../examples/dort.toml"));
     let output = sandbox
         .command()
         .args(["--json", "manifest", "check", "--manifest"])
@@ -100,7 +100,7 @@ fn example_check_reports_unsupported_features_without_deployment() {
     assert!(json["unsupported_capabilities"].as_array().unwrap().len() >= 3);
     assert_eq!(
         fs::read_to_string(path).unwrap(),
-        include_str!("../../../examples/dort.toml")
+        include_str!("../examples/dort.toml")
     );
     sandbox.assert_readonly();
 }
