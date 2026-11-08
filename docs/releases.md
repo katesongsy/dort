@@ -19,7 +19,7 @@ Archive names are `dort-vMAJOR.MINOR.PATCH-TARGET.tar.gz`, with targets:
 - `x86_64-apple-darwin`
 - `aarch64-apple-darwin`
 
-Each archive contains only executable `dort`, the MIT `LICENSE` and `BUILD-INFO.json` with version, commit, target, compiler and minimum runtime. Tar owner/group/timestamps and gzip timestamp are normalized; this does not promise reproducible compiler output. Archives have individual checksum files in CI; publication combines them into `SHA256SUMS`. Checksums/provenance are integrity and consistency checks, not independent publisher signatures, notarization or sandboxing.
+Each archive contains executable `dort`, the MIT `LICENSE`, `BUILD-INFO.json` with version/commit/target/compiler/minimum runtime, `THIRD-PARTY-NOTICES.txt` and `RUST-COPYRIGHT.html`. Dependency notices collect declared license expressions and upstream license/notice files from the target-resolved normal/build dependency closure; missing notices fail packaging. The pinned toolchain supplies its standard-library copyright bundle. Inclusion does not relicense Dort or assert every listed component is linked. Tar owner/group/timestamps and gzip timestamp are normalized; this does not promise reproducible compiler output. Archives have individual checksum files in CI; publication combines them into `SHA256SUMS`. Checksums/provenance are integrity and consistency checks, not independent publisher signatures, notarization or sandboxing.
 
 ## Tag-triggered publication
 
@@ -39,4 +39,4 @@ Before pushing an authorized annotated tag, validate the final candidate locally
 python3 scripts/release.py --self-test
 ```
 
-The standard-library tests construct only disposable synthetic archives. They cover complete-set verification, missing platforms, corruption, commit mismatch, invalid tags and binary-format rejection; they do not execute synthetic binaries, publish releases or establish native runtime correctness. Native version smoke checks and the full platform CI provide separate observations.
+The standard-library tests construct only disposable synthetic archives. They cover complete-set verification, missing platforms/notices, corruption, commit mismatch, invalid tags and binary-format rejection; they do not execute synthetic binaries, publish releases or establish native runtime correctness. Native version smoke checks and the full platform CI provide separate observations.

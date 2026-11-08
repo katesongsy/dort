@@ -31,7 +31,7 @@ mkdir dort-v0.1.0 && tar -xzf "$archive" -C dort-v0.1.0
 ./dort-v0.1.0/dort --version
 ```
 
-Use an empty download directory, not an existing configuration repository. Archives contain `dort`, the MIT `LICENSE` and `BUILD-INFO.json` (version, target, commit, Rust toolchain and minimum runtime). Checksums detect corruption; they are not an independent publisher signature. Use the binary's absolute path, or place it in a directory you already manage on PATH. Dort has no installer and does not bypass operating-system download/security prompts; do not disable platform protections to run it.
+Use an empty download directory, not an existing configuration repository. Archives contain `dort`, the MIT `LICENSE`, dependency notices (`THIRD-PARTY-NOTICES.txt`), Rust standard-library notices (`RUST-COPYRIGHT.html`) and `BUILD-INFO.json` (version, target, commit, Rust toolchain and minimum runtime). Checksums detect corruption; they are not an independent publisher signature. Use the binary's absolute path, or place it in a directory you already manage on PATH. Dort has no installer and does not bypass operating-system download/security prompts; do not disable platform protections to run it.
 
 ### Build from source
 

@@ -24,7 +24,7 @@ TARGETS = {
     "x86_64-apple-darwin": ("Darwin", "x86_64", "macOS 15 or newer"),
     "aarch64-apple-darwin": ("Darwin", "arm64", "macOS 15 or newer"),
 }
-MEMBERS = {"dort", "LICENSE", "BUILD-INFO.json"}
+MEMBERS = {"dort", "LICENSE", "BUILD-INFO.json", "THIRD-PARTY-NOTICES.txt", "RUST-COPYRIGHT.html"}
 LIMIT = 64 * 1024 * 1024
 
 
@@ -67,14 +67,49 @@ def check_binary(data, target):
         raise ValueError("binary format/architecture/size does not match target")
 
 
-def pack(output, tag, target, commit, binary, rustc):
+def dependency_notices(target):
+    metadata = json.loads(subprocess.check_output([
+        "cargo", "metadata", "--locked", "--format-version", "1", "--filter-platform", target,
+    ], cwd=ROOT, text=True))
+    packages = {p["id"]: p for p in metadata["packages"]}
+    nodes = {n["id"]: n for n in metadata["resolve"]["nodes"]}
+    pending = [p["id"] for p in packages.values() if p["name"] == "dort" and p["source"] is None]
+    seen = set()
+    while pending:
+        identity = pending.pop()
+        if identity in seen:
+            continue
+        seen.add(identity)
+        pending.extend(d["pkg"] for d in nodes[identity]["deps"]
+                       if any(k["kind"] != "dev" for k in d["dep_kinds"]))
+    sections = ["Third-party dependency notices\n\nNormal/build dependency closure resolved for " + target + ".\nDeclared license expressions and upstream notice texts follow; inclusion does not relicense Dort or assert every listed component is linked.\n"]
+    for package in sorted((packages[i] for i in seen if packages[i]["source"]), key=lambda p: (p["name"], p["version"])):
+        root = Path(package["manifest_path"]).parent
+        files = {p for p in root.iterdir() if p.is_file() and p.name.lower().startswith(
+            ("license", "licence", "notice", "copying", "copyright"))}
+        if package.get("license_file"):
+            files.add(root / package["license_file"])
+        if not package.get("license") or not files:
+            raise ValueError("missing dependency license expression/notices: " + package["name"])
+        sections.append(f"\n=== {package['name']} {package['version']} | {package['license']} ===\n")
+        for path in sorted(files):
+            if not path.resolve().is_relative_to(root.resolve()) or path.stat().st_size > 2 * 1024 * 1024:
+                raise ValueError("unexpected dependency notice path/size")
+            sections.append("\n--- " + path.name + " ---\n" + path.read_text())
+    return "\n".join(sections).encode()
+
+
+def pack(output, tag, target, commit, binary, rustc, notices, rust_copyright):
     check_binary(binary, target)
     output.mkdir(parents=True, exist_ok=True)
     name = archive_name(tag, target)
     info = {"version": tag[1:], "target": target, "commit": commit, "rustc": rustc,
             "minimum_runtime": TARGETS[target][2]}
+    if not notices or not rust_copyright or max(len(notices), len(rust_copyright)) > 8 * 1024 * 1024:
+        raise ValueError("missing or oversized third-party notice bundle")
     files = {"dort": binary, "LICENSE": (ROOT / "LICENSE").read_bytes(),
-             "BUILD-INFO.json": (json.dumps(info, indent=2) + "\n").encode()}
+             "BUILD-INFO.json": (json.dumps(info, indent=2) + "\n").encode(),
+             "THIRD-PARTY-NOTICES.txt": notices, "RUST-COPYRIGHT.html": rust_copyright}
     with (output / name).open("xb") as raw:
         with gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0) as compressed:
             with tarfile.open(fileobj=compressed, mode="w") as archive:
@@ -104,7 +139,7 @@ def verify(output, tag, commit):
             raise ValueError("archive checksum mismatch")
         with tarfile.open(path, "r:gz") as archive:
             entries = archive.getmembers()
-            if len(entries) != 3 or {e.name for e in entries} != MEMBERS:
+            if len(entries) != len(MEMBERS) or {e.name for e in entries} != MEMBERS:
                 raise ValueError("unexpected archive entries")
             for entry in entries:
                 if not entry.isfile() or entry.uid or entry.gid or entry.mtime or entry.size > LIMIT:
@@ -118,6 +153,11 @@ def verify(output, tag, commit):
                 raise ValueError("release provenance mismatch")
             if not info["rustc"].startswith("rustc 1.99.1 "):
                 raise ValueError("unexpected Rust toolchain")
+            for name in ["THIRD-PARTY-NOTICES.txt", "RUST-COPYRIGHT.html"]:
+                if not 0 < archive.getmember(name).size <= 8 * 1024 * 1024:
+                    raise ValueError("missing or oversized third-party notice bundle")
+            if not archive.extractfile("THIRD-PARTY-NOTICES.txt").read().startswith(b"Third-party dependency notices\n"):
+                raise ValueError("unexpected dependency notice bundle")
             if archive.extractfile("LICENSE").read() != (ROOT / "LICENSE").read_bytes():
                 raise ValueError("license mismatch")
         sums.append(line)
@@ -150,7 +190,11 @@ def package(output, tag, target):
         if observed.strip() != "dort " + tag[1:] or list(Path(home).iterdir()):
             raise ValueError("isolated binary version/no-state smoke check failed")
     require_clean()
-    print(pack(output, tag, target, head(), binary.read_bytes(), rustc.splitlines()[0]))
+    notices = dependency_notices(target)
+    sysroot = Path(subprocess.check_output(["rustc", "--print", "sysroot"], text=True).strip())
+    rust_copyright = (sysroot / "share/doc/rust/COPYRIGHT-library.html").read_bytes()
+    require_clean()
+    print(pack(output, tag, target, head(), binary.read_bytes(), rustc.splitlines()[0], notices, rust_copyright))
 
 
 def check_ci(commit):
@@ -187,7 +231,7 @@ Experimental, TUI-first local dotfile management with a shared Rust core and CLI
 - Keyboard-first compact/wide navigation, retained drafts and explicit write confirmations.
 
 ## Installation
-Choose the archive matching your CPU and OS. Linux binaries require Ubuntu 24.04+ (glibc 2.39+); macOS binaries require macOS 15+. Verify its SHA-256 against `SHA256SUMS`, extract into an empty directory and run `./dort --version`. Checksums detect corruption, not an independent publisher signature. Each archive includes the MIT license and build provenance.
+Choose the archive matching your CPU and OS. Linux binaries require Ubuntu 24.04+ (glibc 2.39+); macOS binaries require macOS 15+. Verify its SHA-256 against `SHA256SUMS`, extract into an empty directory and run `./dort --version`. Checksums detect corruption, not an independent publisher signature. Each archive includes the MIT license, third-party dependency and Rust standard-library notices, and build provenance.
 
 See the [getting-started guide](https://github.com/katesongsy/dort/blob/{tag}/docs/user/getting-started.md) for installation, a disposable-HOME walkthrough and TUI workflows, and the [safety guide](https://github.com/katesongsy/dort/blob/{tag}/docs/user/safety.md) before touching real configuration.
 
@@ -209,7 +253,7 @@ def self_test():
                 else:
                     data[:4] = b"\xcf\xfa\xed\xfe"
                     struct.pack_into("<I", data, 4, 0x100000C if target.startswith("aarch64") else 0x1000007)
-                pack(output, "v0.1.0", target, "a" * 40, bytes(data), "rustc 1.99.1 (fixture)")
+                pack(output, "v0.1.0", target, "a" * 40, bytes(data), "rustc 1.99.1 (fixture)", b"Third-party dependency notices\nfixture", b"Rust library fixture notice")
         def test_tag(self):
             validate_tag("v0.1.0", "0.1.0")
             for tag in ["v0.2.0", "v0.1.0-dev", "../v0.1.0"]:
@@ -232,6 +276,11 @@ def self_test():
             with tempfile.TemporaryDirectory() as scope:
                 output = Path(scope); self.fixtures(output)
                 with self.assertRaises(ValueError): verify(output, "v0.1.0", "b" * 40)
+        def test_missing_notices(self):
+            with tempfile.TemporaryDirectory() as scope:
+                with self.assertRaises(ValueError):
+                    pack(Path(scope), "v0.1.0", "x86_64-apple-darwin", "a" * 40,
+                         b"\xcf\xfa\xed\xfe" + struct.pack("<I", 0x1000007), "rustc 1.99.1 (fixture)", b"", b"")
         def test_wrong_architecture(self):
             with self.assertRaises(ValueError): check_binary(b"not a binary", "x86_64-apple-darwin")
     result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(Guards))
