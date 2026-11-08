@@ -7,6 +7,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Documentation
 
+- add Homebrew and mise installation channels ([94d6fcd](https://github.com/katesongsy/dort/commit/94d6fcd34fd17f692040ccfaa899c0eab66c55e1))
+
 - document crates.io installation and publication ([81550f7](https://github.com/katesongsy/dort/commit/81550f7355ad4347a8f9ee361bc6d87110a914af))
 
 ### Features
