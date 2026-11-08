@@ -8,13 +8,13 @@ Dort currently supports macOS and Ubuntu on x86_64/ARM64. It uses a Rust 2024 wo
 
 | Component | Responsibility | Current boundary |
 | --- | --- | --- |
-| `crates/dort-core` | Models, validation, profiles/graphs, local state, observation, discovery, planning, journals, experimental filesystem lifecycle/recovery | UI-independent; explicit host inputs; no package-manager execution. |
+| `crates/dort-core` | Models, validation, profiles/graphs, local state, observation, discovery, planning, journals, experimental filesystem lifecycle/recovery | UI-independent; explicit host inputs; separately approved bounded provider inspection; no package installation. |
 | `crates/dort` | Clap commands, Ratatui interface, environment/platform boundary, repository selection, presentation, exit codes | Shared core services and opaque approvals; terminal/flag approval for local bootstrap, file lifecycle and guarded recovery. |
 | `examples/` | Tracked manifest examples | Validation examples, not an installed environment or a deployable source tree. |
 | `docs/user/` | Tracked end-user guides | Current usage, commands, manifests, safety and troubleshooting only; no development content. |
 | `docs/` | Maintained technical references and documentation index | Current system/contracts/methods, not transient feature specifications or implementation plans; no dependencies/links to ignored notes. |
 
-Tool installation/inventory, templates, secrets, Git staging/commit/push and cloning/sync remain unimplemented. The TUI exposes session-only repository selection, guided local create/attach, temporary profile selection, Files discovery/adoption/apply/unmanage, structural manifest checks, Recovery and read-only Git inspection with separately confirmed transient patch disclosure. Core adoption/apply/unmanage executors are sandbox-tested prototypes, not production-ready general deployment.
+Tool installation and frontend inventory workflows, templates, secrets, Git staging/commit/push and cloning/sync remain unimplemented. The core has a separately approved provider-inspection capability; existing CLI/TUI observation and planning do not invoke it. The TUI exposes session-only repository selection, guided local create/attach, temporary profile selection, Files discovery/adoption/apply/unmanage, structural manifest checks, Recovery and read-only Git inspection with separately confirmed transient patch disclosure. Core adoption/apply/unmanage executors are sandbox-tested prototypes, not production-ready general deployment.
 
 ## Module map
 
@@ -23,6 +23,7 @@ All module paths below are under `crates/dort-core/src/`:
 | Modules | Responsibilities |
 | --- | --- |
 | `model.rs`, `manifest.rs` | Strict schema-1 manifest models and structural/host validation; resource/dependency conflicts. |
+| `tools.rs`, `tools/inspection/` | Pure provider-version policy parsing/comparison shared with manifest validation; separate single-use approved fixed provider queries, bounded process lifetime and whitelisted catalogs. No provider discovery, installation or ownership inference. See [provider inspection](docs/tools-inspection.md). |
 | `profiles.rs`, `platform.rs` | Profile union/selection, supported host/platform detection, stable dependency inputs. |
 | `context.rs` | Explicit HOME/XDG/platform/architecture and lexical destination protection. Environment reads are confined to `from_env`. |
 | `local.rs`, `state.rs` | Private local TOML, repository IDs/registration/relocation, descriptor-relative state primitives, retained-inode advisory writer lock. |

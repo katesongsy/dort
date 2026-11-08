@@ -4,6 +4,7 @@ use crate::{
     model::{FileMode, InstallSpec, ManagedFile, Provider, Tool},
     platform::Platform,
     profiles::{Profiles, selected},
+    tools::VersionPolicy,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -415,22 +416,7 @@ fn validate_install(platform: Platform, spec: &InstallSpec) -> std::result::Resu
     if spec.provider != Provider::Npm && spec.runtime_tool.is_some() {
         return Err("runtime_tool is only valid for npm".into());
     }
-    if let Some(version) = spec.version.as_deref() {
-        let supported = match spec.provider {
-            Provider::Brew | Provider::Apt => version == "latest",
-            Provider::Npm => version == "latest" || semver::Version::parse(version).is_ok(),
-            Provider::Mise => {
-                version == "latest"
-                    || semver::Version::parse(version).is_ok()
-                    || (version.split('.').count() <= 2
-                        && version
-                            .split('.')
-                            .all(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())))
-            }
-        };
-        if !supported {
-            return Err("provider cannot enforce this version policy".into());
-        }
-    }
+    VersionPolicy::parse(spec.provider, spec.version.as_deref())
+        .map_err(|problem| problem.to_string())?;
     Ok(())
 }

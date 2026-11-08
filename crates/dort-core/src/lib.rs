@@ -25,6 +25,7 @@ pub mod platform;
 pub mod profiles;
 pub mod recovery;
 pub mod state;
+pub mod tools;
 
 pub use error::{Error, Result};
 pub use manifest::Manifest;
