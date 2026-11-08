@@ -25,6 +25,16 @@ A Ratatui interface provides Overview, session repository selection, guided loca
 
 [GitHub Releases](https://github.com/katesongsy/dort/releases) provide native archives and SHA-256 checksums for macOS 15+ (Apple Silicon or Intel) and Ubuntu 24.04+ (ARM64 or x86_64; glibc 2.39+). See [installation instructions](docs/user/getting-started.md#installation) to select and verify an archive. The binaries do not require Rust. Source packages are also published on crates.io as [`dort`](https://crates.io/crates/dort) and [`dort-core`](https://crates.io/crates/dort-core); Cargo installation requires Rust 1.99.1.
 
+Prebuilt binaries are also available through the third-party [Homebrew tap](https://github.com/katesongsy/homebrew-tap) and mise's GitHub backend:
+
+```sh
+brew install katesongsy/tap/dort
+# Or, with mise installed:
+mise use --global github:katesongsy/dort@0.1.0
+```
+
+Both use the same native release archives and supported-host requirements; neither requires Rust. After `brew tap katesongsy/tap`, the short command `brew install dort` also works. Dort is not registered in Homebrew Core or mise's short-name registry.
+
 For source builds, Rust **1.99.1** is the pinned toolchain and current minimum supported Rust version; `rustup` will use `rust-toolchain.toml`.
 
 ```bash

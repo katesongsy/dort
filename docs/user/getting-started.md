@@ -6,6 +6,34 @@
 
 Supported hosts are **macOS or Ubuntu**, on Intel/x86_64 or ARM64. Other Linux distributions are not currently supported. Local init/attach and Git inspection additionally need an installed trusted Git executable in an absolute PATH directory. Dort never installs Git.
 
+### Homebrew
+
+The third-party [Dort tap](https://github.com/katesongsy/homebrew-tap) installs the verified native release for macOS 15+ or Ubuntu 24.04+ (glibc 2.39+), on Intel/x86_64 or ARM64. Rust is not required:
+
+```sh
+brew install katesongsy/tap/dort
+```
+
+To use the short name, tap once first:
+
+```sh
+brew tap katesongsy/tap
+brew install dort
+```
+
+Dort is not in Homebrew Core, so a fresh Homebrew installation needs the qualified command or the one-time tap. The formula retains the release's license, dependency/Rust notices and build provenance.
+
+### Mise
+
+With [mise](https://mise.jdx.dev/getting-started.html) installed, use its built-in GitHub backend:
+
+```sh
+mise use --global github:katesongsy/dort@0.1.0
+mise exec github:katesongsy/dort@0.1.0 -- dort --version
+```
+
+This records the pinned tool in mise's global configuration and installs the matching native archive. The same macOS 15+/Ubuntu 24.04+ and CPU requirements apply; Rust is not needed. Configure mise's PATH/shims to run `dort` directly, or use `mise exec`. No third-party plugin or `dort` short-name registry entry is required. Neither installation method approves any dotfile operation.
+
 ### Prebuilt archives
 
 Download an archive and `SHA256SUMS` from [GitHub Releases](https://github.com/katesongsy/dort/releases). Rust is not needed to run these binaries.
