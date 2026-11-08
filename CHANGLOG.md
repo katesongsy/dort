@@ -3,7 +3,7 @@
 Generated with git-cliff from committed Git history. Do not edit entries by hand.
 Uncommitted changes are not included. Untagged history appears under Unreleased.
 
-## Unreleased
+## v0.1.0 — 2026-11-08
 
 ### Documentation
 
@@ -14,6 +14,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 - Add initial README ([1f32976](https://github.com/katesongsy/dort/commit/1f3297636c7d64be7d7d13fb979e6ca6caab5348))
 
 ### Features
+
+- **release:** prepare v0.1.0 native binary distribution ([8496939](https://github.com/katesongsy/dort/commit/84969390c323379fb06555fdc15655bf6f472b36))
 
 - **tui:** separate menu navigation from contextual actions ([0d9e482](https://github.com/katesongsy/dort/commit/0d9e48225904690caeac61b3e45fd786fd1086bc))
 
