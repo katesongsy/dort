@@ -23,7 +23,7 @@ A Ratatui interface provides Overview, session repository selection, guided loca
 
 ## Install, build and run
 
-[GitHub Releases](https://github.com/katesongsy/dort/releases) provide native archives and SHA-256 checksums for macOS 15+ (Apple Silicon or Intel) and Ubuntu 24.04+ (ARM64 or x86_64; glibc 2.39+). See [installation instructions](docs/user/getting-started.md#installation) to select and verify an archive. The binaries do not require Rust; neither crate is published to crates.io.
+[GitHub Releases](https://github.com/katesongsy/dort/releases) provide native archives and SHA-256 checksums for macOS 15+ (Apple Silicon or Intel) and Ubuntu 24.04+ (ARM64 or x86_64; glibc 2.39+). See [installation instructions](docs/user/getting-started.md#installation) to select and verify an archive. The binaries do not require Rust. Source packages are also published on crates.io as [`dort`](https://crates.io/crates/dort) and [`dort-core`](https://crates.io/crates/dort-core); Cargo installation requires Rust 1.99.1.
 
 For source builds, Rust **1.99.1** is the pinned toolchain and current minimum supported Rust version; `rustup` will use `rust-toolchain.toml`.
 

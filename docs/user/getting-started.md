@@ -33,6 +33,17 @@ mkdir dort-v0.1.0 && tar -xzf "$archive" -C dort-v0.1.0
 
 Use an empty download directory, not an existing configuration repository. Archives contain `dort`, the MIT `LICENSE`, dependency notices (`THIRD-PARTY-NOTICES.txt`), Rust standard-library notices (`RUST-COPYRIGHT.html`) and `BUILD-INFO.json` (version, target, commit, Rust toolchain and minimum runtime). Checksums detect corruption; they are not an independent publisher signature. Use the binary's absolute path, or place it in a directory you already manage on PATH. Dort has no installer and does not bypass operating-system download/security prompts; do not disable platform protections to run it.
 
+### Install with Cargo
+
+The [`dort`](https://crates.io/crates/dort) executable and [`dort-core`](https://crates.io/crates/dort-core) library are published as source packages. Install the executable with Rust **1.99.1** active:
+
+```sh
+cargo install dort --version 0.1.0 --locked
+dort --version
+```
+
+With rustup, use `cargo +1.99.1 install dort --version 0.1.0 --locked` to select the pinned toolchain explicitly. Cargo builds from source and installs into its configured binary directory, which must be on PATH. This does not initialize a Dort repository or manage any files.
+
 ### Build from source
 
 You need pinned **Rust 1.99.1**; Cargo/rustup may download dependencies/toolchain components. From the Dort checkout:
@@ -42,7 +53,7 @@ cargo build --release --workspace --locked
 ./target/release/dort --version
 ```
 
-Neither crate is published to crates.io. Elsewhere, `dort` means your chosen executable; use its absolute path if necessary. Run `dort` or `dort tui` with terminal stdin/stdout/stderr for the interactive interface. Use at least 48×14; 80×24 or larger gives more room for reports.
+Elsewhere, `dort` means your chosen executable; use its absolute path if necessary. Run `dort` or `dort tui` with terminal stdin/stdout/stderr for the interactive interface. Use at least 48×14; 80×24 or larger gives more room for reports.
 
 ## Start in a disposable HOME
 

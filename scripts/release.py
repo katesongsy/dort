@@ -238,7 +238,7 @@ See the [getting-started guide](https://github.com/katesongsy/dort/blob/{tag}/do
 ## Boundaries
 Dort remains experimental, not a production-ready dotfile manager. No package-manager/provider execution, cloning/sync, Git staging/commit/push, templates or secrets. Repository/HOME/state mutations require supported same-filesystem operations. Recovery never automatically replays or overwrites later edits. Backups are private, not encrypted. Tests do not establish real power-loss or failing-fsync safety.
 
-[Full generated history](https://github.com/katesongsy/dort/blob/{tag}/CHANGLOG.md). Rust 1.99.1 is required only for building from source; neither crate is published to crates.io.
+[Full generated history](https://github.com/katesongsy/dort/blob/{tag}/CHANGLOG.md). Rust 1.99.1 is required only for building from source; Cargo installation is also documented in the getting-started guide.
 """
 
 
