@@ -5,6 +5,10 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ## Unreleased
 
+### Documentation
+
+- document crates.io installation and publication ([81550f7](https://github.com/katesongsy/dort/commit/81550f7355ad4347a8f9ee361bc6d87110a914af))
+
 ### Features
 
 - prepare crates.io source packages ([3a941af](https://github.com/katesongsy/dort/commit/3a941af1ec58c5d46bfcf4372563ff7cf9297d8d))
