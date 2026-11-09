@@ -100,6 +100,7 @@ impl Activity {
             Task::Rollback(..) => "Preview guarded rollback",
             Task::Bootstrap(..) => "Preview bootstrap recovery",
             Task::Git(_) => "Read Git",
+            Task::ToolDeclaration(_) => "Preview add-only tool declaration (no provider)",
             Task::ToolsPrepare(_) => "Review provider query (no execution)",
             Task::ToolsReconcilePrepare(_) => {
                 "Read reconciliation declarations (no provider query)"
@@ -111,6 +112,7 @@ impl Activity {
                     return reviewed.clone();
                 }
                 match approved {
+                    Approved::ToolDeclaration(_) => "Tool declaration",
                     Approved::Ignore(_) => "Discovery preferences",
                     Approved::Files(_) => "File operation",
                     Approved::Batch(_) => "Batch file operation",
@@ -245,6 +247,14 @@ impl Activity {
     }
     pub fn for_pending(pending: &Pending) -> Self {
         let (operation, scope) = match pending {
+            Pending::ToolDeclaration(p) => (
+                "Tool declaration · manifest only",
+                vec![
+                    ("Repository", p.repository.display().to_string()),
+                    ("Tool ID", p.tool.id.clone()),
+                    ("No-op", p.no_op.to_string()),
+                ],
+            ),
             Pending::Ignore(_) => (
                 "Discovery preferences",
                 vec![("Scope", "Local HOME discovery only".into())],

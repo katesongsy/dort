@@ -25,6 +25,7 @@ pub mod platform;
 pub mod profiles;
 pub mod recovery;
 pub mod state;
+mod tool_journal;
 pub mod tools;
 
 pub use error::{Error, Result};

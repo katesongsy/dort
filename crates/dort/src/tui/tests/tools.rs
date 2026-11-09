@@ -96,27 +96,22 @@ fn entry_configuration_and_preview_never_query_and_printable_shortcuts_remain_te
     assert!(app.preview.is_none() && app.confirmation.is_none());
     let screen = render(&app, 80, 24);
     assert!(screen.contains("Risk: config/plugins"));
-    assert!(screen.contains("Type inspect"));
+    assert!(screen.contains("Run query"));
     key(&mut app, KeyCode::Esc);
     assert!(app.tools_view.configuring);
     assert!(!f.home.join("calls").exists());
 }
 
 #[test]
-fn exact_literal_executes_once_searches_metadata_and_retry_requires_new_approval() {
+fn explicit_activation_executes_once_searches_metadata_and_retry_needs_review() {
     let f = Fixture::new(
         r#"printf '{"formulae":[{"full_name":"ripgrep","installed":[{"version":"14.1.0"}]},{"full_name":"node","installed":[{"version":"22.0.0"}]}]}'"#,
     );
     let mut app = f.app(false);
     f.review(&mut app);
-    type_text(&mut app, "yes");
-    assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(!f.home.join("calls").exists());
-    app.tools_view.confirmation.clear();
-    type_text(&mut app, "inspect");
     let task = key(&mut app, KeyCode::Enter).unwrap();
     assert!(matches!(task, Task::ToolsInspect(_)));
-    assert!(app.tools_view.preview.is_none() && app.tools_view.confirmation.is_empty());
+    assert!(app.tools_view.preview.is_none());
     f.run(&mut app, task);
     assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
     assert!(render(&app, 80, 24).contains("2 shown / 2 provider claims"));
@@ -129,7 +124,7 @@ fn exact_literal_executes_once_searches_metadata_and_retry_requires_new_approval
     assert!(render(&app, 80, 24).contains("Package: ripgrep"));
     key(&mut app, KeyCode::Esc);
     f.review(&mut app);
-    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(app.tools_view.preview.is_some());
     assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
 }
 
@@ -140,12 +135,12 @@ fn resize_preview_only_and_scope_changes_cannot_reuse_inspection_confirmation() 
     f.review(&mut app);
     type_text(&mut app, "inspect");
     app.resize(47, 13);
-    assert!(app.tools_view.confirmation.is_empty());
+    assert!(app.tools_view.preview.is_none() || app.dry_run);
     assert!(
         app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 47, 13)
             .is_none()
     );
-    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(app.tools_view.preview.is_none());
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Left);
@@ -154,7 +149,7 @@ fn resize_preview_only_and_scope_changes_cannot_reuse_inspection_confirmation() 
     let mut app = f.app(true);
     f.review(&mut app);
     type_text(&mut app, "inspect");
-    assert!(app.tools_view.confirmation.is_empty());
+    assert!(app.tools_view.preview.is_none() || app.dry_run);
     assert!(key(&mut app, KeyCode::Enter).is_none());
     assert!(render(&app, 48, 14).contains("execution disabled"));
     assert!(!f.home.join("calls").exists());
@@ -189,7 +184,7 @@ fn unavailable_is_not_empty_and_never_displays_raw_provider_payload() {
     assert!(!text.contains("PRIVATE"));
     assert!(app.tools_view.preview.is_none());
     f.review(&mut app);
-    assert!(app.tools_view.confirmation.is_empty());
+    assert!(app.tools_view.preview.is_some());
     assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
 }
 

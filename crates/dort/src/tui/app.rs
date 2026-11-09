@@ -63,9 +63,6 @@ impl Preview {
 }
 pub struct Confirmation {
     pub prompt_scroll: u16,
-    pub input: String,
-    pub removal_ack: Option<String>,
-    pub batch_acks: Vec<String>,
 }
 struct RowClick {
     at: std::time::Instant,
@@ -441,6 +438,8 @@ impl App {
                 self.shell.scroll = 0;
                 self.status = "Select an exact ignored path; Enter previews Unignore, Esc returns. Ancestor rules still apply.".into();
             }
+            Ok(Output::Preview(Pending::ToolDeclaration(_)))
+                if self.tab != Tab::Tools || !self.tools_view.declaration_open || self.quit => {}
             Ok(Output::Preview(pending)) => match pending.report() {
                 Ok(text) => {
                     self.reviewed_activity =
@@ -464,6 +463,9 @@ impl App {
                 Err(error) => self.status = super::actions::diagnostic(&error),
             },
             Ok(Output::Completed(completion)) => {
+                if matches!(completion.operation, "Tool declaration" | "Rollback") {
+                    self.tools_view.reconciliation.invalidate();
+                }
                 if completion.operation == "Discovery preferences" {
                     self.content = Default::default();
                     self.discovery = None;
@@ -666,8 +668,16 @@ impl App {
             }
             return self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height);
         }
-        if event.kind != MouseEventKind::Down(MouseButton::Left) || self.confirmation.is_some() {
+        if event.kind != MouseEventKind::Down(MouseButton::Left) {
             return None;
+        }
+        if self.confirmation.is_some() {
+            let code = match self.hits.target(event.column, event.row) {
+                Some(Target::ConfirmAction) => KeyCode::Enter,
+                Some(Target::CancelConfirmation) => KeyCode::Esc,
+                _ => return None,
+            };
+            return self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height);
         }
         let target = self.hits.target(event.column, event.row)?;
         if self.tab == Tab::Files
@@ -813,6 +823,28 @@ impl App {
                 }
                 if self.tab == Tab::Git {
                     self.git_view.search.editing = true;
+                }
+                None
+            }
+            Target::ProviderConfirm | Target::PatchConfirm => self.key(
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                width,
+                height,
+            ),
+            Target::ConfirmAction | Target::CancelConfirmation => None,
+            Target::ToolDeclarationControl(index, activate) => {
+                if self.tab != Tab::Tools || !self.tools_view.declaration_open {
+                    return None;
+                }
+                self.tools_view.declaration.focus = index;
+                if activate {
+                    return self
+                        .tools_view
+                        .key(
+                            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                            self.dry_run,
+                        )
+                        .flatten();
                 }
                 None
             }
@@ -1118,6 +1150,9 @@ impl App {
                         return self.git_task();
                     }
                     if self.tab == Tab::Tools {
+                        if self.tools_view.declaration_open {
+                            return self.tools_view.declaration.prepare();
+                        }
                         if self.tools_view.recon_open {
                             return Some(Task::ToolsReconcilePrepare(
                                 self.tools_view.reconciliation.request(),
@@ -1246,12 +1281,7 @@ impl App {
                 KeyCode::Right => preview.horizontal = preview.horizontal.saturating_add(8),
                 KeyCode::Left => preview.horizontal = preview.horizontal.saturating_sub(8),
                 KeyCode::Enter if !preview.pending.blocked() && !self.dry_run => {
-                    self.confirmation = Some(Confirmation {
-                        prompt_scroll: 0,
-                        input: String::new(),
-                        removal_ack: None,
-                        batch_acks: vec![],
-                    })
+                    self.confirmation = Some(Confirmation { prompt_scroll: 0 })
                 }
                 KeyCode::Enter => {
                     self.status = "Approval disabled: blocked preview or --dry-run.".into()
@@ -1870,9 +1900,10 @@ impl App {
                 self.tab = Tab::Git;
 
                 self.git_view.confirm_patch();
-                self.status = "Patch viewing needs a loaded Unstaged or Staged summary. Type literal view patch in its warning to disclose once.".into();
+                self.status = "Choose Unstaged or Staged, then activate View patch in its content warning.".into();
             }
             Action::Destination(tab) => { self.go_tab(tab); if tab == Tab::Files { self.discovering = false; } }
+            Action::ToolDeclaration => { self.go_tab(Tab::Tools); self.tools_view.declare(); }
             Action::ToolsConfigure => { self.go_tab(Tab::Tools); self.tools_view.configure(); }
             Action::ToolsSnapshots => { self.go_tab(Tab::Tools); self.tools_view.leave(); self.tools_view.catalog_browser = true; }
             Action::ToolsReconcile => { self.go_tab(Tab::Tools); self.tools_view.leave(); self.tools_view.recon_open = true; }
@@ -2412,23 +2443,7 @@ impl App {
         if key.code != KeyCode::Enter {
             return self.confirm_key(key);
         }
-        let ids = self.batch_removal_ids();
-        let confirmation = self.confirmation.as_mut()?;
-        if let Some(id) = ids.get(confirmation.batch_acks.len()) {
-            if &confirmation.input == id {
-                confirmation.batch_acks.push(id.clone());
-                confirmation.input.clear();
-                confirmation.prompt_scroll = 0;
-            } else {
-                self.status = "Exact batch file ID mismatch; re-enter the requested ID.".into();
-            }
-            return None;
-        }
-        if confirmation.input != "yes" {
-            self.status = "Acknowledge every deletion ID, then type literal yes.".into();
-            return None;
-        }
-        let acks = confirmation.batch_acks.clone();
+        let acks = self.batch_removal_ids();
         let Pending::Batch(plan) = self.preview.take()?.pending else {
             return None;
         };
@@ -2460,44 +2475,21 @@ impl App {
                 confirmation.prompt_scroll = confirmation.prompt_scroll.saturating_sub(4)
             }
             KeyCode::Home => confirmation.prompt_scroll = 0,
-            KeyCode::Backspace => {
-                confirmation.input.pop();
-            }
-            KeyCode::Char(c)
-                if !c.is_control()
-                    && key
-                        .modifiers
-                        .intersection(KeyModifiers::CONTROL | KeyModifiers::ALT)
-                        .is_empty()
-                    && confirmation.input.len() + c.len_utf8() <= 256 =>
-            {
-                confirmation.input.push(c)
-            }
             KeyCode::Enter => {
-                let preview = self.preview.as_ref()?;
-                if let Some(id) = preview.pending.removal_id()
-                    && confirmation.removal_ack.is_none()
-                {
-                    if confirmation.input == id {
-                        confirmation.removal_ack = Some(confirmation.input.clone());
-                        confirmation.prompt_scroll = 0;
-                        confirmation.input.clear();
-                    } else {
-                        self.status = "Exact file ID mismatch; re-enter the requested ID.".into();
+                let ack = self
+                    .preview
+                    .as_ref()?
+                    .pending
+                    .removal_id()
+                    .map(str::to_owned);
+                let pending = self.preview.take()?.pending;
+                self.confirmation = None;
+                match pending.approve(ack.as_deref()) {
+                    Ok(approval) => return Some(Task::Execute(approval)),
+                    Err(error) => {
+                        self.status =
+                            format!("Approval refused: {}", super::actions::diagnostic(&error))
                     }
-                } else if confirmation.input == "yes" {
-                    let ack = confirmation.removal_ack.clone();
-                    let pending = self.preview.take()?.pending;
-                    self.confirmation = None;
-                    match pending.approve(ack.as_deref()) {
-                        Ok(approval) => return Some(Task::Execute(approval)),
-                        Err(error) => {
-                            self.status =
-                                format!("Approval refused: {}", super::actions::diagnostic(&error))
-                        }
-                    }
-                } else {
-                    self.status = "Type literal yes to approve, or Esc to cancel.".into();
                 }
             }
             _ => (),

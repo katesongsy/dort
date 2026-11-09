@@ -76,6 +76,10 @@ mod task_surface_tests;
 mod task_surfaces;
 #[cfg(test)]
 mod tests;
+mod tool_declaration;
+#[cfg(test)]
+#[path = "tests/tool_declaration.rs"]
+mod tool_declaration_tests;
 mod tools;
 mod tools_reconcile;
 #[cfg(test)]

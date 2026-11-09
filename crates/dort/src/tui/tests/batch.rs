@@ -76,20 +76,14 @@ fn text(app: &mut App, s: &str) {
     }
 }
 fn clear(app: &mut App) {
-    if let Some(c) = &app.confirmation {
-        for _ in 0..c.input.chars().count() {
-            assert!(key(app, KeyCode::Backspace).is_none());
-        }
-    } else {
-        assert!(
-            app.key(
-                KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
-                SIZE.0,
-                SIZE.1
-            )
-            .is_none()
-        );
-    }
+    assert!(
+        app.key(
+            KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+            SIZE.0,
+            SIZE.1
+        )
+        .is_none()
+    );
 }
 fn select(app: &mut App, name: &str) {
     for _ in 0..20 {
@@ -430,55 +424,17 @@ fn selected_apply_keep_delete_are_combined_and_every_delete_id_then_yes_is_requi
         f.run(&mut app, task);
         assert!(key(&mut app, KeyCode::Enter).is_none());
         if operation == 'D' {
-            assert!(render(&app, 48, 14).contains("1/2"));
-            text(&mut app, "yes");
-            assert!(key(&mut app, KeyCode::Enter).is_none());
-            assert!(app.confirmation.as_ref().unwrap().batch_acks.is_empty());
-            clear(&mut app);
-            text(&mut app, "only-a");
-            assert!(key(&mut app, KeyCode::Enter).is_none());
-            assert_eq!(
-                app.confirmation.as_ref().unwrap().batch_acks,
-                vec!["only-a"]
-            );
-            text(&mut app, "only-b");
+            let screen = render(&app, 48, 14);
+            assert!(screen.contains("only-a") && screen.contains("only-b"));
             key(&mut app, KeyCode::F(1));
             assert!(key(&mut app, KeyCode::Enter).is_none());
-            assert_eq!(
-                app.confirmation.as_ref().unwrap().batch_acks,
-                vec!["only-a"]
-            );
-            assert_eq!(app.confirmation.as_ref().unwrap().input, "only-b");
             assert!(!render(&app, 140, 40).contains("only-a"));
-            key(&mut app, KeyCode::Esc);
-            assert_eq!(app.confirmation.as_ref().unwrap().input, "only-b");
-            key(&mut app, KeyCode::F(1));
             app.resize(47, 14);
             assert!(app.confirmation.is_none());
             app.resize(48, 14);
-            key(&mut app, KeyCode::Esc); // return from Help; no acknowledgements restored
-            key(&mut app, KeyCode::Enter);
-            assert!(app.confirmation.as_ref().unwrap().batch_acks.is_empty());
-            text(&mut app, "only-a");
-            render(&app, 48, 14);
-            assert!(
-                app.mouse(
-                    MouseEvent {
-                        kind: MouseEventKind::Down(MouseButton::Left),
-                        column: 10,
-                        row: 9,
-                        modifiers: KeyModifiers::NONE
-                    },
-                    48,
-                    14
-                )
-                .is_none()
-            );
-            assert!(app.confirmation.as_ref().unwrap().batch_acks.is_empty());
-            key(&mut app, KeyCode::Enter);
-            text(&mut app, "only-b");
-            key(&mut app, KeyCode::Enter);
-            assert!(render(&app, 48, 14).contains("literal yes"));
+            key(&mut app, KeyCode::Esc);
+            assert!(key(&mut app, KeyCode::Enter).is_none());
+            assert!(app.confirmation.is_some());
         }
         text(&mut app, "yes");
         let task = key(&mut app, KeyCode::Enter).unwrap();

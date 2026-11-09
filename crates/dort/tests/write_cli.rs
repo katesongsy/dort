@@ -214,36 +214,32 @@ fn attach_adopt_status_apply_keep_and_guarded_rollback_work_end_to_end() {
     assert!(s.repo.join("files/a").exists());
 }
 #[test]
-fn remove_needs_separate_exact_ack_and_retains_source() {
+fn remove_binds_selected_id_and_optional_guard_must_match_retaining_source() {
     let s = Sandbox::new();
     s.init();
     s.add();
-    for ack in [None, Some("other")] {
-        let mut c = s.repo();
-        c.args(["--json", "--yes"]);
-        if let Some(ack) = ack {
-            c.args(["--confirm-remove", ack]);
-        }
-        c.args(["files", "remove", "a", "--mode", "remove"])
-            .assert()
-            .code(2);
-        assert!(
-            fs::symlink_metadata(s.home.join(".a"))
-                .unwrap()
-                .is_symlink()
-        );
-    }
     s.repo()
         .args([
             "--json",
             "--yes",
             "--confirm-remove",
-            "a",
+            "other",
             "files",
             "remove",
             "a",
             "--mode",
             "remove",
+        ])
+        .assert()
+        .code(2);
+    assert!(
+        fs::symlink_metadata(s.home.join(".a"))
+            .unwrap()
+            .is_symlink()
+    );
+    s.repo()
+        .args([
+            "--json", "--yes", "files", "remove", "a", "--mode", "remove",
         ])
         .assert()
         .success();

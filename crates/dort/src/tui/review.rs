@@ -49,7 +49,7 @@ fn detail(plan: &Plan, selected: usize) -> Text<'static> {
     }
     if file.requires_removal_acknowledgement {
         lines.push(Line::styled(
-            "Separate exact-ID acknowledgement required before literal yes.",
+            "Confirmation identifies this exact mapping; repository source is retained.",
             ui::danger(),
         ));
     }

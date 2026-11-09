@@ -35,7 +35,7 @@ fn details(app: &App, rows: &[&Entry], query: &str, selected: usize) -> Text<'st
         }
         lines.push(Line::raw(match entry.effect {
             super::context::Effect::Preview | super::context::Effect::Draft => "Opens an editable draft or requests a read-only preview. Core guards remain authoritative; execution requires a fresh preview and separate explicit confirmation.",
-            super::context::Effect::Disclosure => "Opens a content warning. Type literal view patch there to disclose the comparison.",
+            super::context::Effect::Disclosure => "Opens a content warning with a View patch action.",
             _ => "Writes require a reviewed, explicit approval.",
         }));
     } else {

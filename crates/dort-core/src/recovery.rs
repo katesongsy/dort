@@ -39,6 +39,7 @@ pub fn preview(host: &HostContext, repository_id: &str, transaction_id: &str) ->
         1 => adoption::rollback_preview(host, repository_id, transaction_id)?,
         2 => lifecycle::rollback_preview(host, repository_id, transaction_id)?,
         4 => crate::batch_execution::rollback_preview(host, repository_id, transaction_id)?,
+        5 => crate::tools::declaration::rollback_preview(host, repository_id, transaction_id)?,
         _ => {
             return Err(Error::Invalid(
                 "use bootstrap resume/abandon for initialization history".into(),
@@ -92,6 +93,13 @@ pub fn execute_with_observer(
             observer,
         ),
         4 => crate::batch::rollback(
+            host,
+            lock,
+            &fresh.repository_id,
+            &fresh.transaction_id,
+            observer,
+        ),
+        5 => crate::tools::declaration::rollback(
             host,
             lock,
             &fresh.repository_id,

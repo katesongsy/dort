@@ -411,22 +411,24 @@ pub fn draw(frame: &mut Frame, app: &App) {
         app.hits.wheel(modal, super::input::Wheel::Confirmation);
         let removal = app.preview.as_ref().and_then(|p| p.pending.removal_id());
         let batch_ids = app.batch_removal_ids();
-        let prompt = if let Some(id) = batch_ids.get(confirmation.batch_acks.len()) {
+        let prompt = if !batch_ids.is_empty() {
             format!(
-                "Separate deletion acknowledgement {}/{}\nType exact file ID: {}\nAll IDs then literal yes; sources retained.",
-                confirmation.batch_acks.len() + 1,
-                batch_ids.len(),
-                safe(id)
+                "Delete managed links for these exact IDs:\n{}\nRepository sources are retained.",
+                batch_ids
+                    .iter()
+                    .map(|id| safe(id))
+                    .collect::<Vec<_>>()
+                    .join("\n")
             )
-        } else if let Some(id) = removal.filter(|_| confirmation.removal_ack.is_none()) {
+        } else if let Some(id) = removal {
             format!(
-                "Separate deletion acknowledgement\nType exact file ID: {}\nRepository source is retained.",
+                "Delete managed link for ID: {}\nRepository source is retained.",
                 safe(id)
             )
         } else {
-            "Approve reviewed effects\nType literal yes, then Enter.\nExecution independently revalidates all guards.".into()
+            "Proceed with the reviewed changes?".into()
         };
-        // Prompt scroll is independent of input; full IDs are never reconstructed from display.
+        // Approval uses the real preview/IDs, never reconstructed display text.
         frame.render_widget(ui::pane("Confirm · Submit to execute", true), modal);
         let inner = Rect::new(
             modal.x + 1,
@@ -441,13 +443,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
             Text::from(prompt).style(ui::warning()),
             confirmation.prompt_scroll,
         );
-        ui::input(
-            frame,
-            Rect::new(inner.x, inner.y + prompt_height, inner.width, 3),
-            "Confirmation",
-            &confirmation.input,
-            true,
+        let button = Rect::new(inner.x, inner.y + prompt_height, inner.width, 1);
+        frame.render_widget(
+            Paragraph::new(Line::from(ui::button("Confirm · Enter", "", true))),
+            button,
         );
+        app.hits.click(button, super::input::Target::ConfirmAction);
+        let cancel = Rect::new(inner.x, inner.y + prompt_height + 1, inner.width, 1);
+        frame.render_widget(Paragraph::new("Cancel · Esc"), cancel);
+        app.hits
+            .click(cancel, super::input::Target::CancelConfirmation);
         frame.render_widget(
             Paragraph::new(ui::keys(&[
                 ("Enter", "Submit"),

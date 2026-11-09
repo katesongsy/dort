@@ -272,29 +272,24 @@ def tools_workflows(binary, base, env):
     executable.chmod(0o700)
     with Session([binary, 'tui'], tools_env) as session:
         session.wait(b'loaded.')
-        session.send(b'\x1b[D')  # Overview -> Tools, no provider query on entry.
+        session.send(b'\x1b[D')
         session.wait(b'No provider has been queried')
         session.send(b'c\t' + str(executable).encode() + b'\t/no-external-programs\t\r')
-        session.wait(b'Type inspect')
+        session.wait(b'Run query')
         assert not (home / 'calls').exists(), 'Provider executed during review'
-        session.send(b'yes\r')
-        session.settle()
-        assert not (home / 'calls').exists(), 'Write confirmation approved inspection'
-        session.send(b'\x15inspect')
         session.resize((13, 47))
         session.wait(b'terminal too small')
         session.resize((24, 80))
-        session.wait(b'Type inspect')
+        session.wait(b'Review exact query')
+        assert not (home / 'calls').exists(), 'Resize executed inspection'
         session.send(b'\r')
-        session.settle()
-        assert not (home / 'calls').exists(), 'Resize retained inspection approval'
-        session.send(b'inspect\r')
+        session.wait(b'Run query')
+        session.send(b'\r')
         session.wait(b'1 shown / 1 provider claims')
         session.send(b'/RIPGREP\r')
         session.wait(b'ripgrep')
         session.send(b'r')
-        session.wait(b'Type inspect')
-        session.send(b'\r')
+        session.wait(b'Run query')
         session.settle()
         assert (home / 'calls').read_text() == 'ran', 'Retry replayed inspection approval'
         session.send(b'\x1b')
@@ -304,12 +299,12 @@ def tools_workflows(binary, base, env):
         session.send(b'q')
         session.finish()
     assert sorted(p.name for p in home.iterdir()) == ['calls'], 'Inspection created Dort state'
-    print('PASS Tools explicit query review, literal confirmation, resize, search and fresh retry')
+    print('PASS Tools query review, explicit activation, resize, search and fresh retry')
     with Session([binary, '--dry-run', 'tui'], tools_env, (14, 48)) as session:
         session.wait(b'loaded.')
         session.send(b'\x1b[Dc\t' + str(executable).encode() + b'\t/no-external-programs\t\r')
         session.wait(b'execution disabled')
-        session.send(b'inspect\r')
+        session.send(b'\r')
         session.settle()
         assert (home / 'calls').read_text() == 'ran'
         session.send(b'\x1b')
@@ -322,13 +317,70 @@ def tools_workflows(binary, base, env):
     print('PASS compact preview-only Tools cannot execute providers')
     with Session([binary, 'tools', 'inspect', 'brew', '--executable', str(executable),
                   '--search-dir', '/no-external-programs'], tools_env) as session:
-        session.wait(b'Type inspect')
+        session.wait(b'Run query? [y/N]')
         assert (home / 'calls').read_text() == 'ran'
-        session.send(b'inspect\n')
+        session.send(b'y\n')
         session.finish(tui=False)
     assert (home / 'calls').read_text() == 'ranran'
     assert sorted(p.name for p in home.iterdir()) == ['calls']
-    print('PASS interactive CLI provider inspection requires literal inspect')
+    print('PASS interactive CLI provider inspection uses simple y/N confirmation')
+
+
+def tool_declaration_workflows(binary, base, env):
+    home, repo, bin_dir = (base / name for name in ('declaration-home', 'declaration-repo', 'declaration-bin'))
+    for directory in (home, repo, bin_dir):
+        directory.mkdir(mode=0o700)
+    (repo / '.git').mkdir()
+    original = '# retained declaration fixture\nschema=1\n'
+    (repo / 'dort.toml').write_text(original)
+    git = bin_dir / 'git'
+    git.write_text('#!/bin/sh\nfor arg do\ncase "$arg" in\nconfig) exit 1;;\nrev-parse) pwd -P; exit 0;;\nstatus) printf "# branch.head main\\000"; exit 0;;\nesac\ndone\nexit 94\n')
+    git.chmod(0o700)
+    provider = bin_dir / 'demo'
+    provider.write_text('#!/bin/sh\nprintf ran > "$HOME/PROVIDER-RAN"\n')
+    provider.chmod(0o700)
+    scoped = dict(env, HOME=str(home), PATH=str(bin_dir), XDG_CONFIG_HOME=str(home / '.config'),
+                  XDG_STATE_HOME=str(home / '.local/state'))
+    subprocess.run([binary, '--json', '--yes', 'init', str(repo)], env=scoped,
+                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    with Session([binary, 'tui'], scoped) as session:
+        session.wait(b'loaded.')
+        session.send(b'\x1b[D')
+        session.wait(b'No provider has been queried')
+        session.send(b'a')
+        session.wait(b'Add tool declaration')
+        session.send(b'demo\tdemo\t\t\tbrew\tdemo\t\t\tapt\tdemo\t\t\t')
+        session.wait(b'Review declaration')
+        session.send(b'\x1b')
+        session.wait(b'No provider has been queried')
+        session.send(b'a\r')  # Retained complete draft, not typed confirmation.
+        session.wait(b'Already declared: false')
+        assert (repo / 'dort.toml').read_text() == original
+        session.send(b'\r')
+        session.wait(b'Confirm')
+        assert (repo / 'dort.toml').read_text() == original
+        session.click_label('[Confirm')
+        session.wait(b'Observations refreshed.')
+        session.send(b'q')
+        session.finish()
+    assert '[[tools]]' in (repo / 'dort.toml').read_text()
+    output = subprocess.run([binary, '--json', 'history'], env=scoped,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    row = next(r for r in json.loads(output.stdout)['transactions'] if r['journal_schema'] == 5)
+    with Session([binary, 'tui'], scoped, (14, 48)) as session:
+        session.wait(b'loaded.')
+        session.destination('Recovery')
+        session.send(b'/' + row['transaction_id'][:16].encode() + b'\rb')
+        session.wait(b'Rollback schema 5')
+        session.send(b'\r')
+        session.wait(b'Confirm')
+        session.send(b'\r')
+        session.wait(b'Observations refreshed.')
+        session.send(b'q')
+        session.finish()
+    assert (repo / 'dort.toml').read_text() == original
+    assert not (home / 'PROVIDER-RAN').exists()
+    print('PASS retained multi-platform tool declaration, click confirmation and compact schema-5 Recovery')
 
 
 def tools_reconciliation_workflows(binary, base, env):
@@ -359,12 +411,12 @@ def tools_reconciliation_workflows(binary, base, env):
         session.send(b'\x1b[D')
         session.wait(b'No provider has been queried')
         session.send(b'c  \t' + scopes[0]['executable'].encode() + b'\t/no-external-programs\t\r')
-        session.wait(b'Type inspect')
-        session.send(b'inspect\r')
+        session.wait(b'Run query')
+        session.send(b'\r')
         session.wait(b'Snapshot s1')
         session.send(b'c\t\x15' + scopes[1]['executable'].encode() + b'\t\t\r')
-        session.wait(b'Type inspect')
-        session.send(b'inspect\r')
+        session.wait(b'Run query')
+        session.send(b'\r')
         session.wait(b'Snapshot s2')
         assert (home / 'calls').read_text() == 'first\nsecond\n'
         session.send(b's')
@@ -421,10 +473,10 @@ def tools_reconciliation_workflows(binary, base, env):
     with Session(cli, scoped_env) as session:
         session.wait(b'Snapshot first:')
         assert (home / 'calls').read_text() == before
-        session.send(b'inspect\n')
+        session.send(b'y\n')
         session.wait(b'Snapshot second:')
         assert (home / 'calls').read_text() == before + 'first\n'
-        session.send(b'inspect\n')
+        session.send(b'y\n')
         session.finish(tui=False)
     assert (home / 'calls').read_text() == before + 'first\nsecond\n'
     assert not (home / 'candidate-executed').exists()
@@ -460,6 +512,7 @@ def run():
 
         tools_workflows(binary, base, env)
         tools_reconciliation_workflows(binary, base, env)
+        tool_declaration_workflows(binary, base, env)
 
         # Text carries navigation/state meaning even with a low-color terminal.
         with Session([binary, "--dry-run", "tui"], dict(env, TERM="vt100", NO_COLOR="1"), (14, 48)) as session:
@@ -1036,13 +1089,13 @@ def run():
             session.wait(b"1 entries")
             assert not (base / "patch-calls").exists(), "Summary/Actions browsing prefetched a patch"
             assert b"PRIVATE-PATCH" not in session.data
-            session.send(b"wyes\r")
+            session.send(b"w")
             session.wait(b"May expose secrets")
             session.settle()
-            assert not (base / "patch-calls").exists(), "yes bypassed disclosure phrase"
+            assert not (base / "patch-calls").exists(), "Warning opened a patch automatically"
             session.send(b"\x1b")
             session.wait(b"1 entries")
-            session.send(b"wview patch\r")
+            session.send(b"w\r")
             session.wait(b"PRIVATE-PATCH\\x1b[31m")
             session.send(b"\x1b")
             session.wait(b"1 entries")
@@ -1124,8 +1177,8 @@ def run():
             session.wait(b"100644 -> 100644")  # loaded diff before content action
             session.click_label("View patch")
             session.wait(b"May expose secrets")
-            session.mouse(0, 20, 8)  # ordinary clicks cannot submit the phrase
-            session.send(b"yes\r")
+            session.mouse(0, 20, 8)  # Only the labeled disclosure control can approve.
+            session.send(b"yes")  # Text alone is not an activation.
             session.settle()
             assert b"May expose secrets" in session.screen.text()
             assert b"PRIVATE-PATCH" not in session.data
@@ -1435,18 +1488,16 @@ def run():
             session.send(b"config\r\r")
             session.wait("Review ·".encode())
             session.send(b"\r")
-            session.wait(b"Separate deletion acknowledgement")
-            session.send(b"yes\r")
-            session.settle()
-            assert candidate.is_symlink(), "Literal yes bypassed exact-ID acknowledgement"
-            session.send(b"\x7f\x7f\x7fconfig\ryes\r")
+            session.wait(b"Delete managed link for ID:")
+            assert candidate.is_symlink(), "Confirmation executed without activation"
+            session.send(b"\r")
             session.wait(b"Operation completed.")
             session.send(b"q")
             session.finish()
         assert not candidate.exists() and not candidate.is_symlink()
         assert (repo / "files/config").read_text() == "ordinary adoption settings\n"
         assert target.is_symlink()
-        print("PASS exact-ID link deletion outside display filter and separate yes")
+        print("PASS selected-ID link deletion outside display filter with simple confirmation")
 
         # Each batch scenario has its own canonical disposable home and registry.
         def batch_fixture(name, managed):
@@ -1554,25 +1605,19 @@ def run():
                 session.send(operation.encode())
                 session.wait(b'Combined batch preview')
                 session.send(b'\r')
+                session.wait(b'Confirm')
                 if operation == 'D':
-                    session.wait(b'1/2')
-                    session.send(b'yes\r')
-                    session.settle()
+                    session.wait(b'only-a')
+                    session.wait(b'only-b')
                     assert all((targets / name).is_symlink() for name in ('only-a', 'only-b'))
-                    session.send(b'\x7f\x7f\x7fonly-a\r')
-                    session.wait(b'2/2')
                     session.resize((14, 47))
                     session.wait(b'terminal too small')
                     session.resize((24, 80))
                     session.wait(b'Combined batch preview')
-                    session.settle()  # Drain resize events before fresh confirmation input.
-                    session.send(b'\r')
-                    session.wait(b'1/2')  # The entire acknowledgement sequence was cleared.
-                    session.send(b'only-a\ronly-b\r')
-                    session.wait(b'literal yes')
-                else:
+                    session.settle()
+                    session.send(b'\r')  # Fresh confirmation, not execution.
                     session.wait(b'Confirm')
-                session.send(b'yes\r')
+                session.send(b'\r')
                 session.wait(b'Batch file operation completed.')
                 session.send(b'q')
                 session.finish()

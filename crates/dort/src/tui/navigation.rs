@@ -64,6 +64,7 @@ pub fn entries(group: usize) -> Vec<Entry> {
         ],
         _ => vec![
             action("Tools [t]", Destination(Tab::Tools)),
+            action("Add tool declaration [a]", ToolDeclaration),
             action("Configure inspection [c]", ToolsConfigure),
             action("Session snapshots [s]", ToolsSnapshots),
             action("Reconcile snapshots [p]", ToolsReconcile),
@@ -87,6 +88,7 @@ pub fn shortcut(item: Item) -> ratatui::crossterm::event::KeyCode {
             Destination(Tab::Files) => 'm',
             Destination(Tab::Recovery) => 'r',
             Destination(Tab::Tools) => 't',
+            ToolDeclaration => 'a',
             ToolsConfigure => 'c',
             ToolsSnapshots => 's',
             ToolsReconcile => 'p',

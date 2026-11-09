@@ -356,7 +356,7 @@ fn mouse_form_controls_and_palette_actions_never_bypass_typed_approval_or_disclo
         .is_none()
     );
     press(&mut app, KeyCode::Enter, size);
-    assert!(app.git_view.sensitive());
+    assert!(!app.git_view.sensitive()); // no configured Git; consumed confirmation is not replayed
     press(&mut app, KeyCode::Esc, size);
     assert!(!app.git_view.sensitive());
 }

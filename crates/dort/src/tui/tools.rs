@@ -35,13 +35,14 @@ pub struct State {
     pub configuring: bool,
     pub focus: usize,
     pub preview: Option<tools::Preview>,
-    pub confirmation: String,
     pub report: Option<std::sync::Arc<tools::Report>>,
     pub snapshots: Vec<Snapshot>,
     pub current: usize,
     next_id: u64,
     pub catalog_browser: bool,
     pub recon_open: bool,
+    pub declaration_open: bool,
+    pub declaration: super::tool_declaration::State,
     pub reconciliation: super::tools_reconcile::State,
     pub notice: Option<&'static str>,
     pub scope: String,
@@ -61,13 +62,14 @@ impl Default for State {
             configuring: false,
             focus: 0,
             preview: None,
-            confirmation: String::new(),
             report: None,
             snapshots: vec![],
             current: 0,
             next_id: 1,
             catalog_browser: false,
             recon_open: false,
+            declaration_open: false,
+            declaration: Default::default(),
             reconciliation: Default::default(),
             notice: None,
             scope: String::new(),
@@ -90,7 +92,8 @@ impl State {
         }
     }
     pub fn text_entry(&self) -> bool {
-        self.configuring
+        self.declaration_open
+            || self.configuring
             || self.preview.is_some()
             || self.searching
             || (self.recon_open && self.reconciliation.text_entry())
@@ -103,14 +106,20 @@ impl State {
     }
     pub fn leave(&mut self) {
         self.preview = None;
-        self.confirmation.clear();
         self.configuring = false;
         self.searching = false;
         self.catalog_browser = false;
         self.recon_open = false;
+        self.declaration_open = false;
+    }
+    pub fn declare(&mut self) {
+        self.leave();
+        self.declaration_open = true;
     }
     pub fn shrink(&mut self) {
-        self.confirmation.clear();
+        if self.preview.take().is_some() {
+            self.configuring = true;
+        }
     }
     fn request(&self) -> Request {
         let npm = self.query == 3;
@@ -126,7 +135,6 @@ impl State {
     }
     pub fn prepare(&mut self) -> Task {
         self.preview = None;
-        self.confirmation.clear();
         self.configuring = false;
         self.searching = false;
         Task::ToolsPrepare(self.request())
@@ -147,7 +155,6 @@ impl State {
         self.scope = serde_json::to_string_pretty(&preview.review())
             .expect("inspection metadata serializes");
         self.preview = Some(preview);
-        self.confirmation.clear();
         self.configuring = false;
         self.scroll = 0;
     }
@@ -213,6 +220,15 @@ impl State {
     }
     /// Some means locally handled, including printable text that must not become shortcuts.
     pub fn key(&mut self, key: KeyEvent, dry_run: bool) -> Option<Option<Task>> {
+        if self.declaration_open {
+            if key.code == KeyCode::Esc
+                || (key.code == KeyCode::Enter && self.declaration.focus == 13)
+            {
+                self.declaration_open = false;
+                return Some(None);
+            }
+            return Some(self.declaration.key(key));
+        }
         if self.recon_open {
             let outcome = self.reconciliation.key(key, &self.snapshots);
             return Some(match outcome {
@@ -257,19 +273,16 @@ impl State {
             match key.code {
                 KeyCode::Esc => {
                     self.preview = None;
-                    self.confirmation.clear();
                     self.configuring = true;
                 }
                 KeyCode::Home => self.scroll = 0,
                 KeyCode::PageDown => self.scroll = self.scroll.saturating_add(3),
                 KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(3),
-                KeyCode::Enter if !dry_run && self.confirmation == "inspect" => {
+                KeyCode::Enter if !dry_run => {
                     let preview = self.preview.take()?;
-                    self.confirmation.clear();
                     self.report = None;
                     return Some(Some(Task::ToolsInspect(preview.approve())));
                 }
-                _ if !dry_run => edit_text(&mut self.confirmation, key),
                 _ => (),
             }
             return Some(None);
@@ -314,6 +327,7 @@ impl State {
             return None;
         }
         match key.code {
+            KeyCode::Char('a') => self.declare(),
             KeyCode::Char('s') => self.catalog_browser = true,
             KeyCode::Char('p') => {
                 self.recon_open = true;
@@ -361,6 +375,10 @@ impl State {
     }
     pub fn draw(&self, frame: &mut Frame, area: Rect, dry_run: bool, hits: &super::input::Hits) {
         hits.wheel(area, super::input::Wheel::Tools);
+        if self.declaration_open {
+            self.declaration.draw(frame, area, hits);
+            return;
+        }
         if self.recon_open {
             self.reconciliation.draw(frame, area, &self.snapshots, hits);
             return;
@@ -435,17 +453,22 @@ impl State {
                 self.scroll,
                 false,
             );
-            ui::input(
-                frame,
-                Rect::new(area.x, area.bottom().saturating_sub(3), area.width, 3),
-                if dry_run {
-                    "Preview only · execution disabled"
-                } else {
-                    "Type inspect then Enter · config/cache risks accepted"
-                },
-                &self.confirmation,
-                !dry_run,
+            let button = Rect::new(area.x, area.bottom().saturating_sub(2), area.width, 1);
+            frame.render_widget(
+                Paragraph::new(Line::from(ui::button(
+                    if dry_run {
+                        "Preview only · execution disabled"
+                    } else {
+                        "Run query · Enter"
+                    },
+                    "",
+                    !dry_run,
+                ))),
+                button,
             );
+            if !dry_run {
+                hits.click(button, Target::ProviderConfirm);
+            }
             return;
         }
         let Some(report) = &self.report else {
@@ -461,7 +484,7 @@ impl State {
             ui::prose(
                 frame,
                 area,
-                "Tools · explicit provider inspection\n\nNo provider has been queried. Config/plugins may execute code and caches/logs may change.\n\nc: configure trusted paths, review and type inspect. s: session snapshots; p: reconcile explicit bindings. No installs, ownership inference or automatic refresh.\n\nHomebrew formulae · apt via dpkg-query · mise · npm with explicit Node/CLI/prefix binding.\n\nUse Session > Preview-only for a process-free review.",
+                "Tools · explicit provider inspection\n\nNo provider has been queried. Config/plugins may execute code and caches/logs may change.\n\na: add a desired tool declaration (registered repository required). c: configure trusted inspection; s: session snapshots; p: reconcile bindings. No installs, ownership inference or automatic refresh.\n\nHomebrew formulae · apt via dpkg-query · mise · npm with explicit Node/CLI/prefix binding.\n\nUse Session > Preview-only for a process-free review.",
                 ui::muted(),
             );
             return;

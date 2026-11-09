@@ -18,17 +18,18 @@ Dort helps describe a development environment in a Git repository. The experimen
 | Inspect declared active files | Yes: `files list`. |
 | Preview links, adoption and unmanage effects | Yes: `files plan …`; no changes are made. |
 | Inspect Git status/diff | Yes: metadata-only `git status` / `git diff`; explicit `--patch` discloses bounded escaped content. |
-| Inspect retained transaction history/integrity | Yes: `history` / `recovery list`, all four journal formats, no replay. |
+| Inspect retained transaction history/integrity | Yes: `history` / `recovery list`, all five journal formats, no replay. |
 | Create/attach a local repository | Experimental: interactive Actions → Create/attach, or `init PATH`. |
 | Adopt/deploy/unmanage regular-file links | Experimental: `files add`, `files apply`, `files remove`. |
 | Guarded rollback / bootstrap recovery | Experimental: `rollback`, `recovery resume` / `abandon`. |
 | Inspect provider-reported installed packages | Yes: Tools or `tools inspect`; [explicit approval and config/cache risks](commands.md#provider-inspection). No ownership inference. |
 | Reconcile declarations against explicit snapshots | Yes: Tools `s`/`p` or `tools reconcile`; [scope and binary-metadata limits](commands.md#snapshot-reconciliation). No installs or tool-readiness claim. |
 | Inspect proposed install argv/effects | Eligible reconciliation rows show preview-only command metadata; no command can be run by Dort. |
+| Add desired tool declarations | Tools → Add tool declaration or `tools declare`; edits the manifest only, with guarded recovery. |
 | Install tools or Git staging/commit/push | Not yet. |
 | Interactive onboarding, Files, profiles/checks/diagnostics, Recovery, Tools and read-only Git | Experimental: terminal `dort` or `dort tui`; [keys and limitations](commands.md#interactive-interface). |
 | Templates, secrets or Git clone/sync | Not yet. |
 
-Use `--dry-run` to inspect effects without writes, locks or prompts. Provider inspection separately needs literal `inspect` or explicit CLI `--yes`. Writes require terminal confirmation or `--yes`; JSON/nonterminal writes always need `--yes`. Destructive link deletion needs a separate exact-ID acknowledgement. These sandbox-tested prototypes are not a production deployment guarantee.
+Use `--dry-run` to inspect effects without writes, locks or prompts. Provider inspection needs an explicit Run query action, CLI `y/N` confirmation or `--yes`. Writes require terminal confirmation or `--yes`; JSON/nonterminal writes always need `--yes`. Deletion confirmation identifies the exact selected mapping; no typing challenge is required. These sandbox-tested prototypes are not a production deployment guarantee.
 
 See the [project overview](../../README.md) and [release history](../../CHANGLOG.md) for more information.

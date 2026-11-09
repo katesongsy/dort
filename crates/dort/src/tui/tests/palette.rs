@@ -126,7 +126,7 @@ fn contextual_catalog_is_unique_and_separates_scope_from_effect() {
         }
     }
     assert!(!union.contains(&Action::Inspect)); // Enter exposes details directly.
-    assert_eq!(union.len(), 50); // Every advertised typed command has a home.
+    assert_eq!(union.len(), 51); // Every advertised typed command has a home.
 }
 #[test]
 fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {
@@ -223,7 +223,7 @@ fn disabled_actions_stay_open_and_full_reasons_are_keyboard_reachable_without_di
         assert!(key(&mut app, KeyCode::PageDown).is_none());
     }
     assert!(joined.contains(reason));
-    assert!(joined.contains("Type literal view patch there to disclose"));
+    assert!(joined.contains("content warning with a View patch action"));
     assert!(joined.contains(Action::GitPatch.label()));
     key(&mut app, KeyCode::PageUp);
     key(&mut app, KeyCode::Home);

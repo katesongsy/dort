@@ -108,6 +108,7 @@ pub enum Action {
     GitStaged,
     GitRefresh,
     GitPatch,
+    ToolDeclaration,
     ToolsConfigure,
     ToolsSnapshots,
     ToolsReconcile,
@@ -156,6 +157,7 @@ impl Action {
             Self::Destination(Tab::Checks) => "Checks: manifest validation",
             Self::Destination(Tab::Git) => "Git: read-only inspection",
             Self::Destination(Tab::Tools) => "Tools: explicitly approved provider inspection",
+            Self::ToolDeclaration => "Tools: add a tool declaration (no install)",
             Self::ToolsConfigure => "Tools: configure trusted provider inspection (no execution)",
             Self::ToolsSnapshots => "Tools: session snapshots (metadata only)",
             Self::ToolsReconcile => {

@@ -30,7 +30,7 @@ struct Cli {
     /// Explicitly approve writes or provider inspection without prompting.
     #[arg(long, global = true)]
     yes: bool,
-    /// Separate acknowledgement for deleting the managed link of this exact file ID.
+    /// Optional extra ID guard for link deletion; must match the selected mapping.
     #[arg(long, global = true)]
     confirm_remove: Option<String>,
     #[command(subcommand)]
@@ -106,7 +106,7 @@ enum GitCommand {
 
 #[derive(Subcommand)]
 enum RecoveryCommand {
-    /// Explicit guarded rollback for file lifecycle history (schemas 1 and 2).
+    /// Explicit guarded rollback for file or tool-declaration history (schemas 1/2/4/5).
     Rollback {
         repository_id: String,
         transaction_id: String,
@@ -206,6 +206,14 @@ enum PlanCommand {
 
 #[derive(Subcommand)]
 enum ToolsCommand {
+    /// Add one desired tool declaration to a registered repository; never install packages.
+    Declare {
+        /// Strict Tool JSON: id, binary, profiles, requires, install (macos/ubuntu specs).
+        #[arg(long)]
+        declaration: String,
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
     /// Collect separately approved scopes and reconcile explicit snapshot bindings; no installs.
     Reconcile {
         #[arg(long)]
@@ -361,9 +369,9 @@ fn tools_reconcile(
             print_git_json(&serde_json::json!({"snapshot":&id,"review":preview.review()}))?;
         }
         if !cli.yes
-            && answer(&format!(
-                "Snapshot {id}: config/plugins may run; caches may change. Type inspect: "
-            ))? != "inspect"
+            && !confirmed(&format!(
+                "Snapshot {id}: config/plugins may run; caches may change. Run query? [y/N] "
+            ))?
         {
             return Err(Error::Invalid("scope not approved; earlier approved inspections may already have run, and nothing is automatically undone".into()));
         }
@@ -396,6 +404,42 @@ fn tools_inspect(
     host: &HostContext,
     command: &ToolsCommand,
 ) -> dort_core::Result<ExitCode> {
+    if let ToolsCommand::Declare {
+        declaration,
+        profiles,
+    } = command
+    {
+        if cli.confirm_remove.is_some() {
+            return Err(Error::Invalid(
+                "tool declaration is add-only; omit --confirm-remove".into(),
+            ));
+        }
+        let local = LocalConfig::load(host)?;
+        let repository = local.select_repository(cli.repo.as_deref())?;
+        let profiles = if profiles.is_empty() {
+            &local.active_profiles
+        } else {
+            profiles
+        };
+        let preview = crate::services::declaration::Request::parse(declaration)?.prepare(
+            host,
+            &repository,
+            profiles,
+        )?;
+        if cli.dry_run {
+            print_git_json(&preview)?;
+        } else {
+            if !cli.json {
+                print_git_json(&preview)?;
+            }
+            approve(cli)?;
+            let approval = dort_core::tools::declaration::Approval::from_preview(preview)?;
+            let lock = WriterLock::acquire(host)?;
+            let tx = dort_core::tools::declaration::execute(host, &lock, approval, |_| Ok(()))?;
+            mutation_report("declare-tool", tx)?;
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
     if cli.repo.is_some() || cli.confirm_remove.is_some() {
         return Err(Error::Invalid(
             "tools inspection uses its explicit scope; omit --repo/--confirm-remove".into(),
@@ -437,10 +481,7 @@ fn tools_inspect(
         if !interactive(cli) {
             return Err(Error::Invalid("provider inspection requires --yes in JSON/nonterminal mode, or use --dry-run to review without execution".into()));
         }
-        if answer(
-            "Provider config/plugins may execute; caches may change. Type inspect to run this exact query: ",
-        )? != "inspect"
-        {
+        if !confirmed("Provider config/plugins may run; caches may change. Run query? [y/N] ")? {
             return Err(Error::Invalid(
                 "provider inspection not approved; nothing executed".into(),
             ));
@@ -891,6 +932,12 @@ fn answer(prompt: &str) -> dort_core::Result<String> {
         .map(|s| s.trim_end_matches(['\r', '\n']).to_owned())
         .map_err(|_| Error::Invalid("invalid confirmation".into()))
 }
+fn confirmed(prompt: &str) -> dort_core::Result<bool> {
+    Ok(matches!(
+        answer(prompt)?.to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
+}
 fn approve(cli: &Cli) -> dort_core::Result<()> {
     if cli.yes {
         return Ok(());
@@ -900,7 +947,7 @@ fn approve(cli: &Cli) -> dort_core::Result<()> {
             "write requires --yes in JSON/nonterminal mode; use --dry-run to preview".into(),
         ));
     }
-    if answer("Review the effects above. Type yes to proceed: ")? != "yes" {
+    if !confirmed("Proceed with the reviewed changes? [y/N] ")? {
         return Err(Error::Invalid("write not approved".into()));
     }
     Ok(())
@@ -938,20 +985,11 @@ fn file_operation(
     if !cli.json {
         print!("{}", plan.human());
     }
-    // Reject missing/incorrect destructive acknowledgement before acquiring any lock.
+    // A supplied legacy guard must match. Approval binds the preview's ID internally.
     if let Some(id) = &removal {
-        let acknowledged = match &cli.confirm_remove {
-            Some(value) => value == id,
-            None if !cli.yes && interactive(cli) => {
-                answer(&format!(
-                    "Delete the managed link? Type its exact ID {id:?}: "
-                ))? == *id
-            }
-            None => false,
-        };
-        if !acknowledged {
+        if cli.confirm_remove.as_ref().is_some_and(|value| value != id) {
             return Err(Error::Invalid(
-                "link deletion requires separate --confirm-remove with the exact mapping ID".into(),
+                "--confirm-remove does not match the selected mapping ID".into(),
             ));
         }
     } else if cli.confirm_remove.is_some() {

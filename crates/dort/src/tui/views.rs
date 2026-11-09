@@ -119,7 +119,7 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16
                 height,
                 width,
             );
-            text.push_str(&format!("\nFull ID: {:?}\nTab: field/review | Enter: advance or review\nThe preview uses this exact ID. Core validates exact ID and scope.\nBoth modes retain source. Keep materializes an ordinary file; delete removes the link.\nDeletion additionally needs a separate exact-ID acknowledgement then literal yes.\nEsc returns to the retained draft.\n", app.shell.unmanage_id));
+            text.push_str(&format!("\nFull ID: {:?}\nTab: field/review | Enter: advance or review\nThe preview uses this exact ID. Core validates exact ID and scope.\nBoth modes retain source. Keep materializes an ordinary file; delete removes the link.\nConfirmation identifies the exact mapping selected for deletion.\nEsc returns to the retained draft.\n", app.shell.unmanage_id));
             text
         }
         Overlay::Form(Form::Check) => {
@@ -165,7 +165,7 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16
                 if *form == Form::Choose {
                     "The exact root becomes this session's selection."
                 } else {
-                    "Absent destination: create; existing valid Git+dort.toml: attach.\nExisting safe parent required. Enter literal paths.\nReview the preview, then type literal yes to approve."
+                    "Absent destination: create; existing valid Git+dort.toml: attach.\nExisting safe parent required. Enter literal paths.\nReview the preview, then activate Confirm."
                 }
             )
         }

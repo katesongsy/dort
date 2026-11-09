@@ -95,7 +95,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                 Control::Field("Exact ID", &shell.unmanage_id),
                 Control::Button("Review read-only preview"),
             ],
-            "Both modes retain the source. Deletion requires exact-ID acknowledgement, then literal yes.",
+            "Both modes retain the source. Review the selected mapping, then Confirm.",
         ),
         Form::Choose | Form::Init => (
             if form == Form::Choose {

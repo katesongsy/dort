@@ -219,7 +219,7 @@ pub struct State {
     patch_scroll: usize,
     horizontal: usize,
     details: bool,
-    confirmation: Option<String>,
+    confirmation: Option<()>,
     patch: Option<Patch>,
     awaiting_patch: bool,
     awaiting_summary: bool,
@@ -307,7 +307,7 @@ impl State {
     pub fn confirm_patch(&mut self) {
         self.discard_patch();
         if self.comparison != Comparison::Status && self.metadata.is_some() {
-            self.confirmation = Some(String::new());
+            self.confirmation = Some(());
         }
     }
     pub fn choose(&mut self, comparison: Comparison) {
@@ -352,10 +352,10 @@ impl State {
         if self.confirmation.is_some() || self.editing_root {
             self.scroll = 0;
         }
-        if let Some(input) = &mut self.confirmation {
+        if self.confirmation.is_some() {
             match key.code {
                 KeyCode::Esc => self.discard_patch(),
-                KeyCode::Enter if input == "view patch" => {
+                KeyCode::Enter => {
                     self.confirmation = None;
                     if let (Some(root), Ok(executable)) = (&self.root, executable) {
                         self.awaiting_patch = true;
@@ -367,7 +367,7 @@ impl State {
                         })));
                     }
                 }
-                _ => edit_text(input, key),
+                _ => (),
             }
             return Some(None);
         }
@@ -582,12 +582,33 @@ impl State {
             );
             return;
         }
-        let body = if let Some(input) = &self.confirmation {
-            format!(
-                "May expose secrets: whole comparison\nType literal view patch; Enter once\n{}\n\n{scope}\nEsc cancels.\nClosing releases the view; bytes may remain in memory.\nFull confirmation input: {input:?}",
-                super::views::short_field("Confirm", input, area.width)
-            )
-        } else if self.editing_root {
+        if self.confirmation.is_some() {
+            let body = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(2));
+            super::components::text_view(
+                frame,
+                body,
+                Text::from(safe(&format!(
+                    "May expose secrets: whole comparison\n\n{scope}"
+                ))),
+                self.scroll,
+            );
+            let button = Rect::new(area.x, area.bottom().saturating_sub(2), area.width, 1);
+            frame.render_widget(
+                Paragraph::new(Line::from(super::components::button(
+                    "View patch · Enter",
+                    "",
+                    true,
+                ))),
+                button,
+            );
+            hits.click(button, super::input::Target::PatchConfirm);
+            frame.render_widget(
+                Paragraph::new("Esc: Cancel"),
+                Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1),
+            );
+            return;
+        }
+        let body = if self.editing_root {
             format!(
                 "Exact Git root (independent scope)\nSelection applies to this session\n{}\n\n{scope}\nFull path input: {:?}",
                 super::views::short_field("Path", &self.draft, area.width),

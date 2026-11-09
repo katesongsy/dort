@@ -67,7 +67,7 @@ impl Topic {
     fn instructions(self) -> &'static str {
         match self {
             Self::Tools => {
-                "Tools never queries providers on entry. c configures trusted absolute paths; Space cycles the provider. Tab moves fields and Enter advances to Review. Inspect exact arguments and config/cache risks; type inspect then Enter to execute once. Preview-only and small layouts cannot execute. Results are session snapshots (s1, s2...), not ownership. / searches metadata; d shows full scope; r prepares a fresh review, never replays approval. s browses snapshots; x there forgets only session metadata. p loads a manifest, separate explicit tool-search dirs and profiles without a provider query. Space explicitly binds each tool to a snapshot; unbound stays not observed. d inspects the chosen binding. Reconcile reads binary metadata without executing candidates; results are package proposals/no-ops, never tool readiness or installation authority. Esc retains drafts. No installs are available."
+                "Tools never queries providers on entry. c configures trusted absolute paths; Space cycles the provider. Tab moves fields and Enter advances to Review. Review the query and config/cache risks; activate Run query to execute once. Preview-only and small layouts cannot execute. Results are session snapshots (s1, s2...), not ownership. / searches metadata; d shows full scope; r prepares a fresh review, never replays approval. s browses snapshots; x there forgets only session metadata. p loads a manifest, separate explicit tool-search dirs and profiles without a provider query. Space explicitly binds each tool to a snapshot; unbound stays not observed. d inspects the chosen binding. Reconcile reads binary metadata without executing candidates; results are package proposals/no-ops, never tool readiness or installation authority. a opens an add-only tool declaration form for the selected registered repository. Review, then Confirm; this edits only dort.toml, not installed packages. Esc retains drafts. No installs are available."
             }
             Self::Menu => {
                 "Menus organize navigation and session commands. Left/Right selects a menu; Up/Down chooses an item; Enter opens it, or press its labeled shortcut. In compact layouts choose a group first; Left returns to groups. Esc closes. Unavailable entries show the requirement to continue. Operation and patch commands open their respective review screens."
@@ -97,7 +97,7 @@ impl Topic {
                 "Choose Status, Unstaged or Staged in the Git menu. Choose Git scope selects an independent root; Follow selected repository restores repository scope. / searches metadata; Enter inspects; View patch opens a content warning. Manage commits, branches and synchronization with your preferred Git tool."
             }
             Self::GitContent => {
-                "A patch may expose secrets. Type literal view patch once to disclose the requested comparison. Headers and hunks are emphasized; + marks additions and - marks removals. PgUp/PgDn scrolls vertically; Left/Right scrolls horizontally. Esc releases the view. Help hides the retained view; shrinking below the layout floor releases it. Released bytes may remain in memory."
+                "A patch may expose secrets. Activate View patch to disclose the requested comparison once. Headers and hunks are emphasized; + marks additions and - marks removals. PgUp/PgDn scrolls vertically; Left/Right scrolls horizontally. Esc releases the view. Help hides the retained view; shrinking below the layout floor releases it. Released bytes may remain in memory."
             }
             Self::Actions => {
                 "Actions contains operations for the current view, selection and marked set. Menus organize navigation and session controls. Type a label to search; Up/Down selects; Enter requests. / refocuses search. Esc leaves search, then closes. Selected action details stay below the list. PgUp/PgDn scroll that pane; Home goes to its top. Execution scope comes from the operation's review."
@@ -106,7 +106,7 @@ impl Topic {
                 "Enter advances TARGET, ID and SOURCE, then requests a review. Tab moves controls. SOURCE is repository-relative. Inspect contents privately before adoption. Esc retains the draft. Explicit Adopt all on the combined preview approves adoption."
             }
             Self::Form(Form::KeepId | Form::RemoveId) => {
-                "Enter an exact mapping ID and request its preview. Keep materializes an ordinary file; Delete removes the managed link. Both retain the repository source. Deletion requires exact-ID acknowledgement followed by literal yes."
+                "Enter an exact mapping ID and request its preview. Keep materializes an ordinary file; Delete removes the managed link. Both retain the repository source. Confirmation shows and binds the exact selected mapping without a typing challenge."
             }
             Self::Form(Form::Check) => {
                 "Enter a manifest path and optional profile additions. Relative paths resolve from the launch directory. Enter requests a structural check. Local profiles contribute to the effective union. Esc retains the draft."
@@ -115,13 +115,13 @@ impl Topic {
                 "Enter an exact repository root. Selection stays in this session. Relative paths resolve from the launch directory; enter literal paths. Esc retains the draft."
             }
             Self::Form(Form::Init) => {
-                "Enter a repository path and ID. An absent destination creates a repository; an existing valid Git repository with dort.toml attaches it. Review effects, then type literal yes to approve persistent registration and selection. Failed preparation retains private artifacts for Recovery."
+                "Enter a repository path and ID. An absent destination creates a repository; an existing valid Git repository with dort.toml attaches it. Review effects, then activate Confirm to approve registration and selection. Failed preparation retains private artifacts for Recovery."
             }
             Self::Picker => {
                 "Up/Down selects a repository or profile; Enter activates it. Repository choices update session scope. Profile additions join mandatory contributors. Esc returns with your previous draft intact."
             }
             Self::Ignored => {
-                "Saved HOME-relative exclusions prune matching paths and descendants from discovery. Select a path and request Unignore to review removal of that exclusion. Type literal yes to approve. Live files remain in place. Esc returns."
+                "Saved HOME-relative exclusions prune matching paths and descendants from discovery. Select a path and request Unignore to review removal of that exclusion. Activate Confirm to save the preference. Live files remain in place. Esc returns."
             }
             Self::About => {
                 "About summarizes Dort's local workflows, host support and license. Diagnostics provides host and path metadata."
@@ -136,7 +136,7 @@ impl Topic {
                 "Review outcome, paths, ordered effects and blockers. File reviews pair a summary table with numbered change details; i opens the full report. Up/Down selects a file; PgDn scrolls details. Enter continues to approval. Adopt all explicitly approves adoption. Esc returns."
             }
             Self::Confirmation => {
-                "Confirm the reviewed operation using literal yes. Managed-link deletion first requires each exact mapping ID. Enter submits for fresh core revalidation. Esc returns to review. Shrinking below the layout floor clears typed approval and removal acknowledgements."
+                "Activate Confirm (Enter or click) to proceed with the reviewed operation. Deletion confirmation displays the exact mapping IDs. Esc returns to review. Shrinking below the layout floor dismisses confirmation; execution always revalidates the real preview."
             }
             Self::Task => {
                 "The active task keeps its original scope while observations remain on screen. Progress describes metadata and stages. q requests exit after the joined worker finishes. Approved writes run to completion; inspect their result and Recovery if a write fails."

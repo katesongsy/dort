@@ -204,6 +204,7 @@ pub fn load_scoped(
 }
 
 pub enum Pending {
+    ToolDeclaration(Box<dort_core::tools::declaration::Preview>),
     Ignore(dort_core::discovery_ignore::Preview),
     Files(Box<Plan>),
     Batch(Box<dort_core::batch::Plan>),
@@ -214,6 +215,12 @@ pub enum Pending {
 impl Pending {
     pub fn report(&self) -> Result<String> {
         Ok(match self {
+            Self::ToolDeclaration(p) => format!(
+                "Add tool declaration\nEdits dort.toml only; does not install packages or adopt binaries.\nAlready declared: {}\n{}\nRecovery can restore the unchanged result. Existing npm snapshots need fresh inspection.",
+                p.no_op,
+                serde_json::to_string_pretty(p)
+                    .map_err(|_| Error::Invalid("cannot encode declaration metadata".into()))?
+            ),
             Self::Ignore(preview) => preview.human(),
             Self::Batch(plan) => plan.human(),
             Self::Files(plan) => format!(
@@ -297,6 +304,8 @@ impl Pending {
     }
     pub fn approve(self, removal: Option<&str>) -> Result<Approved> {
         match self {
+            Self::ToolDeclaration(p) => dort_core::tools::declaration::Approval::from_preview(*p)
+                .map(|a| Approved::ToolDeclaration(Box::new(a))),
             Self::Ignore(preview) => Ok(Approved::Ignore(preview.approve())),
             Self::Batch(plan) => {
                 dort_core::batch::Approval::from_plan(*plan).map(|a| Approved::Batch(Box::new(a)))
@@ -322,6 +331,7 @@ impl Pending {
 }
 
 pub enum Approved {
+    ToolDeclaration(Box<dort_core::tools::declaration::Approval>),
     Ignore(dort_core::discovery_ignore::Approval),
     Files(Box<FileApproval>),
     Batch(Box<dort_core::batch::Approval>),
@@ -341,6 +351,14 @@ impl Approved {
         observer: impl FnMut(&Event) -> Result<()>,
     ) -> Result<Completion> {
         let (operation, transaction_id, repository) = match self {
+            Self::ToolDeclaration(a) => {
+                let lock = WriterLock::acquire(host)?;
+                (
+                    "Tool declaration",
+                    dort_core::tools::declaration::execute(host, &lock, *a, observer)?,
+                    None,
+                )
+            }
             Self::Ignore(approval) => {
                 approval.execute(host, false)?;
                 ("Discovery preferences", None, None)
@@ -387,6 +405,7 @@ pub struct Diagnostics {
 /// Retain intent only, never an approval or an executable preview.
 #[derive(Clone)]
 pub enum Retry {
+    ToolDeclaration(crate::services::declaration::Request),
     Check(Option<PathBuf>, Vec<String>),
     Profiles(Option<PathBuf>, Vec<String>, bool),
     Discover,
@@ -403,6 +422,7 @@ pub enum Retry {
 impl Retry {
     pub fn task(self) -> Task {
         match self {
+            Self::ToolDeclaration(r) => Task::ToolDeclaration(r),
             Self::Check(manifest, requested) => Task::Check {
                 manifest,
                 requested,
@@ -428,6 +448,7 @@ impl Retry {
 impl Task {
     pub fn retry_intent(&self) -> Option<Retry> {
         match self {
+            Self::ToolDeclaration(r) => Some(Retry::ToolDeclaration(r.clone())),
             Self::Check {
                 manifest,
                 requested,
@@ -452,6 +473,7 @@ impl Task {
     }
 }
 pub enum Task {
+    ToolDeclaration(crate::services::declaration::Request),
     IgnoredPaths,
     Ignore(PathBuf, bool),
     DiscoveryTree(super::discovery_tree::Read),
@@ -536,6 +558,12 @@ pub fn perform_scoped(
     observer: impl FnMut(&Event) -> Result<()>,
 ) -> Result<Output> {
     match task {
+        Task::ToolDeclaration(request) => {
+            let repository = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
+            request
+                .prepare(host, &repository, requested)
+                .map(|p| Output::Preview(Pending::ToolDeclaration(Box::new(p))))
+        }
         Task::ToolsPrepare(request) => request.prepare(host).map(Output::ToolsPreview),
         Task::ToolsReconcilePrepare(request) => request
             .prepare(host)

@@ -282,8 +282,6 @@ fn patch_disclosure_is_once_isolated_and_dropped_on_close_scope_resize_or_exit()
     assert!(key(&mut app, KeyCode::Enter).is_none());
     assert!(app.tab == Tab::Git);
     assert!(render(&app, 48, 14).contains("May expose secrets"));
-    text(&mut app, "yes");
-    assert!(key(&mut app, KeyCode::Enter).is_none());
     assert_eq!(f.patch_calls(), 0);
     key(&mut app, KeyCode::Esc);
     let task = patch_task(&mut app);
@@ -461,7 +459,7 @@ fn compact_git_drafts_and_confirmation_remain_visible_and_small_cannot_disclose(
         patch: None,
     }));
     key(&mut app, KeyCode::Char('w'));
-    assert!(render(&app, 48, 14).contains("Confirm >"));
+    assert!(render(&app, 48, 14).contains("View patch"));
     text(&mut app, "view patch");
     assert!(
         app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 47, 13)

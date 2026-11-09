@@ -64,7 +64,9 @@ fn entry(action: Action, primary: Option<usize>) -> Entry {
         Apply | Keep | Remove | IgnoreSelected | Rollback | Resume | Abandon | ApplyMarked
         | KeepMarked | RemoveMarked => Effect::Preview,
         Adopt | AdoptSelected | BatchAdopt | KeepId | RemoveId | Init | CheckStandalone
-        | Profiles | StandaloneProfiles | ToolsConfigure | ToolsReconcile => Effect::Draft,
+        | Profiles | StandaloneProfiles | ToolDeclaration | ToolsConfigure | ToolsReconcile => {
+            Effect::Draft
+        }
         GitPatch => Effect::Disclosure,
         Discover | Refresh | CheckCurrent | Diagnostics | GitStatus | GitUnstaged | GitStaged
         | GitRefresh => Effect::Read,

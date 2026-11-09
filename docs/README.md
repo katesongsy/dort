@@ -14,6 +14,7 @@ Start with the [user guide](user/README.md):
 ## Durable technical references
 
 - [Architecture](../ARCHITECTURE.md): implemented module boundaries, execution, persistence and recovery contracts.
+- [Tool declarations](tool-declarations.md): focused manifest-only edits, single-use approval and schema-5 recovery contracts.
 - [Provider inspection](tools-inspection.md): shared CLI/TUI approval, process, metadata and runtime-binding boundaries.
 - [Snapshot reconciliation](binary-reconciliation.md): explicit multi-snapshot binding, no-follow candidate metadata and frontend scope/freshness boundaries.
 - [Non-executable command previews](install-command-previews.md): fixed argv/control descriptions, native side-effect caveats and no execution authority.
