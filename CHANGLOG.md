@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tools:** reconcile explicit session snapshots with binary metadata ([6e17376](https://github.com/katesongsy/dort/commit/6e1737636397b56e4b23bf6e81507439061c0019))
+
 - **tools:** classify package claims with pure dependency planning ([7c24826](https://github.com/katesongsy/dort/commit/7c24826adf67f865925758eb837e7385cea311a1))
 
 - **tools:** expose approved inspection in CLI and TUI ([1253175](https://github.com/katesongsy/dort/commit/1253175935827cab63ada221baefb9e241b83df4))
