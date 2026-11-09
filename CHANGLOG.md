@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tools:** describe non-executable install commands and risks ([d61431a](https://github.com/katesongsy/dort/commit/d61431afb1dcf6a90383fcd1544528310d10bcfd))
+
 - **tools:** reconcile explicit session snapshots with binary metadata ([6e17376](https://github.com/katesongsy/dort/commit/6e1737636397b56e4b23bf6e81507439061c0019))
 
 - **tools:** classify package claims with pure dependency planning ([7c24826](https://github.com/katesongsy/dort/commit/7c24826adf67f865925758eb837e7385cea311a1))
