@@ -2,6 +2,7 @@
 //! Policy parsing/comparison never inspects or executes providers.
 pub mod binaries;
 pub mod inspection;
+pub mod install_preview;
 pub mod planning;
 use crate::model::Provider;
 use semver::Version;

@@ -347,7 +347,7 @@ def tools_reconciliation_workflows(binary, base, env):
     for name, package, version in [('first', 'node', '22.1.0'), ('second', 'rg', '14.1.0')]:
         executable = base / ('reconciliation-' + name)
         payload = json.dumps({package: [{'version': version, 'installed': True}]})
-        executable.write_text('#!/bin/sh\nprintf "' + name + '\\n" >> "$HOME/calls"\nprintf \'%s\' \'' + payload + "'\n")
+        executable.write_text('#!/bin/sh\nif [ "$1" = install ]; then printf ran > "$HOME/INSTALL-RAN"; fi\nprintf "' + name + '\\n" >> "$HOME/calls"\nprintf \'%s\' \'' + payload + "'\n")
         executable.chmod(0o700)
         scopes.append({'id': name, 'provider': 'mise', 'executable': str(executable),
                        'search_dirs': ['/no-external-programs']})
@@ -383,6 +383,22 @@ def tools_reconciliation_workflows(binary, base, env):
         session.wait(b'Package proposals/no-ops only')
         session.send(b'\x1b')
         session.wait(b'Load declarations')
+        session.send(b'\r')
+        session.wait(b'Space chooses')
+        session.send(b'\t  \t\r')  # Change rg from s2 to explicit s1 (package absent there).
+        session.wait(b'Review only')
+        session.send(b'\x1b[B\r')
+        for _ in range(100):
+            session.settle()
+            if b'PREVIEW ONLY' in session.screen.text():
+                break
+            session.send(b'\x1b[6~')
+        session.wait(b'PREVIEW ONLY')
+        assert not (home / 'INSTALL-RAN').exists()
+        session.send(b'\x1b')
+        session.wait(b'Review only')
+        session.send(b'\x1b')
+        session.wait(b'Load declarations')
         session.send(b'\x1b')
         session.wait(b'Provider claims')
         session.send(b's')
@@ -396,7 +412,7 @@ def tools_reconciliation_workflows(binary, base, env):
         session.wait(b'Provider claims')
         session.send(b'q')
         session.finish()
-    print('PASS multiple session snapshots, explicit bindings, full reconciliation metadata and forget without queries')
+    print('PASS multiple snapshots, explicit bindings, non-executable command previews and forget without queries')
     cli = [binary, 'tools', 'reconcile', '--manifest', str(manifest), '--tool-search-dir', str(lookup),
            '--bind', 'node=first', '--bind', 'rg=second']
     for scope in scopes:

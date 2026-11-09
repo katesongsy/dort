@@ -24,6 +24,7 @@ Dort helps describe a development environment in a Git repository. The experimen
 | Guarded rollback / bootstrap recovery | Experimental: `rollback`, `recovery resume` / `abandon`. |
 | Inspect provider-reported installed packages | Yes: Tools or `tools inspect`; [explicit approval and config/cache risks](commands.md#provider-inspection). No ownership inference. |
 | Reconcile declarations against explicit snapshots | Yes: Tools `s`/`p` or `tools reconcile`; [scope and binary-metadata limits](commands.md#snapshot-reconciliation). No installs or tool-readiness claim. |
+| Inspect proposed install argv/effects | Eligible reconciliation rows show preview-only command metadata; no command can be run by Dort. |
 | Install tools or Git staging/commit/push | Not yet. |
 | Interactive onboarding, Files, profiles/checks/diagnostics, Recovery, Tools and read-only Git | Experimental: terminal `dort` or `dort tui`; [keys and limitations](commands.md#interactive-interface). |
 | Templates, secrets or Git clone/sync | Not yet. |

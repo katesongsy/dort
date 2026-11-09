@@ -282,6 +282,47 @@ fn npm_reconciliation_uses_exact_runtime_scope_and_keeps_private_provenance_out_
 }
 
 #[test]
+fn missing_package_command_is_metadata_only_and_never_dispatched_even_with_yes() {
+    let f = Fixture::new();
+    let scope = f.scope(
+        "preview",
+        "if [ \"$1\" = install ]; then printf ran > \"$HOME/INSTALL-RAN\"; fi\nprintf '{}' ",
+    );
+    let out = f
+        .command()
+        .arg("--scope")
+        .arg(scope)
+        .args(["--bind", "node=preview", "--yes", "--json"])
+        .assert()
+        .code(4)
+        .get_output()
+        .stdout
+        .clone();
+    let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let node = value["reconciliation"]["plan"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == "node")
+        .unwrap();
+    assert_eq!(node["install_preview"]["state"], "preview_only");
+    assert_eq!(
+        node["install_preview"]["command"]["arguments"],
+        serde_json::json!(["install", "--jobs=1", "node@22"])
+    );
+    assert_eq!(
+        node["install_preview"]["command"]["execution_authorized"],
+        false
+    );
+    assert_eq!(
+        value["snapshots"][0]["report"]["provider"]["description"]["arguments"],
+        serde_json::json!(["ls", "--installed", "--json"])
+    );
+    assert_eq!(f.calls(), "preview\n");
+    assert!(!f.home.join("INSTALL-RAN").exists());
+}
+
+#[test]
 fn composite_nonterminal_execution_still_requires_explicit_approval() {
     let f = Fixture::new();
     let scope = f.scope("one", NODE);

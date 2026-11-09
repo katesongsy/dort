@@ -171,6 +171,14 @@ Use existing physical tool-search directories. Symlinked parents/directories (fo
 
 A package **no-op is not tool readiness**; binaries may still be missing/unverified and dependencies may be blocked. A missing-package **review proposal is not execution approval**. Default/latest policies do not upgrade existing matching claims. Other providers, unbound tools, version conflicts and ambiguous tap/architecture/backend names remain explicit rather than guessed or silently merged. npm snapshots must come from the same unchanged manifest; changed/different declarations require a fresh, separately approved inspection, never a silent runtime-ID reassociation.
 
+### Install-command descriptions — preview only
+
+For an eligible **Review only** missing-package row, full TUI details and CLI `reconciliation.plan.rows[].install_preview` show proposed executable/argv, cleared-environment controls, version selection and side-effect warnings. **Dort cannot run these descriptions.** There is no install button/command, and `--yes` approves only the explicitly requested inspection queries—not installation. No native install or install `--dry-run` operation is invoked to construct this metadata.
+
+Satisfied, ambiguous and blocked tools have no install command. Apt stays deferred: the selected dpkg-query path does not authorize inventing apt-get/sudo. Version defaults, prefixes and latest requests are unresolved native selections, not a reproducibility or availability guarantee. A bare mise default can select multiple globally configured versions; the description does not request activation, and Dort executes no installation. Homebrew controls do not guarantee that dependencies remain unchanged or unupgraded. npm descriptions use the selected Node/CLI/prefix and disable lifecycle scripts, which can leave packages unusable; provider code/configuration risks still apply. All native effects can include downloads, shared links/caches and partial failures without rollback.
+
+These descriptions require a computed eligible row; reconciliation `--dry-run` still previews only queries/analysis scope and does not invent missing-package facts. Descriptions exceeding metadata limits are explicitly deferred rather than partially emitted. They are not execution approvals, tested provider capabilities, verified tool readiness or a supported manual-install handoff.
+
 ### CLI collection and reconciliation
 
 `tools reconcile` combines **explicitly approved collection** with metadata-only analysis. Supply one strict JSON `--scope` per requested inspection and explicit `--bind TOOL=SNAPSHOT` choices. Scope fields are `id`, `provider`, `executable`, `search_dirs`, with `runtime_tool`, `npm_cli` and `prefix` only for npm. There are no arbitrary command/argument/environment fields. Each descriptor constructs a fresh real core preview; JSON is not execution authorization.

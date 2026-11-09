@@ -348,6 +348,44 @@ fn full_session_refuses_a_new_query_before_approval_instead_of_overwriting_snaps
 }
 
 #[test]
+fn missing_package_details_show_non_executable_commands_without_an_install_action() {
+    let f = Fixture::new();
+    let mut app = f.app();
+    let executable = f.provider(
+        "preview",
+        "if [ \"$1\" = install ]; then printf ran > \"$HOME/INSTALL-RAN\"; fi\nprintf '{}' ",
+    );
+    f.collect(&mut app, &executable);
+    f.load(&mut app);
+    key(&mut app, KeyCode::Char(' '));
+    f.calculate(&mut app);
+    let row = &app
+        .tools_view
+        .reconciliation
+        .result
+        .as_ref()
+        .unwrap()
+        .plan
+        .rows[0];
+    assert_eq!(row.action, PackageAction::ReviewMissingPackage);
+    assert_eq!(
+        serde_json::to_value(&row.install_preview).unwrap()["state"],
+        "preview_only"
+    );
+    key(&mut app, KeyCode::Enter);
+    let mut seen = String::new();
+    for _ in 0..100 {
+        seen.push_str(&render(&app, 48, 14));
+        key(&mut app, KeyCode::PageDown);
+    }
+    assert!(seen.contains("install_preview") && seen.contains("PREVIEW ONLY"));
+    assert!(seen.contains("execution_authorized"));
+    assert_eq!(f.calls(), "preview\n");
+    assert!(!f.home.join("INSTALL-RAN").exists());
+    assert!(app.preview.is_none() && app.confirmation.is_none() && app.receipt.is_none());
+}
+
+#[test]
 fn compact_forms_bindings_and_results_keep_focus_caret_and_semantic_selection() {
     let f = Fixture::new();
     let mut app = f.app();

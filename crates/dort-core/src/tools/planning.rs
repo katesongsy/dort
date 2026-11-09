@@ -128,6 +128,7 @@ pub struct Row {
     pub binary_observation: BinaryObservation,
     pub action: PackageAction,
     pub blockers: Vec<Blocker>,
+    pub install_preview: super::install_preview::Preview,
 }
 #[derive(Debug, Serialize)]
 pub struct Plan {
@@ -147,7 +148,8 @@ fn invalid(message: &'static str) -> Error {
 
 /// Classify supplied facts only. Missing observations are not evidence of absence.
 /// This intentionally does not call validate_for_host (which also checks file targets),
-/// discover executables, request versions, resolve remote latest or construct argv.
+/// discover executables, request versions or resolve remote latest. Install command
+/// descriptions are metadata only, never executable capabilities.
 /// A serialized result cannot authorize any process, package or manifest write.
 pub fn plan(
     manifest: &Manifest,
@@ -284,7 +286,16 @@ pub fn plan(
             binary_observation: binary,
             action,
             blockers,
+            install_preview: Default::default(),
         });
+    }
+    let mut preview_bytes = 0usize;
+    for row in &mut rows {
+        let paths = observed
+            .catalogs
+            .get(&row.id)
+            .map_or(&[][..], |r| r.description.trusted_search_path.as_slice());
+        row.install_preview = super::install_preview::describe(row, paths, &mut preview_bytes);
     }
     Ok(Plan {
         platform,
