@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tools:** classify package claims with pure dependency planning ([7c24826](https://github.com/katesongsy/dort/commit/7c24826adf67f865925758eb837e7385cea311a1))
+
 - **tools:** expose approved inspection in CLI and TUI ([1253175](https://github.com/katesongsy/dort/commit/1253175935827cab63ada221baefb9e241b83df4))
 
 - **tools:** add explicitly approved provider inspection core ([593f64e](https://github.com/katesongsy/dort/commit/593f64e05606a0a03f035f6f2cd600ff8cfd3c1f))
