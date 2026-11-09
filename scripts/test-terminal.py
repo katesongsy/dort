@@ -331,6 +331,91 @@ def tools_workflows(binary, base, env):
     print('PASS interactive CLI provider inspection requires literal inspect')
 
 
+def tools_reconciliation_workflows(binary, base, env):
+    home = base / 'reconciliation-home'
+    home.mkdir(mode=0o700)
+    lookup = base / 'reconciliation-bin'
+    lookup.mkdir(mode=0o700)
+    scoped_env = dict(env, HOME=str(home), XDG_CONFIG_HOME=str(home / '.config'),
+                      XDG_STATE_HOME=str(home / '.local/state'))
+    manifest = base / 'reconciliation.toml'
+    manifest.write_text("schema=1\n[[tools]]\nid='node'\nbinary='node'\n[tools.install]\n"
+                        "macos={provider='mise',package='node',version='22'}\nubuntu={provider='mise',package='node',version='22'}\n"
+                        "[[tools]]\nid='rg'\nbinary='rg'\n[tools.install]\n"
+                        "macos={provider='mise',package='rg'}\nubuntu={provider='mise',package='rg'}\n")
+    scopes = []
+    for name, package, version in [('first', 'node', '22.1.0'), ('second', 'rg', '14.1.0')]:
+        executable = base / ('reconciliation-' + name)
+        payload = json.dumps({package: [{'version': version, 'installed': True}]})
+        executable.write_text('#!/bin/sh\nprintf "' + name + '\\n" >> "$HOME/calls"\nprintf \'%s\' \'' + payload + "'\n")
+        executable.chmod(0o700)
+        scopes.append({'id': name, 'provider': 'mise', 'executable': str(executable),
+                       'search_dirs': ['/no-external-programs']})
+    candidate = lookup / 'node'
+    candidate.write_text('#!/bin/sh\nprintf PRIVATE > "$HOME/candidate-executed"\n')
+    candidate.chmod(0o700)
+    with Session([binary, 'tui'], scoped_env) as session:
+        session.wait(b'loaded.')
+        session.send(b'\x1b[D')
+        session.wait(b'No provider has been queried')
+        session.send(b'c  \t' + scopes[0]['executable'].encode() + b'\t/no-external-programs\t\r')
+        session.wait(b'Type inspect')
+        session.send(b'inspect\r')
+        session.wait(b'Snapshot s1')
+        session.send(b'c\t\x15' + scopes[1]['executable'].encode() + b'\t\t\r')
+        session.wait(b'Type inspect')
+        session.send(b'inspect\r')
+        session.wait(b'Snapshot s2')
+        assert (home / 'calls').read_text() == 'first\nsecond\n'
+        session.send(b's')
+        session.wait(b'Session snapshots')
+        session.send(b'\x1b[A\r')
+        session.wait(b'Snapshot s1')
+        session.send(b'p' + str(manifest).encode() + b'\t' + str(lookup).encode() + b'\t\t\r')
+        session.wait(b'Not observed')
+        session.send(b' \t  \t\r')  # node=s1, rg=s2, then calculate.
+        session.wait(b'Package proposals/no-ops only')
+        session.send(b'\r')
+        session.wait(b'analysis_scope')
+        session.send(b'\x1b[6~\x1b[H')
+        session.wait(b'analysis_scope')
+        session.send(b'\x1b')
+        session.wait(b'Package proposals/no-ops only')
+        session.send(b'\x1b')
+        session.wait(b'Load declarations')
+        session.send(b'\x1b')
+        session.wait(b'Provider claims')
+        session.send(b's')
+        session.wait(b'Session snapshots')
+        session.send(b'x')
+        session.settle()
+        assert b's1 |' not in session.screen.text() and b's2 |' in session.screen.text()
+        assert (home / 'calls').read_text() == 'first\nsecond\n'
+        assert not (home / 'candidate-executed').exists()
+        session.send(b'\x1b')
+        session.wait(b'Provider claims')
+        session.send(b'q')
+        session.finish()
+    print('PASS multiple session snapshots, explicit bindings, full reconciliation metadata and forget without queries')
+    cli = [binary, 'tools', 'reconcile', '--manifest', str(manifest), '--tool-search-dir', str(lookup),
+           '--bind', 'node=first', '--bind', 'rg=second']
+    for scope in scopes:
+        cli.extend(['--scope', json.dumps(scope)])
+    before = (home / 'calls').read_text()
+    with Session(cli, scoped_env) as session:
+        session.wait(b'Snapshot first:')
+        assert (home / 'calls').read_text() == before
+        session.send(b'inspect\n')
+        session.wait(b'Snapshot second:')
+        assert (home / 'calls').read_text() == before + 'first\n'
+        session.send(b'inspect\n')
+        session.finish(tui=False)
+    assert (home / 'calls').read_text() == before + 'first\nsecond\n'
+    assert not (home / 'candidate-executed').exists()
+    assert sorted(p.name for p in home.iterdir()) == ['calls']
+    print('PASS CLI reconciliation separately confirms each fixed inspection scope')
+
+
 def run():
     screen = Screen((2, 20))
     screen.feed(b"Git executes\x1b[")
@@ -358,6 +443,7 @@ def run():
             print("PASS entry/exit", args, size)
 
         tools_workflows(binary, base, env)
+        tools_reconciliation_workflows(binary, base, env)
 
         # Text carries navigation/state meaning even with a low-color terminal.
         with Session([binary, "--dry-run", "tui"], dict(env, TERM="vt100", NO_COLOR="1"), (14, 48)) as session:

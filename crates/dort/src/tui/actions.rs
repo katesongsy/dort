@@ -461,6 +461,12 @@ pub enum Task {
     Git(super::git::Read),
     ToolsPrepare(crate::services::tools::Request),
     ToolsInspect(crate::services::tools::Approval),
+    ToolsReconcilePrepare(crate::services::reconciliation::Request),
+    ToolsReconcile {
+        prepared: Box<crate::services::reconciliation::Prepared>,
+        bindings: std::collections::BTreeMap<String, String>,
+        snapshots: Vec<crate::services::reconciliation::Snapshot>,
+    },
     Refresh,
     Discover,
     Check {
@@ -495,6 +501,8 @@ pub enum Output {
     Git(super::git::Report),
     ToolsPreview(crate::services::tools::Preview),
     ToolsReport(crate::services::tools::Report),
+    ToolsReconciliationPrepared(Box<crate::services::reconciliation::Prepared>),
+    ToolsReconciled(std::result::Result<crate::services::reconciliation::Report, String>),
     Data(Data),
     Discovery(crate::services::Discovery),
     Checked {
@@ -529,6 +537,18 @@ pub fn perform_scoped(
 ) -> Result<Output> {
     match task {
         Task::ToolsPrepare(request) => request.prepare(host).map(Output::ToolsPreview),
+        Task::ToolsReconcilePrepare(request) => request
+            .prepare(host)
+            .map(|p| Output::ToolsReconciliationPrepared(Box::new(p))),
+        Task::ToolsReconcile {
+            prepared,
+            bindings,
+            snapshots,
+        } => Ok(Output::ToolsReconciled(
+            prepared
+                .reconcile(&snapshots, bindings)
+                .map_err(|e| diagnostic(&e)),
+        )),
         Task::ToolsInspect(approval) => Ok(Output::ToolsReport(approval.inspect())),
         Task::IgnoredPaths => Ok(Output::IgnoredPaths(
             dort_core::discovery_ignore::Rules::load(host)?

@@ -126,7 +126,7 @@ fn contextual_catalog_is_unique_and_separates_scope_from_effect() {
         }
     }
     assert!(!union.contains(&Action::Inspect)); // Enter exposes details directly.
-    assert_eq!(union.len(), 48); // Every advertised typed command has a home.
+    assert_eq!(union.len(), 50); // Every advertised typed command has a home.
 }
 #[test]
 fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {

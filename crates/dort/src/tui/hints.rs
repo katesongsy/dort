@@ -96,7 +96,28 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
             ("Esc", "Back"),
         ]);
     } else if app.tab == Tab::Tools {
-        if app.tools_view.preview.is_some() {
+        if app.tools_view.recon_open {
+            match app.tools_view.reconciliation.mode {
+                super::tools_reconcile::Mode::Inputs => {
+                    keys.extend([("Tab", "Field"), ("Enter", "Next / Load"), ("Esc", "Back")])
+                }
+                super::tools_reconcile::Mode::Bindings => keys.extend([
+                    ("Space", "Snapshot"),
+                    ("d", "Scope"),
+                    ("Tab", "Control"),
+                    ("Esc", "Back"),
+                ]),
+                super::tools_reconcile::Mode::Results => {
+                    keys.extend([("Enter", "Details"), ("PgDn", "Page"), ("Esc", "Back")])
+                }
+            }
+        } else if app.tools_view.catalog_browser {
+            keys.extend([
+                ("Enter", "Select"),
+                ("x", "Forget metadata"),
+                ("Esc", "Back"),
+            ]);
+        } else if app.tools_view.preview.is_some() {
             keys.extend([
                 ("Enter", "Inspect once"),
                 ("Esc", "Draft"),
@@ -112,9 +133,9 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
             keys.extend([
                 ("F10", "Menu"),
                 ("c", "Configure"),
+                ("s", "Snapshots"),
+                ("p", "Reconcile"),
                 ("r", "Fresh review"),
-                ("/", "Search"),
-                ("d", "Scope"),
             ]);
         }
     } else if app.text_entry() {

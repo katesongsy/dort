@@ -1,6 +1,6 @@
 # Pure tool package planning
 
-`dort_core::tools::planning` classifies supplied metadata against manifest tool declarations. It performs no filesystem/environment discovery, provider execution, remote version lookup, clock access or writes. It is not exposed as a CLI/TUI planning workflow; Tools currently exposes only [explicit provider inspection](tools-inspection.md). There is no package executor or installation approval API.
+`dort_core::tools::planning` classifies supplied metadata against manifest tool declarations. It performs no filesystem/environment discovery, provider execution, remote version lookup, clock access or writes. [Snapshot reconciliation](binary-reconciliation.md) supplies explicit CLI/TUI inputs to this pure function after separately approved [provider inspections](tools-inspection.md) and metadata-only binary observation. The planner itself never invokes either observation service. There is no package executor or installation approval API.
 
 ## Inputs and identity
 

@@ -16,10 +16,12 @@ pub struct Request {
 pub struct Preview {
     core: inspection::Preview,
     manifest: Option<PathBuf>,
+    source: Option<Source>,
 }
 pub struct Approval {
     core: inspection::Approval,
     manifest: Option<PathBuf>,
+    source: Option<Source>,
 }
 #[derive(Serialize)]
 pub struct Review<'a> {
@@ -30,6 +32,24 @@ pub struct Review<'a> {
 pub struct Report {
     pub manifest: Option<PathBuf>,
     pub provider: inspection::Report,
+    #[serde(skip)]
+    pub(super) source: Option<Source>,
+}
+// Session-only provenance, never serialized trust or execution authority.
+pub(super) struct Source {
+    fingerprint: Option<observation::Fingerprint>,
+    hash: Option<String>,
+}
+impl Source {
+    pub(super) fn from_entry(entry: &observation::Entry) -> Self {
+        Self {
+            fingerprint: entry.fingerprint.clone(),
+            hash: entry.sha256.clone(),
+        }
+    }
+    pub(super) fn matches(&self, entry: &observation::Entry) -> bool {
+        self.fingerprint == entry.fingerprint && self.hash == entry.sha256
+    }
 }
 fn invalid(message: &str) -> Error {
     Error::Invalid(message.into())
@@ -38,6 +58,7 @@ impl Request {
     /// Only npm needs a manifest. This standalone workflow never reads registration
     /// or observes unrelated live files. All query paths must be supplied explicitly.
     pub fn prepare(self, host: &HostContext) -> Result<Preview> {
+        let mut source = None;
         let core = if self.query == inspection::Query::NpmGlobals {
             let path = self
                 .manifest
@@ -50,9 +71,10 @@ impl Request {
             }
             // Bounded no-follow stable-identity read; raw TOML parser diagnostics can
             // contain source lines and must never reach either frontend.
-            let (manifest, _) = observation::read_manifest(path).map_err(|_| {
+            let (manifest, entry) = observation::read_manifest(path).map_err(|_| {
                 invalid("inspection manifest unavailable, unsafe or invalid; contents withheld")
             })?;
+            source = Some(Source::from_entry(&entry));
             inspection::Preview::npm(
                 &manifest,
                 inspection::NpmBinding {
@@ -91,6 +113,7 @@ impl Request {
         Ok(Preview {
             core,
             manifest: self.manifest,
+            source,
         })
     }
 }
@@ -105,6 +128,7 @@ impl Preview {
         Approval {
             core: self.core.approve(),
             manifest: self.manifest,
+            source: self.source,
         }
     }
 }
@@ -113,6 +137,7 @@ impl Approval {
         Report {
             manifest: self.manifest,
             provider: self.core.inspect(),
+            source: self.source,
         }
     }
 }

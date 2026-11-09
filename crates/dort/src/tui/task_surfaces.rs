@@ -101,6 +101,10 @@ impl Activity {
             Task::Bootstrap(..) => "Preview bootstrap recovery",
             Task::Git(_) => "Read Git",
             Task::ToolsPrepare(_) => "Review provider query (no execution)",
+            Task::ToolsReconcilePrepare(_) => {
+                "Read reconciliation declarations (no provider query)"
+            }
+            Task::ToolsReconcile { .. } => "Reconcile chosen snapshots and binary metadata",
             Task::ToolsInspect(_) => "Execute explicitly approved provider inspection",
             Task::Execute(approved) => {
                 if let Some(reviewed) = &app.reviewed_activity {
@@ -118,6 +122,22 @@ impl Activity {
         };
         let mut scope = vec![];
         match task {
+            Task::ToolsReconcilePrepare(request) => {
+                scope.push(("Manifest", request.manifest.display().to_string()))
+            }
+            Task::ToolsReconcile { prepared, .. } => {
+                scope.push(("Manifest", prepared.scope.manifest.display().to_string()));
+                scope.push((
+                    "Tool search dirs",
+                    prepared
+                        .scope
+                        .tool_search_dirs
+                        .iter()
+                        .map(|p| p.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ));
+            }
             Task::ToolsPrepare(request) => {
                 scope.push(("Provider query", format!("{:?}", request.query)));
                 scope.push((

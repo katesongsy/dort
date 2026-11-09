@@ -1,6 +1,9 @@
 //! Explicit provider inspection, independent of repository observation and write approvals.
 use super::{actions::Task, components as ui, input::Target, shell::edit_text};
-use crate::services::tools::{self, Request};
+use crate::services::{
+    reconciliation::{self, Snapshot},
+    tools::{self, Request},
+};
 use dort_core::tools::inspection::{Observation, Query};
 use ratatui::{
     Frame,
@@ -33,7 +36,14 @@ pub struct State {
     pub focus: usize,
     pub preview: Option<tools::Preview>,
     pub confirmation: String,
-    pub report: Option<tools::Report>,
+    pub report: Option<std::sync::Arc<tools::Report>>,
+    pub snapshots: Vec<Snapshot>,
+    pub current: usize,
+    next_id: u64,
+    pub catalog_browser: bool,
+    pub recon_open: bool,
+    pub reconciliation: super::tools_reconcile::State,
+    pub notice: Option<&'static str>,
     pub scope: String,
     pub search: String,
     pub searching: bool,
@@ -53,6 +63,13 @@ impl Default for State {
             preview: None,
             confirmation: String::new(),
             report: None,
+            snapshots: vec![],
+            current: 0,
+            next_id: 1,
+            catalog_browser: false,
+            recon_open: false,
+            reconciliation: Default::default(),
+            notice: None,
             scope: String::new(),
             search: String::new(),
             searching: false,
@@ -73,10 +90,14 @@ impl State {
         }
     }
     pub fn text_entry(&self) -> bool {
-        self.configuring || self.preview.is_some() || self.searching
+        self.configuring
+            || self.preview.is_some()
+            || self.searching
+            || (self.recon_open && self.reconciliation.text_entry())
     }
     pub fn configure(&mut self) {
         self.leave();
+        self.notice = None;
         self.configuring = true;
         self.focus = 0;
     }
@@ -85,6 +106,8 @@ impl State {
         self.confirmation.clear();
         self.configuring = false;
         self.searching = false;
+        self.catalog_browser = false;
+        self.recon_open = false;
     }
     pub fn shrink(&mut self) {
         self.confirmation.clear();
@@ -109,6 +132,18 @@ impl State {
         Task::ToolsPrepare(self.request())
     }
     pub fn reviewed(&mut self, preview: tools::Preview) {
+        if self.snapshots.len() >= reconciliation::MAX_SNAPSHOTS
+            || reconciliation::snapshot_records(&self.snapshots)
+                >= reconciliation::MAX_SNAPSHOT_RECORDS
+            || self.next_id == u64::MAX
+        {
+            self.leave();
+            self.notice = Some(
+                "Session snapshot limit reached. s opens snapshots; x forgets metadata before a fresh query.",
+            );
+            return;
+        }
+        self.notice = None;
         self.scope = serde_json::to_string_pretty(&preview.review())
             .expect("inspection metadata serializes");
         self.preview = Some(preview);
@@ -116,14 +151,44 @@ impl State {
         self.configuring = false;
         self.scroll = 0;
     }
-    pub fn completed(&mut self, report: tools::Report) {
-        self.scope = serde_json::to_string_pretty(&tools::Review {
-            manifest: report.manifest.as_deref(),
-            provider: &report.provider.description,
-        })
-        .expect("inspection metadata serializes");
+    pub fn completed(&mut self, report: tools::Report) -> bool {
         self.leave();
-        self.report = Some(report);
+        let count = match &report.provider.observation {
+            Observation::Complete { installations } => installations.len(),
+            _ => 0,
+        };
+        if self.snapshots.len() >= reconciliation::MAX_SNAPSHOTS
+            || reconciliation::snapshot_records(&self.snapshots).saturating_add(count)
+                > reconciliation::MAX_SNAPSHOT_RECORDS
+        {
+            self.select_snapshot(self.current);
+            self.notice = Some(
+                "Inspection ran, but its metadata exceeded the session limit and was not stored. Forget metadata before a fresh approved query.",
+            );
+            return false;
+        }
+        self.snapshots.push(Snapshot {
+            id: format!("s{}", self.next_id),
+            report: std::sync::Arc::new(report),
+        });
+        self.next_id += 1;
+        self.notice = None;
+        self.reconciliation.invalidate();
+        self.select_snapshot(self.snapshots.len() - 1);
+        true
+    }
+    fn select_snapshot(&mut self, index: usize) {
+        self.notice = None;
+        self.current = index.min(self.snapshots.len().saturating_sub(1));
+        self.report = self.snapshots.get(self.current).map(|s| s.report.clone());
+        self.scope.clear();
+        if let Some(report) = &self.report {
+            self.scope = serde_json::to_string_pretty(&tools::Review {
+                manifest: report.manifest.as_deref(),
+                provider: &report.provider.description,
+            })
+            .expect("inspection metadata serializes");
+        }
         self.details = false;
         self.selected = 0;
         self.scroll = 0;
@@ -148,6 +213,46 @@ impl State {
     }
     /// Some means locally handled, including printable text that must not become shortcuts.
     pub fn key(&mut self, key: KeyEvent, dry_run: bool) -> Option<Option<Task>> {
+        if self.recon_open {
+            let outcome = self.reconciliation.key(key, &self.snapshots);
+            return Some(match outcome {
+                Some(super::tools_reconcile::Outcome::Back) => {
+                    self.recon_open = false;
+                    None
+                }
+                Some(super::tools_reconcile::Outcome::Load(request)) => {
+                    Some(Task::ToolsReconcilePrepare(request))
+                }
+                Some(super::tools_reconcile::Outcome::Calculate { prepared, bindings }) => {
+                    Some(Task::ToolsReconcile {
+                        prepared,
+                        bindings,
+                        snapshots: self.snapshots.clone(),
+                    })
+                }
+                None => None,
+            });
+        }
+        if self.catalog_browser {
+            match key.code {
+                KeyCode::Esc => self.catalog_browser = false,
+                KeyCode::Up => self.current = self.current.saturating_sub(1),
+                KeyCode::Down => {
+                    self.current = (self.current + 1).min(self.snapshots.len().saturating_sub(1))
+                }
+                KeyCode::Enter => {
+                    self.select_snapshot(self.current);
+                    self.catalog_browser = false;
+                }
+                KeyCode::Char('x') if !self.snapshots.is_empty() => {
+                    self.snapshots.remove(self.current);
+                    self.reconciliation.invalidate();
+                    self.select_snapshot(self.current);
+                }
+                _ => (),
+            }
+            return Some(None);
+        }
         if self.preview.is_some() {
             match key.code {
                 KeyCode::Esc => {
@@ -209,6 +314,10 @@ impl State {
             return None;
         }
         match key.code {
+            KeyCode::Char('s') => self.catalog_browser = true,
+            KeyCode::Char('p') => {
+                self.recon_open = true;
+            }
             KeyCode::Char('c' | 'e') => self.configure(),
             KeyCode::Char('r') => return Some(Some(self.prepare())),
             KeyCode::Char('/') => self.searching = true,
@@ -252,6 +361,59 @@ impl State {
     }
     pub fn draw(&self, frame: &mut Frame, area: Rect, dry_run: bool, hits: &super::input::Hits) {
         hits.wheel(area, super::input::Wheel::Tools);
+        if self.recon_open {
+            self.reconciliation.draw(frame, area, &self.snapshots, hits);
+            return;
+        }
+        if self.catalog_browser {
+            let mut lines = vec![Line::styled(
+                "Session snapshots · Enter selects · x forgets metadata · Esc back",
+                ui::heading(),
+            )];
+            let capacity = usize::from(area.height.saturating_sub(2)).max(1);
+            let offset = self.current.saturating_sub(capacity - 1);
+            for (i, snapshot) in self
+                .snapshots
+                .iter()
+                .enumerate()
+                .skip(offset)
+                .take(capacity)
+            {
+                let d = &snapshot.report.provider.description;
+                lines.push(Line::styled(
+                    ui::clip(
+                        &format!(
+                            "{} | {:?} | {} | {}",
+                            snapshot.id,
+                            d.query,
+                            if snapshot.report.available() {
+                                "Complete"
+                            } else {
+                                "Unavailable"
+                            },
+                            d.executable.display()
+                        ),
+                        area.width,
+                    ),
+                    if i == self.current {
+                        ui::selected()
+                    } else {
+                        ui::muted()
+                    },
+                ));
+            }
+            if self.snapshots.is_empty() {
+                lines.push(Line::raw(
+                    "No snapshots collected. Esc then c configures an explicit query.",
+                ));
+            }
+            frame.render_widget(Paragraph::new(lines), area);
+            return;
+        }
+        if let Some(notice) = self.notice {
+            ui::prose(frame, area, notice, ui::warning());
+            return;
+        }
         if self.configuring {
             self.form(frame, area, hits);
             return;
@@ -287,10 +449,19 @@ impl State {
             return;
         }
         let Some(report) = &self.report else {
+            if self.next_id > 1 {
+                ui::prose(
+                    frame,
+                    area,
+                    "No snapshots retained. Earlier inspections may have run; forgetting metadata does not undo provider side effects.\n\nc configures a fresh approved query; s browses snapshots; p reconciles explicit bindings without provider queries.",
+                    ui::muted(),
+                );
+                return;
+            }
             ui::prose(
                 frame,
                 area,
-                "Tools · explicit provider inspection\n\nNo provider has been queried. Config/plugins may execute code and caches/logs may change.\n\nc: configure trusted paths, then review exact arguments and type inspect. No installs, ownership inference or automatic refresh.\n\nHomebrew formulae · apt via dpkg-query · mise · npm with explicit Node/CLI/prefix binding.\n\nUse Session > Preview-only for a process-free review.",
+                "Tools · explicit provider inspection\n\nNo provider has been queried. Config/plugins may execute code and caches/logs may change.\n\nc: configure trusted paths, review and type inspect. s: session snapshots; p: reconcile explicit bindings. No installs, ownership inference or automatic refresh.\n\nHomebrew formulae · apt via dpkg-query · mise · npm with explicit Node/CLI/prefix binding.\n\nUse Session > Preview-only for a process-free review.",
                 ui::muted(),
             );
             return;
@@ -314,7 +485,11 @@ impl State {
             frame,
             Rect::new(area.x, area.y, area.width, 1),
             &format!(
-                "Provider claims · {:?} · {}",
+                "Provider claims · Snapshot {} · {:?} · {}",
+                self.snapshots
+                    .get(self.current)
+                    .map(|s| s.id.as_str())
+                    .unwrap_or("unknown"),
                 report.provider.description.query,
                 report.provider.description.executable.display()
             ),

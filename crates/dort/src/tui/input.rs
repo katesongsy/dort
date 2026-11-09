@@ -20,6 +20,7 @@ pub enum Target {
     FormControl(usize, bool),
     ToolsControl(usize, bool),
     ToolsRow(usize),
+    ToolsReconControl(usize, bool),
     Picker(usize, bool),
     Palette(Action),
     PaletteSearch,

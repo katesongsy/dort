@@ -286,6 +286,14 @@ impl App {
                     "Read-only Diagnostics loaded; unavailable observations include their cause."
                         .into();
             }
+            Ok(Output::ToolsReconciliationPrepared(prepared)) => {
+                self.tools_view.reconciliation.ready(*prepared);
+                self.status = "Declarations loaded. Explicitly choose snapshot IDs; unbound tools remain not observed.".into();
+            }
+            Ok(Output::ToolsReconciled(report)) => {
+                self.tools_view.reconciliation.completed(report);
+                self.status = "Snapshot-based metadata reconciliation finished. No provider refreshed, candidate executed or installation authorized.".into();
+            }
             Ok(Output::ToolsPreview(preview)) => {
                 if self.tab == Tab::Tools && !self.quit {
                     self.tools_view.reviewed(preview);
@@ -295,8 +303,8 @@ impl App {
             }
             Ok(Output::ToolsReport(report)) => {
                 let available = report.available();
-                self.tools_view.completed(report);
-                self.status = if available { "Inspection complete: provider claims only; no ownership or binary identity verified." } else { "Provider observation unavailable; a retry requires a fresh review and approval." }.into();
+                let stored = self.tools_view.completed(report);
+                self.status = if !stored { "Inspection executed but its metadata exceeded session limits and was not stored." } else if available { "Inspection complete: provider claims only; no ownership or binary identity verified." } else { "Provider observation unavailable; a retry requires a fresh review and approval." }.into();
             }
             Ok(Output::Git(report)) => {
                 self.git_view.accept(
@@ -808,6 +816,21 @@ impl App {
                 }
                 None
             }
+            Target::ToolsReconControl(index, activate) => {
+                if self.tab != Tab::Tools || !self.tools_view.recon_open {
+                    return None;
+                }
+                self.tools_view.reconciliation.focus = index;
+                if activate {
+                    self.key(
+                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                        width,
+                        height,
+                    )
+                } else {
+                    None
+                }
+            }
             Target::ToolsRow(index) => {
                 self.tools_view.selected = index;
                 None
@@ -1095,6 +1118,11 @@ impl App {
                         return self.git_task();
                     }
                     if self.tab == Tab::Tools {
+                        if self.tools_view.recon_open {
+                            return Some(Task::ToolsReconcilePrepare(
+                                self.tools_view.reconciliation.request(),
+                            ));
+                        }
                         return Some(self.tools_view.prepare());
                     }
                     return Some(self.refresh_task());
@@ -1846,6 +1874,8 @@ impl App {
             }
             Action::Destination(tab) => { self.go_tab(tab); if tab == Tab::Files { self.discovering = false; } }
             Action::ToolsConfigure => { self.go_tab(Tab::Tools); self.tools_view.configure(); }
+            Action::ToolsSnapshots => { self.go_tab(Tab::Tools); self.tools_view.leave(); self.tools_view.catalog_browser = true; }
+            Action::ToolsReconcile => { self.go_tab(Tab::Tools); self.tools_view.leave(); self.tools_view.recon_open = true; }
             Action::Choose => self.shell.overlay = Some(Overlay::Repositories { selected: 0 }),
             Action::Init => { self.shell.path_focused = 0; self.shell.overlay = Some(Overlay::Form(Form::Init)); }
             Action::ManageIgnored => return Some(Task::IgnoredPaths),

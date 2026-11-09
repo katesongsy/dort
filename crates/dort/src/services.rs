@@ -1,4 +1,5 @@
 //! Shared application dispatch; presentation must obtain approval before calling.
+pub mod reconciliation;
 pub mod tools;
 use dort_core::{
     Manifest, Result, adoption, bootstrap,

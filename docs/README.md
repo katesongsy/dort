@@ -15,6 +15,7 @@ Start with the [user guide](user/README.md):
 
 - [Architecture](../ARCHITECTURE.md): implemented module boundaries, execution, persistence and recovery contracts.
 - [Provider inspection](tools-inspection.md): shared CLI/TUI approval, process, metadata and runtime-binding boundaries.
+- [Snapshot reconciliation](binary-reconciliation.md): explicit multi-snapshot binding, no-follow candidate metadata and frontend scope/freshness boundaries.
 - [Pure tool package planning](tools-planning.md): explicit-scope claims, binary uncertainty, version/no-op semantics and dependency blockers.
 - [Validation methods](validation.md): test isolation, repeatable checks, terminal/storage harnesses and what their results mean.
 - [Release mechanics](releases.md): native artifacts, provenance and tag-triggered publication guards.

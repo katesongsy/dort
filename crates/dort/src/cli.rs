@@ -206,6 +206,22 @@ enum PlanCommand {
 
 #[derive(Subcommand)]
 enum ToolsCommand {
+    /// Collect separately approved scopes and reconcile explicit snapshot bindings; no installs.
+    Reconcile {
+        #[arg(long)]
+        manifest: PathBuf,
+        /// Explicit tool lookup directories, independent of provider child PATH.
+        #[arg(long = "tool-search-dir", required = true)]
+        tool_search_dirs: Vec<PathBuf>,
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+        /// Strict JSON: id, provider, executable, search_dirs, optional npm binding fields.
+        #[arg(long = "scope", required = true)]
+        scopes: Vec<String>,
+        /// Explicit selected-tool to snapshot-ID binding. Unbound tools stay unobserved.
+        #[arg(long = "bind")]
+        bindings: Vec<String>,
+    },
     /// Query a trusted provider; configuration/plugins may run and caches may change.
     Inspect {
         #[arg(value_enum)]
@@ -287,6 +303,94 @@ pub fn run() -> ExitCode {
     }
 }
 
+fn tools_reconcile(
+    cli: &Cli,
+    host: &HostContext,
+    command: &ToolsCommand,
+) -> dort_core::Result<ExitCode> {
+    use crate::services::reconciliation::{self, ScopeRequest, Snapshot};
+    use std::collections::BTreeSet;
+    let ToolsCommand::Reconcile {
+        manifest,
+        tool_search_dirs,
+        profiles,
+        scopes,
+        bindings,
+    } = command
+    else {
+        unreachable!()
+    };
+    if scopes.len() > reconciliation::MAX_SNAPSHOTS {
+        return Err(Error::Invalid("too many inspection scopes".into()));
+    }
+    let prepared = reconciliation::Request {
+        manifest: manifest.clone(),
+        tool_search_dirs: tool_search_dirs.clone(),
+        profiles: profiles.clone(),
+    }
+    .prepare(host)?;
+    let mut previews = Vec::new();
+    let mut ids = BTreeSet::new();
+    for scope in scopes {
+        let request = ScopeRequest::parse(scope)?;
+        if !ids.insert(request.id.clone()) {
+            return Err(Error::Invalid("duplicate snapshot ID".into()));
+        }
+        previews.push((request.id.clone(), request.prepare(host, manifest)?));
+    }
+    let bindings = reconciliation::parse_bindings(bindings)?;
+    prepared.validate_bindings(&bindings, &ids)?;
+    if cli.dry_run {
+        print_git_json(
+            &serde_json::json!({"reconciliation": &prepared.scope, "bindings": &bindings,
+            "inspections": previews.iter().map(|(id, p)| serde_json::json!({"id":id,"review":p.review()})).collect::<Vec<_>>()}),
+        )?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    if !cli.yes && !interactive(cli) {
+        return Err(Error::Invalid("reconciliation inspections require --yes in JSON/nonterminal mode, or --dry-run to review without execution".into()));
+    }
+    if !cli.json {
+        print_git_json(
+            &serde_json::json!({"reconciliation":&prepared.scope,"bindings":&bindings}),
+        )?;
+    }
+    let mut snapshots = Vec::new();
+    for (id, preview) in previews {
+        if !cli.json {
+            print_git_json(&serde_json::json!({"snapshot":&id,"review":preview.review()}))?;
+        }
+        if !cli.yes
+            && answer(&format!(
+                "Snapshot {id}: config/plugins may run; caches may change. Type inspect: "
+            ))? != "inspect"
+        {
+            return Err(Error::Invalid("scope not approved; earlier approved inspections may already have run, and nothing is automatically undone".into()));
+        }
+        snapshots.push(Snapshot {
+            id,
+            report: std::sync::Arc::new(preview.approve().inspect()),
+        });
+        if reconciliation::snapshot_records(&snapshots) > reconciliation::MAX_SNAPSHOT_RECORDS {
+            return Err(Error::Invalid(
+                "session snapshot record limit exceeded; approved inspections already ran and nothing is automatically undone".into(),
+            ));
+        }
+    }
+    let report = prepared.reconcile(&snapshots, bindings)?;
+    let unavailable =
+        !report.binaries.available() || snapshots.iter().any(|s| !s.report.available());
+    let blocked = report.plan.has_blockers();
+    print_git_json(&serde_json::json!({"snapshots":&snapshots,"reconciliation":&report}))?;
+    Ok(if unavailable {
+        ExitCode::from(1)
+    } else if blocked {
+        ExitCode::from(4)
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
 fn tools_inspect(
     cli: &Cli,
     host: &HostContext,
@@ -297,6 +401,9 @@ fn tools_inspect(
             "tools inspection uses its explicit scope; omit --repo/--confirm-remove".into(),
         ));
     }
+    if matches!(command, ToolsCommand::Reconcile { .. }) {
+        return tools_reconcile(cli, host, command);
+    }
     let ToolsCommand::Inspect {
         provider,
         executable,
@@ -305,7 +412,10 @@ fn tools_inspect(
         runtime_tool,
         npm_cli,
         prefix,
-    } = command;
+    } = command
+    else {
+        unreachable!()
+    };
     let preview = crate::services::tools::Request {
         query: provider.query(),
         executable: executable.clone(),

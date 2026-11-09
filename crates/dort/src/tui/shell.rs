@@ -109,6 +109,8 @@ pub enum Action {
     GitRefresh,
     GitPatch,
     ToolsConfigure,
+    ToolsSnapshots,
+    ToolsReconcile,
     Choose,
     Init,
     Discover,
@@ -155,6 +157,10 @@ impl Action {
             Self::Destination(Tab::Git) => "Git: read-only inspection",
             Self::Destination(Tab::Tools) => "Tools: explicitly approved provider inspection",
             Self::ToolsConfigure => "Tools: configure trusted provider inspection (no execution)",
+            Self::ToolsSnapshots => "Tools: session snapshots (metadata only)",
+            Self::ToolsReconcile => {
+                "Tools: reconcile explicit snapshot bindings (no provider query)"
+            }
             Self::GitRoot => "Git: choose independent root (session only)",
             Self::GitDefault => "Git: use current file repository root",
             Self::GitStatus => "Git: Status metadata",

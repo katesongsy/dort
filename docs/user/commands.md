@@ -155,6 +155,42 @@ dort tools inspect npm --executable /trusted/node/bin/node \
 
 Remove `--dry-run` to execute after terminal confirmation (`inspect`), or use explicit `--yes` for JSON/nonterminal execution. `--repo` and `--confirm-remove` do not apply; npm-only fields are rejected for other providers. Reports include the exact query scope; stdout/stderr payloads, configuration, resolved URLs, scripts and parser excerpts are withheld. Exit 0 means a completed observation (possibly empty), 1 means an unavailable provider observation, and 2 means invalid input/approval/manifest. The runtime binding records your selection, not proof that the declared runtime owns that Node or prefix.
 
+## Snapshot reconciliation
+
+Tools can retain **multiple independently approved snapshots** for the session, then reconcile declarations against your explicit choices. Snapshots are provider claims, not ownership, trust or proof that a binary is ready. They are not saved across sessions. Dort issues no package install, activation, upgrade, adoption or removal operation; provider configuration/code risks still apply.
+
+### Interactive workflow
+
+1. In Tools, configure and approve each provider query with literal `inspect`. Each result gets a session ID (`s1`, `s2`, …). Repeated queries create new snapshots, not replacements or merged inventories.
+2. Press `s` (or **Tools → Session snapshots**) to browse snapshots. Up/Down and Enter select one; `d` on its report shows full scope. `x` **in the snapshot browser** forgets only that metadata, not a package or earlier provider effects. Session limits are 16 snapshots and 65,536 installation records; a limit refusal never replays a query.
+3. Press `p` (or **Tools → Reconcile snapshots**) to enter an absolute manifest, **separate tool-search directories** (colon-separated) and optional temporary profiles (comma-separated). These tool directories are not the provider's child PATH and are never discovered from the process environment. Load declarations with Enter. This step does not query providers.
+4. Each selected tool initially says **Not observed**. Space explicitly chooses a matching-provider snapshot ID; `d` inspects that chosen scope. Nothing is assigned automatically, even when only one snapshot exists. Tab moves controls. Activate **Reconcile metadata** after reviewing the choices.
+5. Up/Down selects a result; Enter/`d` shows full package, scope, blocker and binary-probe metadata. PgUp/PgDn and Home/End inspect the full detail. Esc returns to retained inputs. Reloading/recalculating uses the chosen snapshots as recorded and never queries a provider automatically.
+
+Use existing physical tool-search directories. Symlinked parents/directories (for example `/bin` on some systems), missing/unreadable directories and raced observations are **unavailable**, not healthy empty. Candidate symlink targets are shown but never followed. Lookup reads only metadata for declared bare names: candidates include nonexecutable files, directories, special files and dangling links, and are always unattributed. No candidate is run to obtain a version. Absence means only that the explicit scope was completely inspected and no matching name was found.
+
+A package **no-op is not tool readiness**; binaries may still be missing/unverified and dependencies may be blocked. A missing-package **review proposal is not execution approval**. Default/latest policies do not upgrade existing matching claims. Other providers, unbound tools, version conflicts and ambiguous tap/architecture/backend names remain explicit rather than guessed or silently merged. npm snapshots must come from the same unchanged manifest; changed/different declarations require a fresh, separately approved inspection, never a silent runtime-ID reassociation.
+
+### CLI collection and reconciliation
+
+`tools reconcile` combines **explicitly approved collection** with metadata-only analysis. Supply one strict JSON `--scope` per requested inspection and explicit `--bind TOOL=SNAPSHOT` choices. Scope fields are `id`, `provider`, `executable`, `search_dirs`, with `runtime_tool`, `npm_cli` and `prefix` only for npm. There are no arbitrary command/argument/environment fields. Each descriptor constructs a fresh real core preview; JSON is not execution authorization.
+
+```sh
+# Replace paths with your trusted executables and existing physical directories.
+# This only previews the two queries and analysis scope: no provider/binary lookup.
+dort tools reconcile --manifest /absolute/path/dort.toml \
+  --tool-search-dir /trusted/node/bin --tool-search-dir /usr/bin \
+  --scope '{"id":"mise","provider":"mise","executable":"/trusted/bin/mise","search_dirs":["/trusted/bin","/usr/bin"]}' \
+  --scope '{"id":"npm","provider":"npm","executable":"/trusted/node/bin/node","search_dirs":["/trusted/node/bin","/usr/bin"],"runtime_tool":"node","npm_cli":"/trusted/node/lib/node_modules/npm/bin/npm-cli.js","prefix":"/trusted/npm-global"}' \
+  --bind node=mise --bind pi=npm --dry-run
+```
+
+The manifest must declare the bound tools and npm runtime ID. Add `--profile NAME` for temporary profile additions. Other selected tools stay not observed; they can therefore block the package plan. Duplicate/unknown bindings or snapshot IDs are rejected before query execution.
+
+Remove `--dry-run` to review and type `inspect` **separately for each identified scope**, or use explicit `--yes --json` for automation. `--yes` does not bypass validation. If you decline a later scope or analysis fails, earlier approved inspections may already have executed configuration/plugins or changed caches/logs; nothing is automatically undone. Metadata reconciliation itself never executes/refetches a provider, writes state or grants installation authority.
+
+Final JSON includes `snapshots` and `reconciliation` (scope, bindings, binary observations and package plan). Exit 1 means an unavailable requested provider/binary observation, 4 means a blocked package plan, 2 means invalid input/approval/changed declarations, and 0 means a completed package analysis—not verified tool readiness. Reports and snapshots are not reusable execution approvals or persisted installation receipts.
+
 ## Initialization and approval
 
 ```sh
@@ -295,10 +331,10 @@ The table below describes explicit CLI commands. A clean TUI exit returns 0 even
 | Code | Meaning |
 | --- | --- |
 | 0 | Read succeeded or explicitly approved operation completed; not a production-safety guarantee. |
-| 1 | Unavailable provider observation or I/O failure. |
+| 1 | Unavailable provider/binary observation or I/O failure. |
 | 2 | Invalid input/configuration/approval, stale or unsafe guards, malformed history, unsupported host/arguments, unavailable or failed/refused/bounded Git operation. |
 | 3 | Writer lock contention; dry runs/read-only commands never acquire it. |
-| 4 | A file plan is blocked, or recovery diagnosis reports write blockers. |
+| 4 | A file/package plan is blocked, or recovery diagnosis reports write blockers. |
 
 Blocked plans/diagnosis still emit their full report on **stdout**. Other runtime errors go to **stderr**, as JSON when `--json` is selected. Clap help/argument-parsing output has its own normal formatting; `--json` does not turn invalid CLI syntax into a JSON report.
 

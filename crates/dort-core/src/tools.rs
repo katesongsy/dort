@@ -1,5 +1,6 @@
 //! Pure tool-policy primitives and separately approved provider inspection.
 //! Policy parsing/comparison never inspects or executes providers.
+pub mod binaries;
 pub mod inspection;
 pub mod planning;
 use crate::model::Provider;
