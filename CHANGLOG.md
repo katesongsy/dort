@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tools:** discover inspection defaults with one confirmation ([44ba6bc](https://github.com/katesongsy/dort/commit/44ba6bcc47eccc6984112d7fdb4220743624b8bb))
+
 - **tools:** add manifest-only declarations and simple confirmations ([7c07143](https://github.com/katesongsy/dort/commit/7c07143f79cc06cb8c9bf66e4916c047097b72c4))
 
 - **tools:** describe non-executable install commands and risks ([d61431a](https://github.com/katesongsy/dort/commit/d61431afb1dcf6a90383fcd1544528310d10bcfd))
