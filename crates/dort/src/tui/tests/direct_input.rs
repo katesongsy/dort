@@ -13,9 +13,11 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 fn press(app: &mut App, code: KeyCode, size: (u16, u16)) {
     assert!(
-        app.key(KeyEvent::new(code, KeyModifiers::NONE), size.0, size.1)
-            .is_none(),
-        "metadata browsing must not dispatch a task"
+        matches!(
+            app.key(KeyEvent::new(code, KeyModifiers::NONE), size.0, size.1),
+            None | Some(super::actions::Task::ToolsDetect(_))
+        ),
+        "metadata browsing may detect defaults, never execute a provider"
     );
 }
 fn long_path(prefix: &str) -> String {

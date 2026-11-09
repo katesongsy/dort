@@ -81,6 +81,7 @@ mod tool_declaration;
 #[path = "tests/tool_declaration.rs"]
 mod tool_declaration_tests;
 mod tools;
+mod tools_defaults;
 mod tools_reconcile;
 #[cfg(test)]
 #[path = "tests/tools_reconcile.rs"]

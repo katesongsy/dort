@@ -22,6 +22,7 @@ pub enum Target {
     PatchConfirm,
     ConfirmAction,
     CancelConfirmation,
+    ToolsDefault(usize, bool),
     ToolsControl(usize, bool),
     ToolsRow(usize),
     ToolsReconControl(usize, bool),

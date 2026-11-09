@@ -81,8 +81,8 @@ fn type_text(app: &mut App, text: &str) {
 fn entry_configuration_and_preview_never_query_and_printable_shortcuts_remain_text() {
     let f = Fixture::new("exit 99");
     let mut app = f.app(false);
-    assert!(render(&app, 48, 14).contains("No provider has been queried"));
-    key(&mut app, KeyCode::Char('c'));
+    assert!(render(&app, 48, 14).contains("Inspect installed tools"));
+    key(&mut app, KeyCode::Char('e'));
     app.tools_view.focus = 1;
     type_text(&mut app, "q?;f");
     assert!(!app.quit && app.help.is_none() && app.shell.overlay.is_none());
@@ -194,11 +194,13 @@ fn npm_form_exposes_full_explicit_binding_without_repository_or_launcher_discove
     let manifest = f.home.parent().unwrap().join("dort.toml");
     fs::write(&manifest, include_str!("../../../examples/dort.toml")).unwrap();
     let mut app = f.app(false);
-    key(&mut app, KeyCode::Char('c'));
+    key(&mut app, KeyCode::Char('e'));
     for _ in 0..3 {
         key(&mut app, KeyCode::Char(' '));
     }
     assert_eq!(app.tools_view.query, 3);
+    app.tools_view.fields[0] = f.executable.to_str().unwrap().into();
+    app.tools_view.fields[1] = f.home.join("trusted-bin").to_str().unwrap().into();
     app.tools_view.fields[2] = manifest.to_str().unwrap().into();
     app.tools_view.fields[3] = "node".into();
     app.tools_view.fields[4] = f.home.join("npm-cli.js").to_str().unwrap().into();
@@ -261,7 +263,7 @@ fn compact_wide_forms_keep_focus_and_caret_visible_and_results_have_semantic_sel
         r#"printf '{"formulae":[{"full_name":"ripgrep","installed":[{"version":"14.1.0"}]}]}'"#,
     );
     let mut app = f.app(false);
-    app.tools_view.configure();
+    app.tools_view.advanced();
     app.tools_view.query = 3;
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         for focus in 0..9 {
@@ -305,4 +307,154 @@ fn compact_wide_forms_keep_focus_and_caret_visible_and_results_have_semantic_sel
             |c| c.bg == Color::Cyan && c.modifier.contains(Modifier::BOLD | Modifier::REVERSED)
         )
     );
+}
+
+fn detect(f: &Fixture, app: &mut App) {
+    use crate::services::inspection_defaults::Inputs;
+    app.tools_view.setup = true;
+    let bin = f.home.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    for name in ["brew", "mise"] {
+        fs::copy(&f.executable, bin.join(name)).unwrap();
+    }
+    f.run(
+        app,
+        Task::ToolsDetect(Inputs {
+            search_dirs: vec![bin],
+            ..Default::default()
+        }),
+    );
+}
+
+#[test]
+fn detected_collection_is_process_free_until_one_selected_confirmation() {
+    let f = Fixture::new("printf '{\"formulae\":[]}'");
+    let mut app = f.app(false);
+    detect(&f, &mut app);
+    assert!(!f.home.join("calls").exists());
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        terminal.draw(|frame| views::draw(frame, &app)).unwrap();
+        let text = render(&app, w, h);
+        assert!(text.contains("Inspect installed tools"), "{text}");
+        assert!(text.contains("Homebrew"), "{text}");
+        assert!(
+            terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .any(|c| c.bg == Color::Cyan)
+        );
+    }
+    key(&mut app, KeyCode::Char('d'));
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(!f.home.join("calls").exists());
+    key(&mut app, KeyCode::Char('d'));
+    // Deselect mise; only the displayed selected real preview is consumed.
+    app.tools_view.default_focus = 2;
+    key(&mut app, KeyCode::Char(' '));
+    app.tools_view.default_focus = 4;
+    let task = key(&mut app, KeyCode::Enter).unwrap();
+    assert!(matches!(task, Task::ToolsInspectSelected(_)));
+    assert!(app.tools_view.defaults.is_none());
+    f.run(&mut app, task);
+    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
+    assert_eq!(app.tools_view.snapshots.len(), 1);
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
+    assert!(matches!(
+        key(&mut app, KeyCode::Char('r')),
+        Some(Task::ToolsDetect(_))
+    ));
+    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
+}
+
+#[test]
+fn collection_keeps_independent_unavailable_results_and_fresh_retry() {
+    let f = Fixture::new("printf '{\"formulae\":[]}'");
+    let mut app = f.app(false);
+    detect(&f, &mut app);
+    let task = key(&mut app, KeyCode::Enter).unwrap();
+    f.run(&mut app, task);
+    assert_eq!(app.tools_view.snapshots.len(), 2);
+    assert!(app.tools_view.snapshots[0].report.available());
+    assert!(!app.tools_view.snapshots[1].report.available());
+    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ranran");
+    detect(&f, &mut app);
+    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ranran");
+    app.tools_view.snapshots = vec![app.tools_view.snapshots[0].clone(); 15];
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(app.tools_view.notice.unwrap().contains("limit"));
+    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ranran");
+}
+
+#[test]
+fn default_review_cannot_survive_shrink_navigation_or_preview_only() {
+    let f = Fixture::new("exit 99");
+    for dry in [false, true] {
+        let mut app = f.app(dry);
+        detect(&f, &mut app);
+        if dry {
+            assert!(key(&mut app, KeyCode::Enter).is_none());
+        }
+        app.resize(47, 13);
+        assert!(app.tools_view.defaults.is_none());
+        app.resize(80, 24);
+        assert!(key(&mut app, KeyCode::Enter).is_none());
+        assert!(!f.home.join("calls").exists());
+    }
+    let mut app = f.app(false);
+    app.tools_view.setup = true;
+    app.go_tab(Tab::Git);
+    let defaults = crate::services::inspection_defaults::Inputs {
+        search_dirs: vec![],
+        ..Default::default()
+    }
+    .detect(&f.host, None);
+    app.complete(Ok(actions::Output::ToolsDefaults(defaults)));
+    assert!(app.tools_view.defaults.is_none());
+}
+
+#[test]
+fn advanced_prefills_defaults_and_preserves_overrides_per_provider() {
+    let f = Fixture::new("exit 99");
+    let mut app = App::new(false);
+    app.tab = Tab::Tools;
+    detect(&f, &mut app);
+    app.tools_view.default_focus = 0;
+    key(&mut app, KeyCode::Char('e'));
+    assert!(app.tools_view.configuring);
+    assert!(app.tools_view.fields[0].ends_with("/bin/brew"));
+    app.tools_view.fields[0] = "/custom/brew".into();
+    app.tools_view.focus = 0;
+    key(&mut app, KeyCode::Right);
+    key(&mut app, KeyCode::Left);
+    assert_eq!(app.tools_view.fields[0], "/custom/brew");
+    let Task::ToolsDetect(inputs) = app.tools_view.configure() else {
+        panic!("default review")
+    };
+    assert_eq!(
+        inputs.overrides[0].executable,
+        PathBuf::from("/custom/brew")
+    );
+    assert!(!f.home.join("calls").exists());
+}
+
+#[test]
+fn incomplete_npm_opens_at_the_missing_detail_with_node_and_path_prefilled() {
+    let f = Fixture::new("exit 99");
+    let mut app = App::new(false);
+    app.tab = Tab::Tools;
+    detect(&f, &mut app);
+    fs::copy(&f.executable, f.home.join("bin/node")).unwrap();
+    detect(&f, &mut app);
+    app.tools_view.default_focus = 3;
+    key(&mut app, KeyCode::Enter);
+    assert!(app.tools_view.configuring);
+    assert_eq!(app.tools_view.query, 3);
+    assert_eq!(app.tools_view.focus, 3); // Manifest is the first missing detail.
+    assert!(app.tools_view.fields[0].ends_with("/bin/node"));
+    assert!(app.tools_view.fields[1].ends_with("/bin"));
+    assert!(!f.home.join("calls").exists());
 }

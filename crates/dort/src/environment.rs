@@ -39,6 +39,16 @@ pub fn resolve_git() -> dort_core::Result<PathBuf> {
     ))
 }
 
+/// Capture only; metadata detection runs on the existing owned worker.
+pub fn inspection_inputs() -> crate::services::inspection_defaults::Inputs {
+    crate::services::inspection_defaults::Inputs {
+        search_dirs: std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).collect())
+            .unwrap_or_default(),
+        overrides: vec![],
+    }
+}
+
 pub fn launch_directory() -> dort_core::Result<PathBuf> {
     std::env::current_dir().map_err(|source| Error::Io {
         operation: "resolve current directory",

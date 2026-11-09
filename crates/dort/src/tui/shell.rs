@@ -158,7 +158,7 @@ impl Action {
             Self::Destination(Tab::Git) => "Git: read-only inspection",
             Self::Destination(Tab::Tools) => "Tools: explicitly approved provider inspection",
             Self::ToolDeclaration => "Tools: add a tool declaration (no install)",
-            Self::ToolsConfigure => "Tools: configure trusted provider inspection (no execution)",
+            Self::ToolsConfigure => "Tools: inspect installed tools (review detected defaults)",
             Self::ToolsSnapshots => "Tools: session snapshots (metadata only)",
             Self::ToolsReconcile => {
                 "Tools: reconcile explicit snapshot bindings (no provider query)"

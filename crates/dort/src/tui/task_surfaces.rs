@@ -101,6 +101,8 @@ impl Activity {
             Task::Bootstrap(..) => "Preview bootstrap recovery",
             Task::Git(_) => "Read Git",
             Task::ToolDeclaration(_) => "Preview add-only tool declaration (no provider)",
+            Task::ToolsDetect(_) => "Find inspection defaults (no execution)",
+            Task::ToolsInspectSelected(_) => "Inspect selected installed tools",
             Task::ToolsPrepare(_) => "Review provider query (no execution)",
             Task::ToolsReconcilePrepare(_) => {
                 "Read reconciliation declarations (no provider query)"
@@ -147,7 +149,7 @@ impl Activity {
                     request.executable.display().to_string(),
                 ));
             }
-            Task::ToolsInspect(_) => scope.push((
+            Task::ToolsInspect(_) | Task::ToolsInspectSelected(_) => scope.push((
                 "Scope",
                 "Explicit provider query; no package installation".into(),
             )),
@@ -242,7 +244,10 @@ impl Activity {
             operation,
             scope,
             progress: None,
-            provider_inspection: matches!(task, Task::ToolsInspect(_)),
+            provider_inspection: matches!(
+                task,
+                Task::ToolsInspect(_) | Task::ToolsInspectSelected(_)
+            ),
         }
     }
     pub fn for_pending(pending: &Pending) -> Self {

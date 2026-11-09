@@ -291,6 +291,24 @@ impl App {
                 self.tools_view.reconciliation.completed(report);
                 self.status = "Snapshot-based metadata reconciliation finished. No provider refreshed, candidate executed or installation authorized.".into();
             }
+            Ok(Output::ToolsDefaults(defaults)) => {
+                if self.tab == Tab::Tools && self.tools_view.setup && !self.quit {
+                    self.tools_view.defaults_ready(defaults);
+                    self.status = "Review selected inspections. Enter inspects; e opens Advanced; d shows exact scopes.".into();
+                }
+            }
+            Ok(Output::ToolsReports(reports)) => {
+                let count = reports.len();
+                let unavailable = reports.iter().filter(|r| !r.available()).count();
+                let mut stored = 0;
+                for report in reports {
+                    stored += usize::from(self.tools_view.completed(report));
+                }
+                self.tools_view.collection_result = true;
+                self.status = format!(
+                    "Inspected {count} scopes · {stored} snapshots retained · {unavailable} unavailable. s browses results; p compares declarations."
+                );
+            }
             Ok(Output::ToolsPreview(preview)) => {
                 if self.tab == Tab::Tools && !self.quit {
                     self.tools_view.reviewed(preview);
@@ -853,6 +871,21 @@ impl App {
                     return None;
                 }
                 self.tools_view.reconciliation.focus = index;
+                if activate {
+                    self.key(
+                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                        width,
+                        height,
+                    )
+                } else {
+                    None
+                }
+            }
+            Target::ToolsDefault(index, activate) => {
+                if self.tab != Tab::Tools || !self.tools_view.setup {
+                    return None;
+                }
+                self.tools_view.default_focus = index;
                 if activate {
                     self.key(
                         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
@@ -1902,9 +1935,15 @@ impl App {
                 self.git_view.confirm_patch();
                 self.status = "Choose Unstaged or Staged, then activate View patch in its content warning.".into();
             }
-            Action::Destination(tab) => { self.go_tab(tab); if tab == Tab::Files { self.discovering = false; } }
+            Action::Destination(tab) => {
+                self.go_tab(tab);
+                if tab == Tab::Files { self.discovering = false; }
+                if tab == Tab::Tools && self.tools_view.snapshots.is_empty() {
+                    return Some(self.tools_view.configure());
+                }
+            }
             Action::ToolDeclaration => { self.go_tab(Tab::Tools); self.tools_view.declare(); }
-            Action::ToolsConfigure => { self.go_tab(Tab::Tools); self.tools_view.configure(); }
+            Action::ToolsConfigure => { self.go_tab(Tab::Tools); return Some(self.tools_view.configure()); }
             Action::ToolsSnapshots => { self.go_tab(Tab::Tools); self.tools_view.leave(); self.tools_view.catalog_browser = true; }
             Action::ToolsReconcile => { self.go_tab(Tab::Tools); self.tools_view.leave(); self.tools_view.recon_open = true; }
             Action::Choose => self.shell.overlay = Some(Overlay::Repositories { selected: 0 }),

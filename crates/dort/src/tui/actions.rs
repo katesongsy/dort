@@ -481,6 +481,8 @@ pub enum Task {
     History,
     Diagnostics,
     Git(super::git::Read),
+    ToolsDetect(crate::services::inspection_defaults::Inputs),
+    ToolsInspectSelected(Vec<crate::services::tools::Approval>),
     ToolsPrepare(crate::services::tools::Request),
     ToolsInspect(crate::services::tools::Approval),
     ToolsReconcilePrepare(crate::services::reconciliation::Request),
@@ -521,6 +523,8 @@ pub enum Output {
     },
     Diagnostics(Diagnostics),
     Git(super::git::Report),
+    ToolsDefaults(crate::services::inspection_defaults::Defaults),
+    ToolsReports(Vec<crate::services::tools::Report>),
     ToolsPreview(crate::services::tools::Preview),
     ToolsReport(crate::services::tools::Report),
     ToolsReconciliationPrepared(Box<crate::services::reconciliation::Prepared>),
@@ -564,6 +568,19 @@ pub fn perform_scoped(
                 .prepare(host, &repository, requested)
                 .map(|p| Output::Preview(Pending::ToolDeclaration(Box::new(p))))
         }
+        Task::ToolsDetect(inputs) => {
+            let manifest = LocalConfig::load(host)
+                .ok()
+                .and_then(|c| c.select_repository(repository.as_deref()).ok())
+                .map(|p| p.join("dort.toml"));
+            Ok(Output::ToolsDefaults(inputs.detect(host, manifest)))
+        }
+        Task::ToolsInspectSelected(approvals) => Ok(Output::ToolsReports(
+            approvals
+                .into_iter()
+                .map(|approval| approval.inspect())
+                .collect(),
+        )),
         Task::ToolsPrepare(request) => request.prepare(host).map(Output::ToolsPreview),
         Task::ToolsReconcilePrepare(request) => request
             .prepare(host)

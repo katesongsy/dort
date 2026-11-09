@@ -111,6 +111,15 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
                     keys.extend([("Enter", "Details"), ("PgDn", "Page"), ("Esc", "Back")])
                 }
             }
+        } else if app.tools_view.setup {
+            keys.extend([
+                ("Enter", "Inspect"),
+                ("Space", "Select"),
+                ("e", "Advanced"),
+                ("d", "Scopes"),
+                ("r", "Refresh"),
+                ("Esc", "Back"),
+            ]);
         } else if app.tools_view.catalog_browser {
             keys.extend([
                 ("Enter", "Select"),
@@ -132,7 +141,7 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
         } else {
             keys.extend([
                 ("F10", "Menu"),
-                ("c", "Configure"),
+                ("c", "Inspect tools"),
                 ("s", "Snapshots"),
                 ("p", "Reconcile"),
                 ("r", "Fresh review"),

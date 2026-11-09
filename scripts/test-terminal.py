@@ -264,17 +264,52 @@ def has_color_sgr(data):
 def tools_workflows(binary, base, env):
     home = base / 'tools-home'
     home.mkdir(mode=0o700)
-    tools_env = dict(env, HOME=str(home), XDG_CONFIG_HOME=str(home / '.config'),
+    tools_env = dict(env, HOME=str(home), PATH='/no-external-programs', XDG_CONFIG_HOME=str(home / '.config'),
                      XDG_STATE_HOME=str(home / '.local/state'))
     executable = base / 'fake-provider'
     executable.write_text('#!/bin/sh\nprintf ran >> "$HOME/calls"\n'
                           "printf '{\"formulae\":[{\"full_name\":\"ripgrep\",\"installed\":[{\"version\":\"14.1.0\"}]}]}'\n")
     executable.chmod(0o700)
+    auto_home, auto_bin = base / 'defaults-home', base / 'defaults-bin'
+    auto_home.mkdir(mode=0o700)
+    auto_bin.mkdir(mode=0o700)
+    (auto_bin / 'brew').write_bytes(executable.read_bytes())
+    (auto_bin / 'brew').chmod(0o700)
+    auto_env = dict(tools_env, HOME=str(auto_home), PATH=str(auto_bin),
+                    XDG_CONFIG_HOME=str(auto_home / '.config'),
+                    XDG_STATE_HOME=str(auto_home / '.local/state'))
+    with Session([binary, 'tui'], auto_env) as session:
+        session.wait(b'loaded.')
+        session.send(b'\x1b[D')
+        session.wait(b'[x] Homebrew')
+        assert not (auto_home / 'calls').exists(), 'Default discovery executed a provider'
+        session.send(b'd')
+        session.wait(b'Exact inspection scopes')
+        assert not (auto_home / 'calls').exists(), 'Scope details executed a provider'
+        session.send(b'd')
+        session.click_label('[Inspect installed tools')
+        session.wait(b'Snapshot s1')
+        assert (auto_home / 'calls').read_text() == 'ran', 'Collection did not execute exactly once'
+        session.send(b'c')
+        session.wait(b'[x] Homebrew')
+        assert (auto_home / 'calls').read_text() == 'ran', 'Refresh replayed approval'
+        session.send(b'q')
+        session.finish()
+    with Session([binary, '--dry-run', 'tui'], auto_env, (14, 48)) as session:
+        session.wait(b'loaded.')
+        session.send(b'\x1b[D')
+        session.wait(b'[x] Homebrew')
+        session.send(b'\r')
+        session.settle()
+        assert (auto_home / 'calls').read_text() == 'ran', 'Preview-only defaults executed'
+        session.send(b'q')
+        session.finish()
+    print('PASS default discovery, exact scopes, one-click collection and compact preview-only guard')
     with Session([binary, 'tui'], tools_env) as session:
         session.wait(b'loaded.')
         session.send(b'\x1b[D')
-        session.wait(b'No provider has been queried')
-        session.send(b'c\t' + str(executable).encode() + b'\t/no-external-programs\t\r')
+        session.wait(b'Inspect installed tools')
+        session.send(b'e' + str(executable).encode() + b'\t\x15/no-external-programs\t\r')
         session.wait(b'Run query')
         assert not (home / 'calls').exists(), 'Provider executed during review'
         session.resize((13, 47))
@@ -302,7 +337,9 @@ def tools_workflows(binary, base, env):
     print('PASS Tools query review, explicit activation, resize, search and fresh retry')
     with Session([binary, '--dry-run', 'tui'], tools_env, (14, 48)) as session:
         session.wait(b'loaded.')
-        session.send(b'\x1b[Dc\t' + str(executable).encode() + b'\t/no-external-programs\t\r')
+        session.send(b'\x1b[D')
+        session.wait(b'Homebrew')
+        session.send(b'e' + str(executable).encode() + b'\t\x15/no-external-programs\t\r')
         session.wait(b'execution disabled')
         session.send(b'\r')
         session.settle()
@@ -311,7 +348,7 @@ def tools_workflows(binary, base, env):
         session.wait(b'Review exact query')
         session.settle()
         session.send(b'\x1b')
-        session.wait(b'No provider has been queried')
+        session.wait(b'Inspect installed tools')
         session.send(b'q')
         session.finish()
     print('PASS compact preview-only Tools cannot execute providers')
@@ -346,13 +383,13 @@ def tool_declaration_workflows(binary, base, env):
     with Session([binary, 'tui'], scoped) as session:
         session.wait(b'loaded.')
         session.send(b'\x1b[D')
-        session.wait(b'No provider has been queried')
+        session.wait(b'Inspect installed tools')
         session.send(b'a')
         session.wait(b'Add tool declaration')
         session.send(b'demo\tdemo\t\t\tbrew\tdemo\t\t\tapt\tdemo\t\t\t')
         session.wait(b'Review declaration')
         session.send(b'\x1b')
-        session.wait(b'No provider has been queried')
+        session.wait(b'Inspect installed tools')
         session.send(b'a\r')  # Retained complete draft, not typed confirmation.
         session.wait(b'Already declared: false')
         assert (repo / 'dort.toml').read_text() == original
@@ -388,7 +425,7 @@ def tools_reconciliation_workflows(binary, base, env):
     home.mkdir(mode=0o700)
     lookup = base / 'reconciliation-bin'
     lookup.mkdir(mode=0o700)
-    scoped_env = dict(env, HOME=str(home), XDG_CONFIG_HOME=str(home / '.config'),
+    scoped_env = dict(env, HOME=str(home), PATH='/no-external-programs', XDG_CONFIG_HOME=str(home / '.config'),
                       XDG_STATE_HOME=str(home / '.local/state'))
     manifest = base / 'reconciliation.toml'
     manifest.write_text("schema=1\n[[tools]]\nid='node'\nbinary='node'\n[tools.install]\n"
@@ -409,12 +446,12 @@ def tools_reconciliation_workflows(binary, base, env):
     with Session([binary, 'tui'], scoped_env) as session:
         session.wait(b'loaded.')
         session.send(b'\x1b[D')
-        session.wait(b'No provider has been queried')
-        session.send(b'c  \t' + scopes[0]['executable'].encode() + b'\t/no-external-programs\t\r')
+        session.wait(b'Inspect installed tools')
+        session.send(b'e\x1b[Z  \t' + scopes[0]['executable'].encode() + b'\t\x15/no-external-programs\t\r')
         session.wait(b'Run query')
         session.send(b'\r')
         session.wait(b'Snapshot s1')
-        session.send(b'c\t\x15' + scopes[1]['executable'].encode() + b'\t\t\r')
+        session.send(b'e\t\x15' + scopes[1]['executable'].encode() + b'\t\t\r')
         session.wait(b'Run query')
         session.send(b'\r')
         session.wait(b'Snapshot s2')

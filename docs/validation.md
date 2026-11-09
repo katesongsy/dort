@@ -90,6 +90,10 @@ Process exits at persisted boundaries demonstrate process-crash handling, not po
 
 Menu fixtures also check bottom-only navigation hints, numeric-key inertness and uncluttered popup content. Review fixtures assert heading/effect hierarchy and escaped metadata; private patch tests distinguish file headers, hunks, additions and removals while scrolling horizontally. Appearance fixtures cover Unicode chevrons and gutters with ASCII fallback.
 
+### Inspection defaults
+
+Metadata-only default detection uses synthetic absolute PATH directories and executable/layout fixtures, including precedence, non-executable/relative entries, missing and ambiguous npm runtime bindings, and co-located Node/CLI/prefix layouts. No installed provider is probed. TUI checks cover selection, one collection activation, independent unavailable results, retained Advanced overrides, snapshot limits, preview-only/shrink/navigation guards and compact/wide cell styles. PTY coverage exercises default discovery through confirmation with a fake provider and checks that discovery never executes it. These checks do not establish unfamiliar-user intuitiveness or real-provider compatibility.
+
 ### Tool declarations and confirmation controls
 
 [Core declaration fixtures](../crates/dort-core/tests/tool_declaration.rs) cover focused manifest edits and permissions, registration, identical no-ops, conflicts, unsafe inputs, stale/tampered previews, private-preparation failures, changed live state, checksum-valid substituted scope, damaged backups/tails and optional cross-device refusal. Every exposed forward/inverse observer boundary is exercised with returned errors and child process exits, followed by fresh guarded recovery. These are process/restart checks, not power-loss evidence.
