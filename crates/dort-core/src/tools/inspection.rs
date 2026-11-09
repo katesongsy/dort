@@ -143,7 +143,7 @@ pub struct Preview {
 /// Single-use authority, deliberately not Clone/Debug/Serialize/Deserialize.
 pub struct Approval(Preview);
 
-fn absolute(path: &Path) -> bool {
+pub(super) fn absolute(path: &Path) -> bool {
     path.is_absolute()
         && path.to_str().is_some()
         && path.components().all(|c| matches!(c, Component::RootDir | Component::Normal(_)))

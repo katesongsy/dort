@@ -245,7 +245,11 @@ impl Manifest {
         self.order(platform, &ids)
     }
 
-    fn dependencies<'a>(&'a self, tool: &'a Tool, platform: Platform) -> BTreeSet<&'a str> {
+    pub(crate) fn dependencies<'a>(
+        &'a self,
+        tool: &'a Tool,
+        platform: Platform,
+    ) -> BTreeSet<&'a str> {
         tool.requires
             .iter()
             .map(String::as_str)
@@ -257,7 +261,11 @@ impl Manifest {
             .collect()
     }
 
-    fn order(&self, platform: Platform, selected_ids: &BTreeSet<String>) -> Result<Vec<String>> {
+    pub(crate) fn order(
+        &self,
+        platform: Platform,
+        selected_ids: &BTreeSet<String>,
+    ) -> Result<Vec<String>> {
         let mut remaining: BTreeMap<_, BTreeSet<_>> = self
             .tools
             .iter()

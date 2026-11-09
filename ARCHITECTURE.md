@@ -14,7 +14,7 @@ Dort currently supports macOS and Ubuntu on x86_64/ARM64. It uses a Rust 2024 wo
 | `docs/user/` | Tracked end-user guides | Current usage, commands, manifests, safety and troubleshooting only; no development content. |
 | `docs/` | Maintained technical references and documentation index | Current system/contracts/methods, not transient feature specifications or implementation plans; no dependencies/links to ignored notes. |
 
-Tool installation, declared-tool/binary reconciliation, templates, secrets, Git staging/commit/push and cloning/sync remain unimplemented. Explicit CLI/TUI Tools workflows consume the separate approved provider-inspection capability; passive observation and planning never invoke it. The TUI exposes session-only repository selection, guided local create/attach, temporary profile selection, Files discovery/adoption/apply/unmanage, structural manifest checks, Recovery, explicit Tools provider catalogs and read-only Git inspection with separately confirmed transient patch disclosure. Core adoption/apply/unmanage executors are sandbox-tested prototypes, not production-ready general deployment.
+Tool installation, frontend declared-tool/binary reconciliation, templates, secrets, Git staging/commit/push and cloning/sync remain unimplemented. Explicit CLI/TUI Tools workflows consume the separate approved provider-inspection capability; passive observation and planning never invoke it. The TUI exposes session-only repository selection, guided local create/attach, temporary profile selection, Files discovery/adoption/apply/unmanage, structural manifest checks, Recovery, explicit Tools provider catalogs and read-only Git inspection with separately confirmed transient patch disclosure. Core adoption/apply/unmanage executors are sandbox-tested prototypes, not production-ready general deployment.
 
 ## Module map
 
@@ -23,7 +23,7 @@ All module paths below are under `crates/dort-core/src/`:
 | Modules | Responsibilities |
 | --- | --- |
 | `model.rs`, `manifest.rs` | Strict schema-1 manifest models and structural/host validation; resource/dependency conflicts. |
-| `tools.rs`, `tools/inspection/` | Pure provider-version policy parsing/comparison shared with manifest validation; separate single-use approved fixed provider queries, bounded process lifetime and whitelisted catalogs. No provider discovery, installation or ownership inference. See [provider inspection](docs/tools-inspection.md). |
+| `tools.rs`, `tools/inspection.rs`, `tools/inspection/`, `tools/planning.rs` | Shared pure version policies, separately approved bounded fixed provider queries and whitelisted catalogs; pure explicit-scope claim classification and conservative dependency/version proposals. No provider discovery, installation or ownership inference. See [provider inspection](docs/tools-inspection.md) and [pure package planning](docs/tools-planning.md). |
 | `profiles.rs`, `platform.rs` | Profile union/selection, supported host/platform detection, stable dependency inputs. |
 | `context.rs` | Explicit HOME/XDG/platform/architecture and lexical destination protection. Environment reads are confined to `from_env`. |
 | `local.rs`, `state.rs` | Private local TOML, repository IDs/registration/relocation, descriptor-relative state primitives, retained-inode advisory writer lock. |

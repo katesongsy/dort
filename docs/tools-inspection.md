@@ -1,6 +1,6 @@
 # Core provider inspection
 
-`dort_core::tools::inspection` implements deliberate local provider queries. CLI `tools inspect` and the Tools TUI expose the same live-preview/approval capability through `services::tools`. Package installation and declared-tool/binary reconciliation are not exposed. Pure version policies in `tools.rs`, manifest checks, filesystem observation and planners do not execute providers. End-user usage is in the [command reference](user/commands.md#provider-inspection).
+`dort_core::tools::inspection` implements deliberate local provider queries. CLI `tools inspect` and the Tools TUI expose the same live-preview/approval capability through `services::tools`. Package installation and frontend declared-tool/binary reconciliation are not exposed. A separate [pure package planner](tools-planning.md) can classify explicitly supplied metadata, but the existing Tools workflow does not invoke it. Pure version policies in `tools.rs`, manifest checks, filesystem observation and planners do not execute providers. End-user usage is in the [command reference](user/commands.md#provider-inspection).
 
 ## Frontend workflow
 
