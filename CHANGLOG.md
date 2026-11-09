@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tools:** add manifest-only declarations and simple confirmations ([7c07143](https://github.com/katesongsy/dort/commit/7c07143f79cc06cb8c9bf66e4916c047097b72c4))
+
 - **tools:** describe non-executable install commands and risks ([d61431a](https://github.com/katesongsy/dort/commit/d61431afb1dcf6a90383fcd1544528310d10bcfd))
 
 - **tools:** reconcile explicit session snapshots with binary metadata ([6e17376](https://github.com/katesongsy/dort/commit/6e1737636397b56e4b23bf6e81507439061c0019))
