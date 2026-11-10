@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tools:** install exact mise versions with guarded attempt closure ([a93e65c](https://github.com/katesongsy/dort/commit/a93e65c71865046f29e7119de6e1024d5dc38b60))
+
 - **tools:** discover inspection defaults with one confirmation ([44ba6bc](https://github.com/katesongsy/dort/commit/44ba6bcc47eccc6984112d7fdb4220743624b8bb))
 
 - **tools:** add manifest-only declarations and simple confirmations ([7c07143](https://github.com/katesongsy/dort/commit/7c07143f79cc06cb8c9bf66e4916c047097b72c4))
