@@ -221,6 +221,15 @@ impl App {
         }
         match result {
             Err(error) => {
+                if self.tools_view.install_open
+                    && matches!(
+                        self.tools_view.installation.mode,
+                        super::tools_install::Mode::LoadingInstall
+                            | super::tools_install::Mode::LoadingClose
+                    )
+                {
+                    self.tools_view.installation.preparation_failed(&error);
+                }
                 self.return_to_discover = false;
                 self.rediscovering_after_adoption = false;
                 self.failure = Some(super::task_surfaces::Failure {
@@ -290,6 +299,49 @@ impl App {
             Ok(Output::ToolsReconciled(report)) => {
                 self.tools_view.reconciliation.completed(report);
                 self.status = "Snapshot-based metadata reconciliation finished. No provider refreshed, candidate executed or installation authorized.".into();
+            }
+            Ok(Output::ToolInstallPreview(preview)) => {
+                if self.tab == Tab::Tools
+                    && self.tools_view.install_open
+                    && !self.quit
+                    && self.tools_view.installation.mode
+                        == super::tools_install::Mode::LoadingInstall
+                {
+                    self.tools_view.installation.reviewed(*preview);
+                    self.status = "Review one exact mise install. Enter confirms; d shows full scope and argv. No queries ran for this review.".into();
+                }
+            }
+            Ok(Output::ToolInstalled(result)) => {
+                self.tools_view.reconciliation.invalidate();
+                self.tools_view.reconciliation.stale_for_install = self
+                    .tools_view
+                    .snapshots
+                    .iter()
+                    .map(|s| s.id.clone())
+                    .collect();
+                self.tools_view.recon_open = false;
+                self.tools_view.installation.installed(result);
+                self.status = "Installation finished or stopped. Inspect the typed outcome and Tools installation attempts. No readiness or rollback claim; snapshots were not refreshed.".into();
+            }
+            Ok(Output::ToolAttempts(result)) => {
+                if self.tab == Tab::Tools && self.tools_view.install_open && !self.quit {
+                    self.tools_view.installation.attempts_ready(result);
+                    self.status = "Installation attempts · metadata only. c reviews fresh inspection and closure of an unresolved attempt.".into();
+                }
+            }
+            Ok(Output::ToolClosePreview(preview)) => {
+                if self.tab == Tab::Tools
+                    && self.tools_view.install_open
+                    && !self.quit
+                    && self.tools_view.installation.mode == super::tools_install::Mode::LoadingClose
+                {
+                    self.tools_view.installation.close_reviewed(*preview);
+                    self.status = "Review fresh inspection and metadata closure. Enter confirms once; d shows exact scope.".into();
+                }
+            }
+            Ok(Output::ToolClosed(result)) => {
+                self.tools_view.installation.closed(result);
+                self.status = "Inspect closure outcome. Closing metadata does not replay, repair or roll back an install.".into();
             }
             Ok(Output::ToolsDefaults(defaults)) => {
                 if self.tab == Tab::Tools && self.tools_view.setup && !self.quit {
@@ -881,6 +933,63 @@ impl App {
                     None
                 }
             }
+            Target::ToolInstallCollect => {
+                if self.tab != Tab::Tools
+                    || !self.tools_view.recon_open
+                    || self.tools_view.install_open
+                {
+                    return None;
+                }
+                self.key(
+                    KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE),
+                    width,
+                    height,
+                )
+            }
+            Target::ToolInstallSelected => {
+                if self.tab != Tab::Tools
+                    || !self.tools_view.recon_open
+                    || self.tools_view.install_open
+                {
+                    return None;
+                }
+                self.key(
+                    KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
+                    width,
+                    height,
+                )
+            }
+            Target::ToolAttemptRow(index) => {
+                if self.tab == Tab::Tools && self.tools_view.install_open {
+                    self.tools_view.installation.selected = index;
+                }
+                None
+            }
+            Target::ToolAttemptClose => {
+                if self.tab != Tab::Tools || !self.tools_view.install_open {
+                    return None;
+                }
+                self.key(
+                    KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE),
+                    width,
+                    height,
+                )
+            }
+            Target::ToolInstallControl(index, activate) => {
+                if self.tab != Tab::Tools || !self.tools_view.install_open {
+                    return None;
+                }
+                self.tools_view.installation.focus = index;
+                if activate {
+                    self.key(
+                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                        width,
+                        height,
+                    )
+                } else {
+                    None
+                }
+            }
             Target::ToolsDefault(index, activate) => {
                 if self.tab != Tab::Tools || !self.tools_view.setup {
                     return None;
@@ -1183,6 +1292,9 @@ impl App {
                         return self.git_task();
                     }
                     if self.tab == Tab::Tools {
+                        if self.tools_view.install_open {
+                            return self.tools_view.installation.retry_preview();
+                        }
                         if self.tools_view.declaration_open {
                             return self.tools_view.declaration.prepare();
                         }
@@ -1944,6 +2056,7 @@ impl App {
             }
             Action::ToolDeclaration => { self.go_tab(Tab::Tools); self.tools_view.declare(); }
             Action::ToolsConfigure => { self.go_tab(Tab::Tools); return Some(self.tools_view.configure()); }
+            Action::ToolAttempts => { self.go_tab(Tab::Tools); return Some(self.tools_view.open_attempts()); }
             Action::ToolsSnapshots => { self.go_tab(Tab::Tools); self.tools_view.leave(); self.tools_view.catalog_browser = true; }
             Action::ToolsReconcile => { self.go_tab(Tab::Tools); self.tools_view.leave(); self.tools_view.recon_open = true; }
             Action::Choose => self.shell.overlay = Some(Overlay::Repositories { selected: 0 }),

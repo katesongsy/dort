@@ -3,6 +3,7 @@ pub mod declaration;
 pub mod inspection_defaults;
 #[cfg(test)]
 mod inspection_defaults_tests;
+pub mod installation;
 pub mod reconciliation;
 pub mod tools;
 use dort_core::{
@@ -119,7 +120,7 @@ pub fn check_manifest(
         .collect();
     let mut unsupported = vec![];
     if !tools.is_empty() {
-        unsupported.push("tool inventory and installation".into());
+        unsupported.push("tool inventory and installation in structural checks (use Tools)".into());
     }
     for file in &files {
         if file.mode != FileMode::Link {

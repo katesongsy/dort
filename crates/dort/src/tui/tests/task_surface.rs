@@ -68,6 +68,7 @@ fn activity_keeps_scope_and_real_boundary_through_navigation_and_quit_waits() {
     app.requested_profiles = vec!["dev-original".into()];
     begin(&mut app, &Task::Refresh, true);
     app.activity.as_mut().unwrap().progress = Some(Progress {
+        installation: false,
         transaction_id: "b".repeat(64),
         boundary: "Durable checkpoint",
         sequence: 17,

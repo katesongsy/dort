@@ -47,6 +47,8 @@ pub struct State {
     next_id: u64,
     pub catalog_browser: bool,
     pub recon_open: bool,
+    pub install_open: bool,
+    pub installation: super::tools_install::State,
     pub declaration_open: bool,
     pub declaration: super::tool_declaration::State,
     pub reconciliation: super::tools_reconcile::State,
@@ -80,6 +82,8 @@ impl Default for State {
             next_id: 1,
             catalog_browser: false,
             recon_open: false,
+            install_open: false,
+            installation: Default::default(),
             declaration_open: false,
             declaration: Default::default(),
             reconciliation: Default::default(),
@@ -105,6 +109,7 @@ impl State {
     }
     pub fn text_entry(&self) -> bool {
         self.declaration_open
+            || (self.install_open && self.installation.text_entry())
             || self.configuring
             || self.preview.is_some()
             || self.searching
@@ -254,6 +259,8 @@ impl State {
         self.searching = false;
         self.catalog_browser = false;
         self.recon_open = false;
+        self.install_open = false;
+        self.installation.clear_approvals();
         self.declaration_open = false;
     }
     pub fn declare(&mut self) {
@@ -261,6 +268,7 @@ impl State {
         self.declaration_open = true;
     }
     pub fn shrink(&mut self) {
+        self.installation.clear_approvals();
         if self.setup {
             self.defaults = None;
             self.setup = false;
@@ -375,6 +383,16 @@ impl State {
     }
     /// Some means locally handled, including printable text that must not become shortcuts.
     pub fn key(&mut self, key: KeyEvent, dry_run: bool) -> Option<Option<Task>> {
+        if self.install_open {
+            return Some(match self.installation.key(key, dry_run, &self.snapshots) {
+                Some(super::tools_install::Outcome::Back) => {
+                    self.install_open = false;
+                    None
+                }
+                Some(super::tools_install::Outcome::Task(task)) => Some(*task),
+                None => None,
+            });
+        }
         if self.declaration_open {
             if key.code == KeyCode::Esc
                 || (key.code == KeyCode::Enter && self.declaration.focus == 13)
@@ -387,6 +405,24 @@ impl State {
         if self.recon_open {
             let outcome = self.reconciliation.key(key, &self.snapshots);
             return Some(match outcome {
+                Some(super::tools_reconcile::Outcome::FreshInventory) => Some(self.configure()),
+                Some(super::tools_reconcile::Outcome::Install(tool)) => {
+                    match self.reconciliation.result.as_ref().and_then(|r| {
+                        crate::services::installation::Request::selected(r, &tool, &self.snapshots)
+                            .ok()
+                    }) {
+                        Some(request) => {
+                            self.install_open = true;
+                            Some(self.installation.prepare(request))
+                        }
+                        None => {
+                            self.notice = Some(
+                                "Select an eligible missing exact mise package with an explicit snapshot binding.",
+                            );
+                            None
+                        }
+                    }
+                }
                 Some(super::tools_reconcile::Outcome::Back) => {
                     self.recon_open = false;
                     None
@@ -443,6 +479,7 @@ impl State {
                 | KeyCode::F(10)
                 | KeyCode::Char('?' | ';')
                 | KeyCode::F(1) => return None,
+                KeyCode::Char('i') => return Some(Some(self.open_attempts())),
                 KeyCode::Char('a') => self.declare(),
                 KeyCode::Char('s') => {
                     self.leave();
@@ -562,6 +599,7 @@ impl State {
             return None;
         }
         match key.code {
+            KeyCode::Char('i') => return Some(Some(self.open_attempts())),
             KeyCode::Char('a') => self.declare(),
             KeyCode::Char('s') => self.catalog_browser = true,
             KeyCode::Char('p') => {
@@ -615,8 +653,17 @@ impl State {
         }
         Some(None)
     }
+    pub fn open_attempts(&mut self) -> Task {
+        self.leave();
+        self.install_open = true;
+        self.installation.open_attempts(&self.snapshots)
+    }
     pub fn draw(&self, frame: &mut Frame, area: Rect, dry_run: bool, hits: &super::input::Hits) {
         hits.wheel(area, super::input::Wheel::Tools);
+        if self.install_open {
+            self.installation.draw(frame, area, dry_run, hits);
+            return;
+        }
         if self.declaration_open {
             self.declaration.draw(frame, area, hits);
             return;

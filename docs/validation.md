@@ -90,6 +90,12 @@ Process exits at persisted boundaries demonstrate process-crash handling, not po
 
 Menu fixtures also check bottom-only navigation hints, numeric-key inertness and uncluttered popup content. Review fixtures assert heading/effect hierarchy and escaped metadata; private patch tests distinguish file headers, hunks, additions and removals while scrolling horizontally. Appearance fixtures cover Unicode chevrons and gutters with ASCII fallback.
 
+### Exact mise installation and attempt closure
+
+Core fixtures construct process-free opaque previews from explicit snapshots, then test fresh locked manifest/registration/profile/executable/binary validation, exact-only eligibility, satisfied no-ops, fixed argv/cleared environment, discarded dual-pipe output, short test deadlines and descendant cleanup. Failure observers/process-exit children exercise intent-before-spawn and outcome persistence, unresolved-only Tools blocking, changed sources, malformed/changed artifacts and append-only fresh-query closure. They do not prove power-loss safety or isolate malicious same-user provider races.
+
+CLI and typed TUI tests cover explicit opt-in, one activation, metadata-only outcomes, retained fallback closure fields, unavailable-versus-empty attempt storage, below-floor/dry-run/shrink/late-result guards and unchanged historical snapshots. PTY fake-provider cases cover compact review/details, clicked installation, typed progress, joined quit and all-repository attempt closure. No real provider/package/network install or workstation credential is used. See [installation contracts](tool-installation.md).
+
 ### Inspection defaults
 
 Metadata-only default detection uses synthetic absolute PATH directories and executable/layout fixtures, including precedence, non-executable/relative entries, missing and ambiguous npm runtime bindings, and co-located Node/CLI/prefix layouts. No installed provider is probed. TUI checks cover selection, one collection activation, independent unavailable results, retained Advanced overrides, snapshot limits, preview-only/shrink/navigation guards and compact/wide cell styles. PTY coverage exercises default discovery through confirmation with a fake provider and checks that discovery never executes it. These checks do not establish unfamiliar-user intuitiveness or real-provider compatibility.

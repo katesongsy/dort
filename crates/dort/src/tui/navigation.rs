@@ -67,6 +67,7 @@ pub fn entries(group: usize) -> Vec<Entry> {
             action("Add tool declaration [a]", ToolDeclaration),
             action("Inspect installed tools [c]", ToolsConfigure),
             action("Session snapshots [s]", ToolsSnapshots),
+            action("Installation attempts [i]", ToolAttempts),
             action("Reconcile snapshots [p]", ToolsReconcile),
         ],
     }
@@ -91,6 +92,7 @@ pub fn shortcut(item: Item) -> ratatui::crossterm::event::KeyCode {
             ToolDeclaration => 'a',
             ToolsConfigure => 'c',
             ToolsSnapshots => 's',
+            ToolAttempts => 'i',
             ToolsReconcile => 'p',
             Discover => 'f',
             ManageIgnored => 'U',
@@ -140,7 +142,15 @@ pub fn group(app: &App) -> usize {
 pub fn location(app: &App) -> &'static str {
     match app.tab {
         Tab::Overview => "Overview",
-        Tab::Tools => "Tools / Explicit inspection",
+        Tab::Tools if app.tools_view.install_open => match app.tools_view.installation.mode {
+            super::tools_install::Mode::Attempts => "Tools / Installation attempts",
+            super::tools_install::Mode::CloseInputs
+            | super::tools_install::Mode::LoadingClose
+            | super::tools_install::Mode::CloseReview => "Tools / Close attempt",
+            super::tools_install::Mode::Result => "Tools / Installation outcome",
+            _ => "Tools / Exact mise install",
+        },
+        Tab::Tools => "Tools / Inspection and comparison",
         Tab::Files if app.discovering => "Files / Discover",
         Tab::Files => "Files / Managed",
         Tab::Recovery => "Recovery / All repositories",

@@ -3,6 +3,7 @@
 pub mod binaries;
 pub mod declaration;
 pub mod inspection;
+pub mod install;
 pub mod install_preview;
 pub mod planning;
 use crate::model::Provider;

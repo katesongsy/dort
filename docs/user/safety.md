@@ -4,7 +4,7 @@
 
 ## Content disclosure and secrets
 
-Checks/discovery/plans/status/history/Git inspection do not write or run providers. Separate [Tools inspection](commands.md#provider-inspection) executes a trusted program only after explicit approval: global configuration/plugins may execute code and caches/logs may change. Offline/no-update flags are not an OS sandbox or a network guarantee. Reports are provider claims, not binary identity, installed-tool satisfaction or Dort ownership; there are no installs or provider rollback promises. Explicit init/file/recovery mutations can change repositories and live files only after approval. Start with a disposable HOME; these are experimental prototypes. `--dry-run` never creates state/locks/artifacts or prompts. JSON/nonterminal writes require `--yes`; link deletion binds approval to the exact selected mapping. Manifest checks validate declarations; file plans may read/hash ordinary files. CLI discovery reports contain metadata only. TUI Discover additionally reads only the selected eligible regular file for an automatic bounded content preview.
+Checks/discovery/plans/status/history/Git inspection do not write or run providers. Separate [Tools inspection](commands.md#provider-inspection) executes a trusted program only after explicit approval: global configuration/plugins may execute code and caches/logs may change. Offline/no-update flags are not an OS sandbox or a network guarantee. Reports are provider claims, not binary identity, installed-tool satisfaction or Dort ownership; inspection does not install packages or promise provider rollback. The separate [exact mise workflow](commands.md#exact-mise-installation) can install one still-missing exact version after fresh checks and explicit approval; it has a ten-minute deadline and no activation/rollback guarantee. Explicit init/file/recovery mutations can change repositories and live files only after approval. Start with a disposable HOME; these are experimental prototypes. `--dry-run` never creates state/locks/artifacts or prompts. JSON/nonterminal writes require `--yes`; link deletion binds approval to the exact selected mapping. Manifest checks validate declarations; file plans may read/hash ordinary files. CLI discovery reports contain metadata only. TUI Discover additionally reads only the selected eligible regular file for an automatic bounded content preview.
 
 F1 opens contextual Help even during approval; `?` remains literal in text/search. Help never submits or authorizes underlying input, and returning restores retained drafts/focus. Shrinking below 48×14 still clears all approval acknowledgements and Git disclosure input/content, including while Help is open. Help never copies private file/patch payloads. Menus never authorize writes or patch disclosure and cannot bypass active forms, previews, confirmations or workers. Opening a menu withholds Discover content; returning may reread the eligible selected file. Opening menus drops any displayed Git patch reference; this is not secure memory erasure and no patch is automatically reopened.
 
@@ -60,6 +60,7 @@ Both macOS and Ubuntu use:
 | Local discovery exclusions | `$HOME/.config/dort/discovery-ignore.toml` |
 | State | `$HOME/.local/state/dort/` |
 | Repository transactions | `repositories/<repository-id>/transactions/<transaction-id>/` below state |
+| Tools installation attempts | `tools-attempts/<attempt-id>/` below state; metadata only, not package backups or file Recovery transactions |
 
 `XDG_CONFIG_HOME` and `XDG_STATE_HOME` override the respective base directories. Empty overrides are ignored; relative overrides are rejected. Missing state is not created by read-only commands or dry runs.
 
@@ -83,6 +84,12 @@ Private state uses owned directories/files without symlink traversal or hard lin
 | Discovery limit/warning | Discovery has a 100,000-name total budget and a matching per-directory limit. Raced/unreadable nested subtrees produce warnings; an oversized root can fail the command. |
 
 On macOS, aliases such as `/var` may be symlinks. When supplying explicit state paths or temporary demo roots, resolve the physical path with `pwd -P` from inside that directory. Do not rewrite your real HOME/XDG setup merely to run a demo; use the [isolated walkthrough](getting-started.md#start-in-a-disposable-home).
+
+## Exact mise installs and unresolved attempts
+
+Only an explicitly reviewed missing exact mise package can be installed. Provider/backend/package code and downloads may change data and caches despite fixed no-config/no-env/no-hooks controls; unsupported flags fail without a weaker fallback. There is no atomicity, activation, upgrade, ownership or binary-readiness claim. Timeout/failure can leave partial effects. Quit waits for approved work, and raw installer output is discarded.
+
+A private durable attempt intent precedes spawn, followed by observed outcome metadata. Missing/malformed/incomplete records block later Tools installs but not unrelated file operations. Tools → Installation attempts and `tools attempts` expose metadata; an explicit fresh-query closure acknowledges unchanged records without retrying, repairing or rolling back packages. Unavailable inspection does not close an attempt. Later record changes invalidate closure. No automatic replay or cleanup occurs, and snapshots are not silently refreshed for retries. See [commands and closure](commands.md#installation-attempts-and-explicit-closure).
 
 ## Tool declaration changes
 

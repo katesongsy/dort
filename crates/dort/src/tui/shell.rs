@@ -111,6 +111,7 @@ pub enum Action {
     ToolDeclaration,
     ToolsConfigure,
     ToolsSnapshots,
+    ToolAttempts,
     ToolsReconcile,
     Choose,
     Init,
@@ -160,6 +161,7 @@ impl Action {
             Self::ToolDeclaration => "Tools: add a tool declaration (no install)",
             Self::ToolsConfigure => "Tools: inspect installed tools (review detected defaults)",
             Self::ToolsSnapshots => "Tools: session snapshots (metadata only)",
+            Self::ToolAttempts => "Tools: installation attempts and guarded metadata closure",
             Self::ToolsReconcile => {
                 "Tools: reconcile explicit snapshot bindings (no provider query)"
             }

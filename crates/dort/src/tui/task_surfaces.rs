@@ -18,13 +18,32 @@ use ratatui::{
 
 #[derive(Clone)]
 pub struct Progress {
+    pub installation: bool,
     pub transaction_id: String,
     pub boundary: &'static str,
     pub sequence: usize,
 }
 impl Progress {
+    pub fn from_install(event: dort_core::tools::install::Event) -> Self {
+        use dort_core::tools::install::Event::*;
+        let (boundary, sequence) = match event {
+            FreshValidation => ("Checking fresh install scope", 1),
+            FreshInspection => ("Inspecting mise inventory", 2),
+            IntentDurable => ("Installation intent durable", 3),
+            Installing => ("Installing exact version · 10-minute deadline", 4),
+            PostInspection => ("Inspecting package and binary metadata", 5),
+            OutcomeDurable => ("Observed outcome durable", 6),
+        };
+        Self {
+            installation: true,
+            transaction_id: String::new(),
+            boundary,
+            sequence,
+        }
+    }
     pub fn from_event(event: &Event) -> Self {
         Self {
+            installation: false,
             transaction_id: event.transaction_id.clone(),
             boundary: match event.boundary {
                 Boundary::Checkpoint => "Durable checkpoint",
@@ -100,6 +119,11 @@ impl Activity {
             Task::Rollback(..) => "Preview guarded rollback",
             Task::Bootstrap(..) => "Preview bootstrap recovery",
             Task::Git(_) => "Read Git",
+            Task::ToolInstallPrepare(_) => "Review one exact mise install (no execution)",
+            Task::ToolInstall(_) => "Install one exact mise version · 10-minute deadline",
+            Task::ToolAttempts => "Read installation attempts (no execution)",
+            Task::ToolClosePrepare(_) => "Review fresh inspection and attempt closure",
+            Task::ToolClose(_) => "Inspect mise and close unchanged attempt metadata",
             Task::ToolDeclaration(_) => "Preview add-only tool declaration (no provider)",
             Task::ToolsDetect(_) => "Find inspection defaults (no execution)",
             Task::ToolsInspectSelected(_) => "Inspect selected installed tools",
@@ -126,6 +150,26 @@ impl Activity {
         };
         let mut scope = vec![];
         match task {
+            Task::ToolAttempts => scope.push((
+                "Scope",
+                "All repository Tools attempts in this host state".into(),
+            )),
+            Task::ToolInstallPrepare(request) => {
+                scope.push(("Manifest", request.scope().manifest.display().to_string()))
+            }
+            Task::ToolInstall(_) => {
+                if let Some(s) = &app.tools_view.installation.scope {
+                    scope.push(("Package", format!("{}@{}", s.package, s.version)));
+                    scope.push(("Repository", s.repository.display().to_string()));
+                    scope.push(("Provider", s.executable.display().to_string()));
+                }
+                scope.push(("Effects", "Provider/package code, downloads and caches; possible partial effects, no rollback".into()));
+            }
+            Task::ToolClosePrepare(request) => scope.push(("Attempt", request.id.clone())),
+            Task::ToolClose(_) => scope.push((
+                "Scope",
+                "Fresh fixed mise inspection and unchanged attempt metadata closure only".into(),
+            )),
             Task::ToolsReconcilePrepare(request) => {
                 scope.push(("Manifest", request.manifest.display().to_string()))
             }
@@ -519,11 +563,17 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
         }
     } else if app.busy {
         let mut lines = vec![];
+        let progress = app.activity.as_ref().and_then(|a| a.progress.as_ref());
+        if let Some(progress) = progress.filter(|p| p.installation) {
+            lines.push(ui::metadata("Installation phase", progress.boundary));
+        }
         scope(&mut lines, app.activity.as_ref());
-        if let Some(progress) = app.activity.as_ref().and_then(|a| a.progress.as_ref()) {
-            lines.push(ui::metadata("Transaction", &progress.transaction_id));
-            lines.push(ui::metadata("Boundary", progress.boundary));
-            lines.push(ui::metadata("Sequence", &progress.sequence.to_string()));
+        if let Some(progress) = progress {
+            if !progress.installation {
+                lines.push(ui::metadata("Transaction", &progress.transaction_id));
+                lines.push(ui::metadata("Boundary", progress.boundary));
+                lines.push(ui::metadata("Sequence", &progress.sequence.to_string()));
+            }
         } else {
             lines.push(Line::raw(
                 "Waiting for service metadata; no percentage is estimated.",

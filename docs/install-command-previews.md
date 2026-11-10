@@ -1,6 +1,6 @@
 # Non-executable install-command descriptions
 
-`tools::install_preview` adds inspectable command metadata to [pure package planning](tools-planning.md). This module does not run processes, observe files, read environment variables, resolve remote versions, write state or create approvals. The existing [reconciliation CLI/TUI](binary-reconciliation.md) displays these descriptions in computed rows; there is no install command, run button or executor accepting them.
+`tools::install_preview` adds inspectable command metadata to [pure package planning](tools-planning.md). This module does not run processes, observe files, read environment variables, resolve remote versions, write state or create approvals. The existing [reconciliation CLI/TUI](binary-reconciliation.md) displays these descriptions in computed rows; there is no executor accepting them. The separate [exact mise capability](tool-installation.md) reconstructs independent opaque previews and does not dispatch these DTOs.
 
 ## Eligibility and authority
 
@@ -8,7 +8,7 @@ Only a `review_missing_package` row with reported absence, explicit missing bina
 
 Descriptions are serializable metadata, not deserializable approvals or executable capabilities. Each has `state: preview_only`, fixed executable/argument vectors, proposed cleared-environment controls, working directory `/`, unresolved/requested version selection, explicit effect warnings and `execution_authorized: false`. The selected inspection scope supplies the executable, HOME and **provider child search directories**; tool lookup directories are not substituted. No shell command string or clipboard handoff is generated.
 
-Provider version/support, global configuration, mutable package metadata, global absence, side-effect boundaries and actual installability have **not** been independently established. A preview is not a tested invocation or a claim of safe execution. The only running provider operations remain separately approved inspection queries. No new journal, receipt, lock, installation/recovery/cancellation or trust-persistence contract follows from these descriptions.
+Provider version/support, global configuration, mutable package metadata, global absence, side-effect boundaries and actual installability have **not** been independently established. A preview is not a tested invocation or a claim of safe execution. The separate exact mise install workflow has its own fresh-validation and persistence contract; it never executes these descriptions. No new journal, receipt, lock, installation/recovery/cancellation or trust-persistence contract follows from these descriptions.
 
 ## Fixed descriptions
 

@@ -77,7 +77,7 @@ enum Command {
         #[command(subcommand)]
         command: GitCommand,
     },
-    /// Explicitly review/approve bounded local provider inspection; no installations.
+    /// Inspect tools, compare declarations, or explicitly review one exact mise install.
     Tools {
         #[command(subcommand)]
         command: ToolsCommand,
@@ -214,8 +214,11 @@ enum ToolsCommand {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
-    /// Collect separately approved scopes and reconcile explicit snapshot bindings; no installs.
+    /// Inspect explicit scopes and compare declarations; optionally review one exact mise install.
     Reconcile {
+        /// Review and approve one still-missing exact mise package after reconciliation.
+        #[arg(long)]
+        install_tool: Option<String>,
         #[arg(long)]
         manifest: PathBuf,
         /// Explicit tool lookup directories, independent of provider child PATH.
@@ -229,6 +232,20 @@ enum ToolsCommand {
         /// Explicit selected-tool to snapshot-ID binding. Unbound tools stay unobserved.
         #[arg(long = "bind")]
         bindings: Vec<String>,
+    },
+    /// List private Tools installation attempts; optionally inspect one full record.
+    Attempts {
+        #[arg(long)]
+        id: Option<String>,
+    },
+    /// Freshly inspect and close an unchanged unresolved attempt; never replay or roll back.
+    CloseAttempt {
+        id: String,
+        /// Required only when the original provider scope is damaged or missing.
+        #[arg(long)]
+        executable: Option<PathBuf>,
+        #[arg(long = "search-dir")]
+        search_dirs: Vec<PathBuf>,
     },
     /// Query a trusted provider; configuration/plugins may run and caches may change.
     Inspect {
@@ -319,6 +336,7 @@ fn tools_reconcile(
     use crate::services::reconciliation::{self, ScopeRequest, Snapshot};
     use std::collections::BTreeSet;
     let ToolsCommand::Reconcile {
+        install_tool,
         manifest,
         tool_search_dirs,
         profiles,
@@ -331,10 +349,15 @@ fn tools_reconcile(
     if scopes.len() > reconciliation::MAX_SNAPSHOTS {
         return Err(Error::Invalid("too many inspection scopes".into()));
     }
+    let effective_profiles = if install_tool.is_some() {
+        crate::services::installation::profiles(host, manifest, profiles)?
+    } else {
+        profiles.clone()
+    };
     let prepared = reconciliation::Request {
         manifest: manifest.clone(),
         tool_search_dirs: tool_search_dirs.clone(),
-        profiles: profiles.clone(),
+        profiles: effective_profiles,
     }
     .prepare(host)?;
     let mut previews = Vec::new();
@@ -348,10 +371,21 @@ fn tools_reconcile(
     }
     let bindings = reconciliation::parse_bindings(bindings)?;
     prepared.validate_bindings(&bindings, &ids)?;
+    if let Some(tool) = install_tool
+        && !prepared
+            .tools
+            .iter()
+            .any(|t| &t.id == tool && t.provider == Some(dort_core::model::Provider::Mise))
+    {
+        return Err(Error::Invalid(
+            "installation must select an active mise tool".into(),
+        ));
+    }
     if cli.dry_run {
         print_git_json(
             &serde_json::json!({"reconciliation": &prepared.scope, "bindings": &bindings,
-            "inspections": previews.iter().map(|(id, p)| serde_json::json!({"id":id,"review":p.review()})).collect::<Vec<_>>()}),
+            "inspections": previews.iter().map(|(id, p)| serde_json::json!({"id":id,"review":p.review()})).collect::<Vec<_>>(),
+            "requested_install": install_tool, "installation_review": "Requires approved inventories first; this dry-run runs no queries or installs"}),
         )?;
         return Ok(ExitCode::SUCCESS);
     }
@@ -389,6 +423,23 @@ fn tools_reconcile(
     let unavailable =
         !report.binaries.available() || snapshots.iter().any(|s| !s.report.available());
     let blocked = report.plan.has_blockers();
+    if let Some(tool) = install_tool {
+        let preview = crate::services::installation::Request::selected(&report, tool, &snapshots)?
+            .prepare(host)?;
+        if !cli.json {
+            print_git_json(&preview.review())?;
+        }
+        approve(cli)?;
+        let lock = WriterLock::acquire(host)?;
+        let result = dort_core::tools::install::execute(host, &lock, preview.approve(), |_| {})?;
+        let success = crate::services::installation::succeeded(&result);
+        print_git_json(&result)?;
+        return Ok(if success {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(1)
+        });
+    }
     print_git_json(&serde_json::json!({"snapshots":&snapshots,"reconciliation":&report}))?;
     Ok(if unavailable {
         ExitCode::from(1)
@@ -442,8 +493,49 @@ fn tools_inspect(
     }
     if cli.repo.is_some() || cli.confirm_remove.is_some() {
         return Err(Error::Invalid(
-            "tools inspection uses its explicit scope; omit --repo/--confirm-remove".into(),
+            "Tools uses its explicit scope; omit --repo/--confirm-remove".into(),
         ));
+    }
+    if let ToolsCommand::Attempts { id } = command {
+        let attempts = dort_core::tools::install::diagnose(host)?;
+        if let Some(id) = id {
+            let attempt = attempts
+                .iter()
+                .find(|a| &a.id == id)
+                .ok_or_else(|| Error::Invalid("installation attempt not found".into()))?;
+            print_git_json(attempt)?;
+        } else {
+            print_git_json(&attempts)?;
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+    if let ToolsCommand::CloseAttempt {
+        id,
+        executable,
+        search_dirs,
+    } = command
+    {
+        let preview = dort_core::tools::install::prepare_close(
+            host,
+            dort_core::tools::install::CloseRequest {
+                id: id.clone(),
+                executable: executable.clone(),
+                search_dirs: search_dirs.clone(),
+            },
+        )?;
+        if cli.dry_run || !cli.json {
+            print_git_json(&preview.review())?;
+        }
+        if !cli.dry_run {
+            approve(cli)?;
+            let lock = WriterLock::acquire(host)?;
+            print_git_json(&dort_core::tools::install::close(
+                host,
+                &lock,
+                preview.approve(),
+            )?)?;
+        }
+        return Ok(ExitCode::SUCCESS);
     }
     if matches!(command, ToolsCommand::Reconcile { .. }) {
         return tools_reconcile(cli, host, command);

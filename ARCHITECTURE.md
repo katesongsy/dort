@@ -8,13 +8,13 @@ Dort currently supports macOS and Ubuntu on x86_64/ARM64. It uses a Rust 2024 wo
 
 | Component | Responsibility | Current boundary |
 | --- | --- | --- |
-| `crates/dort-core` | Models, validation, profiles/graphs, local state, observation, discovery, planning, journals, experimental filesystem lifecycle/recovery | UI-independent; explicit host inputs; separately approved bounded provider inspection; no package installation. |
+| `crates/dort-core` | Models, validation, profiles/graphs, local state, observation, discovery, planning, journals, experimental filesystem lifecycle/recovery | UI-independent; explicit host inputs; separately approved bounded provider inspection and one exact mise install; no general package deployment. |
 | `crates/dort` | Clap commands, Ratatui interface, environment/platform boundary, repository selection, presentation, exit codes | Shared core services and opaque approvals; terminal/flag approval for local bootstrap, file lifecycle, guarded recovery and separate provider inspection. |
 | `examples/` | Tracked manifest examples | Validation examples, not an installed environment or a deployable source tree. |
 | `docs/user/` | Tracked end-user guides | Current usage, commands, manifests, safety and troubleshooting only; no development content. |
 | `docs/` | Maintained technical references and documentation index | Current system/contracts/methods, not transient feature specifications or implementation plans; no dependencies/links to ignored notes. |
 
-Tool installation, templates, secrets, Git staging/commit/push and cloning/sync remain unimplemented. Explicit CLI/TUI Tools workflows consume the separate approved provider-inspection capability; passive observation and planning never invoke it. The TUI exposes session-only repository selection, guided local create/attach, temporary profile selection, Files discovery/adoption/apply/unmanage, structural manifest checks, Recovery, explicit Tools provider catalogs/session-snapshot reconciliation and read-only Git inspection with separately confirmed transient patch disclosure. Core adoption/apply/unmanage executors are sandbox-tested prototypes, not production-ready general deployment.
+General package deployment, activation/upgrades, other providers' installations, templates, secrets, Git staging/commit/push and cloning/sync remain unimplemented. A separate exact mise install capability has opaque approval, fresh locked validation, fixed bounded execution and private attempt metadata/guarded closure; see [installation contracts](docs/tool-installation.md). Explicit CLI/TUI Tools workflows consume the separate approved provider-inspection capability; passive observation and planning never invoke it. The TUI exposes session-only repository selection, guided local create/attach, temporary profile selection, Files discovery/adoption/apply/unmanage, structural manifest checks, Recovery, explicit Tools provider catalogs/session-snapshot reconciliation and read-only Git inspection with separately confirmed transient patch disclosure. Core adoption/apply/unmanage executors are sandbox-tested prototypes, not production-ready general deployment.
 
 ## Module map
 
@@ -37,6 +37,7 @@ All module paths below are under `crates/dort-core/src/`:
 | `git.rs` | Fixed read-only Git executable adapter, conservative configuration preflight, bounded nonblocking subprocess runner, NUL status/raw-diff parsers and explicit escaped patch disclosure. No state/journal interaction. |
 | `bootstrap.rs` | Opaque init/attach previews, schema-3 staged bootstrap chains, guarded resume/abandon, verified private configuration backups and registration publication. |
 | `batch.rs`, `batch_execution.rs`, `batch_journal.rs` | Pure homogeneous selected-file plans, opaque combined approvals, schema-4 execution and whole-transaction guarded rollback. |
+| `tools/install.rs`, `tools/install/` | One exact mise install, independent source-bound approvals, fixed output-discarding runner, durable private attempt records and fresh-query closure. No activation, rollback, ownership or readiness claim; separate from file journals. |
 | `tools/declaration.rs`, `tool_journal.rs` | Add-only desired-tool metadata, focused manifest edits, opaque approvals, manifest-only schema-5 transactions and guarded rollback. |
 | `recovery.rs` | Read-only schema-1/2/4 inverse-path previews, opaque tamper-checked approvals bound to the journal head, fresh guard checks and rollback dispatch. |
 | `error.rs` | Shared errors; callers decide presentation and exit status. |

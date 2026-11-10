@@ -277,7 +277,7 @@ fn about_reports_build_version_and_returns_to_prior_focus_and_details() {
     app.shell.overlay = Some(Overlay::About);
     let text = render(&app, 120, 45);
     assert!(text.contains(env!("CARGO_PKG_VERSION")));
-    assert!(text.contains("Use external tools for"));
+    assert!(text.contains("Other package installations"));
     key(&mut app, KeyCode::Esc);
     assert!(app.tab == Tab::Recovery);
     assert_eq!(app.details_scroll, 8);

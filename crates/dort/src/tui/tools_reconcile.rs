@@ -9,7 +9,10 @@ use ratatui::{
     text::Line,
     widgets::Paragraph,
 };
-use std::{cell::Cell, collections::BTreeMap};
+use std::{
+    cell::Cell,
+    collections::{BTreeMap, BTreeSet},
+};
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Inputs,
@@ -18,6 +21,8 @@ pub enum Mode {
 }
 pub enum Outcome {
     Back,
+    Install(String),
+    FreshInventory,
     Load(reconciliation::Request),
     Calculate {
         prepared: Box<Prepared>,
@@ -29,6 +34,7 @@ pub struct State {
     pub focus: usize,
     pub mode: Mode,
     pub bindings: BTreeMap<String, String>,
+    pub stale_for_install: BTreeSet<String>,
     pub result: Option<reconciliation::Report>,
     pub failure: Option<String>,
     pub selected: usize,
@@ -46,6 +52,7 @@ impl Default for State {
             focus: 0,
             mode: Mode::Inputs,
             bindings: BTreeMap::new(),
+            stale_for_install: BTreeSet::new(),
             result: None,
             failure: None,
             selected: 0,
@@ -59,6 +66,20 @@ impl Default for State {
     }
 }
 impl State {
+    fn may_install(&self, row: &dort_core::tools::planning::Row) -> bool {
+        crate::services::installation::eligible(row)
+            && self
+                .result
+                .as_ref()
+                .and_then(|r| r.bindings.get(&row.id))
+                .is_some_and(|id| !self.stale_for_install.contains(id))
+    }
+    fn needs_inventory(&self) -> bool {
+        self.result
+            .as_ref()
+            .and_then(|r| r.plan.rows.get(self.selected))
+            .is_some_and(|r| crate::services::installation::eligible(r) && !self.may_install(r))
+    }
     pub fn text_entry(&self) -> bool {
         self.mode != Mode::Results
     }
@@ -225,6 +246,19 @@ impl State {
                 self.mode = Mode::Inputs;
                 self.focus = 3;
             }
+            KeyCode::Char('c') if !self.details && self.needs_inventory() => {
+                return Some(Outcome::FreshInventory);
+            }
+            KeyCode::Char('i') if !self.details => {
+                if let Some(row) = self
+                    .result
+                    .as_ref()
+                    .and_then(|r| r.plan.rows.get(self.selected))
+                    && self.may_install(row)
+                {
+                    return Some(Outcome::Install(row.id.clone()));
+                }
+            }
             KeyCode::Char('d') | KeyCode::Enter if count > 0 => {
                 self.details = !self.details;
                 self.scroll = 0;
@@ -314,7 +348,18 @@ impl State {
             ),
             ui::heading(),
         );
-        let capacity = usize::from(area.height.saturating_sub(3)).max(1);
+        let eligible = report
+            .plan
+            .rows
+            .get(self.selected)
+            .is_some_and(|r| self.may_install(r));
+        let needs_inventory = self.needs_inventory();
+        let capacity = usize::from(area.height.saturating_sub(if eligible || needs_inventory {
+            4
+        } else {
+            3
+        }))
+        .max(1);
         self.capacity.set(capacity);
         let offset = self.selected.saturating_sub(capacity - 1);
         let mut lines = vec![Line::styled(
@@ -356,6 +401,26 @@ impl State {
                 },
             ));
         }
+        if needs_inventory {
+            let button = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
+            frame.render_widget(
+                Paragraph::new(Line::from(ui::button("Collect fresh inventory", "c", true))),
+                button,
+            );
+            hits.click(button, Target::ToolInstallCollect);
+        }
+        if eligible {
+            let button = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
+            frame.render_widget(
+                Paragraph::new(Line::from(ui::button(
+                    "Review exact mise install",
+                    "i",
+                    true,
+                ))),
+                button,
+            );
+            hits.click(button, Target::ToolInstallSelected);
+        }
         if report.plan.rows.is_empty() {
             lines.push(Line::raw(
                 "No selected tools declared. No provider was refreshed.",
@@ -367,7 +432,8 @@ impl State {
                 area.x,
                 area.y + 2,
                 area.width,
-                area.height.saturating_sub(2),
+                area.height
+                    .saturating_sub(if eligible || needs_inventory { 3 } else { 2 }),
             ),
         );
     }

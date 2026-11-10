@@ -69,7 +69,7 @@ fn entry(action: Action, primary: Option<usize>) -> Entry {
         }
         GitPatch => Effect::Disclosure,
         Discover | Refresh | CheckCurrent | Diagnostics | GitStatus | GitUnstaged | GitStaged
-        | GitRefresh => Effect::Read,
+        | GitRefresh | ToolAttempts => Effect::Read,
         _ => Effect::View,
     };
     Entry {

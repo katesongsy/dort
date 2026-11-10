@@ -4,7 +4,7 @@
 
 ## Installation
 
-Supported hosts are **macOS or Ubuntu**, on Intel/x86_64 or ARM64. Other Linux distributions are not currently supported. Local init/attach and Git inspection additionally need an installed trusted Git executable in an absolute PATH directory. Dort never installs Git.
+Supported hosts are **macOS or Ubuntu**, on Intel/x86_64 or ARM64. Other Linux distributions are not currently supported. Local init/attach and Git inspection additionally need an installed trusted Git executable in an absolute PATH directory. Initialization and Git inspection do not install Git for you.
 
 ### Homebrew
 
@@ -156,7 +156,7 @@ Exit with `q` outside text entry or Ctrl-C. The demo remains for inspection; rem
 
 Launch `dort`, then Actions → **Choose repository (session only)** (`p`). Select a known root or enter an exact physical directory containing `dort.toml`; selection does not register it or save configuration. To enable writes, use **Create/attach** with that exact existing non-bare Git working-tree root and approve its attachment preview. Arbitrary empty directories are refused. Relative form paths resolve from Dort's launch directory; no upward repository search or clone operation occurs.
 
-**Check standalone manifest** (`v`) works without a selected repository, registration or Git. Enter an exact manifest path, then activate Check. A successful check validates declarations, not live files or installed tools. Templates/secrets/tool installation are reported as unsupported. Separate [Tools inspection](commands.md#provider-inspection) reports provider claims only after explicit approval; it does not verify declared binaries or install anything.
+**Check standalone manifest** (`v`) works without a selected repository, registration or Git. Enter an exact manifest path, then activate Check. A successful check validates declarations, not live files or installed tools. Checks do not deploy templates/secrets or inspect/install tools; use the separate Tools workflows for inventories and supported exact mise installs. Separate [Tools inspection](commands.md#provider-inspection) reports provider claims only after explicit approval; it does not verify declared binaries or install anything.
 
 ## Optional CLI and automation
 

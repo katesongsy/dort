@@ -521,6 +521,74 @@ def tools_reconciliation_workflows(binary, base, env):
     print('PASS CLI reconciliation separately confirms each fixed inspection scope')
 
 
+def tool_install_workflows(binary, base, env):
+    home, repo, bin_dir, lookup = (base / name for name in ('install-home', 'install-repo', 'install-bin', 'install-lookup'))
+    for directory in (home, repo, bin_dir, lookup):
+        directory.mkdir(mode=0o700)
+    (repo / '.git').mkdir()
+    (repo / 'dort.toml').write_text("schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='mise',package='demo',version='1.2.3'}\nubuntu={provider='mise',package='demo',version='1.2.3'}\n")
+    git = bin_dir / 'git'
+    git.write_text('#!/bin/sh\nfor arg do\ncase "$arg" in\nconfig) exit 1;;\nrev-parse) pwd -P; exit 0;;\nstatus) printf "# branch.head main\\000"; exit 0;;\nesac\ndone\nexit 94\n')
+    git.chmod(0o700)
+    mise = bin_dir / 'mise'
+    mise.write_text('#!/bin/sh\nif [ "$1" = ls ]; then\nprintf Q >> "$HOME/calls"\nif [ -f "$HOME/installed" ]; then printf \'{"demo":[{"version":"1.2.3","installed":true}]}\'; else printf "{}"; fi\nexit 0\nfi\nprintf I >> "$HOME/calls"\nprintf started > "$HOME/started"\nprintf PRIVATE_INSTALL_OUTPUT; printf PRIVATE_INSTALL_ERROR >&2\nn=0\nwhile [ ! -f "$HOME/release" ] && [ "$n" -lt 2000000 ]; do n=$((n+1)); done\nprintf installed > "$HOME/installed"\n')
+    mise.chmod(0o700)
+    scoped = dict(env, HOME=str(home), PATH=str(bin_dir), XDG_CONFIG_HOME=str(home / '.config'),
+                  XDG_STATE_HOME=str(home / '.local/state'))
+    subprocess.run([binary, '--json', '--yes', 'init', str(repo)], env=scoped,
+                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    with Session([binary, 'tui'], scoped) as session:
+        session.wait(b'loaded.')
+        session.send(b'\x1b[D')
+        session.wait(b'[x] mise')
+        assert not (home / 'calls').exists(), 'Defaults executed mise'
+        session.send(b'\r')
+        session.wait(b'no installed packages reported')
+        session.send(b'p' + str(repo / 'dort.toml').encode() + b'\t' + str(lookup).encode() + b'\t\t\r')
+        session.wait(b'Space chooses')
+        session.send(b' \t\r')
+        session.wait(b'Review exact mise install')
+        session.send(b'i')
+        session.wait(b'Install exact version')
+        assert (home / 'calls').read_text() == 'Q', 'Review executed a new query or install'
+        session.resize((14, 48))
+        session.wait(b'Install exact version')
+        session.send(b'd')
+        session.wait(b'Tools installation details')
+        session.send(b'd')
+        session.click_label('[Install exact version')
+        session.wait(b'Installing exact version')
+        session.send(b'q')
+        session.wait(b'waiting for worker')
+        (home / 'release').write_text('release fixture')
+        session.finish()
+        assert b'PRIVATE_INSTALL' not in session.data, 'Raw provider output reached terminal'
+    assert (home / 'calls').read_text() == 'QQIQ'
+    assert (home / 'installed').exists(), 'Quit did not join the approved install'
+    print('PASS exact mise review, compact scope, one-click install, typed progress and joined quit')
+    attempts = home / '.local/state/dort/tools-attempts'
+    damaged = attempts / ('0' * 64)
+    damaged.mkdir(mode=0o700)
+    before = (home / 'calls').read_text()
+    with Session([binary, 'tui'], scoped, (14, 48)) as session:
+        session.wait(b'loaded.')
+        session.navigate('Tools', 'Installation attempts [i]')
+        session.wait(b'UNRESOLVED')
+        session.send(b'c')
+        session.wait(b'Trusted mise executable')
+        session.send(str(mise).encode() + b'\t' + str(bin_dir).encode() + b'\t\r')
+        session.wait(b'Inspect and close attempt')
+        assert (home / 'calls').read_text() == before, 'Closure review executed mise'
+        session.send(b'\r')
+        session.wait(b'Explicitly closed')
+        session.send(b'\x1b')
+        session.wait(b'Tools /')
+        session.send(b'q')
+        session.finish()
+    assert (home / 'calls').read_text() == before + 'Q'
+    print('PASS compact all-repository attempt inspection, missing-scope draft and one-activation closure')
+
+
 def run():
     screen = Screen((2, 20))
     screen.feed(b"Git executes\x1b[")
@@ -548,6 +616,7 @@ def run():
             print("PASS entry/exit", args, size)
 
         tools_workflows(binary, base, env)
+        tool_install_workflows(binary, base, env)
         tools_reconciliation_workflows(binary, base, env)
         tool_declaration_workflows(binary, base, env)
 

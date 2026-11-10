@@ -96,7 +96,30 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
             ("Esc", "Back"),
         ]);
     } else if app.tab == Tab::Tools {
-        if app.tools_view.recon_open {
+        if app.tools_view.install_open {
+            use super::tools_install::Mode;
+            if app.tools_view.installation.details {
+                keys.extend([("d/Esc", "Back"), ("PgDn", "Page")]);
+            } else {
+                match app.tools_view.installation.mode {
+                    Mode::Review | Mode::CloseReview => {
+                        keys.extend([("Enter", "Confirm once"), ("d", "Scope"), ("Esc", "Back")])
+                    }
+                    Mode::CloseInputs => keys.extend([
+                        ("Tab", "Field"),
+                        ("Enter", "Next / Review"),
+                        ("Esc", "Back"),
+                    ]),
+                    Mode::Attempts => keys.extend([
+                        ("Enter", "Details"),
+                        ("c", "Close review"),
+                        ("r", "Refresh"),
+                        ("Esc", "Back"),
+                    ]),
+                    _ => keys.extend([("i", "Attempts"), ("d", "Outcome"), ("Esc", "Back")]),
+                }
+            }
+        } else if app.tools_view.recon_open {
             match app.tools_view.reconciliation.mode {
                 super::tools_reconcile::Mode::Inputs => {
                     keys.extend([("Tab", "Field"), ("Enter", "Next / Load"), ("Esc", "Back")])

@@ -2,7 +2,7 @@
 
 [User guide](README.md) · [Getting started](getting-started.md)
 
-Checks, discovery, file inventory, plans, status, history and Git inspection are read-only and never run providers. Separate Tools inspection requires approval: provider configuration/plugins may execute code and caches/logs may change. Explicit mutation commands are experimental and require approval. No command installs tools, clones/syncs, stages, commits or pushes. Use `dort --help` and `dort <command> --help` for syntax.
+Checks, discovery, file inventory, plans, status, history and Git inspection are read-only and never run providers. Separate Tools inspection requires approval: provider configuration/plugins may execute code and caches/logs may change. Explicit mutation commands are experimental and require approval. Only the explicit exact mise workflow below installs a package. No command activates/upgrades tools, clones/syncs, stages, commits or pushes. Use `dort --help` and `dort <command> --help` for syntax.
 
 ## Global options
 
@@ -177,7 +177,7 @@ Remove `--dry-run` to execute after terminal confirmation (`inspect`), or use ex
 
 ## Snapshot reconciliation
 
-Tools can retain **multiple independently approved snapshots** for the session, then reconcile declarations against your explicit choices. Snapshots are provider claims, not ownership, trust or proof that a binary is ready. They are not saved across sessions. Dort issues no package install, activation, upgrade, adoption or removal operation; provider configuration/code risks still apply.
+Tools can retain **multiple independently approved snapshots** for the session, then reconcile declarations against your explicit choices. Snapshots are provider claims, not ownership, trust or proof that a binary is ready. They are not saved across sessions. Reconciliation alone performs no package operation. A separate opt-in exact mise install review is available for eligible missing rows; provider configuration/code risks still apply.
 
 ### Interactive workflow
 
@@ -193,9 +193,9 @@ A package **no-op is not tool readiness**; binaries may still be missing/unverif
 
 ### Install-command descriptions — preview only
 
-For an eligible **Review only** missing-package row, full TUI details and CLI `reconciliation.plan.rows[].install_preview` show proposed executable/argv, cleared-environment controls, version selection and side-effect warnings. **Dort cannot run these descriptions.** There is no install button/command, and `--yes` approves only the explicitly requested inspection queries—not installation. No native install or install `--dry-run` operation is invoked to construct this metadata.
+For an eligible **Review only** missing-package row, full TUI details and CLI `reconciliation.plan.rows[].install_preview` show proposed executable/argv, cleared-environment controls, version selection and side-effect warnings. **Dort cannot run these descriptions.** The separate exact mise workflow below reconstructs its own live preview; it never executes these descriptions. Regular reconciliation with `--yes` approves only inspection queries, not installation. No native install or install `--dry-run` operation is invoked to construct this metadata.
 
-Satisfied, ambiguous and blocked tools have no install command. Apt stays deferred: the selected dpkg-query path does not authorize inventing apt-get/sudo. Version defaults, prefixes and latest requests are unresolved native selections, not a reproducibility or availability guarantee. A bare mise default can select multiple globally configured versions; the description does not request activation, and Dort executes no installation. Homebrew controls do not guarantee that dependencies remain unchanged or unupgraded. npm descriptions use the selected Node/CLI/prefix and disable lifecycle scripts, which can leave packages unusable; provider code/configuration risks still apply. All native effects can include downloads, shared links/caches and partial failures without rollback.
+Satisfied, ambiguous and blocked tools have no install command. Apt stays deferred: the selected dpkg-query path does not authorize inventing apt-get/sudo. Version defaults, prefixes and latest requests are unresolved native selections, not a reproducibility or availability guarantee. A bare mise default can select multiple globally configured versions; the description does not request activation and executes nothing. Homebrew controls do not guarantee that dependencies remain unchanged or unupgraded. npm descriptions use the selected Node/CLI/prefix and disable lifecycle scripts, which can leave packages unusable; provider code/configuration risks still apply. All native effects can include downloads, shared links/caches and partial failures without rollback.
 
 These descriptions require a computed eligible row; reconciliation `--dry-run` still previews only queries/analysis scope and does not invent missing-package facts. Descriptions exceeding metadata limits are explicitly deferred rather than partially emitted. They are not execution approvals, tested provider capabilities, verified tool readiness or a supported manual-install handoff.
 
@@ -218,6 +218,50 @@ The manifest must declare the bound tools and npm runtime ID. Add `--profile NAM
 Remove `--dry-run` to review and confirm `y/N` **separately for each identified scope**, or use explicit `--yes --json` for automation. `--yes` does not bypass validation. If you decline a later scope or analysis fails, earlier approved inspections may already have executed configuration/plugins or changed caches/logs; nothing is automatically undone. Metadata reconciliation itself never executes/refetches a provider, writes state or grants installation authority.
 
 Final JSON includes `snapshots` and `reconciliation` (scope, bindings, binary observations and package plan). Exit 1 means an unavailable requested provider/binary observation, 4 means a blocked package plan, 2 means invalid input/approval/changed declarations, and 0 means a completed package analysis—not verified tool readiness. Reports and snapshots are not reusable execution approvals or persisted installation receipts.
+
+## Exact mise installation
+
+Dort can install **one observed missing exact mise version** for a registered repository. The manifest must specify an exact version such as `1.2.3`, with clear prerequisites and no existing/unattributed binary in the separate lookup scope. Default/latest/prefix policies, other providers, conflicting or unknown inventories, unmanaged binaries and blocked prerequisites are not installable. No activation, force/reinstall, upgrade, uninstall or rollback is provided.
+
+**TUI:**
+
+1. Select the registered repository and profiles through Session. Use Tools → Inspect installed tools to collect a mise inventory.
+2. Press `p`, load that repository's `dort.toml`, existing physical tool-search directories and matching profile additions, then explicitly bind the target and any satisfied prerequisites to the chosen mise snapshot. Reconcile.
+3. On an eligible missing exact mise row, press `i` or click **Review exact mise install**. This review runs no queries. `d` shows full scope/arguments; return with `d` or Esc.
+4. Press Enter or click **Install exact version** once. Dort freshly inspects the scope under the writer lock, installs only if still eligible, and inspects afterward. A newly satisfied exact package becomes a no-op. Results distinguish process outcome, package claim and binary metadata; inactive mise versions are normal, not readiness verification.
+
+The installer has a **10-minute deadline**. Provider/backend/package code and downloads can change data and caches; timeout or failure may leave partial effects. Quit/Ctrl-C waits for the worker and terminal restoration. Installer output is discarded, not shown or logged. Historical snapshots are not refreshed: collect a fresh inventory and explicitly bind it before another install review. Recomputing with old snapshots remains read-only; **Collect fresh inventory** (`c` in that comparison) starts a new default review without running commands.
+
+**CLI:** add `--install-tool TOOL` to explicit collection/reconciliation. A registered manifest is required; persistent profiles are included with your explicit additions. Each collection query is approved separately, followed by one installation review/confirmation. `--yes` explicitly approves the selected workflow in automation; JSON/nonterminal execution requires it. Without `--install-tool`, reconciliation remains metadata-only.
+
+```sh
+# Preview requested scope only: no queries, installs, state, locks or prompts.
+# Replace paths and IDs with your registered manifest and trusted physical paths.
+dort --dry-run tools reconcile --manifest /home/alex/dotfiles/dort.toml \
+  --tool-search-dir /home/alex/bin \
+  --scope '{"id":"mise-global","provider":"mise","executable":"/usr/local/bin/mise","search_dirs":["/usr/bin"]}' \
+  --bind demo=mise-global --install-tool demo
+```
+
+Omit `--dry-run` for interactive collection and review. A dry-run cannot invent an installed inventory or prove eligibility; it previews the request, not an executable install approval. Successful exact package observation (or a newly satisfied no-op) exits 0; failed/unverified outcomes exit 1, invalid/stale/refused requests exit 2, and lock contention exits 3. A successful exit does not establish binary readiness. Error exits can still follow partial effects or failed outcome persistence; inspect installation attempts before retrying.
+
+### Installation attempts and explicit closure
+
+Tools → **Installation attempts** (`i` outside comparison) lists private, all-repository attempt metadata. Enter/`d` shows full IDs, scope and observed outcomes. An unresolved attempt blocks later Tools installs, not unrelated file workflows. Nothing is replayed, cleaned up or rolled back at startup.
+
+Select an unresolved row and press `c` or click **Review closure**. The preview uses the original trusted provider scope; missing/damaged scope opens retained executable and child-PATH fields. Review is process-free. One Enter/click approves a **fresh mise inventory query and closure of unchanged metadata only**. An unavailable query cannot close the attempt. Closure is not package repair, retry, readiness verification or proof of a successful install. Changed records require a fresh review.
+
+```sh
+dort tools attempts
+dort tools attempts --id ATTEMPT_ID
+dort --dry-run tools close-attempt ATTEMPT_ID
+# Interactive fresh query and metadata closure:
+dort tools close-attempt ATTEMPT_ID
+# For missing/damaged original scope, also supply trusted paths:
+dort tools close-attempt ATTEMPT_ID --executable /usr/local/bin/mise --search-dir /usr/bin
+```
+
+No literal confirmation phrase or ID must be retyped at confirmation. If attempt storage is unsafe or exhausted, Dort refuses rather than deleting records or silently treating unavailable metadata as empty.
 
 ## Initialization and approval
 

@@ -22,11 +22,21 @@ impl Worker {
         let handle = thread::Builder::new()
             .name("dort-tui-service".into())
             .spawn(move || {
-                actions::perform_scoped(task, &host, repository, &requested, |event| {
-                    // Dropped/coalesced display updates never interrupt an approved write.
-                    let _ = sender.try_send(super::task_surfaces::Progress::from_event(event));
-                    Ok(())
-                })
+                actions::perform_scoped_with_install_progress(
+                    task,
+                    &host,
+                    repository,
+                    &requested,
+                    |event| {
+                        // Dropped/coalesced display updates never interrupt approved work.
+                        let _ = sender.try_send(super::task_surfaces::Progress::from_event(event));
+                        Ok(())
+                    },
+                    |event| {
+                        let _ =
+                            sender.try_send(super::task_surfaces::Progress::from_install(event));
+                    },
+                )
             })?;
         Ok(Self {
             handle: Some(handle),
@@ -65,6 +75,7 @@ mod tests {
             handle: Some(thread::spawn(move || {
                 progress_sender
                     .send(super::super::task_surfaces::Progress {
+                        installation: false,
                         transaction_id: "test-transaction".into(),
                         boundary: "Durable checkpoint",
                         sequence: 1,

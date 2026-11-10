@@ -473,6 +473,11 @@ impl Task {
     }
 }
 pub enum Task {
+    ToolInstallPrepare(Box<crate::services::installation::Request>),
+    ToolInstall(Box<dort_core::tools::install::Approval>),
+    ToolAttempts,
+    ToolClosePrepare(dort_core::tools::install::CloseRequest),
+    ToolClose(Box<dort_core::tools::install::CloseApproval>),
     ToolDeclaration(crate::services::declaration::Request),
     IgnoredPaths,
     Ignore(PathBuf, bool),
@@ -514,6 +519,11 @@ pub enum Task {
     Execute(Approved),
 }
 pub enum Output {
+    ToolInstallPreview(Box<dort_core::tools::install::Preview>),
+    ToolInstalled(std::result::Result<dort_core::tools::install::Report, String>),
+    ToolAttempts(std::result::Result<Vec<dort_core::tools::install::Attempt>, String>),
+    ToolClosePreview(Box<dort_core::tools::install::ClosePreview>),
+    ToolClosed(std::result::Result<dort_core::tools::install::Attempt, String>),
     IgnoredPaths(Vec<PathBuf>),
     DiscoveryTree(super::discovery_tree::Report),
     DiscoverContent(super::discover_content::Report),
@@ -554,6 +564,7 @@ pub fn perform(
 ) -> Result<Output> {
     perform_scoped(task, host, repository, &[], observer)
 }
+#[cfg(test)]
 pub fn perform_scoped(
     task: Task,
     host: &HostContext,
@@ -561,7 +572,39 @@ pub fn perform_scoped(
     requested: &[String],
     observer: impl FnMut(&Event) -> Result<()>,
 ) -> Result<Output> {
+    perform_scoped_with_install_progress(task, host, repository, requested, observer, |_| {})
+}
+pub fn perform_scoped_with_install_progress(
+    task: Task,
+    host: &HostContext,
+    repository: Option<PathBuf>,
+    requested: &[String],
+    observer: impl FnMut(&Event) -> Result<()>,
+    installation_observer: impl FnMut(dort_core::tools::install::Event),
+) -> Result<Output> {
     match task {
+        Task::ToolInstallPrepare(request) => request
+            .prepare(host)
+            .map(|p| Output::ToolInstallPreview(Box::new(p))),
+        Task::ToolInstall(approval) => Ok(Output::ToolInstalled(
+            (|| {
+                let lock = dort_core::state::WriterLock::acquire(host)?;
+                dort_core::tools::install::execute(host, &lock, *approval, installation_observer)
+            })()
+            .map_err(|e| diagnostic(&e)),
+        )),
+        Task::ToolAttempts => Ok(Output::ToolAttempts(
+            dort_core::tools::install::diagnose(host).map_err(|e| diagnostic(&e)),
+        )),
+        Task::ToolClosePrepare(request) => dort_core::tools::install::prepare_close(host, request)
+            .map(|p| Output::ToolClosePreview(Box::new(p))),
+        Task::ToolClose(approval) => Ok(Output::ToolClosed(
+            (|| {
+                let lock = dort_core::state::WriterLock::acquire(host)?;
+                dort_core::tools::install::close(host, &lock, *approval)
+            })()
+            .map_err(|e| diagnostic(&e)),
+        )),
         Task::ToolDeclaration(request) => {
             let repository = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
             request

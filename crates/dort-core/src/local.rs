@@ -63,6 +63,28 @@ impl LocalConfig {
         Ok(config)
     }
 
+    /// Bounded, stable private configuration read for source-bound Tools writes.
+    /// Only the fingerprint/hash escapes; variable values remain private.
+    pub(crate) fn load_bound(host: &HostContext) -> Result<(Self, crate::observation::Entry)> {
+        let directory = PrivateDir::open(&host.config_dir, false)?
+            .ok_or_else(|| Error::Invalid("registered local configuration required".into()))?;
+        let before = crate::observation::inspect(&host.local_config_path(), false)?;
+        let bytes = crate::journal::read_bytes(&directory, "local.toml")?;
+        let text = std::str::from_utf8(&bytes)
+            .map_err(|_| Error::Invalid("invalid local configuration (values redacted)".into()))?;
+        let config: Self = toml::from_str(text)
+            .map_err(|_| Error::Invalid("invalid local configuration (values redacted)".into()))?;
+        config.validate()?;
+        let mut after = crate::observation::inspect(&host.local_config_path(), false)?;
+        if before != after {
+            return Err(Error::Invalid(
+                "local configuration changed during read".into(),
+            ));
+        }
+        after.sha256 = Some(crate::journal::digest(&bytes));
+        Ok((config, after))
+    }
+
     fn validate(&self) -> Result<()> {
         if self.schema != 1 {
             return Err(Error::Invalid(

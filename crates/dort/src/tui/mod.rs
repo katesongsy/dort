@@ -82,6 +82,10 @@ mod tool_declaration;
 mod tool_declaration_tests;
 mod tools;
 mod tools_defaults;
+mod tools_install;
+#[cfg(test)]
+#[path = "tests/tools_install.rs"]
+mod tools_install_tests;
 mod tools_reconcile;
 #[cfg(test)]
 #[path = "tests/tools_reconcile.rs"]
@@ -269,7 +273,10 @@ fn dispatch(
 ) -> Result<()> {
     if worker.is_some() {
         // Wait for the owned passive read; never detach or launch a second worker.
-        app.start(matches!(task, Task::Execute(_)));
+        app.start(matches!(
+            task,
+            Task::Execute(_) | Task::ToolInstall(_) | Task::ToolClose(_)
+        ));
         *queued = Some(task);
         Ok(())
     } else {
@@ -291,7 +298,10 @@ fn launch(
         return Ok(());
     }
     app.retry = task.retry_intent();
-    let writing = matches!(task, Task::Execute(_));
+    let writing = matches!(
+        task,
+        Task::Execute(_) | Task::ToolInstall(_) | Task::ToolClose(_)
+    );
     let completed = matches!(task, Task::Refresh) && app.status.starts_with("Operation completed.");
     let activity = task_surfaces::Activity::for_task(&task, app);
     if !matches!(task, Task::Refresh) {
