@@ -12,6 +12,7 @@ fn fixture(body: &str) -> (tempfile::TempDir, Scope) {
     fs::write(&executable, format!("#!/bin/sh\n{body}\n")).unwrap();
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
     let scope = Scope {
+        npm: None,
         platform: crate::platform::Platform::Ubuntu,
         architecture: crate::platform::Architecture::X86_64,
         repository: home.clone(),

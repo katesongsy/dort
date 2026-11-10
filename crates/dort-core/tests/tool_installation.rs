@@ -123,6 +123,7 @@ impl Fixture {
             &self.home.host,
             install::CloseRequest {
                 id: id.into(),
+                npm_binding: None,
                 executable: None,
                 search_dirs: vec![],
             },
@@ -200,6 +201,32 @@ fn process_free_prepare_and_fixed_install_have_private_durable_metadata_only() {
             assert!(!text.contains(private));
         }
     }
+}
+#[test]
+fn schema_one_raw_payload_checksums_and_head_bound_closures_are_not_migrated() {
+    let f = Fixture::new();
+    let id = f.incomplete();
+    let path = f.attempt_dir(&id).join("intent.json");
+    let mut envelope: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_str(envelope["payload"].as_str().unwrap()).unwrap();
+    assert_eq!(payload["schema"], 1);
+    assert!(payload["scope"].get("npm").is_none() && payload["sources"].get("npm").is_none());
+    let raw = format!(" \n{}\n ", serde_json::to_string_pretty(&payload).unwrap());
+    use sha2::{Digest, Sha256};
+    envelope["sha256"] = format!("{:x}", Sha256::digest(raw.as_bytes())).into();
+    envelope["payload"] = raw.clone().into();
+    let bytes = serde_json::to_vec(&envelope).unwrap();
+    fs::write(&path, &bytes).unwrap();
+    assert!(install::diagnose(&f.home.host).unwrap()[0].scope.is_some());
+    assert!(f.close(&id).explicitly_closed);
+    assert_eq!(fs::read(&path).unwrap(), bytes);
+    // Same typed JSON, different raw payload, stale checksum: reject and invalidate closure.
+    envelope["payload"] = format!("{raw}\n").into();
+    fs::write(&path, serde_json::to_vec(&envelope).unwrap()).unwrap();
+    let a = install::diagnose(&f.home.host).unwrap();
+    assert!(a[0].unresolved && a[0].scope.is_none());
 }
 #[test]
 fn fresh_satisfaction_is_noop_and_fresh_conflict_or_unmanaged_binary_refuses() {
@@ -307,6 +334,7 @@ fn unresolved_attempt_blocks_only_tools_installs_and_closure_is_guarded_and_fres
         &f.home.host,
         install::CloseRequest {
             id: id.clone(),
+            npm_binding: None,
             executable: None,
             search_dirs: vec![],
         },
@@ -322,6 +350,7 @@ fn unresolved_attempt_blocks_only_tools_installs_and_closure_is_guarded_and_fres
             &f.home.host,
             install::CloseRequest {
                 id: id.clone(),
+                npm_binding: None,
                 executable: None,
                 search_dirs: vec![]
             }
@@ -353,6 +382,7 @@ fn damaged_intent_needs_explicit_scope_and_changed_head_or_failed_query_cannot_c
             &f.home.host,
             install::CloseRequest {
                 id: id.clone(),
+                npm_binding: None,
                 executable: None,
                 search_dirs: vec![]
             }
@@ -361,6 +391,7 @@ fn damaged_intent_needs_explicit_scope_and_changed_head_or_failed_query_cannot_c
     );
     let request = install::CloseRequest {
         id: id.clone(),
+        npm_binding: None,
         executable: Some(f.executable.clone()),
         search_dirs: f.request().search_dirs,
     };

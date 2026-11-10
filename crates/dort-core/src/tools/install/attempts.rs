@@ -54,6 +54,33 @@ pub(super) struct ProbeScope {
     pub executable: PathBuf,
     pub home: PathBuf,
     pub search_dirs: Vec<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub npm_binding: Option<super::inspection::NpmBinding>,
+}
+impl ProbeScope {
+    pub(super) fn preview(&self) -> Result<super::inspection::Preview> {
+        if let Some(b) = &self.npm_binding {
+            if b.node != self.executable {
+                return Err(invalid("closure Node binding differs"));
+            }
+            super::inspection::Preview::npm_probe(
+                b.clone(),
+                self.home.clone(),
+                self.search_dirs.clone(),
+            )
+        } else {
+            super::inspection::Preview::new(
+                super::inspection::Query::MiseInstalled,
+                self.executable.clone(),
+                self.home.clone(),
+                self.search_dirs.clone(),
+            )
+        }
+        .map_err(|_| invalid("invalid explicit Tools closure scope"))
+    }
+    fn schema(&self) -> u32 {
+        if self.npm_binding.is_some() { 2 } else { 1 }
+    }
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -167,11 +194,21 @@ pub(super) fn valid_scope(s: &Scope) -> bool {
     };
     let absolute = super::inspection::absolute;
     journal::valid_id(&s.repository_id)
-        && [s.tool.as_str(), &s.binary, &s.package]
-            .into_iter()
-            .all(token)
+        && [s.tool.as_str(), &s.binary].into_iter().all(token)
+        && if s.npm.is_some() {
+            valid_npm_package(&s.package)
+        } else {
+            token(&s.package)
+        }
         && matches!(
-            super::VersionPolicy::parse(crate::model::Provider::Mise, Some(&s.version)),
+            super::VersionPolicy::parse(
+                if s.npm.is_some() {
+                    crate::model::Provider::Npm
+                } else {
+                    crate::model::Provider::Mise
+                },
+                Some(&s.version)
+            ),
             Ok(super::VersionPolicy::Exact { .. })
         )
         && s.version.len() <= 256
@@ -189,10 +226,26 @@ pub(super) fn valid_scope(s: &Scope) -> bool {
         && !s.tool_search_dirs.is_empty()
         && s.tool_search_dirs.len() <= super::binaries::MAX_DIRECTORIES
         && s.tool_search_dirs.iter().all(|p| absolute(p))
+        && (s.npm.is_none() || super::npm::valid(s))
+}
+fn valid_npm_package(s: &str) -> bool {
+    let name = |p: &str| {
+        !p.is_empty()
+            && p.len() <= 214
+            && p.as_bytes()[0].is_ascii_alphanumeric()
+            && p.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(&b))
+    };
+    if let Some(s) = s.strip_prefix('@') {
+        s.split_once('/').is_some_and(|(a, b)| name(a) && name(b))
+    } else {
+        name(s)
+    }
 }
 fn intent(dir: &PrivateDir, id: &str) -> Result<Intent> {
     let i: Intent = read(dir, "intent.json")?;
-    if i.schema != 1
+    if i.schema != if i.scope.npm.is_some() { 2 } else { 1 }
+        || i.scope.npm.is_some() != i.sources.npm.is_some()
         || i.id != id
         || !valid_scope(&i.scope)
         || i.sources.manifest.path != i.scope.repository.join("dort.toml")
@@ -278,11 +331,10 @@ fn scan(dir: &PrivateDir, id: &str) -> Result<Attempt> {
     if files.iter().any(|n| n == "outcome.json") {
         let completed = read::<Completed>(dir, "outcome.json").ok();
         if let (Some(i), Some(c)) = (&i, completed)
-            && c.schema == 1
+            && c.schema == i.schema
             && c.id == id
             && c.intent_sha256 == journal::digest(&read_bytes(dir, "intent.json")?)
         {
-            let _ = i;
             a.outcome = Some(c.outcome);
         } else {
             a.problem = Some(Problem::Malformed);
@@ -293,16 +345,10 @@ fn scan(dir: &PrivateDir, id: &str) -> Result<Attempt> {
     }
     if let Some(name) = files.iter().rev().find(|n| closure_index(n).is_some()) {
         if let Ok(c) = read::<Closure>(dir, name)
-            && c.schema == 1
+            && c.schema == c.scope.schema()
             && c.id == id
             && c.head == head(dir, Some(name))?
-            && super::inspection::Preview::new(
-                super::inspection::Query::MiseInstalled,
-                c.scope.executable,
-                c.scope.home,
-                c.scope.search_dirs,
-            )
-            .is_ok()
+            && c.scope.preview().is_ok()
             && c.observed_records <= super::planning::MAX_VERSION_CLAIMS
         {
             a.explicitly_closed = true;
@@ -362,7 +408,7 @@ pub(super) fn begin(
     }
     let id = adoption::transaction_id();
     let bytes = encode(&Intent {
-        schema: 1,
+        schema: if scope.npm.is_some() { 2 } else { 1 },
         id: id.clone(),
         scope,
         sources,
@@ -401,7 +447,7 @@ pub(super) fn finish(
     verify_pending(host, handle)?;
     let dir = directory(host, &handle.id)?;
     let completed = Completed {
-        schema: 1,
+        schema: intent(&dir, &handle.id)?.schema,
         id: handle.id.clone(),
         intent_sha256: journal::digest(&read_bytes(&dir, "intent.json")?),
         outcome,
@@ -428,7 +474,7 @@ pub(super) fn close(
         ));
     }
     let c = Closure {
-        schema: 1,
+        schema: scope.schema(),
         id: id.into(),
         head: expected_head.into(),
         scope,

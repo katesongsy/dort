@@ -14,7 +14,7 @@ Start with the [user guide](user/README.md):
 ## Durable technical references
 
 - [Architecture](../ARCHITECTURE.md): implemented module boundaries, execution, persistence and recovery contracts.
-- [Exact mise installation](tool-installation.md): independent opaque approvals, fixed runner, durable attempt metadata and guarded closure.
+- [Exact mise/npm installation](tool-installation.md): independent opaque approvals, explicit runtime/prefix validation, fixed runner, compatible durable attempt metadata and guarded closure.
 - [Tool declarations](tool-declarations.md): focused manifest-only edits, single-use approval and schema-5 recovery contracts.
 - [Provider inspection](tools-inspection.md): shared CLI/TUI approval, process, metadata and runtime-binding boundaries.
 - [Snapshot reconciliation](binary-reconciliation.md): explicit multi-snapshot binding, no-follow candidate metadata and frontend scope/freshness boundaries.

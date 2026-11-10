@@ -67,12 +67,37 @@ impl Default for State {
 }
 impl State {
     fn may_install(&self, row: &dort_core::tools::planning::Row) -> bool {
-        crate::services::installation::eligible(row)
-            && self
-                .result
-                .as_ref()
-                .and_then(|r| r.bindings.get(&row.id))
+        if !crate::services::installation::eligible(row) {
+            return false;
+        }
+        let Some(result) = &self.result else {
+            return false;
+        };
+        let npm = row
+            .declaration
+            .as_ref()
+            .is_some_and(|d| d.provider == dort_core::model::Provider::Npm);
+        let mut pending = vec![row.id.clone()];
+        let mut checked = BTreeSet::new();
+        while let Some(tool) = pending.pop() {
+            if !checked.insert(tool.clone()) {
+                continue;
+            }
+            if !result
+                .bindings
+                .get(&tool)
                 .is_some_and(|id| !self.stale_for_install.contains(id))
+            {
+                return false;
+            }
+            if npm {
+                let Some(row) = result.plan.rows.iter().find(|r| r.id == tool) else {
+                    return false;
+                };
+                pending.extend(row.dependencies.clone());
+            }
+        }
+        true
     }
     fn needs_inventory(&self) -> bool {
         self.result
@@ -413,7 +438,17 @@ impl State {
             let button = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
             frame.render_widget(
                 Paragraph::new(Line::from(ui::button(
-                    "Review exact mise install",
+                    if report
+                        .plan
+                        .rows
+                        .get(self.selected)
+                        .and_then(|r| r.declaration.as_ref())
+                        .is_some_and(|d| d.provider == dort_core::model::Provider::Npm)
+                    {
+                        "Review exact npm install"
+                    } else {
+                        "Review exact mise install"
+                    },
                     "i",
                     true,
                 ))),

@@ -2,7 +2,7 @@
 
 [User guide](README.md) · [Getting started](getting-started.md)
 
-Checks, discovery, file inventory, plans, status, history and Git inspection are read-only and never run providers. Separate Tools inspection requires approval: provider configuration/plugins may execute code and caches/logs may change. Explicit mutation commands are experimental and require approval. Only the explicit exact mise workflow below installs a package. No command activates/upgrades tools, clones/syncs, stages, commits or pushes. Use `dort --help` and `dort <command> --help` for syntax.
+Checks, discovery, file inventory, plans, status, history and Git inspection are read-only and never run providers. Separate Tools inspection requires approval: provider configuration/plugins may execute code and caches/logs may change. Explicit mutation commands are experimental and require approval. Only the explicit exact mise/npm workflows below install packages. npm's native links may expose commands on PATH. No command configures runtime activation, intentionally upgrades other top-level tools, clones/syncs, stages, commits or pushes. Use `dort --help` and `dort <command> --help` for syntax.
 
 ## Global options
 
@@ -177,7 +177,7 @@ Remove `--dry-run` to execute after terminal confirmation (`inspect`), or use ex
 
 ## Snapshot reconciliation
 
-Tools can retain **multiple independently approved snapshots** for the session, then reconcile declarations against your explicit choices. Snapshots are provider claims, not ownership, trust or proof that a binary is ready. They are not saved across sessions. Reconciliation alone performs no package operation. A separate opt-in exact mise install review is available for eligible missing rows; provider configuration/code risks still apply.
+Tools can retain **multiple independently approved snapshots** for the session, then reconcile declarations against your explicit choices. Snapshots are provider claims, not ownership, trust or proof that a binary is ready. They are not saved across sessions. Reconciliation alone performs no package operation. Separate opt-in exact mise/npm install reviews are available for eligible missing rows; provider configuration/code risks still apply.
 
 ### Interactive workflow
 
@@ -193,7 +193,7 @@ A package **no-op is not tool readiness**; binaries may still be missing/unverif
 
 ### Install-command descriptions — preview only
 
-For an eligible **Review only** missing-package row, full TUI details and CLI `reconciliation.plan.rows[].install_preview` show proposed executable/argv, cleared-environment controls, version selection and side-effect warnings. **Dort cannot run these descriptions.** The separate exact mise workflow below reconstructs its own live preview; it never executes these descriptions. Regular reconciliation with `--yes` approves only inspection queries, not installation. No native install or install `--dry-run` operation is invoked to construct this metadata.
+For an eligible **Review only** missing-package row, full TUI details and CLI `reconciliation.plan.rows[].install_preview` show proposed executable/argv, cleared-environment controls, version selection and side-effect warnings. **Dort cannot run these descriptions.** The separate exact mise/npm workflows below reconstruct their own live previews; they never execute these descriptions. Regular reconciliation with `--yes` approves only inspection queries, not installation. No native install or install `--dry-run` operation is invoked to construct this metadata.
 
 Satisfied, ambiguous and blocked tools have no install command. Apt stays deferred: the selected dpkg-query path does not authorize inventing apt-get/sudo. Version defaults, prefixes and latest requests are unresolved native selections, not a reproducibility or availability guarantee. A bare mise default can select multiple globally configured versions; the description does not request activation and executes nothing. Homebrew controls do not guarantee that dependencies remain unchanged or unupgraded. npm descriptions use the selected Node/CLI/prefix and disable lifecycle scripts, which can leave packages unusable; provider code/configuration risks still apply. All native effects can include downloads, shared links/caches and partial failures without rollback.
 
@@ -221,7 +221,7 @@ Final JSON includes `snapshots` and `reconciliation` (scope, bindings, binary ob
 
 ## Exact mise installation
 
-Dort can install **one observed missing exact mise version** for a registered repository. The manifest must specify an exact version such as `1.2.3`, with clear prerequisites and no existing/unattributed binary in the separate lookup scope. Default/latest/prefix policies, other providers, conflicting or unknown inventories, unmanaged binaries and blocked prerequisites are not installable. No activation, force/reinstall, upgrade, uninstall or rollback is provided.
+Dort can install **one observed missing exact mise version** for a registered repository. The manifest must specify an exact version such as `1.2.3`, with clear prerequisites and no existing/unattributed binary in the separate lookup scope. Default/latest/prefix policies, Homebrew/apt writes, conflicting or unknown inventories, unmanaged binaries and blocked prerequisites are not installable. npm has a separate [exact-package workflow](#exact-npm-installation). No activation, force/reinstall, upgrade, uninstall or rollback is provided.
 
 **TUI:**
 
@@ -245,11 +245,40 @@ dort --dry-run tools reconcile --manifest /home/alex/dotfiles/dort.toml \
 
 Omit `--dry-run` for interactive collection and review. A dry-run cannot invent an installed inventory or prove eligibility; it previews the request, not an executable install approval. Successful exact package observation (or a newly satisfied no-op) exits 0; failed/unverified outcomes exit 1, invalid/stale/refused requests exit 2, and lock contention exits 3. A successful exit does not establish binary readiness. Error exits can still follow partial effects or failed outcome persistence; inspect installation attempts before retrying.
 
+## Exact npm installation
+
+Dort can install **one observed missing exact npm registry package** with lifecycle scripts disabled. The registered manifest must declare its `runtime_tool`, an exact package version, and clear dependencies. The selected Node must be the sole runtime candidate in your separate tool-search directories, with a satisfied package claim in an explicitly selected runtime inventory. Existing/conflicting/unmanaged/unknown packages and default/latest/prefix requests cannot be installed.
+
+Use a **physical, owned prefix strictly inside HOME**, separate from the selected runtime. Existing required parents, including a scoped package's `@scope` directory, cannot be symlinks or group/world writable; absent descendants are created only after approval and durable intent. npm's write roots are `PREFIX/lib/node_modules`, `PREFIX/bin` and `PREFIX/share/man`: selected Node and npm CLI must be outside them. A typical co-located Node/npm default prefix may therefore be unsuitable for installation. Change the prefix deliberately in Advanced, collect that new scope, and bind it explicitly; Dort never silently substitutes another prefix or runtime.
+
+**Important:** native dependencies and bin/man links can expose commands immediately if PREFIX/bin is already on PATH. Dort does not edit PATH or activate/configure Node. Script-disabled packages may not be usable. Effects are not atomic or isolated from other prefix entries; failure/timeout can leave partial changes. Trusted npm/builtin configuration and dependencies may read HOME or contact additional endpoints. No private-auth setup, force, intentional other-top-level upgrade, uninstall or rollback is provided.
+
+**TUI:**
+
+1. Select the registered repository and profiles. Collect a runtime inventory and any prerequisite inventories through **Tools → Inspect installed tools**. These are provider claims, not runtime ownership or readiness proof.
+2. In the npm inventory's **Advanced** form, select the declared runtime ID, physical Node executable, npm CLI script and explicit global prefix. Node runs that CLI directly; no npm launcher, version probe or config query is used. Confirm collection once. Keep the manifest unchanged; changed declarations require fresh collection.
+3. Press `p`, load `dort.toml`, existing physical tool-search directories and matching profiles. Explicitly bind the target to its npm snapshot and runtime/prerequisites to their own chosen snapshots, then reconcile.
+4. Select the eligible target and press `i` or click **Review exact npm install**. Review is process-free; `d` shows the full prefix, trusted programs, fresh query scopes, fixed install arguments and risks.
+5. Enter/click **Install exact version** once. Under the writer lock, Dort revalidates every selected necessary catalog and the runtime candidate, installs only if still missing, and observes afterward. A newly satisfied exact target is a no-op. Quit/Ctrl-C waits; the installer deadline is ten minutes. Results do not verify readiness. Before another install, collect fresh inventories and explicitly rebind all required scopes; old snapshots are retained but cannot authorize another install review.
+
+**CLI:** use the same `--install-tool` opt-in, confirmation and exit codes as mise. This example assumes declared `node` and `prettier` tools, a satisfied runtime, and an exact npm version for `prettier`; replace every path with your physical trusted paths:
+
+```sh
+dort --dry-run tools reconcile --manifest /home/alex/dotfiles/dort.toml \
+  --tool-search-dir /home/alex/runtimes/node/bin \
+  --tool-search-dir /home/alex/bin \
+  --scope '{"id":"runtime","provider":"mise","executable":"/home/alex/bin/mise","search_dirs":["/usr/bin"]}' \
+  --scope '{"id":"npm","provider":"npm","executable":"/home/alex/runtimes/node/bin/node","search_dirs":["/usr/bin"],"runtime_tool":"node","npm_cli":"/home/alex/runtimes/node/lib/node_modules/npm/bin/npm-cli.js","prefix":"/home/alex/.local/npm-global"}' \
+  --bind node=runtime --bind prettier=npm --install-tool prettier
+```
+
+Omit `--dry-run` for interactive collection and review, or explicitly add `--yes` for automation. JSON/nonterminal execution never prompts. The dry-run does not query, create parents/state/locks or establish eligibility. npm uses fixed public-registry, ignore-scripts, audit/fund/notifier/log controls and ignored user/global config; unsupported controls fail without a weaker fallback. Installer output is discarded.
+
 ### Installation attempts and explicit closure
 
 Tools → **Installation attempts** (`i` outside comparison) lists private, all-repository attempt metadata. Enter/`d` shows full IDs, scope and observed outcomes. An unresolved attempt blocks later Tools installs, not unrelated file workflows. Nothing is replayed, cleaned up or rolled back at startup.
 
-Select an unresolved row and press `c` or click **Review closure**. The preview uses the original trusted provider scope; missing/damaged scope opens retained executable and child-PATH fields. Review is process-free. One Enter/click approves a **fresh mise inventory query and closure of unchanged metadata only**. An unavailable query cannot close the attempt. Closure is not package repair, retry, readiness verification or proof of a successful install. Changed records require a fresh review.
+Select an unresolved row and press `c` or click **Review closure**. The preview uses the original trusted provider scope; missing/damaged scope opens retained provider/executable/child-PATH fields, plus Node/npm CLI/prefix for npm. Use the Provider control to choose npm or mise; each provider's draft is retained. Known attempts retain their original scope, without needing an unchanged current manifest. Review is process-free. One Enter/click approves a **fresh inventory query for that provider scope and closure of unchanged metadata only**. An unavailable query cannot close the attempt. Closure is not package repair, retry, readiness verification or proof of a successful install. Changed records require a fresh review.
 
 ```sh
 dort tools attempts
@@ -259,6 +288,11 @@ dort --dry-run tools close-attempt ATTEMPT_ID
 dort tools close-attempt ATTEMPT_ID
 # For missing/damaged original scope, also supply trusted paths:
 dort tools close-attempt ATTEMPT_ID --executable /usr/local/bin/mise --search-dir /usr/bin
+# Missing/damaged npm scope (no current manifest or runtime claim required):
+dort tools close-attempt ATTEMPT_ID --provider npm \
+  --executable /home/alex/runtimes/node/bin/node --search-dir /usr/bin \
+  --npm-cli /home/alex/runtimes/node/lib/node_modules/npm/bin/npm-cli.js \
+  --prefix /home/alex/.local/npm-global
 ```
 
 No literal confirmation phrase or ID must be retyped at confirmation. If attempt storage is unsafe or exhausted, Dort refuses rather than deleting records or silently treating unavailable metadata as empty.

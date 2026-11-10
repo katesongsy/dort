@@ -1,7 +1,7 @@
 //! Deliberate provider queries, never called by passive observation/planning.
 //! Provider configuration/plugins may execute and caches may change. Not a sandbox.
 use crate::model::Provider;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     io::Read,
     os::unix::process::CommandExt,
@@ -19,7 +19,7 @@ pub const WARNING: &str = "Provider inspection executes a trusted local program.
 
 /// Only these fixed query protocols are implemented. Apt uses dpkg-query, not apt.
 /// npm requires an explicit declared-runtime/Node/CLI/prefix binding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Query {
     BrewFormulae,
@@ -113,7 +113,8 @@ pub struct Report {
 }
 /// Explicit caller-selected scope, not proof that Node is installed/owned by Dort.
 /// The npm launcher is never run: the selected Node executes the selected CLI script.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NpmBinding {
     pub runtime_tool: String,
     pub node: PathBuf,
@@ -122,7 +123,7 @@ pub struct NpmBinding {
 }
 
 /// Inspectable description; deserializing a report never grants execution authority.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Description {
     pub query: Query,
     pub executable: PathBuf,
@@ -174,13 +175,24 @@ impl Preview {
         home: PathBuf,
         trusted_search_path: Vec<PathBuf>,
     ) -> Result<Self, Failure> {
+        if !manifest.tools.iter().any(|t| t.id == binding.runtime_tool) {
+            return Err(Failure::InvalidNpmBinding);
+        }
+        Self::npm_probe(binding, home, trusted_search_path)
+    }
+    /// Historical metadata inspection only. Does not assert a current declaration,
+    /// runtime satisfaction or installation eligibility. Never an install capability.
+    pub(crate) fn npm_probe(
+        binding: NpmBinding,
+        home: PathBuf,
+        trusted_search_path: Vec<PathBuf>,
+    ) -> Result<Self, Failure> {
         if binding.runtime_tool.is_empty()
             || binding.runtime_tool.len() > 256
             || !binding
                 .runtime_tool
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-            || !manifest.tools.iter().any(|t| t.id == binding.runtime_tool)
         {
             return Err(Failure::InvalidNpmBinding);
         }

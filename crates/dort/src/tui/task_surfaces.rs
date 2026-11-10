@@ -28,7 +28,7 @@ impl Progress {
         use dort_core::tools::install::Event::*;
         let (boundary, sequence) = match event {
             FreshValidation => ("Checking fresh install scope", 1),
-            FreshInspection => ("Inspecting mise inventory", 2),
+            FreshInspection => ("Inspecting selected provider catalogs", 2),
             IntentDurable => ("Installation intent durable", 3),
             Installing => ("Installing exact version · 10-minute deadline", 4),
             PostInspection => ("Inspecting package and binary metadata", 5),

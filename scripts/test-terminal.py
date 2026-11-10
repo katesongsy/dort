@@ -589,6 +589,97 @@ def tool_install_workflows(binary, base, env):
     print('PASS compact all-repository attempt inspection, missing-scope draft and one-activation closure')
 
 
+def npm_install_workflows(binary, base, env):
+    home, repo, bin_dir = (base / name for name in ('npm-home', 'npm-repo', 'npm-bin'))
+    for directory in (home, repo, bin_dir):
+        directory.mkdir(mode=0o700)
+    (repo / '.git').mkdir()
+    manifest = repo / 'dort.toml'
+    manifest.write_text("schema=1\n[[tools]]\nid='node'\nbinary='node'\n[tools.install]\nmacos={provider='mise',package='node',version='20.1.0'}\nubuntu={provider='mise',package='node',version='20.1.0'}\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='npm',package='demo',version='1.2.3',runtime_tool='node'}\nubuntu={provider='npm',package='demo',version='1.2.3',runtime_tool='node'}\n")
+    git = bin_dir / 'git'
+    git.write_text('#!/bin/sh\nfor arg do\ncase "$arg" in\nconfig) exit 1;;\nrev-parse) pwd -P; exit 0;;\nstatus) printf "# branch.head main\\000"; exit 0;;\nesac\ndone\nexit 94\n')
+    mise = bin_dir / 'mise'
+    mise.write_text('#!/bin/sh\nprintf M >> "$HOME/calls"\nprintf \'{"node":[{"version":"20.1.0","installed":true}]}\'\n')
+    node = bin_dir / 'node'
+    node.write_text('#!/bin/sh\nshift\nif [ "$1" = ls ]; then\nprintf N >> "$HOME/calls"\nif [ -f "$HOME/installed" ]; then printf \'{"dependencies":{"demo":{"version":"1.2.3"}}}\'; else printf \'{"dependencies":{}}\'; fi\nexit 0\nfi\nprintf I >> "$HOME/calls"\nprintf started > "$HOME/started"\nprintf PRIVATE_NPM_OUTPUT; printf PRIVATE_NPM_ERROR >&2\nn=0\nwhile [ ! -f "$HOME/release" ] && [ "$n" -lt 10000000 ]; do n=$((n+1)); done\nprintf installed > "$HOME/installed"\n')
+    for program in (git, mise, node):
+        program.chmod(0o700)
+    cli = home / 'npm-cli.js'
+    cli.write_text('TRUSTED_CLI_NOT_EXECUTED_DIRECTLY')
+    prefix = home / 'global-prefix'
+    scoped = dict(env, HOME=str(home), PATH=str(bin_dir), XDG_CONFIG_HOME=str(home / '.config'),
+                  XDG_STATE_HOME=str(home / '.local/state'))
+    subprocess.run([binary, '--json', '--yes', 'init', str(repo)], env=scoped,
+                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    with Session([binary, 'tui'], scoped, (40, 120)) as session:
+        session.wait(b'loaded.')
+        session.send(b'\x1b[D')
+        session.wait(b'[x] mise')
+        session.send(b'\r')
+        session.wait(b'node')
+        assert (home / 'calls').read_text() == 'M'
+        session.send(b'c')
+        session.wait(b'Inspect installed tools')
+        session.send(b'\x1b[Ze')  # npm row immediately before the collection button
+        session.wait(b'Global npm prefix')
+        session.click_label('Trusted executable')
+        for value in (node, bin_dir, manifest, 'node', cli, prefix):
+            session.send(b'\x15' + str(value).encode() + b'\t')
+        session.send(b'\r')
+        session.wait(b'Run query')
+        assert (home / 'calls').read_text() == 'M', 'npm review executed a query'
+        session.send(b'\r')
+        session.wait(b'no installed packages reported')
+        session.send(b'p' + str(manifest).encode() + b'\t' + str(bin_dir).encode() + b'\t\t\r')
+        session.wait(b'Space chooses')
+        session.send(b' \t \t\r')
+        session.wait(b'Package proposals/no-ops only')
+        session.send(b'\x1b[B')
+        session.wait(b'Review exact npm install')
+        session.send(b'i')
+        session.wait(b'scripts off')
+        assert (home / 'calls').read_text() == 'MN', 'Install review executed a query'
+        assert not prefix.exists(), 'Install review created prefix'
+        session.resize((14, 48))
+        session.wait(b'bin/man')
+        session.wait(b'No rollback')
+        session.send(b'\r')
+        session.wait(b'Installing exact version')
+        session.send(b'\x03')
+        session.wait(b'waiting for worker')
+        (home / 'release').write_text('fixture')
+        session.finish()
+        assert b'PRIVATE_NPM' not in session.data, 'Raw npm output reached terminal'
+    assert (home / 'calls').read_text() == 'MNMNIMN'
+    assert (home / 'installed').exists() and prefix.is_dir()
+    print('PASS npm Advanced scope, explicit runtime catalog binding, compact native-effects warning and joined Ctrl-C')
+    damaged = home / '.local/state/dort/tools-attempts' / ('0' * 64)
+    damaged.mkdir(mode=0o700)
+    before = (home / 'calls').read_text()
+    with Session([binary, 'tui'], scoped, (40, 120)) as session:
+        session.wait(b'loaded.')
+        session.navigate('Tools', 'Installation attempts [i]')
+        session.wait(b'UNRESOLVED')
+        session.send(b'c')
+        session.wait(b'Trusted mise executable')
+        session.click_label('Provider: mise')
+        session.wait(b'Trusted Node executable')
+        session.click_label('Trusted Node executable')
+        for value in (node, bin_dir, cli, prefix):
+            session.send(b'\x15' + str(value).encode() + b'\t')
+        session.send(b'\r')
+        session.wait(b'Inspect and close attempt')
+        assert (home / 'calls').read_text() == before, 'Closure preview ran Node'
+        session.resize((14, 48))
+        session.wait(b'Inspect and close attempt')
+        session.send(b'\r')
+        session.wait(b'Explicitly closed')
+        session.send(b'\x1bq')
+        session.finish()
+    assert (home / 'calls').read_text() == before + 'N'
+    print('PASS damaged npm attempt provider/Node/CLI/prefix form and compact one-activation closure')
+
+
 def run():
     screen = Screen((2, 20))
     screen.feed(b"Git executes\x1b[")
@@ -617,6 +708,7 @@ def run():
 
         tools_workflows(binary, base, env)
         tool_install_workflows(binary, base, env)
+        npm_install_workflows(binary, base, env)
         tools_reconciliation_workflows(binary, base, env)
         tool_declaration_workflows(binary, base, env)
 

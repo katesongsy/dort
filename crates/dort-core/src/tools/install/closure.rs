@@ -18,6 +18,8 @@ pub struct CloseRequest {
     /// Only needed when the original intent has no trustworthy provider scope.
     pub executable: Option<PathBuf>,
     pub search_dirs: Vec<PathBuf>,
+    /// Damaged-intent npm fallback; never a runtime-satisfaction claim.
+    pub npm_binding: Option<inspection::NpmBinding>,
 }
 pub struct ClosePreview {
     id: String,
@@ -25,6 +27,7 @@ pub struct ClosePreview {
     original_scope_known: bool,
     scope: ProbeScope,
     executable: Entry,
+    npm_cli: Option<Entry>,
     host_binding: String,
     preview: inspection::Preview,
 }
@@ -42,7 +45,7 @@ impl ClosePreview {
             attempt_id: &self.id,
             original_scope_known: self.original_scope_known,
             query: self.preview.description(),
-            explanation: "Freshly inspects this mise scope and closes only the unchanged attempt metadata. It does not replay, verify readiness, repair packages or roll back earlier effects.",
+            explanation: "Freshly inspects this provider scope and closes only the unchanged attempt metadata. It does not replay, verify readiness, repair packages or roll back earlier effects.",
         }
     }
     pub fn approve(self) -> CloseApproval {
@@ -76,6 +79,10 @@ pub fn prepare_close(host: &HostContext, request: CloseRequest) -> Result<CloseP
                 .as_ref()
                 .is_some_and(|e| e != &s.executable)
             || (!request.search_dirs.is_empty() && request.search_dirs != s.search_dirs)
+            || request
+                .npm_binding
+                .as_ref()
+                .is_some_and(|b| s.npm.as_ref().is_none_or(|n| &n.binding != b))
         {
             return Err(invalid(
                 "closure must use the displayed original provider scope",
@@ -85,18 +92,18 @@ pub fn prepare_close(host: &HostContext, request: CloseRequest) -> Result<CloseP
             executable: s.executable,
             home: s.home,
             search_dirs: s.search_dirs,
+            npm_binding: s.npm.map(|n| n.binding),
         }
     } else {
-        ProbeScope { executable: request.executable.ok_or_else(|| invalid("damaged intent needs an explicit trusted mise executable and search directories"))?,
-            home: host.home.clone(), search_dirs: request.search_dirs }
+        ProbeScope { executable: request.executable.ok_or_else(|| invalid("damaged intent needs an explicit trusted provider executable and search directories"))?,
+            home: host.home.clone(), search_dirs: request.search_dirs, npm_binding: request.npm_binding }
     };
-    let preview = inspection::Preview::new(
-        inspection::Query::MiseInstalled,
-        scope.executable.clone(),
-        scope.home.clone(),
-        scope.search_dirs.clone(),
-    )
-    .map_err(|_| invalid("invalid explicit Tools closure inspection scope"))?;
+    let preview = scope.preview()?;
+    let npm_cli = scope
+        .npm_binding
+        .as_ref()
+        .map(|b| super::npm::program(&b.npm_cli, false))
+        .transpose()?;
     let executable = executable(&scope.executable)?;
     Ok(ClosePreview {
         id: request.id,
@@ -104,8 +111,16 @@ pub fn prepare_close(host: &HostContext, request: CloseRequest) -> Result<CloseP
         original_scope_known: known,
         scope,
         executable,
+        npm_cli,
         host_binding: crate::journal::digest(crate::journal::encode(host)?.as_bytes()),
         preview,
+    })
+}
+fn same_cli(cli: &Option<Entry>, scope: &ProbeScope) -> Result<bool> {
+    Ok(match (cli, &scope.npm_binding) {
+        (Some(e), Some(b)) => same_source(e, &super::npm::program(&b.npm_cli, false)?),
+        (None, None) => true,
+        _ => false,
     })
 }
 pub fn close(
@@ -116,6 +131,7 @@ pub fn close(
     lock.check_context(host)?;
     let old = approval.0;
     if old.host_binding != crate::journal::digest(crate::journal::encode(host)?.as_bytes())
+        || !same_cli(&old.npm_cli, &old.scope)?
         || !same_source(&old.executable, &executable(&old.scope.executable)?)
     {
         return Err(invalid(
@@ -128,7 +144,9 @@ pub fn close(
             "Tools attempt changed; request a fresh closure review",
         ));
     }
-    if !same_source(&old.executable, &executable(&old.scope.executable)?) {
+    if !same_cli(&old.npm_cli, &old.scope)?
+        || !same_source(&old.executable, &executable(&old.scope.executable)?)
+    {
         return Err(invalid(
             "Tools closure executable changed before inspection",
         ));
@@ -139,7 +157,9 @@ pub fn close(
             "fresh closure inspection unavailable; Tools attempt remains unresolved",
         ));
     };
-    if !same_source(&old.executable, &executable(&old.scope.executable)?) {
+    if !same_cli(&old.npm_cli, &old.scope)?
+        || !same_source(&old.executable, &executable(&old.scope.executable)?)
+    {
         return Err(invalid(
             "Tools closure executable changed during inspection",
         ));

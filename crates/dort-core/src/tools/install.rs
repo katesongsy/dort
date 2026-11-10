@@ -1,4 +1,4 @@
-//! One explicitly approved exact mise install. Never executes command-preview DTOs.
+//! Explicit exact mise/npm installs. Never executes command-preview DTOs.
 use super::{VersionMatch, VersionPolicy, binaries, inspection, planning};
 use crate::{
     Error, Manifest, Result, adoption,
@@ -14,6 +14,7 @@ use std::{collections::BTreeSet, path::PathBuf};
 
 mod attempts;
 mod closure;
+pub mod npm;
 mod process;
 pub use attempts::{Attempt, Problem, diagnose};
 pub use closure::{CloseApproval, ClosePreview, CloseRequest, CloseReview, close, prepare_close};
@@ -29,7 +30,8 @@ pub struct Request {
     pub executable: PathBuf,
     pub search_dirs: Vec<PathBuf>,
     pub tool_search_dirs: Vec<PathBuf>,
-    /// Explicit tools bound to this ONE chosen snapshot. Never inferred/merged.
+    /// Explicit selected tools. Mise binds these to ONE snapshot; npm supplies
+    /// separate explicit catalog groups. Never inferred or merged.
     pub bound_tools: BTreeSet<String>,
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -49,12 +51,16 @@ pub struct Scope {
     pub search_dirs: Vec<PathBuf>,
     pub tool_search_dirs: Vec<PathBuf>,
     pub bound_tools: BTreeSet<String>,
+    /// Absent in schema-1 mise records; never filled by migration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub npm: Option<npm::Scope>,
 }
 #[derive(Serialize)]
 pub struct Review<'a> {
     pub operation: &'static str,
     pub scope: &'a Scope,
     pub arguments: Vec<String>,
+    pub fresh_inspections: Vec<inspection::Description>,
     pub timeout_seconds: u64,
     pub warning: &'static str,
 }
@@ -65,6 +71,8 @@ struct Sources {
     local_config: Entry,
     executable: Entry,
     host_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    npm: Option<npm::Sources>,
 }
 pub struct Preview {
     request: Request,
@@ -73,13 +81,44 @@ pub struct Preview {
 }
 pub struct Approval(Preview);
 impl Preview {
+    /// Compare session provenance with the independently captured core manifest.
+    pub fn manifest_matches(&self, entry: &Entry) -> bool {
+        same_source(&self.sources.manifest, entry)
+    }
     pub fn review(&self) -> Review<'_> {
         Review {
-            operation: "Freshly inspect this scope, install only this still-missing exact version, then inspect again. No activation or upgrade request.",
+            operation: "Freshly inspect the displayed catalogs, install only this still-missing exact version, then inspect again. No intentional other-package upgrade request.",
             scope: &self.scope,
             arguments: arguments(&self.scope),
+            fresh_inspections: if let Some(npm) = &self.scope.npm {
+                npm.catalogs
+                    .iter()
+                    .map(|c| {
+                        c.preview(&self.scope.home)
+                            .expect("validated catalog")
+                            .description()
+                            .clone()
+                    })
+                    .collect()
+            } else {
+                vec![
+                    inspection::Preview::new(
+                        inspection::Query::MiseInstalled,
+                        self.scope.executable.clone(),
+                        self.scope.home.clone(),
+                        self.scope.search_dirs.clone(),
+                    )
+                    .expect("validated catalog")
+                    .description()
+                    .clone(),
+                ]
+            },
             timeout_seconds: TIMEOUT_SECONDS,
-            warning: WARNING,
+            warning: if self.scope.npm.is_some() {
+                npm::WARNING
+            } else {
+                WARNING
+            },
         }
     }
     pub fn approve(self) -> Approval {
@@ -140,6 +179,9 @@ fn invalid(message: &'static str) -> Error {
     Error::Invalid(message.into())
 }
 fn arguments(scope: &Scope) -> Vec<String> {
+    if scope.npm.is_some() {
+        return npm::arguments(scope);
+    }
     [
         "--no-config",
         "--no-env",
@@ -169,7 +211,11 @@ fn query(host: &HostContext, request: &Request) -> Result<inspection::Preview> {
     )
     .map_err(|_| invalid("invalid explicit mise inspection scope"))
 }
-fn sources(host: &HostContext, request: &Request) -> Result<(Manifest, Scope, Sources)> {
+fn sources(
+    host: &HostContext,
+    request: &Request,
+    npm: Option<&npm::Scope>,
+) -> Result<(Manifest, Scope, Sources)> {
     let (local, local_config) = LocalConfig::load_bound(host)?;
     let repository_id = local
         .repositories
@@ -196,8 +242,15 @@ fn sources(host: &HostContext, request: &Request) -> Result<(Manifest, Scope, So
     let spec = tool
         .install
         .get(&host.platform)
-        .filter(|s| s.provider == Provider::Mise)
-        .ok_or_else(|| invalid("only exact mise installations are supported"))?;
+        .filter(|s| {
+            s.provider
+                == if npm.is_some() {
+                    Provider::Npm
+                } else {
+                    Provider::Mise
+                }
+        })
+        .ok_or_else(|| invalid("only exact mise and npm installations are supported"))?;
     let VersionPolicy::Exact { version } =
         VersionPolicy::parse(spec.provider, spec.version.as_deref())
             .map_err(|_| invalid("unsupported installation policy"))?
@@ -215,10 +268,27 @@ fn sources(host: &HostContext, request: &Request) -> Result<(Manifest, Scope, So
         })
     {
         return Err(invalid(
-            "installation requires explicit active tool bindings to one mise snapshot",
+            "installation requires bounded explicit active tool bindings",
         ));
     }
-    query(host, request)?;
+    if let Some(npm) = npm {
+        if spec.runtime_tool.as_ref() != Some(&npm.binding.runtime_tool)
+            || request.executable != npm.binding.node
+        {
+            return Err(invalid(
+                "npm installation runtime binding differs from declaration",
+            ));
+        }
+        inspection::Preview::npm(
+            &manifest,
+            npm.binding.clone(),
+            host.home.clone(),
+            request.search_dirs.clone(),
+        )
+        .map_err(|_| invalid("invalid explicit npm installation binding"))?;
+    } else {
+        query(host, request)?;
+    }
     binaries::validate(&manifest, &active, &request.tool_search_dirs)?;
     let executable = observation::inspect(&request.executable, false)?;
     if executable.kind != Kind::Regular
@@ -246,20 +316,29 @@ fn sources(host: &HostContext, request: &Request) -> Result<(Manifest, Scope, So
         search_dirs: request.search_dirs.clone(),
         tool_search_dirs: request.tool_search_dirs.clone(),
         bound_tools: request.bound_tools.clone(),
+        npm: npm.cloned(),
     };
+    if !attempts::valid_scope(&scope) {
+        return Err(invalid("installation scope exceeds supported bounds"));
+    }
     let sources = Sources {
         manifest: entry,
         local_config,
         executable,
         host_sha256: journal::digest(journal::encode(host)?.as_bytes()),
+        npm: if scope.npm.is_some() {
+            Some(npm::sources(&scope)?)
+        } else {
+            None
+        },
     };
-    if !attempts::valid_scope(&scope) {
-        return Err(invalid("installation scope exceeds supported bounds"));
-    }
-    if journal::encode(&(&scope, &sources))?.len() > 48 * 1024 {
+    Ok((manifest, scope, sources))
+}
+fn bounded_metadata(scope: &Scope, sources: &Sources) -> Result<()> {
+    if journal::encode(&(scope, sources))?.len() > 48 * 1024 {
         return Err(invalid("installation scope exceeds metadata limit"));
     }
-    Ok((manifest, scope, sources))
+    Ok(())
 }
 /// Process-free. The supplied report is metadata, not authority. Binary names are
 /// independently observed in explicit, separate directories; no candidates run.
@@ -268,7 +347,8 @@ pub fn prepare(
     request: Request,
     selected: &inspection::Report,
 ) -> Result<Preview> {
-    let (manifest, scope, sources) = sources(host, &request)?;
+    let (manifest, scope, sources) = sources(host, &request, None)?;
+    bounded_metadata(&scope, &sources)?;
     let r = evaluate(host, &manifest, &scope, selected)?;
     if r.action != planning::PackageAction::ReviewMissingPackage || !r.blockers.is_empty() {
         return Err(invalid(
@@ -294,13 +374,26 @@ fn evaluate(
     {
         return Err(invalid("selected snapshot has a different provider scope"));
     }
+    evaluate_catalogs(host, manifest, scope, &[report])
+}
+fn evaluate_catalogs(
+    host: &HostContext,
+    manifest: &Manifest,
+    scope: &Scope,
+    reports: &[&inspection::Report],
+) -> Result<planning::Row> {
     let binary_report = binaries::observe(manifest, &scope.profiles, &scope.tool_search_dirs)?;
-    let observed = planning::Observations {
-        catalogs: scope
+    let catalogs = if let Some(npm) = &scope.npm {
+        npm::catalogs(scope, npm, reports)?
+    } else {
+        scope
             .bound_tools
             .iter()
-            .map(|id| (id.clone(), report))
-            .collect(),
+            .map(|id| (id.clone(), reports[0]))
+            .collect()
+    };
+    let observed = planning::Observations {
+        catalogs,
         binaries: binary_report
             .tools
             .into_iter()
@@ -317,9 +410,9 @@ fn observe(
     host: &HostContext,
     manifest: &Manifest,
     scope: &Scope,
-    report: &inspection::Report,
+    reports: &[&inspection::Report],
 ) -> (PackageState, BinaryState) {
-    match evaluate(host, manifest, scope, report) {
+    match evaluate_catalogs(host, manifest, scope, reports) {
         Ok(row) => {
             let package = match row.package {
                 planning::PackageFinding::Present { versions }
@@ -344,13 +437,43 @@ fn observe(
         Err(_) => (PackageState::Unavailable, BinaryState::Unavailable),
     }
 }
+fn collect(host: &HostContext, old: &Preview) -> Result<Vec<inspection::Report>> {
+    let (manifest, scope, _) = revalidate(host, old)?;
+    if let Some(npm) = &scope.npm {
+        npm.catalogs
+            .iter()
+            .map(|c| {
+                revalidate(host, old)?;
+                if let Some(b) = &c.npm_binding {
+                    inspection::Preview::npm(
+                        &manifest,
+                        b.clone(),
+                        scope.home.clone(),
+                        c.search_dirs.clone(),
+                    )
+                    .map_err(|_| invalid("installation catalog runtime no longer declared"))?;
+                }
+                let report = c.preview(&scope.home)?.approve().inspect();
+                revalidate(host, old)?;
+                Ok(report)
+            })
+            .collect()
+    } else {
+        Ok(vec![query(host, &old.request)?.approve().inspect()])
+    }
+}
 fn revalidate(host: &HostContext, old: &Preview) -> Result<(Manifest, Scope, Sources)> {
-    let (manifest, scope, fresh) = sources(host, &old.request)?;
+    let (manifest, scope, fresh) = sources(host, &old.request, old.scope.npm.as_ref())?;
     if journal::encode(&scope)? != journal::encode(&old.scope)?
         || fresh.host_sha256 != old.sources.host_sha256
         || !same_source(&fresh.manifest, &old.sources.manifest)
         || !same_source(&fresh.local_config, &old.sources.local_config)
         || !same_source(&fresh.executable, &old.sources.executable)
+        || match (&fresh.npm, &old.sources.npm) {
+            (Some(a), Some(b)) => !npm::same(a, b),
+            (None, None) => false,
+            _ => true,
+        }
     {
         return Err(invalid(
             "installation scope changed; request a fresh review",
@@ -368,12 +491,13 @@ pub fn execute(
     lock.check_context(host)?;
     journal::ensure_writable(host)?;
     attempts::ensure_clear(host)?;
-    let old = approval.0;
+    let mut old = approval.0;
     observer(Event::FreshValidation);
     let (manifest, scope, fresh) = revalidate(host, &old)?;
     observer(Event::FreshInspection);
-    let before = query(host, &old.request)?.approve().inspect();
-    let row = evaluate(host, &manifest, &scope, &before)?;
+    let before = collect(host, &old)?;
+    let before_refs = before.iter().collect::<Vec<_>>();
+    let row = evaluate_catalogs(host, &manifest, &scope, &before_refs)?;
     revalidate(host, &old)?;
     if row.action == planning::PackageAction::NoChange {
         return Ok(Report {
@@ -394,21 +518,38 @@ pub fn execute(
     observer(Event::IntentDurable);
     // Fail closed if source bindings changed while intent was made durable.
     revalidate(host, &old)?;
-    observer(Event::Installing);
     revalidate(host, &old)?;
     journal::ensure_writable(host)?;
     attempts::verify_pending(host, &attempt)?;
-    let ready = evaluate(host, &manifest, &scope, &before)?;
+    let ready = evaluate_catalogs(host, &manifest, &scope, &before_refs)?;
     if ready.action != planning::PackageAction::ReviewMissingPackage || !ready.blockers.is_empty() {
         return Err(invalid(
             "binary or prerequisite scope changed before installation; inspect and close the pending attempt",
         ));
     }
+    if let Some(bound) = &old.sources.npm {
+        old.sources.npm = Some(npm::create_directories(&scope, bound)?);
+        revalidate(host, &old)?;
+        journal::ensure_writable(host)?;
+        attempts::verify_pending(host, &attempt)?;
+    }
+    observer(Event::Installing);
+    revalidate(host, &old)?;
+    journal::ensure_writable(host)?;
+    attempts::verify_pending(host, &attempt)?;
+    let ready = evaluate_catalogs(host, &manifest, &scope, &before_refs)?;
+    if ready.action != planning::PackageAction::ReviewMissingPackage || !ready.blockers.is_empty() {
+        return Err(invalid(
+            "binary or prerequisite scope changed before spawn; inspect the pending attempt",
+        ));
+    }
     let process = process::run(&scope, std::time::Duration::from_secs(TIMEOUT_SECONDS));
     observer(Event::PostInspection);
     let (mut package, mut binary) = if revalidate(host, &old).is_ok() {
-        let after = query(host, &old.request)?.approve().inspect();
-        observe(host, &manifest, &scope, &after)
+        match collect(host, &old) {
+            Ok(after) => observe(host, &manifest, &scope, &after.iter().collect::<Vec<_>>()),
+            Err(_) => (PackageState::Unavailable, BinaryState::Unavailable),
+        }
     } else {
         // Do not run a provider whose binding changed during installation.
         (PackageState::Unavailable, BinaryState::Unavailable)

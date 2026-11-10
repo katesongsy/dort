@@ -27,17 +27,20 @@ pub(super) fn run(scope: &Scope, timeout: Duration) -> ProcessOutcome {
         .env("LC_ALL", "C")
         .env("LANG", "C")
         .env("NO_COLOR", "1")
-        .env("MISE_NO_CONFIG", "1")
-        .env("MISE_NO_ENV", "1")
-        .env("MISE_NO_HOOKS", "1")
-        .env("MISE_YES", "1")
-        .env("MISE_AUTO_INSTALL", "0")
         .current_dir("/")
         .args(arguments(scope))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
+    if scope.npm.is_none() {
+        command
+            .env("MISE_NO_CONFIG", "1")
+            .env("MISE_NO_ENV", "1")
+            .env("MISE_NO_HOOKS", "1")
+            .env("MISE_YES", "1")
+            .env("MISE_AUTO_INSTALL", "0");
+    }
     let mut child = match command.spawn() {
         Ok(c) => c,
         Err(_) => return ProcessOutcome::Unavailable,

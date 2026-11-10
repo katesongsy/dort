@@ -32,7 +32,10 @@ pub struct State {
     pub attempts: Vec<install::Attempt>,
     pub error: Option<String>,
     pub selected: usize,
-    pub fields: [String; 2],
+    pub fields: [String; 4],
+    pub close_npm: bool,
+    close_mise_draft: [String; 2],
+    close_npm_draft: [String; 4],
     pub focus: usize,
     pub details: bool,
     pub scroll: u16,
@@ -97,11 +100,20 @@ impl State {
     }
     pub fn reviewed(&mut self, preview: install::Preview) {
         self.scope = Some(preview.review().scope.clone());
-        self.summary = format!(
-            "Install {}@{} with mise\nFresh inspection, install only if still missing, then inspect again.\n10-minute install deadline; q/Ctrl-C waits. No activation.\nProvider/package code and downloads may change data; no rollback.",
-            preview.review().scope.package,
-            preview.review().scope.version
-        );
+        let s = preview.review().scope;
+        self.summary = if let Some(npm) = &s.npm {
+            format!(
+                "npm install · scripts off · 10m deadline\nDependencies + bin/man links may expose\ncommands on PATH. No rollback. q waits.\nFresh target/runtime/prerequisite queries.\n{}@{}\nPrefix: {}\nd: full scope and query details",
+                s.package,
+                s.version,
+                ui::inline(&npm.binding.prefix.display().to_string())
+            )
+        } else {
+            format!(
+                "Install {}@{} with mise\nFresh inspection, install only if still missing, then inspect again.\n10-minute install deadline; q/Ctrl-C waits. No activation.\nProvider/package code and downloads may change data; no rollback.",
+                s.package, s.version
+            )
+        };
         self.metadata =
             serde_json::to_string_pretty(&preview.review()).expect("metadata serializes");
         self.preview = Some(preview);
@@ -118,7 +130,9 @@ impl State {
                 self.summary = if report.no_op {
                     "Exact version already reported; no installer ran."
                 } else if installation::succeeded(&report) {
-                    "Exact version reported installed. Inactive mise versions are normal."
+                    if report.scope.npm.is_some() {
+                        "Exact npm package reported installed; native links may expose commands on PATH."
+                    } else { "Exact version reported installed. Inactive mise versions are normal." }
                 } else {
                     "Installation incomplete or unverified; partial effects may remain."
                 }
@@ -153,6 +167,29 @@ impl State {
                 .collect::<Vec<_>>()
                 .join(":");
         }
+        if self.close_npm_draft[0].is_empty()
+            && let Some(d) = snapshots
+                .iter()
+                .rev()
+                .map(|s| &s.report.provider.description)
+                .find(|d| d.npm_binding.is_some())
+            && let Some(b) = &d.npm_binding
+        {
+            self.close_npm_draft = [
+                b.node.display().to_string(),
+                d.trusted_search_path
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(":"),
+                b.npm_cli.display().to_string(),
+                b.prefix.display().to_string(),
+            ];
+            if self.fields[0].is_empty() {
+                self.fields = self.close_npm_draft.clone();
+                self.close_npm = true;
+            }
+        }
         Task::ToolAttempts
     }
     pub fn attempts_ready(&mut self, result: Result<Vec<install::Attempt>, String>) {
@@ -177,6 +214,7 @@ impl State {
             id: attempt.id.clone(),
             executable: None,
             search_dirs: vec![],
+            npm_binding: None,
         };
         self.close_request = Some(request.clone());
         self.details = false;
@@ -190,11 +228,23 @@ impl State {
             None
         }
     }
+    fn toggle_close_provider(&mut self) {
+        if self.close_npm {
+            self.close_npm_draft = self.fields.clone();
+            self.fields[0] = self.close_mise_draft[0].clone();
+            self.fields[1] = self.close_mise_draft[1].clone();
+        } else {
+            self.close_mise_draft = [self.fields[0].clone(), self.fields[1].clone()];
+            self.fields = self.close_npm_draft.clone();
+        }
+        self.close_npm = !self.close_npm;
+        self.focus = if self.close_npm { 5 } else { 3 };
+    }
     pub fn close_reviewed(&mut self, preview: install::ClosePreview) {
         self.metadata =
             serde_json::to_string_pretty(&preview.review()).expect("metadata serializes");
         self.summary = format!(
-            "Close unresolved attempt {}\nFreshly inspect its mise scope, then close unchanged metadata.\nNo package replay, repair, readiness verification or rollback.\nConfig/plugins may execute code and caches may change.",
+            "Close unresolved attempt {}\nFreshly inspect its provider scope, then close unchanged metadata.\nNo package replay, repair, readiness verification or rollback.\nConfig/plugins may execute code and caches may change.",
             preview.review().attempt_id
         );
         self.close_preview = Some(preview);
@@ -225,31 +275,44 @@ impl State {
     }
     pub fn key(&mut self, key: KeyEvent, dry_run: bool, snapshots: &[Snapshot]) -> Option<Outcome> {
         if self.mode == Mode::CloseInputs {
+            let count = if self.close_npm { 4 } else { 2 };
             return match key.code {
                 KeyCode::Esc => {
                     self.mode = Mode::Attempts;
                     None
                 }
                 KeyCode::Tab | KeyCode::Down => {
-                    self.focus = (self.focus + 1) % 3;
+                    self.focus = (self.focus + 1) % (count + 2);
                     None
                 }
                 KeyCode::BackTab | KeyCode::Up => {
-                    self.focus = (self.focus + 2) % 3;
+                    self.focus = (self.focus + count + 1) % (count + 2);
                     None
                 }
-                KeyCode::Enter if self.focus == 2 => {
+                KeyCode::Enter if self.focus == count + 1 => {
+                    self.toggle_close_provider();
+                    None
+                }
+                KeyCode::Enter if self.focus == count => {
                     let request = self.close_request.as_mut()?;
                     request.executable = Some(PathBuf::from(&self.fields[0]));
                     request.search_dirs = self.fields[1].split(':').map(PathBuf::from).collect();
+                    request.npm_binding =
+                        self.close_npm
+                            .then(|| dort_core::tools::inspection::NpmBinding {
+                                runtime_tool: "historical-runtime".into(),
+                                node: PathBuf::from(&self.fields[0]),
+                                npm_cli: PathBuf::from(&self.fields[2]),
+                                prefix: PathBuf::from(&self.fields[3]),
+                            });
                     self.mode = Mode::LoadingClose;
                     Some(Outcome::task(Task::ToolClosePrepare(request.clone())))
                 }
                 KeyCode::Enter => {
-                    self.focus = (self.focus + 1) % 3;
+                    self.focus = (self.focus + 1) % (count + 2);
                     None
                 }
-                _ if self.focus < 2 => {
+                _ if self.focus < count => {
                     edit_text(&mut self.fields[self.focus], key);
                     None
                 }
@@ -331,39 +394,40 @@ impl State {
             return;
         }
         if self.mode == Mode::CloseInputs {
+            let count = if self.close_npm { 4 } else { 2 };
             let budget = area.height.saturating_sub(1);
-            let first = if budget < 7 && self.focus > 0 {
-                self.focus.min(1)
+            let first = if usize::from(budget) < count * 3 + 2 {
+                self.focus.min(count)
             } else {
                 0
             };
             let mut y = area.y;
-            for i in first..3 {
-                let h = if i < 2 { 3 } else { 1 };
+            for i in first..count + 2 {
+                let h = if i < count { 3 } else { 1 };
                 if y + h > area.bottom().saturating_sub(1) {
                     break;
                 }
                 let rect = Rect::new(area.x, y, area.width, h);
-                hits.click(rect, Target::ToolInstallControl(i, i == 2));
-                if i < 2 {
-                    ui::input(
-                        frame,
-                        rect,
-                        if i == 0 {
-                            "Trusted mise executable · absolute"
-                        } else {
-                            "Trusted child PATH · colon-separated"
-                        },
-                        &self.fields[i],
-                        self.focus == i,
-                    );
+                hits.click(rect, Target::ToolInstallControl(i, i >= count));
+                if i < count {
+                    let title = match i {
+                        0 if self.close_npm => "Trusted Node executable · absolute",
+                        0 => "Trusted mise executable · absolute",
+                        1 => "Trusted child PATH · colon-separated",
+                        2 => "Trusted npm CLI script · absolute",
+                        _ => "Original npm global prefix · absolute",
+                    };
+                    ui::input(frame, rect, title, &self.fields[i], self.focus == i);
                 } else {
+                    let label = if i == count {
+                        "Review closure"
+                    } else if self.close_npm {
+                        "Provider: npm · change to mise"
+                    } else {
+                        "Provider: mise · change to npm"
+                    };
                     frame.render_widget(
-                        Paragraph::new(Line::from(ui::button(
-                            "Review closure",
-                            "Enter",
-                            self.focus == 2,
-                        ))),
+                        Paragraph::new(Line::from(ui::button(label, "Enter", self.focus == i))),
                         rect,
                     );
                 }

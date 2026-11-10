@@ -77,7 +77,7 @@ enum Command {
         #[command(subcommand)]
         command: GitCommand,
     },
-    /// Inspect tools, compare declarations, or explicitly review one exact mise install.
+    /// Inspect tools, compare declarations, or explicitly review one exact mise/npm install.
     Tools {
         #[command(subcommand)]
         command: ToolsCommand,
@@ -214,9 +214,9 @@ enum ToolsCommand {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
-    /// Inspect explicit scopes and compare declarations; optionally review one exact mise install.
+    /// Inspect explicit scopes and compare declarations; optionally review one exact mise/npm install.
     Reconcile {
-        /// Review and approve one still-missing exact mise package after reconciliation.
+        /// Review and approve one still-missing exact mise/npm package after reconciliation.
         #[arg(long)]
         install_tool: Option<String>,
         #[arg(long)]
@@ -241,6 +241,13 @@ enum ToolsCommand {
     /// Freshly inspect and close an unchanged unresolved attempt; never replay or roll back.
     CloseAttempt {
         id: String,
+        /// Damaged-scope provider (default: mise); known attempts keep their original scope.
+        #[arg(long, value_enum)]
+        provider: Option<InstallationProvider>,
+        #[arg(long)]
+        npm_cli: Option<PathBuf>,
+        #[arg(long)]
+        prefix: Option<PathBuf>,
         /// Required only when the original provider scope is damaged or missing.
         #[arg(long)]
         executable: Option<PathBuf>,
@@ -270,6 +277,12 @@ enum ToolsCommand {
         prefix: Option<PathBuf>,
     },
 }
+#[derive(Clone, Copy, ValueEnum)]
+enum InstallationProvider {
+    Mise,
+    Npm,
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 enum InspectionProvider {
     Brew,
@@ -372,13 +385,16 @@ fn tools_reconcile(
     let bindings = reconciliation::parse_bindings(bindings)?;
     prepared.validate_bindings(&bindings, &ids)?;
     if let Some(tool) = install_tool
-        && !prepared
-            .tools
-            .iter()
-            .any(|t| &t.id == tool && t.provider == Some(dort_core::model::Provider::Mise))
+        && !prepared.tools.iter().any(|t| {
+            &t.id == tool
+                && matches!(
+                    t.provider,
+                    Some(dort_core::model::Provider::Mise | dort_core::model::Provider::Npm)
+                )
+        })
     {
         return Err(Error::Invalid(
-            "installation must select an active mise tool".into(),
+            "installation must select an active mise or npm tool".into(),
         ));
     }
     if cli.dry_run {
@@ -513,14 +529,39 @@ fn tools_inspect(
         id,
         executable,
         search_dirs,
+        provider,
+        npm_cli,
+        prefix,
     } = command
     {
+        let npm_binding = if matches!(provider, Some(InstallationProvider::Npm)) {
+            Some(dort_core::tools::inspection::NpmBinding {
+                runtime_tool: "historical-runtime".into(),
+                node: executable.clone().ok_or_else(|| {
+                    Error::Invalid("npm fallback requires --executable Node".into())
+                })?,
+                npm_cli: npm_cli
+                    .clone()
+                    .ok_or_else(|| Error::Invalid("npm fallback requires --npm-cli".into()))?,
+                prefix: prefix
+                    .clone()
+                    .ok_or_else(|| Error::Invalid("npm fallback requires --prefix".into()))?,
+            })
+        } else {
+            if npm_cli.is_some() || prefix.is_some() {
+                return Err(Error::Invalid(
+                    "npm fallback requires --provider npm".into(),
+                ));
+            }
+            None
+        };
         let preview = dort_core::tools::install::prepare_close(
             host,
             dort_core::tools::install::CloseRequest {
                 id: id.clone(),
                 executable: executable.clone(),
                 search_dirs: search_dirs.clone(),
+                npm_binding,
             },
         )?;
         if cli.dry_run || !cli.json {
