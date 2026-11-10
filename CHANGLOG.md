@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tools:** install exact npm packages with guarded runtime scopes ([6fe32ab](https://github.com/katesongsy/dort/commit/6fe32ab9c10e235d55b8667e2a367bbc66968433))
+
 - **tools:** install exact mise versions with guarded attempt closure ([a93e65c](https://github.com/katesongsy/dort/commit/a93e65c71865046f29e7119de6e1024d5dc38b60))
 
 - **tools:** discover inspection defaults with one confirmation ([44ba6bc](https://github.com/katesongsy/dort/commit/44ba6bcc47eccc6984112d7fdb4220743624b8bb))
