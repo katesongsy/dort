@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tools:** install missing Ubuntu packages noninteractively ([c8f4999](https://github.com/katesongsy/dort/commit/c8f49999cdbb801c465ef2a7b1f75b69257160ca))
+
 - **tools:** install missing Homebrew core formulae ([1ccf308](https://github.com/katesongsy/dort/commit/1ccf308260ac0acc82ea5392ab9d9edcf2d134b7))
 
 - **tools:** install exact npm packages with guarded runtime scopes ([6fe32ab](https://github.com/katesongsy/dort/commit/6fe32ab9c10e235d55b8667e2a367bbc66968433))
