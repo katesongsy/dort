@@ -19,6 +19,7 @@ pub struct Request {
     tool: String,
     snapshots: Vec<Snapshot>,
     brew_prefix: Option<std::path::PathBuf>,
+    apt_programs: Option<[Option<std::path::PathBuf>; 3]>,
 }
 pub fn eligible(row: &Row) -> bool {
     row.action == PackageAction::ReviewMissingPackage
@@ -26,8 +27,12 @@ pub fn eligible(row: &Row) -> bool {
         && row.declaration.as_ref().is_some_and(|d| {
             (matches!(d.provider, Provider::Mise | Provider::Npm)
                 && matches!(d.policy, VersionPolicy::Exact { .. }))
-                || (d.provider == Provider::Brew
-                    && install::brew::formula(&d.package)
+                || (matches!(d.provider, Provider::Brew | Provider::Apt)
+                    && if d.provider == Provider::Apt {
+                        install::apt::package(&d.package)
+                    } else {
+                        install::brew::formula(&d.package)
+                    }
                     && matches!(
                         d.policy,
                         VersionPolicy::ProviderDefault {} | VersionPolicy::Latest {}
@@ -67,6 +72,24 @@ pub fn profiles(
     Ok(selected)
 }
 impl Request {
+    pub fn apt_programs(&self) -> Option<&[Option<std::path::PathBuf>; 3]> {
+        self.apt_programs.as_ref()
+    }
+    pub fn set_apt_programs(&mut self, programs: [Option<std::path::PathBuf>; 3]) {
+        self.apt_programs = Some(programs);
+    }
+    pub fn apt_executable(&self) -> Option<&std::path::Path> {
+        let id = self.bindings.get(&self.tool)?;
+        let d = &self
+            .snapshots
+            .iter()
+            .find(|s| &s.id == id)?
+            .report
+            .provider
+            .description;
+        (d.query == dort_core::tools::inspection::Query::DpkgPackages)
+            .then_some(d.executable.as_path())
+    }
     pub fn brew_prefix(&self) -> Option<&std::path::Path> {
         self.brew_prefix.as_deref()
     }
@@ -91,7 +114,7 @@ impl Request {
     pub fn selected(report: &Report, tool: &str, snapshots: &[Snapshot]) -> Result<Self> {
         if !report.plan.rows.iter().any(|r| r.id == tool && eligible(r)) {
             return Err(invalid(
-                "select an eligible missing mise/npm exact package or canonical core formula",
+                "select an eligible missing mise/npm exact package, canonical core formula or literal Ubuntu package",
             ));
         }
         let mut bindings = report.bindings.clone();
@@ -101,7 +124,7 @@ impl Request {
             .iter()
             .find(|r| r.id == tool)
             .and_then(|r| r.declaration.as_ref())
-            .is_some_and(|d| matches!(d.provider, Provider::Npm | Provider::Brew))
+            .is_some_and(|d| matches!(d.provider, Provider::Npm | Provider::Brew | Provider::Apt))
         {
             let mut needed = std::collections::BTreeSet::new();
             let mut pending = vec![tool.to_owned()];
@@ -136,6 +159,18 @@ impl Request {
                 })
                 .and_then(|s| {
                     install::brew::prefix_hint(&s.report.provider.description.executable)
+                }),
+            apt_programs: bindings
+                .get(tool)
+                .and_then(|id| snapshots.iter().find(|s| &s.id == id))
+                .filter(|s| {
+                    s.report.provider.description.query
+                        == dort_core::tools::inspection::Query::DpkgPackages
+                })
+                .map(|s| {
+                    ["apt-cache", "apt-get", "sudo"].map(|name| {
+                        install::apt::program_hint(&s.report.provider.description.executable, name)
+                    })
                 }),
             snapshots: snapshots.to_vec(),
         })
@@ -188,7 +223,11 @@ impl Request {
                 .map(|(tool, _)| tool.clone())
                 .collect(),
         };
-        let preview = if description.query == dort_core::tools::inspection::Query::BrewFormulae {
+        let preview = if matches!(
+            description.query,
+            dort_core::tools::inspection::Query::BrewFormulae
+                | dort_core::tools::inspection::Query::DpkgPackages
+        ) {
             self.prepare_catalogs(host, request, None)?
         } else if let Some(binding) = &description.npm_binding {
             self.prepare_catalogs(host, request, Some(binding.clone()))?
@@ -254,6 +293,33 @@ impl Request {
                 host,
                 request,
                 install::npm::Scope { binding, catalogs },
+                &reports,
+            )?
+        } else if let Some(programs) = &self.apt_programs {
+            let [Some(apt_cache), Some(apt_get), Some(sudo)] = programs else {
+                return Err(invalid(
+                    "select trusted physical apt-cache, apt-get and sudo programs in Advanced",
+                ));
+            };
+            let (manifest, _) = dort_core::observation::read_manifest(&self.scope.manifest)?;
+            let spec = manifest
+                .tools
+                .iter()
+                .find(|t| t.id == self.tool)
+                .and_then(|t| t.install.get(&host.platform))
+                .ok_or_else(|| invalid("APT declaration changed"))?;
+            let policy = VersionPolicy::parse(spec.provider, spec.version.as_deref())
+                .map_err(|_| invalid("unsupported APT policy"))?;
+            install::apt::prepare(
+                host,
+                request,
+                install::apt::Scope {
+                    apt_cache: apt_cache.clone(),
+                    apt_get: apt_get.clone(),
+                    sudo: sudo.clone(),
+                    policy,
+                    catalogs,
+                },
                 &reports,
             )?
         } else {

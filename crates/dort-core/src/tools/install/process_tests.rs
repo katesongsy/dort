@@ -14,6 +14,7 @@ fn fixture(body: &str) -> (tempfile::TempDir, Scope) {
     let scope = Scope {
         npm: None,
         brew: None,
+        apt: None,
         platform: crate::platform::Platform::Ubuntu,
         architecture: crate::platform::Architecture::X86_64,
         repository: home.clone(),

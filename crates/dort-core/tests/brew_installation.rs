@@ -158,6 +158,7 @@ fn close_request(id: String) -> install::CloseRequest {
         search_dirs: vec![],
         npm_binding: None,
         brew_prefix: None,
+        apt: false,
     }
 }
 #[test]
@@ -626,8 +627,58 @@ fn mixed_schema_one_two_three_history_is_read_without_reencoding_legacy_artifact
     let npm_id = f.execute(p).unwrap().attempt_id.unwrap();
     let npm_intent = bytes(&npm_id, "intent.json");
     let npm_outcome = bytes(&npm_id, "outcome.json");
+    let brew_intent = bytes(&brew_id, "intent.json");
+    let brew_outcome = bytes(&brew_id, "outcome.json");
+    // Schema 4 shares the attempt directory without migrating schemas 1–3.
+    let mut apt_host = f.home.host.clone();
+    apt_host.platform = dort_core::platform::Platform::Ubuntu;
+    fs::write(f.repo.join("dort.toml"), "schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nubuntu={provider='apt',package='demo',version='latest'}\n").unwrap();
+    for (name, body) in [
+        (
+            "dpkg-query",
+            "if [ -f \"$HOME/apt-installed\" ]; then printf 'demo\\t2.7\\tinstalled\\tok\\n'; fi",
+        ),
+        (
+            "apt-cache",
+            "printf 'demo:\\n  Installed: (none)\\n  Candidate: 2.7\\n'",
+        ),
+        ("apt-get", "printf installed > \"$HOME/apt-installed\""),
+        ("sudo", "shift 6; \"$@\""),
+    ] {
+        let path = apt_host.home.join(name);
+        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let mut req = f.request();
+    req.executable = apt_host.home.join("dpkg-query");
+    let target = inspection::Preview::new(
+        Query::DpkgPackages,
+        req.executable.clone(),
+        apt_host.home.clone(),
+        req.search_dirs.clone(),
+    )
+    .unwrap()
+    .approve()
+    .inspect();
+    let scope = install::apt::Scope {
+        apt_cache: apt_host.home.join("apt-cache"),
+        apt_get: apt_host.home.join("apt-get"),
+        sudo: apt_host.home.join("sudo"),
+        policy: VersionPolicy::Latest {},
+        catalogs: vec![npm::Catalog {
+            query: Query::DpkgPackages,
+            executable: req.executable.clone(),
+            search_dirs: req.search_dirs.clone(),
+            npm_binding: None,
+            tools: req.bound_tools.clone(),
+        }],
+    };
+    let preview = install::apt::prepare(&apt_host, req, scope, &[&target]).unwrap();
+    install::execute(&apt_host, &f.lock, preview.approve(), |_| {}).unwrap();
     let a = install::diagnose(&f.home.host).unwrap();
-    assert_eq!(a.len(), 3);
+    assert_eq!(a.len(), 4);
+    assert_eq!(brew_intent, bytes(&brew_id, "intent.json"));
+    assert_eq!(brew_outcome, bytes(&brew_id, "outcome.json"));
     assert!(a.iter().all(|a| !a.unresolved));
     assert_eq!(old_intent, bytes(&legacy, "intent.json"));
     assert_eq!(old_outcome, bytes(&legacy, "outcome.json"));

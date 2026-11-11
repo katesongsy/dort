@@ -31,7 +31,9 @@ pub(super) fn valid(scope: &super::Scope) -> bool {
     let Some(npm) = &scope.npm else {
         return false;
     };
-    if npm.catalogs.is_empty()
+    if scope.apt.is_some()
+        || scope.brew.is_some()
+        || npm.catalogs.is_empty()
         || npm.catalogs.len() > 16
         || npm.binding.node != scope.executable
         || npm.binding.prefix == scope.home
@@ -100,7 +102,7 @@ pub fn prepare(
     npm: Scope,
     reports: &[&inspection::Report],
 ) -> Result<Preview> {
-    let (manifest, scope, sources) = super::sources(host, &request, Some(&npm), None)?;
+    let (manifest, scope, sources) = super::sources(host, &request, Some(&npm), None, None)?;
     // The durable intent budget applies before creation. Newly pinned parents
     // expand in-memory fingerprints, not the immutable persisted intent.
     super::bounded_metadata(&scope, &sources)?;

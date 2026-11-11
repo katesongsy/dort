@@ -17,6 +17,7 @@ pub enum Mode {
     Attempts,
     LoadingInstall,
     PrefixInputs,
+    AptInputs,
     Review,
     Result,
     CloseInputs,
@@ -36,6 +37,12 @@ pub struct State {
     pub fields: [String; 4],
     pub close_npm: bool,
     pub close_brew: bool,
+    pub close_apt: bool,
+    close_apt_draft: [String; 4],
+    close_seeded: bool,
+    close_initialized: [bool; 4],
+    apt_fields: [String; 3],
+    apt_drafts: std::collections::BTreeMap<PathBuf, [String; 3]>,
     close_brew_draft: [String; 4],
     brew_prefix: String,
     brew_drafts: std::collections::BTreeMap<PathBuf, String>,
@@ -74,6 +81,7 @@ impl State {
             self.mode,
             Mode::CloseInputs
                 | Mode::PrefixInputs
+                | Mode::AptInputs
                 | Mode::Review
                 | Mode::CloseReview
                 | Mode::LoadingInstall
@@ -90,6 +98,20 @@ impl State {
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
         }
+        if let Some(executable) = request.apt_executable().map(std::path::Path::to_owned) {
+            if let Some(draft) = self.apt_drafts.get(&executable) {
+                request.set_apt_programs(
+                    draft
+                        .clone()
+                        .map(|s| (!s.is_empty()).then(|| PathBuf::from(s))),
+                );
+            }
+            self.apt_fields = request
+                .apt_programs()
+                .expect("APT inputs")
+                .clone()
+                .map(|p| p.map(|p| p.display().to_string()).unwrap_or_default());
+        }
         self.clear_approvals();
         self.mode = Mode::LoadingInstall;
         self.details = false;
@@ -102,9 +124,9 @@ impl State {
         self.summary = if self
             .request
             .as_ref()
-            .is_some_and(|r| r.brew_executable().is_some())
+            .is_some_and(|r| r.brew_executable().is_some() || r.apt_executable().is_some())
         {
-            "Review unavailable. a edits Advanced prefix; r requests a fresh preview; Esc returns."
+            "Review unavailable. a edits Advanced inputs; r requests a fresh preview; Esc returns."
         } else {
             "Review unavailable. r requests a fresh preview; Esc returns."
         }
@@ -125,7 +147,12 @@ impl State {
     pub fn reviewed(&mut self, preview: install::Preview) {
         self.scope = Some(preview.review().scope.clone());
         let s = preview.review().scope;
-        self.summary = if let Some(brew) = &s.brew {
+        self.summary = if s.apt.is_some() {
+            format!(
+                "APT · ROOT RISK · {} · current, not pinned\nRoot scripts/hooks/dependency code CAN EXECUTE.\nDependencies upgrade; services start/restart.\nSystem/config/data/live links may change.\nNo sandbox or rollback; native root policy.\nsudo -n -T 600: denied policy fails, no prompt.\nOverdue supervisor: keep waiting joined.\na: Advanced · d: full scope · q waits",
+                s.package
+            )
+        } else if let Some(brew) = &s.brew {
             format!(
                 "Homebrew · provider-current · 10m deadline\nBuild/dependency code CAN EXECUTE.\nDependencies may upgrade; native links may\nexpose commands on PATH. No rollback.\n{} · Prefix: {}\nFresh help/layout/formula/catalog probes.\na: Advanced prefix · d: full scope · q waits",
                 s.package,
@@ -160,7 +187,9 @@ impl State {
                 self.summary = if report.no_op {
                     "Matching package already reported; no installer ran."
                 } else if installation::succeeded(&report) {
-                    if report.scope.brew.is_some() {
+                    if report.scope.apt.is_some() {
+                        "APT provider-current package reported present, not exact-pinned. Root/system/service effects possible; no readiness, termination or rollback guarantee."
+                    } else if report.scope.brew.is_some() {
                         "Homebrew provider-current formula reported present, not exact-pinned. Native links may expose commands on PATH."
                     } else if report.scope.npm.is_some() {
                         "Exact npm package reported installed; native links may expose commands on PATH."
@@ -184,7 +213,9 @@ impl State {
         self.mode = Mode::Attempts;
         self.details = false;
         self.error = None;
-        if self.fields[0].is_empty()
+        if !self.close_seeded
+            && !self.close_initialized[0]
+            && self.fields[0].is_empty()
             && let Some(s) = snapshots.iter().rev().find(|s| {
                 s.report.provider.description.query
                     == dort_core::tools::inspection::Query::MiseInstalled
@@ -198,8 +229,12 @@ impl State {
                 .map(|p| p.display().to_string())
                 .collect::<Vec<_>>()
                 .join(":");
+            self.close_npm = false;
+            self.close_brew = false;
+            self.close_apt = false;
+            self.retain_close_draft();
         }
-        if self.close_npm_draft[0].is_empty()
+        if !self.close_initialized[1]
             && let Some(d) = snapshots
                 .iter()
                 .rev()
@@ -217,12 +252,16 @@ impl State {
                 b.npm_cli.display().to_string(),
                 b.prefix.display().to_string(),
             ];
-            if self.fields[0].is_empty() {
+            self.close_initialized[1] = true;
+            if !self.close_seeded && self.fields[0].is_empty() {
                 self.fields = self.close_npm_draft.clone();
                 self.close_npm = true;
+                self.close_brew = false;
+                self.close_apt = false;
+                self.close_seeded = true;
             }
         }
-        if self.close_brew_draft[0].is_empty()
+        if !self.close_initialized[2]
             && let Some(d) = snapshots
                 .iter()
                 .rev()
@@ -241,9 +280,38 @@ impl State {
                     .unwrap_or_default(),
                 String::new(),
             ];
-            if self.fields[0].is_empty() {
+            self.close_initialized[2] = true;
+            if !self.close_seeded && self.fields[0].is_empty() {
                 self.fields = self.close_brew_draft.clone();
+                self.close_apt = false;
+                self.close_seeded = true;
                 self.close_brew = true;
+                self.close_npm = false;
+            }
+        }
+        if !self.close_initialized[3]
+            && let Some(d) = snapshots
+                .iter()
+                .rev()
+                .map(|s| &s.report.provider.description)
+                .find(|d| d.query == dort_core::tools::inspection::Query::DpkgPackages)
+        {
+            self.close_apt_draft = [
+                d.executable.display().to_string(),
+                d.trusted_search_path
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(":"),
+                String::new(),
+                String::new(),
+            ];
+            self.close_initialized[3] = true;
+            if !self.close_seeded && self.fields[0].is_empty() {
+                self.fields = self.close_apt_draft.clone();
+                self.close_seeded = true;
+                self.close_apt = true;
+                self.close_brew = false;
                 self.close_npm = false;
             }
         }
@@ -273,6 +341,7 @@ impl State {
             search_dirs: vec![],
             npm_binding: None,
             brew_prefix: None,
+            apt: false,
         };
         self.close_request = Some(request.clone());
         self.details = false;
@@ -295,16 +364,41 @@ impl State {
             2
         }
     }
+    fn retain_close_draft(&mut self) {
+        self.close_seeded = true;
+        let index = if self.close_apt {
+            3
+        } else if self.close_brew {
+            2
+        } else if self.close_npm {
+            1
+        } else {
+            0
+        };
+        self.close_initialized[index] = true;
+        match index {
+            3 => self.close_apt_draft = self.fields.clone(),
+            2 => self.close_brew_draft = self.fields.clone(),
+            1 => self.close_npm_draft = self.fields.clone(),
+            _ => self.close_mise_draft = [self.fields[0].clone(), self.fields[1].clone()],
+        }
+    }
     fn toggle_close_provider(&mut self) {
+        self.retain_close_draft();
         if self.close_brew {
             self.close_brew_draft = self.fields.clone();
+            self.fields = self.close_apt_draft.clone();
+            self.close_brew = false;
+            self.close_apt = true;
+        } else if self.close_apt {
+            self.close_apt_draft = self.fields.clone();
             self.fields = [
                 self.close_mise_draft[0].clone(),
                 self.close_mise_draft[1].clone(),
                 String::new(),
                 String::new(),
             ];
-            self.close_brew = false;
+            self.close_apt = false;
         } else if self.close_npm {
             self.close_npm_draft = self.fields.clone();
             self.fields = self.close_brew_draft.clone();
@@ -321,7 +415,7 @@ impl State {
         self.metadata =
             serde_json::to_string_pretty(&preview.review()).expect("metadata serializes");
         self.summary = format!(
-            "Close unresolved attempt {}\nFreshly inspect its provider scope, then close unchanged metadata.\nNo package replay, repair, readiness verification or rollback.\nConfig/plugins may execute code and caches may change.",
+            "Close unresolved attempt {}\nFreshly inspect its provider scope, then close unchanged metadata.\nNo proof of root termination, replay, repair, readiness or rollback.\nConfig/plugins may execute code and caches may change.",
             preview.review().attempt_id
         );
         self.close_preview = Some(preview);
@@ -358,7 +452,54 @@ impl State {
             request.set_brew_prefix(PathBuf::from(&self.brew_prefix));
         }
     }
+    fn retain_apt_draft(&mut self) {
+        if let Some(request) = self.request.as_mut() {
+            if let Some(exe) = request.apt_executable().map(std::path::Path::to_owned) {
+                self.apt_drafts.insert(exe, self.apt_fields.clone());
+            }
+            request.set_apt_programs(
+                self.apt_fields
+                    .clone()
+                    .map(|s| (!s.is_empty()).then(|| PathBuf::from(s))),
+            );
+        }
+    }
     pub fn key(&mut self, key: KeyEvent, dry_run: bool, snapshots: &[Snapshot]) -> Option<Outcome> {
+        if self.mode == Mode::AptInputs {
+            return match key.code {
+                KeyCode::Esc => {
+                    self.retain_apt_draft();
+                    self.mode = Mode::LoadingInstall;
+                    self.preparation_failed("APT inputs retained; request a fresh review.");
+                    None
+                }
+                KeyCode::Tab | KeyCode::Down => {
+                    self.focus = (self.focus + 1) % 4;
+                    None
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    self.focus = (self.focus + 3) % 4;
+                    None
+                }
+                KeyCode::Enter if self.focus < 3 => {
+                    self.focus += 1;
+                    None
+                }
+                KeyCode::Enter => {
+                    self.retain_apt_draft();
+                    self.mode = Mode::LoadingInstall;
+                    self.error = None;
+                    self.request
+                        .as_ref()
+                        .map(|r| Outcome::task(Task::ToolInstallPrepare(r.clone())))
+                }
+                _ if self.focus < 3 => {
+                    edit_text(&mut self.apt_fields[self.focus], key);
+                    None
+                }
+                _ => None,
+            };
+        }
         if self.mode == Mode::PrefixInputs {
             return match key.code {
                 KeyCode::Esc => {
@@ -393,6 +534,7 @@ impl State {
             let count = self.close_field_count();
             return match key.code {
                 KeyCode::Esc => {
+                    self.retain_close_draft();
                     self.mode = Mode::Attempts;
                     None
                 }
@@ -409,9 +551,11 @@ impl State {
                     None
                 }
                 KeyCode::Enter if self.focus == count => {
+                    self.retain_close_draft();
                     let request = self.close_request.as_mut()?;
                     request.executable = Some(PathBuf::from(&self.fields[0]));
                     request.search_dirs = self.fields[1].split(':').map(PathBuf::from).collect();
+                    request.apt = self.close_apt;
                     request.brew_prefix = self.close_brew.then(|| PathBuf::from(&self.fields[2]));
                     request.npm_binding =
                         self.close_npm
@@ -448,14 +592,28 @@ impl State {
         match key.code {
             KeyCode::Char('a')
                 if matches!(self.mode, Mode::Review | Mode::LoadingInstall)
-                    && self
-                        .request
-                        .as_ref()
-                        .is_some_and(|r| r.brew_executable().is_some()) =>
+                    && self.request.as_ref().is_some_and(|r| {
+                        r.brew_executable().is_some() || r.apt_executable().is_some()
+                    }) =>
             {
                 self.preview = None;
-                self.mode = Mode::PrefixInputs;
-                self.focus = usize::from(!self.brew_prefix.is_empty());
+                let apt = self
+                    .request
+                    .as_ref()
+                    .is_some_and(|r| r.apt_executable().is_some());
+                self.mode = if apt {
+                    Mode::AptInputs
+                } else {
+                    Mode::PrefixInputs
+                };
+                self.focus = if apt {
+                    self.apt_fields
+                        .iter()
+                        .position(String::is_empty)
+                        .unwrap_or(3)
+                } else {
+                    usize::from(!self.brew_prefix.is_empty())
+                };
                 self.error = None;
             }
             KeyCode::Esc if self.mode == Mode::CloseReview => {
@@ -521,6 +679,42 @@ impl State {
             );
             return;
         }
+        if self.mode == Mode::AptInputs {
+            let first = if area.height < 11 { self.focus } else { 0 };
+            let mut y = area.y;
+            for i in first..4 {
+                let h = if i < 3 { 3 } else { 1 };
+                if y + h > area.bottom() {
+                    break;
+                }
+                let rect = Rect::new(area.x, y, area.width, h);
+                hits.click(rect, Target::ToolInstallControl(i, i == 3));
+                if i < 3 {
+                    ui::input(
+                        frame,
+                        rect,
+                        [
+                            "Trusted apt-cache · absolute",
+                            "Trusted apt-get · absolute",
+                            "Trusted sudo · absolute",
+                        ][i],
+                        &self.apt_fields[i],
+                        self.focus == i,
+                    );
+                } else {
+                    frame.render_widget(
+                        Paragraph::new(Line::from(ui::button(
+                            "Review root-risk installation",
+                            "Enter",
+                            self.focus == i,
+                        ))),
+                        rect,
+                    );
+                }
+                y += h;
+            }
+            return;
+        }
         if self.mode == Mode::PrefixInputs {
             let rect = Rect::new(area.x, area.y, area.width, 3.min(area.height));
             hits.click(rect, Target::ToolInstallControl(0, false));
@@ -563,6 +757,7 @@ impl State {
                 hits.click(rect, Target::ToolInstallControl(i, i >= count));
                 if i < count {
                     let title = match i {
+                        0 if self.close_apt => "Trusted dpkg-query · absolute",
                         0 if self.close_brew => "Trusted Homebrew executable · absolute",
                         0 if self.close_npm => "Trusted Node executable · absolute",
                         0 => "Trusted mise executable · absolute",
@@ -575,8 +770,10 @@ impl State {
                 } else {
                     let label = if i == count {
                         "Review closure"
+                    } else if self.close_apt {
+                        "Provider: apt · change to mise"
                     } else if self.close_brew {
-                        "Provider: brew · change to mise"
+                        "Provider: brew · change to apt"
                     } else if self.close_npm {
                         "Provider: npm · change to brew"
                     } else {
@@ -629,7 +826,7 @@ impl State {
                             attempt
                                 .scope
                                 .as_ref()
-                                .map(|s| if s.brew.is_some() {
+                                .map(|s| if s.brew.is_some() || s.apt.is_some() {
                                     format!("{} (provider-current)", s.package)
                                 } else {
                                     format!("{}@{}", s.package, s.version)
@@ -684,6 +881,10 @@ impl State {
                 Paragraph::new(Line::from(ui::button(
                     if dry_run {
                         "Preview only · execution disabled"
+                    } else if self.mode == Mode::Review
+                        && self.scope.as_ref().is_some_and(|s| s.apt.is_some())
+                    {
+                        "Install with root risk · sudo 10m"
                     } else if self.mode == Mode::Review
                         && self.scope.as_ref().is_some_and(|s| s.brew.is_some())
                     {

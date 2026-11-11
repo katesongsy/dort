@@ -216,12 +216,21 @@ enum ToolsCommand {
     },
     /// Inspect scopes and declarations; optionally install one missing supported package.
     Reconcile {
-        /// Review one still-missing exact mise/npm package or provider-current core formula.
+        /// Review one missing exact mise/npm package, core formula or root-risk Ubuntu package.
         #[arg(long)]
         install_tool: Option<String>,
         /// Expected physical Homebrew prefix, only with --install-tool for brew.
         #[arg(long, requires = "install_tool")]
         brew_prefix: Option<PathBuf>,
+        /// Trusted physical APT candidate-query program (APT installation only).
+        #[arg(long, requires = "install_tool")]
+        apt_cache: Option<PathBuf>,
+        /// Trusted physical privileged APT installer (APT installation only).
+        #[arg(long, requires = "install_tool")]
+        apt_get: Option<PathBuf>,
+        /// Trusted physical sudo with policy-permitted command timeouts (APT only).
+        #[arg(long, requires = "install_tool")]
+        sudo: Option<PathBuf>,
         #[arg(long)]
         manifest: PathBuf,
         /// Explicit tool lookup directories, independent of provider child PATH.
@@ -282,6 +291,7 @@ enum ToolsCommand {
 }
 #[derive(Clone, Copy, ValueEnum)]
 enum InstallationProvider {
+    Apt,
     Mise,
     Npm,
     Brew,
@@ -355,6 +365,9 @@ fn tools_reconcile(
     let ToolsCommand::Reconcile {
         install_tool,
         brew_prefix,
+        apt_cache,
+        apt_get,
+        sudo,
         manifest,
         tool_search_dirs,
         profiles,
@@ -398,12 +411,23 @@ fn tools_reconcile(
                         dort_core::model::Provider::Mise
                             | dort_core::model::Provider::Npm
                             | dort_core::model::Provider::Brew
+                            | dort_core::model::Provider::Apt
                     )
                 )
         })
     {
         return Err(Error::Invalid(
-            "installation must select an active mise, npm or Homebrew tool".into(),
+            "installation must select an active mise, npm, Homebrew or APT tool".into(),
+        ));
+    }
+    if (apt_cache.is_some() || apt_get.is_some() || sudo.is_some())
+        && !prepared.tools.iter().any(|t| {
+            Some(&t.id) == install_tool.as_ref()
+                && t.provider == Some(dort_core::model::Provider::Apt)
+        })
+    {
+        return Err(Error::Invalid(
+            "--apt-cache, --apt-get and --sudo are only for APT installation".into(),
         ));
     }
     if brew_prefix.is_some()
@@ -420,7 +444,7 @@ fn tools_reconcile(
         print_git_json(
             &serde_json::json!({"reconciliation": &prepared.scope, "bindings": &bindings,
             "inspections": previews.iter().map(|(id, p)| serde_json::json!({"id":id,"review":p.review()})).collect::<Vec<_>>(),
-            "requested_install": install_tool, "brew_prefix": brew_prefix, "installation_review": "Requires approved inventories first; this dry-run runs no queries or installs"}),
+            "requested_install": install_tool, "brew_prefix": brew_prefix, "apt_cache": apt_cache, "apt_get": apt_get, "sudo": sudo, "installation_review": "Requires approved inventories first; this dry-run runs no queries or installs"}),
         )?;
         return Ok(ExitCode::SUCCESS);
     }
@@ -468,6 +492,13 @@ fn tools_reconcile(
                 ));
             }
             request.set_brew_prefix(prefix.clone());
+        }
+        if let Some(defaults) = request.apt_programs().cloned() {
+            request.set_apt_programs([
+                apt_cache.clone().or(defaults[0].clone()),
+                apt_get.clone().or(defaults[1].clone()),
+                sudo.clone().or(defaults[2].clone()),
+            ]);
         }
         let preview = request.prepare(host)?;
         if !cli.json {
@@ -592,6 +623,7 @@ fn tools_inspect(
                 executable: executable.clone(),
                 search_dirs: search_dirs.clone(),
                 npm_binding,
+                apt: matches!(provider, Some(InstallationProvider::Apt)),
                 brew_prefix: if matches!(provider, Some(InstallationProvider::Brew)) {
                     Some(prefix.clone().ok_or_else(|| {
                         Error::Invalid("Homebrew fallback requires --prefix".into())

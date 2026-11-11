@@ -12,6 +12,10 @@ use std::{
 };
 
 pub(super) fn run(scope: &Scope, timeout: Duration) -> ProcessOutcome {
+    // Privileged supervisors must never enter this user-SIGKILL-group runner.
+    if scope.apt.is_some() {
+        return ProcessOutcome::Unavailable;
+    }
     let mut command = Command::new(&scope.executable);
     command
         .env_clear()

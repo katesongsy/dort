@@ -78,7 +78,8 @@ pub(super) fn valid(s: &super::Scope) -> bool {
     let Some(b) = &s.brew else {
         return false;
     };
-    s.npm.is_none()
+    s.apt.is_none()
+        && s.npm.is_none()
         && formula(&s.package)
         && matches!(
             b.policy,
@@ -121,7 +122,7 @@ pub fn prepare(
     brew: Scope,
     reports: &[&inspection::Report],
 ) -> Result<Preview> {
-    let (manifest, scope, sources) = super::sources(host, &request, None, Some(&brew))?;
+    let (manifest, scope, sources) = super::sources(host, &request, None, Some(&brew), None)?;
     super::bounded_metadata(&scope, &sources)?;
     catalogs(&scope, &brew, reports)?;
     let row = super::evaluate_catalogs(host, &manifest, &scope, reports)?;

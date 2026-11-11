@@ -283,7 +283,7 @@ fn apt_defers_privileged_handoff_and_never_invents_an_install_executable_from_dp
     let v = preview(&p);
     assert_eq!(
         v,
-        serde_json::json!({"state":"deferred","reason":"privileged_handoff_not_designed"})
+        serde_json::json!({"state":"deferred","reason":"explicit_privileged_programs_required"})
     );
     assert!(!serde_json::to_string(&v).unwrap().contains("apt-get"));
     assert!(v.get("command").is_none());

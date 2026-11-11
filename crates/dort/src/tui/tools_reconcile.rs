@@ -76,7 +76,9 @@ impl State {
         let cross_catalog = row.declaration.as_ref().is_some_and(|d| {
             matches!(
                 d.provider,
-                dort_core::model::Provider::Npm | dort_core::model::Provider::Brew
+                dort_core::model::Provider::Npm
+                    | dort_core::model::Provider::Brew
+                    | dort_core::model::Provider::Apt
             )
         });
         let mut pending = vec![row.id.clone()];
@@ -456,6 +458,14 @@ impl State {
                         .is_some_and(|d| d.provider == dort_core::model::Provider::Brew)
                     {
                         "Review core formula install"
+                    } else if report
+                        .plan
+                        .rows
+                        .get(self.selected)
+                        .and_then(|r| r.declaration.as_ref())
+                        .is_some_and(|d| d.provider == dort_core::model::Provider::Apt)
+                    {
+                        "Review root-risk APT install"
                     } else {
                         "Review exact mise install"
                     },

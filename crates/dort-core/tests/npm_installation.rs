@@ -504,6 +504,7 @@ fn historical_npm_closure_does_not_require_current_manifest_or_invent_runtime_tr
     fs::write(f.repo.join("dort.toml"), "changed manifest").unwrap();
     let request = install::CloseRequest {
         brew_prefix: None,
+        apt: false,
         id: id.clone(),
         executable: None,
         search_dirs: vec![],
@@ -526,6 +527,7 @@ fn historical_npm_closure_does_not_require_current_manifest_or_invent_runtime_tr
     assert!(install::diagnose(&f.home.host).unwrap()[0].unresolved);
     let request = install::CloseRequest {
         brew_prefix: None,
+        apt: false,
         id,
         executable: Some(f.node.clone()),
         search_dirs: f.request().search_dirs,
@@ -687,6 +689,7 @@ fn mixed_legacy_and_npm_attempts_share_only_the_explicit_tools_guard() {
         &f.home.host,
         install::CloseRequest {
             brew_prefix: None,
+            apt: false,
             id,
             executable: None,
             search_dirs: vec![],
@@ -717,6 +720,7 @@ fn damaged_attempt_and_changed_cli_or_head_cannot_be_closed_with_stale_approval(
     let id = f.pending();
     let request = install::CloseRequest {
         brew_prefix: None,
+        apt: false,
         id: id.clone(),
         executable: None,
         search_dirs: vec![],

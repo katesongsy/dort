@@ -14,7 +14,7 @@ Start with the [user guide](user/README.md):
 ## Durable technical references
 
 - [Architecture](../ARCHITECTURE.md): implemented module boundaries, execution, persistence and recovery contracts.
-- [Bounded Tools installation](tool-installation.md): exact mise/npm and provider-current Homebrew core scopes, independent opaque approvals, native-effect disclosures, fixed probes/runner, compatible attempt schemas and guarded historical closure.
+- [Bounded Tools installation](tool-installation.md): exact mise/npm and provider-current Homebrew core/Ubuntu APT scopes, independent opaque approvals, native-effect disclosures, fixed probes/provider-specific supervision, compatible attempt schemas and guarded historical closure.
 - [Tool declarations](tool-declarations.md): focused manifest-only edits, single-use approval and schema-5 recovery contracts.
 - [Provider inspection](tools-inspection.md): shared CLI/TUI approval, process, metadata and runtime-binding boundaries.
 - [Snapshot reconciliation](binary-reconciliation.md): explicit multi-snapshot binding, no-follow candidate metadata and frontend scope/freshness boundaries.

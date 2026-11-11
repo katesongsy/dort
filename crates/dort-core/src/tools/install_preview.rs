@@ -29,7 +29,7 @@ pub enum Preview {
 pub enum Deferred {
     MissingScope,
     InvalidScope,
-    PrivilegedHandoffNotDesigned,
+    ExplicitPrivilegedProgramsRequired,
     UnsupportedPolicy,
     DescriptionLimit,
 }
@@ -106,7 +106,7 @@ pub(super) fn describe(
     // A trusted dpkg-query path is not a trusted apt-get/sudo capability.
     if declaration.provider == Provider::Apt {
         return Preview::Deferred {
-            reason: Deferred::PrivilegedHandoffNotDesigned,
+            reason: Deferred::ExplicitPrivilegedProgramsRequired,
         };
     }
     let Ok(path) = std::env::join_paths(trusted_search_path) else {

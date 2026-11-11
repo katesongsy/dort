@@ -2,7 +2,7 @@
 
 [User guide](README.md) · [Getting started](getting-started.md)
 
-Checks, discovery, file inventory, plans, status, history and Git inspection are read-only and never run providers. Separate Tools inspection requires approval: provider configuration/plugins may execute code and caches/logs may change. Explicit mutation commands are experimental and require approval. Only the explicit mise/npm/Homebrew workflows below install packages. npm/Homebrew native links may expose commands on PATH; Homebrew build/dependency code can execute and dependencies may upgrade. No command configures runtime activation, intentionally upgrades other top-level tools, clones/syncs, stages, commits or pushes. Use `dort --help` and `dort <command> --help` for syntax.
+Checks, discovery, file inventory, plans, status, history and Git inspection are read-only and never run providers. Separate Tools inspection requires approval: provider configuration/plugins may execute code and caches/logs may change. Explicit mutation commands are experimental and require approval. Only the explicit mise/npm/Homebrew/APT workflows below install packages. APT is root-native: scripts/hooks, dependency upgrades, services and system/config/data effects are possible, with required noninteractive sudo supervision and no rollback. npm/Homebrew native links may expose commands on PATH; Homebrew build/dependency code can execute and dependencies may upgrade. No command configures runtime activation, intentionally upgrades other top-level tools, clones/syncs, stages, commits or pushes. Use `dort --help` and `dort <command> --help` for syntax.
 
 ## Global options
 
@@ -177,7 +177,7 @@ Remove `--dry-run` to execute after terminal confirmation (`inspect`), or use ex
 
 ## Snapshot reconciliation
 
-Tools can retain **multiple independently approved snapshots** for the session, then reconcile declarations against your explicit choices. Snapshots are provider claims, not ownership, trust or proof that a binary is ready. They are not saved across sessions. Reconciliation alone performs no package operation. Separate opt-in mise/npm/Homebrew install reviews are available for eligible missing rows; provider configuration/code risks still apply.
+Tools can retain **multiple independently approved snapshots** for the session, then reconcile declarations against your explicit choices. Snapshots are provider claims, not ownership, trust or proof that a binary is ready. They are not saved across sessions. Reconciliation alone performs no package operation. Separate opt-in mise/npm/Homebrew/APT install reviews are available for eligible missing rows; provider configuration/code risks still apply.
 
 ### Interactive workflow
 
@@ -193,9 +193,9 @@ A package **no-op is not tool readiness**; binaries may still be missing/unverif
 
 ### Install-command descriptions — preview only
 
-For an eligible **Review only** missing-package row, full TUI details and CLI `reconciliation.plan.rows[].install_preview` show proposed executable/argv, cleared-environment controls, version selection and side-effect warnings. **Dort cannot run these descriptions.** The separate mise/npm/Homebrew workflows below reconstruct their own live previews; they never execute these descriptions. Regular reconciliation with `--yes` approves only inspection queries, not installation. No native install or install `--dry-run` operation is invoked to construct this metadata.
+For an eligible **Review only** missing-package row, full TUI details and CLI `reconciliation.plan.rows[].install_preview` show proposed executable/argv, cleared-environment controls, version selection and side-effect warnings. **Dort cannot run these descriptions.** The separate mise/npm/Homebrew/APT workflows below reconstruct their own live previews; they never execute these descriptions. Regular reconciliation with `--yes` approves only inspection queries, not installation. No native install or install `--dry-run` operation is invoked to construct this metadata.
 
-Satisfied, ambiguous and blocked tools have no install command. Apt stays deferred: the selected dpkg-query path does not authorize inventing apt-get/sudo. Version defaults, prefixes and latest requests are unresolved native selections, not a reproducibility or availability guarantee. A bare mise default can select multiple globally configured versions; the description does not request activation and executes nothing. Homebrew controls do not guarantee that dependencies remain unchanged or unupgraded. npm descriptions use the selected Node/CLI/prefix and disable lifecycle scripts, which can leave packages unusable; provider code/configuration risks still apply. All native effects can include downloads, shared links/caches and partial failures without rollback.
+Satisfied, ambiguous and blocked tools have no install command. APT command descriptions stay withheld here: a dpkg-query snapshot never authorizes inventing apt-get/sudo. The separate [APT install review](#bounded-apt-installation) requires explicit trusted programs and root-risk approval. Version defaults, prefixes and latest requests are unresolved native selections, not a reproducibility or availability guarantee. A bare mise default can select multiple globally configured versions; the description does not request activation and executes nothing. Homebrew controls do not guarantee that dependencies remain unchanged or unupgraded. npm descriptions use the selected Node/CLI/prefix and disable lifecycle scripts, which can leave packages unusable; provider code/configuration risks still apply. All native effects can include downloads, shared links/caches and partial failures without rollback.
 
 These descriptions require a computed eligible row; reconciliation `--dry-run` still previews only queries/analysis scope and does not invent missing-package facts. Descriptions exceeding metadata limits are explicitly deferred rather than partially emitted. They are not execution approvals, tested provider capabilities, verified tool readiness or a supported manual-install handoff.
 
@@ -221,7 +221,7 @@ Final JSON includes `snapshots` and `reconciliation` (scope, bindings, binary ob
 
 ## Exact mise installation
 
-Dort can install **one observed missing exact mise version** for a registered repository. The manifest must specify an exact version such as `1.2.3`, with clear prerequisites and no existing/unattributed binary in the separate lookup scope. Default/latest/prefix mise policies, apt writes, conflicting or unknown inventories, unmanaged binaries and blocked prerequisites are not installable. Homebrew has a separate provider-current workflow below. npm has a separate [exact-package workflow](#exact-npm-installation). No activation, force/reinstall, upgrade, uninstall or rollback is provided.
+Dort can install **one observed missing exact mise version** for a registered repository. The manifest must specify an exact version such as `1.2.3`, with clear prerequisites and no existing/unattributed binary in the separate lookup scope. Default/latest/prefix mise policies, conflicting or unknown inventories, unmanaged binaries and blocked prerequisites are not installable. Homebrew and Ubuntu APT have separate provider-current workflows below. npm has a separate [exact-package workflow](#exact-npm-installation). No activation, force/reinstall, upgrade, uninstall or rollback is provided.
 
 **TUI:**
 
@@ -295,11 +295,35 @@ dort --dry-run tools reconcile --manifest /Users/alex/dotfiles/dort.toml \
 
 Dry-run runs no queries, creates no state and cannot invent absence. Remove `--dry-run` for separate inventory confirmation followed by the single install review, or use explicit `--yes` for automation. A query-only reconciliation never installs. Native installer arguments are fixed: `brew install --formula --no-ask --skip-post-install homebrew/core/FORMULA`. Fixed no-update/no-analytics/no-target-upgrade/no-dependent-check/no-cleanup controls are required; help and layout probes run only as part of this explicit installation approval, not normal inspection collection.
 
+## Bounded APT installation
+
+On Ubuntu, one observed missing literal package with omitted or `latest` policy can be installed at the provider-current version, **not an exact Debian pin**. The repository must be registered; explicitly bind the target and all necessary prerequisites to approved inventories. Complete dpkg inventory is required: any repair-required package blocks installation. Names with periods/regex characters, architecture/version/release qualifiers, paths/options or trailing `+`/`-` refuse. There are no apt update, upgrade, remove, repository-edit or provider-setup workflows.
+
+**Root risk:** root hooks, maintainer scripts, triggers and dependency code can execute. Dependencies can install/upgrade, services can start/restart, and packages, configuration, live links, databases, caches and data outside HOME can change. `--no-upgrade` protects only the named target; `--no-remove` forbids removals, not every other change. Native root configuration/endpoints and sudo policy/PAM remain trusted. Clearing the caller environment is not privileged isolation. There is no sandbox, exact-pin, atomicity, package-isolation, usability/readiness or rollback guarantee.
+
+In Tools comparison choose the eligible row, then `i` / **Review root-risk APT install**. Preparation runs no commands. `a` opens retained **Advanced** fields for physical absolute apt-cache, apt-get and sudo programs; co-located metadata hints are inspectable, never execution or authentication probes. Missing paths require explicit input. Tab/Enter moves fields; printable shortcuts remain text. `d` shows the full scope, fixed argv and root-risk warning. One Enter/click **Install with root risk** confirms fresh necessary catalogs, bounded `apt-cache policy PACKAGE`, conditional privileged installation and post-dpkg observation. This confirmation is separate from inventory approval. Preview-only/below-floor layouts cannot execute; leaving/shrinking drops approval.
+
+The fixed privileged request uses selected sudo with `-n -T 600 -u root`, `DEBIAN_FRONTEND=noninteractive`, selected absolute apt-get, `--assume-yes --no-remove --no-upgrade --no-install-recommends`, disabled dpkg PTY and default/old conffile handling. Sudo refuses prompts; user-specified command timeouts require explicit permission in existing sudo policy. If environment/timeout permission is denied or unsupported, the attempt fails noninteractively. Dort never collects passwords, validates credentials, manipulates the credential cache, changes policy, configures a helper or retries without the timeout. Ask your administrator about policy outside Dort; no policy-changing command is supplied here.
+
+Only trusted sudo owns privileged timeout/termination. At the requested ten-minute deadline, an overdue supervisor receives catchable TERM for sudo's relay and Dort **continues waiting joined**, with an overdue status. A user cannot reliably kill root descendants; no strict OS deadline against a broken supervisor or proof every privileged descendant/service terminated is promised. q/Ctrl-C waits, with no detached work or automatic rollback. Failure/deadline may leave partial or ongoing native effects; inspect the reported outcome and system separately, never assume safe automatic retry. Historical closure proves neither root termination nor repair.
+
+Example process-free CLI preview (replace trusted physical paths as appropriate):
+
+```sh
+dort --dry-run tools reconcile --manifest /physical/dotfiles/dort.toml \
+  --tool-search-dir /usr/bin --install-tool rg \
+  --apt-cache /usr/bin/apt-cache --apt-get /usr/bin/apt-get --sudo /usr/bin/sudo \
+  --scope '{"id":"packages","provider":"apt","executable":"/usr/bin/dpkg-query","search_dirs":["/usr/bin"]}' \
+  --bind rg=packages
+```
+
+Remove `--dry-run` for separate inventory confirmation followed by the root-risk install review; JSON/nonterminal execution needs explicit `--yes`. A newly matching installed target is a no-op, never an upgrade request. Results distinguish process outcome, provider-current package/version claims and binary metadata, not readiness. Inventories remain historical; collect fresh ones and explicitly rebind before another install. No supported step requires a CLI handoff from the TUI.
+
 ## Installation attempts and explicit closure
 
 Tools → **Installation attempts** (`i` outside comparison) lists private, all-repository attempt metadata. Enter/`d` shows full IDs, scope and observed outcomes. An unresolved attempt blocks later Tools installs, not unrelated file workflows. Nothing is replayed, cleaned up or rolled back at startup.
 
-Select an unresolved row and press `c` or click **Review closure**. The preview uses the original trusted provider scope; missing/damaged scope opens retained provider/executable/child-PATH fields, plus Node/npm CLI/prefix for npm or the original prefix for Homebrew. Use the Provider control to cycle mise, npm and Homebrew; each provider's draft is retained. Known attempts retain their original scope, without needing an unchanged current manifest. Review is process-free. One Enter/click approves a **fresh inventory query for that provider scope and closure of unchanged metadata only**. Homebrew also verifies a fixed fresh prefix query against the displayed original prefix. An unavailable query cannot close the attempt. Closure is not package repair, retry, readiness verification or proof of a successful install. Changed records require a fresh review.
+Select an unresolved row and press `c` or click **Review closure**. The preview uses the original trusted provider scope; missing/damaged scope opens retained provider/executable/child-PATH fields, plus Node/npm CLI/prefix for npm or the original prefix for Homebrew. Use the Provider control to cycle mise, npm, Homebrew and APT; each provider's draft is retained. Known attempts retain their original scope, without needing an unchanged current manifest. Review is process-free. One Enter/click approves a **fresh inventory query for that provider scope and closure of unchanged metadata only**. Homebrew also verifies a fixed fresh prefix query against the displayed original prefix. An unavailable query cannot close the attempt. APT closure queries only complete dpkg inventory, without sudo/root authentication or current manifest requirements. Closure is not proof of root termination, package repair, retry, readiness verification or a successful install. Changed records require a fresh review.
 
 ```sh
 dort tools attempts
@@ -314,6 +338,10 @@ dort tools close-attempt ATTEMPT_ID --provider npm \
   --executable /home/alex/runtimes/node/bin/node --search-dir /usr/bin \
   --npm-cli /home/alex/runtimes/node/lib/node_modules/npm/bin/npm-cli.js \
   --prefix /home/alex/.local/npm-global
+# Missing/damaged APT scope (dpkg only; no sudo/authentication):
+dort tools close-attempt ATTEMPT_ID --provider apt \
+  --executable /usr/bin/dpkg-query --search-dir /usr/bin
+
 # Missing/damaged Homebrew scope:
 dort tools close-attempt ATTEMPT_ID --provider brew \
   --executable /usr/local/Homebrew/bin/brew --search-dir /usr/bin \

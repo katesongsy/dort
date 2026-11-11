@@ -1,3 +1,5 @@
+#[path = "tools_install_apt.rs"]
+mod apt;
 #[path = "tools_install_brew.rs"]
 mod brew;
 use super::{
@@ -514,8 +516,11 @@ fn damaged_npm_closure_has_retained_provider_drafts_and_compact_focus_caret() {
     app.tools_view.installation.focus = 4;
     key(&mut app, KeyCode::Enter);
     assert!(!app.tools_view.installation.close_brew);
+    assert!(app.tools_view.installation.close_apt);
     app.tools_view.installation.focus = 3;
-    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Enter); // mise
+    app.tools_view.installation.focus = 3;
+    key(&mut app, KeyCode::Enter); // npm
     assert!(app.tools_view.installation.close_npm);
     assert_eq!(
         app.tools_view.installation.fields[2],

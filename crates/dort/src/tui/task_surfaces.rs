@@ -30,7 +30,8 @@ impl Progress {
             FreshValidation => ("Checking fresh install scope", 1),
             FreshInspection => ("Inspecting selected provider catalogs", 2),
             IntentDurable => ("Installation intent durable", 3),
-            Installing => ("Installing package · 10-minute deadline", 4),
+            Installing => ("Installing package · requested 10-minute deadline", 4),
+            SupervisionWaiting => ("Privileged supervisor overdue · still waiting joined", 4),
             PostInspection => ("Inspecting package and binary metadata", 5),
             OutcomeDurable => ("Observed outcome durable", 6),
         };
@@ -120,7 +121,7 @@ impl Activity {
             Task::Bootstrap(..) => "Preview bootstrap recovery",
             Task::Git(_) => "Read Git",
             Task::ToolInstallPrepare(_) => "Review one package install (no execution)",
-            Task::ToolInstall(_) => "Install one package · 10-minute deadline",
+            Task::ToolInstall(_) => "Install one package · quit waits for completion",
             Task::ToolAttempts => "Read installation attempts (no execution)",
             Task::ToolClosePrepare(_) => "Review fresh inspection and attempt closure",
             Task::ToolClose(_) => "Inspect mise and close unchanged attempt metadata",

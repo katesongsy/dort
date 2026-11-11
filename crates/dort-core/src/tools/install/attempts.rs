@@ -62,10 +62,22 @@ pub(super) struct ProbeScope {
     pub npm_binding: Option<super::inspection::NpmBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brew_prefix: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub apt: bool,
 }
 impl ProbeScope {
     pub(super) fn preview(&self) -> Result<super::inspection::Preview> {
-        if let Some(prefix) = &self.brew_prefix {
+        if self.apt {
+            if self.brew_prefix.is_some() || self.npm_binding.is_some() {
+                return Err(invalid("invalid APT closure scope"));
+            }
+            super::inspection::Preview::new(
+                super::inspection::Query::DpkgPackages,
+                self.executable.clone(),
+                self.home.clone(),
+                self.search_dirs.clone(),
+            )
+        } else if let Some(prefix) = &self.brew_prefix {
             if self.npm_binding.is_some() || !super::inspection::absolute(prefix) {
                 return Err(invalid("invalid Homebrew closure scope"));
             }
@@ -95,7 +107,9 @@ impl ProbeScope {
         .map_err(|_| invalid("invalid explicit Tools closure scope"))
     }
     fn schema(&self) -> u32 {
-        if self.brew_prefix.is_some() {
+        if self.apt {
+            4
+        } else if self.brew_prefix.is_some() {
             3
         } else if self.npm_binding.is_some() {
             2
@@ -217,14 +231,17 @@ pub(super) fn valid_scope(s: &Scope) -> bool {
     let absolute = super::inspection::absolute;
     journal::valid_id(&s.repository_id)
         && [s.tool.as_str(), &s.binary].into_iter().all(token)
-        && if s.brew.is_some() {
+        && if s.apt.is_some() {
+            super::apt::package(&s.package)
+        } else if s.brew.is_some() {
             super::brew::formula(&s.package)
         } else if s.npm.is_some() {
             valid_npm_package(&s.package)
         } else {
             token(&s.package)
         }
-        && (s.brew.is_some()
+        && (s.apt.is_some()
+            || s.brew.is_some()
             || matches!(
                 super::VersionPolicy::parse(
                     if s.npm.is_some() {
@@ -253,6 +270,7 @@ pub(super) fn valid_scope(s: &Scope) -> bool {
         && s.tool_search_dirs.iter().all(|p| absolute(p))
         && (s.npm.is_none() || (s.brew.is_none() && super::npm::valid(s)))
         && (s.brew.is_none() || super::brew::valid(s))
+        && (s.apt.is_none() || super::apt::valid(s))
 }
 fn valid_npm_package(s: &str) -> bool {
     let name = |p: &str| {
@@ -269,7 +287,9 @@ fn valid_npm_package(s: &str) -> bool {
     }
 }
 fn schema(scope: &Scope) -> u32 {
-    if scope.brew.is_some() {
+    if scope.apt.is_some() {
+        4
+    } else if scope.brew.is_some() {
         3
     } else if scope.npm.is_some() {
         2
@@ -282,6 +302,12 @@ fn intent(dir: &PrivateDir, id: &str) -> Result<Intent> {
     if i.schema != schema(&i.scope)
         || i.scope.npm.is_some() != i.sources.npm.is_some()
         || i.scope.brew.is_some() != i.sources.brew.is_some()
+        || i.scope.apt.is_some() != i.sources.apt.is_some()
+        || match (&i.scope.apt, &i.sources.apt_probe) {
+            (Some(_), Some(p)) => !p.valid(),
+            (None, None) => false,
+            _ => true,
+        }
         || match (&i.scope.brew, &i.sources.brew_probe) {
             (Some(b), Some(p)) => !p.valid(b),
             (None, None) => false,
@@ -375,9 +401,9 @@ fn scan(dir: &PrivateDir, id: &str) -> Result<Attempt> {
         if let (Some(i), Some(c)) = (&i, completed)
             && c.schema == i.schema
             && c.id == id
-            && (i.schema == 3 || c.outcome.package != super::PackageState::ProviderCurrentPresent)
-            && (i.schema != 3 || c.outcome.package != super::PackageState::ExactPresent)
-            && (i.schema == 3 || c.observed_versions.is_empty())
+            && (i.schema >= 3 || c.outcome.package != super::PackageState::ProviderCurrentPresent)
+            && (i.schema < 3 || c.outcome.package != super::PackageState::ExactPresent)
+            && (i.schema >= 3 || c.observed_versions.is_empty())
             && c.observed_versions.len() <= 256
             && c.observed_versions
                 .iter()

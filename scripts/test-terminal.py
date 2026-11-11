@@ -686,7 +686,7 @@ def brew_install_workflows(binary, base, env):
         directory.mkdir(mode=0o700)
     (repo / '.git').mkdir()
     manifest = repo / 'dort.toml'
-    manifest.write_text("schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='brew',package='demo'}\n")
+    manifest.write_text("schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='brew',package='demo'}\nubuntu={provider='mise',package='demo',version='1.2.3'}\n")
     prefix = home / 'prefix'
     for name in ('Homebrew/bin', 'Homebrew/Library', 'Cellar', 'bin', 'etc', 'include', 'lib', 'opt', 'sbin', 'share', 'var/homebrew'):
         (prefix / name).mkdir(parents=True, exist_ok=True)
@@ -754,7 +754,8 @@ esac
     else:
         print('SKIP Homebrew installation PTY: declarations are macOS-only; explicit macOS fake-host core/TUI tests remain portable')
     damaged = home / '.local/state/dort/tools-attempts' / ('0' * 64)
-    damaged.mkdir(mode=0o700, parents=True)
+    damaged.parent.mkdir(mode=0o700, exist_ok=True)
+    damaged.mkdir(mode=0o700)
     before = (home / 'calls').read_text() if (home / 'calls').exists() else ''
     with Session([binary, 'tui'], scoped, (40, 120)) as session:
         session.wait(b'loaded.')
@@ -780,6 +781,101 @@ esac
         session.finish()
     assert (home / 'calls').read_text() == before + '--prefix\ninfo --json=v2 --installed --formula\n'
     print('PASS damaged Homebrew attempt retained three-field scope and compact fresh closure')
+
+
+def apt_install_workflows(binary, base, env):
+    home, repo, bin_dir, programs = (base / name for name in ('apt-home', 'apt-repo', 'apt-bin', 'apt-programs'))
+    for directory in (home, repo, bin_dir, programs):
+        directory.mkdir(mode=0o700)
+    (repo / '.git').mkdir()
+    manifest = repo / 'dort.toml'
+    manifest.write_text("schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nubuntu={provider='apt',package='demo'}\nmacos={provider='mise',package='demo',version='1.2.3'}\n")
+    git = bin_dir / 'git'
+    git.write_text('#!/bin/sh\nfor arg do\ncase "$arg" in\nconfig) exit 1;;\nrev-parse) pwd -P; exit 0;;\nstatus) printf "# branch.head main\\000"; exit 0;;\nesac\ndone\nexit 94\n')
+    git.chmod(0o700)
+    bodies = {
+        'dpkg-query': 'printf D >> "$HOME/calls"; if [ -f "$HOME/installed" ]; then printf "demo\\t2.7\\tinstalled\\tok\\n"; fi',
+        'apt-cache': 'printf C >> "$HOME/calls"; printf "demo:\\n  Installed: (none)\\n  Candidate: 2.7\\n"',
+        'sudo': 'printf S >> "$HOME/calls"; shift 6; "$@"',
+        'apt-get': '''printf I >> "$HOME/calls"
+printf started > "$HOME/started"
+printf PRIVATE_APT_OUTPUT; printf PRIVATE_APT_ERROR >&2
+n=0
+while [ ! -f "$HOME/release" ] && [ "$n" -lt 10000000 ]; do n=$((n+1)); done
+printf installed > "$HOME/installed"''',
+    }
+    for name, body in bodies.items():
+        program = programs / name
+        program.write_text('#!/bin/sh\n' + body + '\n')
+        program.chmod(0o700)
+    scoped = dict(env, HOME=str(home), PATH=str(bin_dir), XDG_CONFIG_HOME=str(home / '.config'),
+                  XDG_STATE_HOME=str(home / '.local/state'))
+    subprocess.run([binary, '--json', '--yes', 'init', str(repo)], env=scoped,
+                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    if sys.platform == 'linux':
+        with Session([binary, 'tui'], scoped, (40, 120)) as session:
+            session.wait(b'loaded.')
+            session.send(b'\x1b[D')
+            session.wait(b'apt / dpkg packages')
+            session.click_label('apt / dpkg packages')
+            session.wait(b'Trusted executable')
+            session.send(str(programs / 'dpkg-query').encode() + b'\t\x15' + str(bin_dir).encode() + b'\t\r')
+            session.wait(b'Run query')
+            assert not (home / 'calls').exists(), 'APT review executed a query'
+            session.send(b'\r')
+            session.wait(b'no installed packages reported')
+            session.send(b'p' + str(manifest).encode() + b'\t' + str(bin_dir).encode() + b'\t\t\r')
+            session.wait(b'Space chooses')
+            session.send(b' \t\r')
+            session.wait(b'Review root-risk APT install')
+            before = (home / 'calls').read_text()
+            session.send(b'i')
+            session.wait(b'ROOT RISK')
+            assert (home / 'calls').read_text() == before
+            session.send(b'a')
+            session.wait(b'Trusted sudo')
+            session.send(b'\r')
+            session.wait(b'Install with root risk')
+            session.resize((14, 48))
+            session.wait(b'CAN EXECUTE')
+            session.send(b'\r')
+            session.wait(b'Installing package')
+            session.send(b'\x03')
+            session.wait(b'waiting for worker')
+            (home / 'release').write_text('fixture')
+            session.finish()
+            assert b'PRIVATE_APT' not in session.data
+        assert (home / 'installed').exists()
+        print('PASS APT root-risk review, retained explicit programs and joined Ctrl-C (fake nonprivileged supervisor)')
+    else:
+        print('SKIP APT installation PTY: declarations are Ubuntu-only; portable core/TUI use explicit Ubuntu fake-host contexts')
+    damaged = home / '.local/state/dort/tools-attempts' / ('0' * 64)
+    damaged.parent.mkdir(mode=0o700, exist_ok=True)
+    damaged.mkdir(mode=0o700)
+    before = (home / 'calls').read_text() if (home / 'calls').exists() else ''
+    with Session([binary, 'tui'], scoped, (40, 120)) as session:
+        session.wait(b'loaded.')
+        session.navigate('Tools', 'Installation attempts [i]')
+        session.wait(b'UNRESOLVED')
+        session.send(b'c')
+        session.wait(b'Trusted mise executable')
+        for provider, next_label in (('mise', b'Trusted Node'), ('npm', b'Trusted Homebrew'), ('brew', b'Trusted dpkg-query')):
+            session.click_label('Provider: ' + provider)
+            session.wait(next_label)
+        session.click_label('Trusted dpkg-query')
+        for value in (programs / 'dpkg-query', bin_dir):
+            session.send(b'\x15' + str(value).encode() + b'\t')
+        session.send(b'\r')
+        session.wait(b'Inspect and close attempt')
+        assert ((home / 'calls').read_text() if (home / 'calls').exists() else '') == before
+        session.resize((14, 48))
+        session.wait(b'Inspect and close attempt')
+        session.send(b'\r')
+        session.wait(b'Explicitly closed')
+        session.send(b'\x1bq')
+        session.finish()
+    assert (home / 'calls').read_text() == before + 'D'
+    print('PASS damaged APT closure uses only retained dpkg/PATH fields, never sudo authentication')
 
 
 def run():
@@ -812,6 +908,7 @@ def run():
         tool_install_workflows(binary, base, env)
         npm_install_workflows(binary, base, env)
         brew_install_workflows(binary, base, env)
+        apt_install_workflows(binary, base, env)
         tools_reconciliation_workflows(binary, base, env)
         tool_declaration_workflows(binary, base, env)
 

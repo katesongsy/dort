@@ -230,6 +230,8 @@ fn damaged_brew_closure_requests_only_executable_path_and_prefix_with_retained_d
         }
     }
     app.tools_view.installation.focus = 4;
+    key(&mut app, KeyCode::Enter); // apt
+    app.tools_view.installation.focus = 3;
     key(&mut app, KeyCode::Enter); // mise
     app.tools_view.installation.focus = 3;
     key(&mut app, KeyCode::Enter); // npm

@@ -12,6 +12,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, path::PathBuf};
 
+pub mod apt;
 mod attempts;
 pub mod brew;
 mod closure;
@@ -58,12 +59,17 @@ pub struct Scope {
     /// Schema 3 only. Provider-current selection is not an exact pin.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brew: Option<brew::Scope>,
+    /// Schema 4: root-native provider-current installation with sudo supervision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apt: Option<apt::Scope>,
 }
 #[derive(Serialize)]
 pub struct Review<'a> {
     pub operation: &'static str,
     pub scope: &'a Scope,
     pub arguments: Vec<String>,
+    /// The actual installer; APT inventory uses dpkg-query, not this program.
+    pub installer: &'a std::path::Path,
     pub fresh_inspections: Vec<inspection::Description>,
     pub timeout_seconds: u64,
     pub warning: &'static str,
@@ -82,6 +88,10 @@ struct Sources {
     brew: Option<brew::Sources>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     brew_probe: Option<brew::Probe>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    apt: Option<apt::Sources>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    apt_probe: Option<apt::Probe>,
 }
 pub struct Preview {
     request: Request,
@@ -99,7 +109,23 @@ impl Preview {
             operation: "Freshly inspect the displayed scopes, conditionally install this still-missing package, then inspect again. No intentional other top-level upgrade request.",
             scope: &self.scope,
             arguments: arguments(&self.scope),
-            fresh_inspections: if let Some(brew) = &self.scope.brew {
+            installer: self
+                .scope
+                .apt
+                .as_ref()
+                .map(|a| a.sudo.as_path())
+                .unwrap_or(&self.scope.executable),
+            fresh_inspections: if let Some(apt) = &self.scope.apt {
+                apt.catalogs
+                    .iter()
+                    .map(|c| {
+                        c.preview(&self.scope.home)
+                            .expect("validated catalog")
+                            .description()
+                            .clone()
+                    })
+                    .collect()
+            } else if let Some(brew) = &self.scope.brew {
                 brew.catalogs
                     .iter()
                     .map(|c| {
@@ -132,14 +158,19 @@ impl Preview {
                     .clone(),
                 ]
             },
-            fresh_probes: self
-                .scope
-                .brew
-                .as_ref()
-                .map(|_| brew::probe_arguments(&self.scope.package))
-                .unwrap_or_default(),
+            fresh_probes: if self.scope.apt.is_some() {
+                vec![vec!["policy".into(), self.scope.package.clone()]]
+            } else {
+                self.scope
+                    .brew
+                    .as_ref()
+                    .map(|_| brew::probe_arguments(&self.scope.package))
+                    .unwrap_or_default()
+            },
             timeout_seconds: TIMEOUT_SECONDS,
-            warning: if self.scope.brew.is_some() {
+            warning: if self.scope.apt.is_some() {
+                apt::WARNING
+            } else if self.scope.brew.is_some() {
                 brew::WARNING
             } else if self.scope.npm.is_some() {
                 npm::WARNING
@@ -202,6 +233,8 @@ pub enum Event {
     FreshInspection,
     IntentDurable,
     Installing,
+    /// Trusted privileged supervisor has not exited by the requested deadline.
+    SupervisionWaiting,
     PostInspection,
     OutcomeDurable,
 }
@@ -209,6 +242,9 @@ fn invalid(message: &'static str) -> Error {
     Error::Invalid(message.into())
 }
 fn arguments(scope: &Scope) -> Vec<String> {
+    if scope.apt.is_some() {
+        return apt::arguments(scope);
+    }
     if scope.brew.is_some() {
         return brew::arguments(&scope.package);
     }
@@ -249,6 +285,7 @@ fn sources(
     request: &Request,
     npm: Option<&npm::Scope>,
     brew: Option<&brew::Scope>,
+    apt: Option<&apt::Scope>,
 ) -> Result<(Manifest, Scope, Sources)> {
     let (local, local_config) = LocalConfig::load_bound(host)?;
     let repository_id = local
@@ -278,7 +315,9 @@ fn sources(
         .get(&host.platform)
         .filter(|s| {
             s.provider
-                == if brew.is_some() {
+                == if apt.is_some() {
+                    Provider::Apt
+                } else if brew.is_some() {
                     Provider::Brew
                 } else if npm.is_some() {
                     Provider::Npm
@@ -289,15 +328,16 @@ fn sources(
         .ok_or_else(|| invalid("unsupported installation provider"))?;
     let policy = VersionPolicy::parse(spec.provider, spec.version.as_deref())
         .map_err(|_| invalid("unsupported installation policy"))?;
-    let version = match (&policy, brew) {
-        (VersionPolicy::ProviderDefault {}, Some(b)) if b.policy == policy => {
+    let current_policy = apt.map(|a| &a.policy).or_else(|| brew.map(|b| &b.policy));
+    let version = match (&policy, current_policy) {
+        (VersionPolicy::ProviderDefault {}, Some(p)) if p == &policy => {
             "provider_default".to_owned()
         }
-        (VersionPolicy::Latest {}, Some(b)) if b.policy == policy => "latest".to_owned(),
+        (VersionPolicy::Latest {}, Some(p)) if p == &policy => "latest".to_owned(),
         (VersionPolicy::Exact { version }, None) => version.clone(),
         _ => {
             return Err(invalid(
-                "mise/npm require exact versions; brew requires provider-current policy",
+                "mise/npm require exact versions; brew/apt require provider-current policy",
             ));
         }
     };
@@ -330,6 +370,14 @@ fn sources(
             request.search_dirs.clone(),
         )
         .map_err(|_| invalid("invalid explicit npm installation binding"))?;
+    } else if apt.is_some() {
+        inspection::Preview::new(
+            inspection::Query::DpkgPackages,
+            request.executable.clone(),
+            host.home.clone(),
+            request.search_dirs.clone(),
+        )
+        .map_err(|_| invalid("invalid explicit dpkg scope"))?;
     } else if brew.is_some() {
         inspection::Preview::new(
             inspection::Query::BrewFormulae,
@@ -370,6 +418,7 @@ fn sources(
         bound_tools: request.bound_tools.clone(),
         npm: npm.cloned(),
         brew: brew.cloned(),
+        apt: apt.cloned(),
     };
     if !attempts::valid_scope(&scope) {
         return Err(invalid("installation scope exceeds supported bounds"));
@@ -380,6 +429,12 @@ fn sources(
         executable,
         host_sha256: journal::digest(journal::encode(host)?.as_bytes()),
         brew_probe: None,
+        apt_probe: None,
+        apt: if scope.apt.is_some() {
+            Some(apt::sources(&scope)?)
+        } else {
+            None
+        },
         brew: if scope.brew.is_some() {
             Some(brew::sources(&scope)?)
         } else {
@@ -406,7 +461,7 @@ pub fn prepare(
     request: Request,
     selected: &inspection::Report,
 ) -> Result<Preview> {
-    let (manifest, scope, sources) = sources(host, &request, None, None)?;
+    let (manifest, scope, sources) = sources(host, &request, None, None, None)?;
     bounded_metadata(&scope, &sources)?;
     let r = evaluate(host, &manifest, &scope, selected)?;
     if r.action != planning::PackageAction::ReviewMissingPackage || !r.blockers.is_empty() {
@@ -442,7 +497,9 @@ fn evaluate_catalogs(
     reports: &[&inspection::Report],
 ) -> Result<planning::Row> {
     let binary_report = binaries::observe(manifest, &scope.profiles, &scope.tool_search_dirs)?;
-    let catalogs = if let Some(brew) = &scope.brew {
+    let catalogs = if let Some(apt) = &scope.apt {
+        apt::catalogs(scope, apt, reports)?
+    } else if let Some(brew) = &scope.brew {
         brew::catalogs(scope, brew, reports)?
     } else if let Some(npm) = &scope.npm {
         npm::catalogs(scope, npm, reports)?
@@ -483,7 +540,7 @@ fn observe(
 ) -> (PackageState, BinaryState, Vec<String>) {
     match evaluate_catalogs(host, manifest, scope, reports) {
         Ok(row) => {
-            let versions = if scope.brew.is_some() {
+            let versions = if scope.brew.is_some() || scope.apt.is_some() {
                 row_versions(&row)
             } else {
                 Vec::new()
@@ -494,7 +551,7 @@ fn observe(
                         .iter()
                         .any(|v| v.policy_match == VersionMatch::Satisfied) =>
                 {
-                    if scope.brew.is_some() {
+                    if scope.brew.is_some() || scope.apt.is_some() {
                         PackageState::ProviderCurrentPresent
                     } else {
                         PackageState::ExactPresent
@@ -521,12 +578,13 @@ fn observe(
 }
 fn collect(host: &HostContext, old: &Preview) -> Result<Vec<inspection::Report>> {
     let (manifest, scope, _) = revalidate(host, old)?;
-    if let Some(catalogs) = scope
-        .brew
-        .as_ref()
-        .map(|b| &b.catalogs)
-        .or_else(|| scope.npm.as_ref().map(|n| &n.catalogs))
-    {
+    if let Some(catalogs) = scope.apt.as_ref().map(|a| &a.catalogs).or_else(|| {
+        scope
+            .brew
+            .as_ref()
+            .map(|b| &b.catalogs)
+            .or_else(|| scope.npm.as_ref().map(|n| &n.catalogs))
+    }) {
         catalogs
             .iter()
             .map(|c| {
@@ -555,12 +613,18 @@ fn revalidate(host: &HostContext, old: &Preview) -> Result<(Manifest, Scope, Sou
         &old.request,
         old.scope.npm.as_ref(),
         old.scope.brew.as_ref(),
+        old.scope.apt.as_ref(),
     )?;
     if journal::encode(&scope)? != journal::encode(&old.scope)?
         || fresh.host_sha256 != old.sources.host_sha256
         || !same_source(&fresh.manifest, &old.sources.manifest)
         || !same_source(&fresh.local_config, &old.sources.local_config)
         || !same_source(&fresh.executable, &old.sources.executable)
+        || match (&fresh.apt, &old.sources.apt) {
+            (Some(a), Some(b)) => !apt::same(a, b),
+            (None, None) => false,
+            _ => true,
+        }
         || match (&fresh.brew, &old.sources.brew) {
             (Some(a), Some(b)) => !brew::same(a, b),
             (None, None) => false,
@@ -609,15 +673,20 @@ pub fn execute(
         ));
     }
     if row.action == planning::PackageAction::NoChange {
+        let observed_versions = if scope.apt.is_some() {
+            row_versions(&row)
+        } else {
+            brew_probe
+                .as_ref()
+                .map(|p| p.installed_versions.clone())
+                .unwrap_or_default()
+        };
         return Ok(Report {
             scope,
             attempt_id: None,
             no_op: true,
             outcome: None,
-            observed_versions: brew_probe
-                .as_ref()
-                .map(|p| p.installed_versions.clone())
-                .unwrap_or_default(),
+            observed_versions,
             possible_partial_effects: false,
             readiness_verified: false,
         });
@@ -627,6 +696,11 @@ pub fn execute(
             "fresh inspection refused installation; inspect current scope and review again",
         ));
     }
+    fresh.apt_probe = if scope.apt.is_some() {
+        Some(apt::probe(&scope, || revalidate(host, &old).map(|_| ()))?)
+    } else {
+        None
+    };
     fresh.brew_probe = brew_probe;
     bounded_metadata(&scope, &fresh)?;
     let attempt = attempts::begin(host, lock, scope.clone(), fresh)?;
@@ -658,7 +732,15 @@ pub fn execute(
             "binary or prerequisite scope changed before spawn; inspect the pending attempt",
         ));
     }
-    let process = process::run(&scope, std::time::Duration::from_secs(TIMEOUT_SECONDS));
+    let process = if scope.apt.is_some() {
+        apt::run(
+            &scope,
+            std::time::Duration::from_secs(TIMEOUT_SECONDS),
+            || observer(Event::SupervisionWaiting),
+        )
+    } else {
+        process::run(&scope, std::time::Duration::from_secs(TIMEOUT_SECONDS))
+    };
     observer(Event::PostInspection);
     let (mut package, mut binary, mut observed_versions) = if revalidate(host, &old).is_ok() {
         match collect(host, &old) {
