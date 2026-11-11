@@ -18,13 +18,20 @@ pub struct Request {
     bindings: BTreeMap<String, String>,
     tool: String,
     snapshots: Vec<Snapshot>,
+    brew_prefix: Option<std::path::PathBuf>,
 }
 pub fn eligible(row: &Row) -> bool {
     row.action == PackageAction::ReviewMissingPackage
         && row.blockers.is_empty()
         && row.declaration.as_ref().is_some_and(|d| {
-            matches!(d.provider, Provider::Mise | Provider::Npm)
-                && matches!(d.policy, VersionPolicy::Exact { .. })
+            (matches!(d.provider, Provider::Mise | Provider::Npm)
+                && matches!(d.policy, VersionPolicy::Exact { .. }))
+                || (d.provider == Provider::Brew
+                    && install::brew::formula(&d.package)
+                    && matches!(
+                        d.policy,
+                        VersionPolicy::ProviderDefault {} | VersionPolicy::Latest {}
+                    ))
         })
 }
 fn invalid(message: &'static str) -> Error {
@@ -60,13 +67,31 @@ pub fn profiles(
     Ok(selected)
 }
 impl Request {
+    pub fn brew_prefix(&self) -> Option<&std::path::Path> {
+        self.brew_prefix.as_deref()
+    }
+    pub fn set_brew_prefix(&mut self, prefix: std::path::PathBuf) {
+        self.brew_prefix = Some(prefix);
+    }
+    pub fn brew_executable(&self) -> Option<&std::path::Path> {
+        let id = self.bindings.get(&self.tool)?;
+        let d = &self
+            .snapshots
+            .iter()
+            .find(|s| &s.id == id)?
+            .report
+            .provider
+            .description;
+        (d.query == dort_core::tools::inspection::Query::BrewFormulae)
+            .then_some(d.executable.as_path())
+    }
     pub fn scope(&self) -> &Scope {
         &self.scope
     }
     pub fn selected(report: &Report, tool: &str, snapshots: &[Snapshot]) -> Result<Self> {
         if !report.plan.rows.iter().any(|r| r.id == tool && eligible(r)) {
             return Err(invalid(
-                "select an eligible missing exact mise or npm package",
+                "select an eligible missing mise/npm exact package or canonical core formula",
             ));
         }
         let mut bindings = report.bindings.clone();
@@ -76,7 +101,7 @@ impl Request {
             .iter()
             .find(|r| r.id == tool)
             .and_then(|r| r.declaration.as_ref())
-            .is_some_and(|d| d.provider == Provider::Npm)
+            .is_some_and(|d| matches!(d.provider, Provider::Npm | Provider::Brew))
         {
             let mut needed = std::collections::BTreeSet::new();
             let mut pending = vec![tool.to_owned()];
@@ -100,8 +125,18 @@ impl Request {
         }
         Ok(Self {
             scope: report.scope.clone(),
-            bindings,
+            bindings: bindings.clone(),
             tool: tool.into(),
+            brew_prefix: bindings
+                .get(tool)
+                .and_then(|id| snapshots.iter().find(|s| &s.id == id))
+                .filter(|s| {
+                    s.report.provider.description.query
+                        == dort_core::tools::inspection::Query::BrewFormulae
+                })
+                .and_then(|s| {
+                    install::brew::prefix_hint(&s.report.provider.description.executable)
+                }),
             snapshots: snapshots.to_vec(),
         })
     }
@@ -153,8 +188,10 @@ impl Request {
                 .map(|(tool, _)| tool.clone())
                 .collect(),
         };
-        let preview = if let Some(binding) = &description.npm_binding {
-            self.prepare_npm(host, request, binding.clone())?
+        let preview = if description.query == dort_core::tools::inspection::Query::BrewFormulae {
+            self.prepare_catalogs(host, request, None)?
+        } else if let Some(binding) = &description.npm_binding {
+            self.prepare_catalogs(host, request, Some(binding.clone()))?
         } else {
             install::prepare(host, request, &snapshot.report.provider)?
         };
@@ -167,11 +204,11 @@ impl Request {
         }
         Ok(preview)
     }
-    fn prepare_npm(
+    fn prepare_catalogs(
         &self,
         host: &HostContext,
         mut request: install::Request,
-        binding: dort_core::tools::inspection::NpmBinding,
+        binding: Option<dort_core::tools::inspection::NpmBinding>,
     ) -> Result<install::Preview> {
         let (_, entry) = dort_core::observation::read_manifest(&self.scope.manifest)
             .map_err(|_| invalid("installation manifest unavailable; contents withheld"))?;
@@ -212,12 +249,45 @@ impl Request {
             reports.push(&snapshot.report.provider);
         }
         request.bound_tools = self.bindings.keys().cloned().collect();
-        let preview = install::npm::prepare(
-            host,
-            request,
-            install::npm::Scope { binding, catalogs },
-            &reports,
-        )?;
+        let preview = if let Some(binding) = binding {
+            install::npm::prepare(
+                host,
+                request,
+                install::npm::Scope { binding, catalogs },
+                &reports,
+            )?
+        } else {
+            let prefix = self.brew_prefix.clone().ok_or_else(|| {
+                invalid("select the expected physical Homebrew prefix in Advanced")
+            })?;
+            let (manifest, _) = dort_core::observation::read_manifest(&self.scope.manifest)?;
+            let spec = manifest
+                .tools
+                .iter()
+                .find(|t| t.id == self.tool)
+                .and_then(|t| t.install.get(&host.platform))
+                .ok_or_else(|| invalid("Homebrew declaration changed"))?;
+            let policy = VersionPolicy::parse(spec.provider, spec.version.as_deref())
+                .map_err(|_| invalid("unsupported Homebrew policy"))?;
+            let repository = request
+                .executable
+                .parent()
+                .and_then(std::path::Path::parent)
+                .ok_or_else(|| invalid("unsupported physical Homebrew script layout"))?
+                .to_owned();
+            install::brew::prepare(
+                host,
+                request,
+                install::brew::Scope {
+                    cellar: prefix.join("Cellar"),
+                    prefix,
+                    repository,
+                    policy,
+                    catalogs,
+                },
+                &reports,
+            )?
+        };
         if !preview.manifest_matches(&entry) {
             return Err(invalid("installation manifest changed during preparation"));
         }
@@ -229,6 +299,10 @@ pub fn succeeded(report: &install::Report) -> bool {
     report.no_op
         || report.outcome.is_some_and(|o| {
             o.process == install::ProcessOutcome::Success
-                && o.package == install::PackageState::ExactPresent
+                && matches!(
+                    o.package,
+                    install::PackageState::ExactPresent
+                        | install::PackageState::ProviderCurrentPresent
+                )
         })
 }

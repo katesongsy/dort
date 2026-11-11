@@ -319,7 +319,11 @@ impl Approval {
 
 // Private raw payloads never implement Debug/Serialize or escape on errors. Concurrent,
 // nonblocking drains bound combined stdout/stderr even if a descendant holds a pipe.
-fn run_bounded(mut command: Command, limit: usize, timeout: Duration) -> Result<Vec<u8>, Failure> {
+pub(crate) fn run_bounded(
+    mut command: Command,
+    limit: usize,
+    timeout: Duration,
+) -> Result<Vec<u8>, Failure> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

@@ -73,10 +73,12 @@ impl State {
         let Some(result) = &self.result else {
             return false;
         };
-        let npm = row
-            .declaration
-            .as_ref()
-            .is_some_and(|d| d.provider == dort_core::model::Provider::Npm);
+        let cross_catalog = row.declaration.as_ref().is_some_and(|d| {
+            matches!(
+                d.provider,
+                dort_core::model::Provider::Npm | dort_core::model::Provider::Brew
+            )
+        });
         let mut pending = vec![row.id.clone()];
         let mut checked = BTreeSet::new();
         while let Some(tool) = pending.pop() {
@@ -90,7 +92,7 @@ impl State {
             {
                 return false;
             }
-            if npm {
+            if cross_catalog {
                 let Some(row) = result.plan.rows.iter().find(|r| r.id == tool) else {
                     return false;
                 };
@@ -446,6 +448,14 @@ impl State {
                         .is_some_and(|d| d.provider == dort_core::model::Provider::Npm)
                     {
                         "Review exact npm install"
+                    } else if report
+                        .plan
+                        .rows
+                        .get(self.selected)
+                        .and_then(|r| r.declaration.as_ref())
+                        .is_some_and(|d| d.provider == dort_core::model::Provider::Brew)
+                    {
+                        "Review core formula install"
                     } else {
                         "Review exact mise install"
                     },

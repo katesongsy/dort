@@ -308,7 +308,7 @@ impl App {
                         == super::tools_install::Mode::LoadingInstall
                 {
                     self.tools_view.installation.reviewed(*preview);
-                    self.status = "Review one exact mise install. Enter confirms; d shows full scope and argv. No queries ran for this review.".into();
+                    self.status = "Review one package install. Enter confirms; d shows scope, probes and argv. No queries ran for this review.".into();
                 }
             }
             Ok(Output::ToolInstalled(result)) => {

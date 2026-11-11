@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, path::PathBuf};
 
 mod attempts;
+pub mod brew;
 mod closure;
 pub mod npm;
 mod process;
@@ -54,6 +55,9 @@ pub struct Scope {
     /// Absent in schema-1 mise records; never filled by migration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub npm: Option<npm::Scope>,
+    /// Schema 3 only. Provider-current selection is not an exact pin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brew: Option<brew::Scope>,
 }
 #[derive(Serialize)]
 pub struct Review<'a> {
@@ -63,6 +67,7 @@ pub struct Review<'a> {
     pub fresh_inspections: Vec<inspection::Description>,
     pub timeout_seconds: u64,
     pub warning: &'static str,
+    pub fresh_probes: Vec<Vec<String>>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -73,6 +78,10 @@ struct Sources {
     host_sha256: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     npm: Option<npm::Sources>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    brew: Option<brew::Sources>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    brew_probe: Option<brew::Probe>,
 }
 pub struct Preview {
     request: Request,
@@ -87,10 +96,20 @@ impl Preview {
     }
     pub fn review(&self) -> Review<'_> {
         Review {
-            operation: "Freshly inspect the displayed catalogs, install only this still-missing exact version, then inspect again. No intentional other-package upgrade request.",
+            operation: "Freshly inspect the displayed scopes, conditionally install this still-missing package, then inspect again. No intentional other top-level upgrade request.",
             scope: &self.scope,
             arguments: arguments(&self.scope),
-            fresh_inspections: if let Some(npm) = &self.scope.npm {
+            fresh_inspections: if let Some(brew) = &self.scope.brew {
+                brew.catalogs
+                    .iter()
+                    .map(|c| {
+                        c.preview(&self.scope.home)
+                            .expect("validated catalog")
+                            .description()
+                            .clone()
+                    })
+                    .collect()
+            } else if let Some(npm) = &self.scope.npm {
                 npm.catalogs
                     .iter()
                     .map(|c| {
@@ -113,8 +132,16 @@ impl Preview {
                     .clone(),
                 ]
             },
+            fresh_probes: self
+                .scope
+                .brew
+                .as_ref()
+                .map(|_| brew::probe_arguments(&self.scope.package))
+                .unwrap_or_default(),
             timeout_seconds: TIMEOUT_SECONDS,
-            warning: if self.scope.npm.is_some() {
+            warning: if self.scope.brew.is_some() {
+                brew::WARNING
+            } else if self.scope.npm.is_some() {
                 npm::WARNING
             } else {
                 WARNING
@@ -139,6 +166,7 @@ pub enum ProcessOutcome {
 #[serde(rename_all = "snake_case")]
 pub enum PackageState {
     ExactPresent,
+    ProviderCurrentPresent,
     Absent,
     Conflict,
     Unavailable,
@@ -163,6 +191,8 @@ pub struct Report {
     pub attempt_id: Option<String>,
     pub no_op: bool,
     pub outcome: Option<Outcome>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub observed_versions: Vec<String>,
     pub possible_partial_effects: bool,
     pub readiness_verified: bool,
 }
@@ -179,6 +209,9 @@ fn invalid(message: &'static str) -> Error {
     Error::Invalid(message.into())
 }
 fn arguments(scope: &Scope) -> Vec<String> {
+    if scope.brew.is_some() {
+        return brew::arguments(&scope.package);
+    }
     if scope.npm.is_some() {
         return npm::arguments(scope);
     }
@@ -215,6 +248,7 @@ fn sources(
     host: &HostContext,
     request: &Request,
     npm: Option<&npm::Scope>,
+    brew: Option<&brew::Scope>,
 ) -> Result<(Manifest, Scope, Sources)> {
     let (local, local_config) = LocalConfig::load_bound(host)?;
     let repository_id = local
@@ -244,18 +278,28 @@ fn sources(
         .get(&host.platform)
         .filter(|s| {
             s.provider
-                == if npm.is_some() {
+                == if brew.is_some() {
+                    Provider::Brew
+                } else if npm.is_some() {
                     Provider::Npm
                 } else {
                     Provider::Mise
                 }
         })
-        .ok_or_else(|| invalid("only exact mise and npm installations are supported"))?;
-    let VersionPolicy::Exact { version } =
-        VersionPolicy::parse(spec.provider, spec.version.as_deref())
-            .map_err(|_| invalid("unsupported installation policy"))?
-    else {
-        return Err(invalid("installation requires an exact version"));
+        .ok_or_else(|| invalid("unsupported installation provider"))?;
+    let policy = VersionPolicy::parse(spec.provider, spec.version.as_deref())
+        .map_err(|_| invalid("unsupported installation policy"))?;
+    let version = match (&policy, brew) {
+        (VersionPolicy::ProviderDefault {}, Some(b)) if b.policy == policy => {
+            "provider_default".to_owned()
+        }
+        (VersionPolicy::Latest {}, Some(b)) if b.policy == policy => "latest".to_owned(),
+        (VersionPolicy::Exact { version }, None) => version.clone(),
+        _ => {
+            return Err(invalid(
+                "mise/npm require exact versions; brew requires provider-current policy",
+            ));
+        }
     };
     if request.bound_tools.is_empty()
         || request.bound_tools.len() > 256
@@ -286,6 +330,14 @@ fn sources(
             request.search_dirs.clone(),
         )
         .map_err(|_| invalid("invalid explicit npm installation binding"))?;
+    } else if brew.is_some() {
+        inspection::Preview::new(
+            inspection::Query::BrewFormulae,
+            request.executable.clone(),
+            host.home.clone(),
+            request.search_dirs.clone(),
+        )
+        .map_err(|_| invalid("invalid explicit Homebrew scope"))?;
     } else {
         query(host, request)?;
     }
@@ -317,6 +369,7 @@ fn sources(
         tool_search_dirs: request.tool_search_dirs.clone(),
         bound_tools: request.bound_tools.clone(),
         npm: npm.cloned(),
+        brew: brew.cloned(),
     };
     if !attempts::valid_scope(&scope) {
         return Err(invalid("installation scope exceeds supported bounds"));
@@ -326,6 +379,12 @@ fn sources(
         local_config,
         executable,
         host_sha256: journal::digest(journal::encode(host)?.as_bytes()),
+        brew_probe: None,
+        brew: if scope.brew.is_some() {
+            Some(brew::sources(&scope)?)
+        } else {
+            None
+        },
         npm: if scope.npm.is_some() {
             Some(npm::sources(&scope)?)
         } else {
@@ -347,7 +406,7 @@ pub fn prepare(
     request: Request,
     selected: &inspection::Report,
 ) -> Result<Preview> {
-    let (manifest, scope, sources) = sources(host, &request, None)?;
+    let (manifest, scope, sources) = sources(host, &request, None, None)?;
     bounded_metadata(&scope, &sources)?;
     let r = evaluate(host, &manifest, &scope, selected)?;
     if r.action != planning::PackageAction::ReviewMissingPackage || !r.blockers.is_empty() {
@@ -383,7 +442,9 @@ fn evaluate_catalogs(
     reports: &[&inspection::Report],
 ) -> Result<planning::Row> {
     let binary_report = binaries::observe(manifest, &scope.profiles, &scope.tool_search_dirs)?;
-    let catalogs = if let Some(npm) = &scope.npm {
+    let catalogs = if let Some(brew) = &scope.brew {
+        brew::catalogs(scope, brew, reports)?
+    } else if let Some(npm) = &scope.npm {
         npm::catalogs(scope, npm, reports)?
     } else {
         scope
@@ -406,21 +467,38 @@ fn evaluate_catalogs(
         .find(|r| r.id == scope.tool)
         .ok_or_else(|| invalid("selected installation row disappeared"))
 }
+fn row_versions(row: &planning::Row) -> Vec<String> {
+    match &row.package {
+        planning::PackageFinding::Present { versions } => {
+            versions.iter().map(|v| v.version.clone()).collect()
+        }
+        _ => Vec::new(),
+    }
+}
 fn observe(
     host: &HostContext,
     manifest: &Manifest,
     scope: &Scope,
     reports: &[&inspection::Report],
-) -> (PackageState, BinaryState) {
+) -> (PackageState, BinaryState, Vec<String>) {
     match evaluate_catalogs(host, manifest, scope, reports) {
         Ok(row) => {
+            let versions = if scope.brew.is_some() {
+                row_versions(&row)
+            } else {
+                Vec::new()
+            };
             let package = match row.package {
                 planning::PackageFinding::Present { versions }
                     if versions
                         .iter()
                         .any(|v| v.policy_match == VersionMatch::Satisfied) =>
                 {
-                    PackageState::ExactPresent
+                    if scope.brew.is_some() {
+                        PackageState::ProviderCurrentPresent
+                    } else {
+                        PackageState::ExactPresent
+                    }
                 }
                 planning::PackageFinding::Absent => PackageState::Absent,
                 planning::PackageFinding::Unavailable { .. }
@@ -432,15 +510,24 @@ fn observe(
                 planning::BinaryObservation::Candidates { .. } => BinaryState::Candidates,
                 _ => BinaryState::Unavailable,
             };
-            (package, binary)
+            (package, binary, versions)
         }
-        Err(_) => (PackageState::Unavailable, BinaryState::Unavailable),
+        Err(_) => (
+            PackageState::Unavailable,
+            BinaryState::Unavailable,
+            Vec::new(),
+        ),
     }
 }
 fn collect(host: &HostContext, old: &Preview) -> Result<Vec<inspection::Report>> {
     let (manifest, scope, _) = revalidate(host, old)?;
-    if let Some(npm) = &scope.npm {
-        npm.catalogs
+    if let Some(catalogs) = scope
+        .brew
+        .as_ref()
+        .map(|b| &b.catalogs)
+        .or_else(|| scope.npm.as_ref().map(|n| &n.catalogs))
+    {
+        catalogs
             .iter()
             .map(|c| {
                 revalidate(host, old)?;
@@ -463,12 +550,22 @@ fn collect(host: &HostContext, old: &Preview) -> Result<Vec<inspection::Report>>
     }
 }
 fn revalidate(host: &HostContext, old: &Preview) -> Result<(Manifest, Scope, Sources)> {
-    let (manifest, scope, fresh) = sources(host, &old.request, old.scope.npm.as_ref())?;
+    let (manifest, scope, fresh) = sources(
+        host,
+        &old.request,
+        old.scope.npm.as_ref(),
+        old.scope.brew.as_ref(),
+    )?;
     if journal::encode(&scope)? != journal::encode(&old.scope)?
         || fresh.host_sha256 != old.sources.host_sha256
         || !same_source(&fresh.manifest, &old.sources.manifest)
         || !same_source(&fresh.local_config, &old.sources.local_config)
         || !same_source(&fresh.executable, &old.sources.executable)
+        || match (&fresh.brew, &old.sources.brew) {
+            (Some(a), Some(b)) => !brew::same(a, b),
+            (None, None) => false,
+            _ => true,
+        }
         || match (&fresh.npm, &old.sources.npm) {
             (Some(a), Some(b)) => !npm::same(a, b),
             (None, None) => false,
@@ -493,18 +590,34 @@ pub fn execute(
     attempts::ensure_clear(host)?;
     let mut old = approval.0;
     observer(Event::FreshValidation);
-    let (manifest, scope, fresh) = revalidate(host, &old)?;
+    let (manifest, scope, mut fresh) = revalidate(host, &old)?;
     observer(Event::FreshInspection);
+    let brew_probe = if scope.brew.is_some() {
+        Some(brew::probe(&scope, || revalidate(host, &old).map(|_| ()))?)
+    } else {
+        None
+    };
     let before = collect(host, &old)?;
     let before_refs = before.iter().collect::<Vec<_>>();
     let row = evaluate_catalogs(host, &manifest, &scope, &before_refs)?;
     revalidate(host, &old)?;
+    if let Some(probe) = &brew_probe
+        && row_versions(&row) != probe.installed_versions
+    {
+        return Err(invalid(
+            "Homebrew target and installed catalog observations disagree; inspect again",
+        ));
+    }
     if row.action == planning::PackageAction::NoChange {
         return Ok(Report {
             scope,
             attempt_id: None,
             no_op: true,
             outcome: None,
+            observed_versions: brew_probe
+                .as_ref()
+                .map(|p| p.installed_versions.clone())
+                .unwrap_or_default(),
             possible_partial_effects: false,
             readiness_verified: false,
         });
@@ -514,6 +627,8 @@ pub fn execute(
             "fresh inspection refused installation; inspect current scope and review again",
         ));
     }
+    fresh.brew_probe = brew_probe;
+    bounded_metadata(&scope, &fresh)?;
     let attempt = attempts::begin(host, lock, scope.clone(), fresh)?;
     observer(Event::IntentDurable);
     // Fail closed if source bindings changed while intent was made durable.
@@ -545,25 +660,54 @@ pub fn execute(
     }
     let process = process::run(&scope, std::time::Duration::from_secs(TIMEOUT_SECONDS));
     observer(Event::PostInspection);
-    let (mut package, mut binary) = if revalidate(host, &old).is_ok() {
+    let (mut package, mut binary, mut observed_versions) = if revalidate(host, &old).is_ok() {
         match collect(host, &old) {
             Ok(after) => observe(host, &manifest, &scope, &after.iter().collect::<Vec<_>>()),
-            Err(_) => (PackageState::Unavailable, BinaryState::Unavailable),
+            Err(_) => (
+                PackageState::Unavailable,
+                BinaryState::Unavailable,
+                Vec::new(),
+            ),
         }
     } else {
         // Do not run a provider whose binding changed during installation.
-        (PackageState::Unavailable, BinaryState::Unavailable)
+        (
+            PackageState::Unavailable,
+            BinaryState::Unavailable,
+            Vec::new(),
+        )
     };
     if revalidate(host, &old).is_err() {
         package = PackageState::Unavailable;
         binary = BinaryState::Unavailable;
+        observed_versions.clear();
+    }
+    if scope.brew.is_some() && revalidate(host, &old).is_ok() {
+        match brew::formula_info(&scope) {
+            Ok((_, versions)) if revalidate(host, &old).is_ok() => {
+                let expected = if versions.is_empty() {
+                    PackageState::Absent
+                } else {
+                    PackageState::ProviderCurrentPresent
+                };
+                if package != expected || observed_versions != versions {
+                    package = PackageState::Unavailable;
+                    observed_versions.clear();
+                }
+            }
+            _ => {
+                package = PackageState::Unavailable;
+                binary = BinaryState::Unavailable;
+                observed_versions.clear();
+            }
+        }
     }
     let outcome = Outcome {
         process,
         package,
         binary,
     };
-    attempts::finish(host, lock, &attempt, outcome).map_err(|_| crate::Error::Invalid(format!(
+    attempts::finish(host, lock, &attempt, outcome, observed_versions.clone()).map_err(|_| crate::Error::Invalid(format!(
         "Tools attempt {} has no durable outcome; inspect and close it before retrying (possible partial effects)", attempt.id
     )))?;
     observer(Event::OutcomeDurable);
@@ -572,8 +716,12 @@ pub fn execute(
         attempt_id: Some(attempt.id),
         no_op: false,
         outcome: Some(outcome),
+        observed_versions,
         possible_partial_effects: process != ProcessOutcome::Success
-            || package != PackageState::ExactPresent,
+            || !matches!(
+                package,
+                PackageState::ExactPresent | PackageState::ProviderCurrentPresent
+            ),
         readiness_verified: false,
     })
 }

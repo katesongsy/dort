@@ -1,6 +1,6 @@
 # Non-executable install-command descriptions
 
-`tools::install_preview` adds inspectable command metadata to [pure package planning](tools-planning.md). This module does not run processes, observe files, read environment variables, resolve remote versions, write state or create approvals. The existing [reconciliation CLI/TUI](binary-reconciliation.md) displays these descriptions in computed rows; there is no executor accepting them. The separate [exact mise/npm capabilities](tool-installation.md) reconstructs independent opaque previews and does not dispatch these DTOs.
+`tools::install_preview` adds inspectable command metadata to [pure package planning](tools-planning.md). This module does not run processes, observe files, read environment variables, resolve remote versions, write state or create approvals. The existing [reconciliation CLI/TUI](binary-reconciliation.md) displays these descriptions in computed rows; there is no executor accepting them. The separate [bounded Tools capabilities](tool-installation.md) reconstruct independent opaque previews and does not dispatch these DTOs.
 
 ## Eligibility and authority
 
@@ -8,7 +8,7 @@ Only a `review_missing_package` row with reported absence, explicit missing bina
 
 Descriptions are serializable metadata, not deserializable approvals or executable capabilities. Each has `state: preview_only`, fixed executable/argument vectors, proposed cleared-environment controls, working directory `/`, unresolved/requested version selection, explicit effect warnings and `execution_authorized: false`. The selected inspection scope supplies the executable, HOME and **provider child search directories**; tool lookup directories are not substituted. No shell command string or clipboard handoff is generated.
 
-Provider version/support, global configuration, mutable package metadata, global absence, side-effect boundaries and actual installability have **not** been independently established. A preview is not a tested invocation or a claim of safe execution. The separate exact mise/npm install workflows have their own fresh-validation and persistence contract; it never executes these descriptions. No new journal, receipt, lock, installation/recovery/cancellation or trust-persistence contract follows from these descriptions.
+Provider version/support, global configuration, mutable package metadata, global absence, side-effect boundaries and actual installability have **not** been independently established. A preview is not a tested invocation or a claim of safe execution. The separate mise/npm/Homebrew install workflows have their own fresh-validation and persistence contracts; they never execute these descriptions. No new journal, receipt, lock, installation/recovery/cancellation or trust-persistence contract follows from these descriptions.
 
 ## Fixed descriptions
 
@@ -21,7 +21,7 @@ Provider version/support, global configuration, mutable package metadata, global
 
 The environment description uses explicit HOME/XDG paths, provider child PATH, C locale and no-color controls, not inherited credentials/Node options. Network/downloads are disclosed as potential installation effects; query-only offline settings are deliberately not misrepresented as an installation guarantee. No remote version is fetched to complete this metadata.
 
-All proposed installs disclose provider/package code, dependency changes (possibly upgrades), shared links/caches/data, partial failure and no automatic rollback. mise descriptions explicitly say activation is not requested, not that plugins cannot change configuration. Homebrew controls do not promise that no other installed tool changes; this unresolved native behavior must be addressed before an executor can satisfy Dort's no-automatic-upgrade contract, not silently treated as an exception. npm ignore-scripts is not proof of functional readiness or suppression of all trusted provider code.
+All proposed installs disclose provider/package code, dependency changes (possibly upgrades), shared links/caches/data, partial failure and no automatic rollback. mise descriptions explicitly say activation is not requested, not that plugins cannot change configuration. Homebrew controls do not promise that no other installed tool changes; the separate Homebrew capability explicitly approves native dependency upgrades/build code/link exposure, never an intentional other-top-level upgrade request. Its fixed guarded protocol is independent of these preview DTOs. npm ignore-scripts is not proof of functional readiness or suppression of all trusted provider code.
 
 ## Bounds and presentation
 

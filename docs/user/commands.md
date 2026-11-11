@@ -2,7 +2,7 @@
 
 [User guide](README.md) · [Getting started](getting-started.md)
 
-Checks, discovery, file inventory, plans, status, history and Git inspection are read-only and never run providers. Separate Tools inspection requires approval: provider configuration/plugins may execute code and caches/logs may change. Explicit mutation commands are experimental and require approval. Only the explicit exact mise/npm workflows below install packages. npm's native links may expose commands on PATH. No command configures runtime activation, intentionally upgrades other top-level tools, clones/syncs, stages, commits or pushes. Use `dort --help` and `dort <command> --help` for syntax.
+Checks, discovery, file inventory, plans, status, history and Git inspection are read-only and never run providers. Separate Tools inspection requires approval: provider configuration/plugins may execute code and caches/logs may change. Explicit mutation commands are experimental and require approval. Only the explicit mise/npm/Homebrew workflows below install packages. npm/Homebrew native links may expose commands on PATH; Homebrew build/dependency code can execute and dependencies may upgrade. No command configures runtime activation, intentionally upgrades other top-level tools, clones/syncs, stages, commits or pushes. Use `dort --help` and `dort <command> --help` for syntax.
 
 ## Global options
 
@@ -177,7 +177,7 @@ Remove `--dry-run` to execute after terminal confirmation (`inspect`), or use ex
 
 ## Snapshot reconciliation
 
-Tools can retain **multiple independently approved snapshots** for the session, then reconcile declarations against your explicit choices. Snapshots are provider claims, not ownership, trust or proof that a binary is ready. They are not saved across sessions. Reconciliation alone performs no package operation. Separate opt-in exact mise/npm install reviews are available for eligible missing rows; provider configuration/code risks still apply.
+Tools can retain **multiple independently approved snapshots** for the session, then reconcile declarations against your explicit choices. Snapshots are provider claims, not ownership, trust or proof that a binary is ready. They are not saved across sessions. Reconciliation alone performs no package operation. Separate opt-in mise/npm/Homebrew install reviews are available for eligible missing rows; provider configuration/code risks still apply.
 
 ### Interactive workflow
 
@@ -193,7 +193,7 @@ A package **no-op is not tool readiness**; binaries may still be missing/unverif
 
 ### Install-command descriptions — preview only
 
-For an eligible **Review only** missing-package row, full TUI details and CLI `reconciliation.plan.rows[].install_preview` show proposed executable/argv, cleared-environment controls, version selection and side-effect warnings. **Dort cannot run these descriptions.** The separate exact mise/npm workflows below reconstruct their own live previews; they never execute these descriptions. Regular reconciliation with `--yes` approves only inspection queries, not installation. No native install or install `--dry-run` operation is invoked to construct this metadata.
+For an eligible **Review only** missing-package row, full TUI details and CLI `reconciliation.plan.rows[].install_preview` show proposed executable/argv, cleared-environment controls, version selection and side-effect warnings. **Dort cannot run these descriptions.** The separate mise/npm/Homebrew workflows below reconstruct their own live previews; they never execute these descriptions. Regular reconciliation with `--yes` approves only inspection queries, not installation. No native install or install `--dry-run` operation is invoked to construct this metadata.
 
 Satisfied, ambiguous and blocked tools have no install command. Apt stays deferred: the selected dpkg-query path does not authorize inventing apt-get/sudo. Version defaults, prefixes and latest requests are unresolved native selections, not a reproducibility or availability guarantee. A bare mise default can select multiple globally configured versions; the description does not request activation and executes nothing. Homebrew controls do not guarantee that dependencies remain unchanged or unupgraded. npm descriptions use the selected Node/CLI/prefix and disable lifecycle scripts, which can leave packages unusable; provider code/configuration risks still apply. All native effects can include downloads, shared links/caches and partial failures without rollback.
 
@@ -221,7 +221,7 @@ Final JSON includes `snapshots` and `reconciliation` (scope, bindings, binary ob
 
 ## Exact mise installation
 
-Dort can install **one observed missing exact mise version** for a registered repository. The manifest must specify an exact version such as `1.2.3`, with clear prerequisites and no existing/unattributed binary in the separate lookup scope. Default/latest/prefix policies, Homebrew/apt writes, conflicting or unknown inventories, unmanaged binaries and blocked prerequisites are not installable. npm has a separate [exact-package workflow](#exact-npm-installation). No activation, force/reinstall, upgrade, uninstall or rollback is provided.
+Dort can install **one observed missing exact mise version** for a registered repository. The manifest must specify an exact version such as `1.2.3`, with clear prerequisites and no existing/unattributed binary in the separate lookup scope. Default/latest/prefix mise policies, apt writes, conflicting or unknown inventories, unmanaged binaries and blocked prerequisites are not installable. Homebrew has a separate provider-current workflow below. npm has a separate [exact-package workflow](#exact-npm-installation). No activation, force/reinstall, upgrade, uninstall or rollback is provided.
 
 **TUI:**
 
@@ -274,11 +274,32 @@ dort --dry-run tools reconcile --manifest /home/alex/dotfiles/dort.toml \
 
 Omit `--dry-run` for interactive collection and review, or explicitly add `--yes` for automation. JSON/nonterminal execution never prompts. The dry-run does not query, create parents/state/locks or establish eligibility. npm uses fixed public-registry, ignore-scripts, audit/fund/notifier/log controls and ignored user/global config; unsupported controls fail without a weaker fallback. Installer output is discarded.
 
-### Installation attempts and explicit closure
+## Homebrew core installation
+
+On macOS, Dort can install **one observed missing canonical Homebrew core formula** with an omitted or `latest` version policy. Use its unqualified canonical name, for example `jq`, not a tap-qualified name or alias. Versioned formula names are identities, not exact patch pins. Casks, aliases/renames, disabled/unknown formulae, HEAD, arbitrary options/URLs/files and privileged layouts are unsupported. Already matching installed claims are no-ops, never upgrade requests.
+
+**Native effects:** formula/build/resource/dependency code **can execute**. Dependencies can install or upgrade, and native links can expose commands on PATH. Skip-post-install skips post-install steps only, not all build code. This is not bottle-only, exact-pinned, atomic, a sandbox, a usability guarantee or isolation of other prefix entries. There is no rollback, PATH/runtime configuration, service operation, manager installation, explicit link/upgrade/cleanup or sudo fallback. Trusted Homebrew may contact endpoints and maintain its native caches/metadata.
+
+Select a physical trusted `REPOSITORY/bin/brew` and the expected native prefix. Supported layouts put the repository at `PREFIX` or `PREFIX/Homebrew`, and Cellar at `PREFIX/Cellar`. Required native write roots must already exist as safe owned directories; a non-writable root-owned `/usr/local` parent is acceptable only when its required write roots are already owned/writable by you. Unsafe, missing or mismatched layouts refuse; do not bypass them with sudo or permission changes. Dort does not create Homebrew layouts for you.
+
+**TUI:** collect the Homebrew inventory and any declared prerequisite inventories, load the registered manifest/profile scope and separate physical tool-search directories, and explicitly bind every necessary tool. On an eligible row, `i` / **Review core formula install** opens a process-free review. `a` edits the retained **Advanced prefix**; `d` shows full scope, fixed probes and arguments. Enter/click **Install core formula** once approves fresh help/layout/canonical-formula probes, necessary installed catalogs, conditional installation and post-observation. Unsupported advertised controls refuse; there is no weaker fallback. The ten-minute installer deadline can leave partial effects; q/Ctrl-C waits. Results report provider-current presence and observed versions, never exact presence or verified readiness. Before another install collect fresh catalogs and explicitly rebind them.
+
+**CLI:** this assumes a registered macOS manifest declaring `jq` with `provider='brew', package='jq'`, without blocked prerequisites. Replace the paths with your physical trusted paths. `--brew-prefix` deliberately overrides the metadata-only layout hint; it never changes an observed mismatch.
+
+```sh
+dort --dry-run tools reconcile --manifest /Users/alex/dotfiles/dort.toml \
+  --tool-search-dir /Users/alex/bin \
+  --scope '{"id":"brew","provider":"brew","executable":"/opt/homebrew/bin/brew","search_dirs":["/usr/bin","/bin"]}' \
+  --bind jq=brew --install-tool jq --brew-prefix /opt/homebrew
+```
+
+Dry-run runs no queries, creates no state and cannot invent absence. Remove `--dry-run` for separate inventory confirmation followed by the single install review, or use explicit `--yes` for automation. A query-only reconciliation never installs. Native installer arguments are fixed: `brew install --formula --no-ask --skip-post-install homebrew/core/FORMULA`. Fixed no-update/no-analytics/no-target-upgrade/no-dependent-check/no-cleanup controls are required; help and layout probes run only as part of this explicit installation approval, not normal inspection collection.
+
+## Installation attempts and explicit closure
 
 Tools → **Installation attempts** (`i` outside comparison) lists private, all-repository attempt metadata. Enter/`d` shows full IDs, scope and observed outcomes. An unresolved attempt blocks later Tools installs, not unrelated file workflows. Nothing is replayed, cleaned up or rolled back at startup.
 
-Select an unresolved row and press `c` or click **Review closure**. The preview uses the original trusted provider scope; missing/damaged scope opens retained provider/executable/child-PATH fields, plus Node/npm CLI/prefix for npm. Use the Provider control to choose npm or mise; each provider's draft is retained. Known attempts retain their original scope, without needing an unchanged current manifest. Review is process-free. One Enter/click approves a **fresh inventory query for that provider scope and closure of unchanged metadata only**. An unavailable query cannot close the attempt. Closure is not package repair, retry, readiness verification or proof of a successful install. Changed records require a fresh review.
+Select an unresolved row and press `c` or click **Review closure**. The preview uses the original trusted provider scope; missing/damaged scope opens retained provider/executable/child-PATH fields, plus Node/npm CLI/prefix for npm or the original prefix for Homebrew. Use the Provider control to cycle mise, npm and Homebrew; each provider's draft is retained. Known attempts retain their original scope, without needing an unchanged current manifest. Review is process-free. One Enter/click approves a **fresh inventory query for that provider scope and closure of unchanged metadata only**. Homebrew also verifies a fixed fresh prefix query against the displayed original prefix. An unavailable query cannot close the attempt. Closure is not package repair, retry, readiness verification or proof of a successful install. Changed records require a fresh review.
 
 ```sh
 dort tools attempts
@@ -293,6 +314,10 @@ dort tools close-attempt ATTEMPT_ID --provider npm \
   --executable /home/alex/runtimes/node/bin/node --search-dir /usr/bin \
   --npm-cli /home/alex/runtimes/node/lib/node_modules/npm/bin/npm-cli.js \
   --prefix /home/alex/.local/npm-global
+# Missing/damaged Homebrew scope:
+dort tools close-attempt ATTEMPT_ID --provider brew \
+  --executable /usr/local/Homebrew/bin/brew --search-dir /usr/bin \
+  --prefix /usr/local
 ```
 
 No literal confirmation phrase or ID must be retyped at confirmation. If attempt storage is unsafe or exhausted, Dort refuses rather than deleting records or silently treating unavailable metadata as empty.

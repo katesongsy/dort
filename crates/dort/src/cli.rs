@@ -77,7 +77,7 @@ enum Command {
         #[command(subcommand)]
         command: GitCommand,
     },
-    /// Inspect tools, compare declarations, or explicitly review one exact mise/npm install.
+    /// Inspect tools, compare declarations, or review one bounded package install.
     Tools {
         #[command(subcommand)]
         command: ToolsCommand,
@@ -214,11 +214,14 @@ enum ToolsCommand {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
-    /// Inspect explicit scopes and compare declarations; optionally review one exact mise/npm install.
+    /// Inspect scopes and declarations; optionally install one missing supported package.
     Reconcile {
-        /// Review and approve one still-missing exact mise/npm package after reconciliation.
+        /// Review one still-missing exact mise/npm package or provider-current core formula.
         #[arg(long)]
         install_tool: Option<String>,
+        /// Expected physical Homebrew prefix, only with --install-tool for brew.
+        #[arg(long, requires = "install_tool")]
+        brew_prefix: Option<PathBuf>,
         #[arg(long)]
         manifest: PathBuf,
         /// Explicit tool lookup directories, independent of provider child PATH.
@@ -281,6 +284,7 @@ enum ToolsCommand {
 enum InstallationProvider {
     Mise,
     Npm,
+    Brew,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -350,6 +354,7 @@ fn tools_reconcile(
     use std::collections::BTreeSet;
     let ToolsCommand::Reconcile {
         install_tool,
+        brew_prefix,
         manifest,
         tool_search_dirs,
         profiles,
@@ -389,19 +394,33 @@ fn tools_reconcile(
             &t.id == tool
                 && matches!(
                     t.provider,
-                    Some(dort_core::model::Provider::Mise | dort_core::model::Provider::Npm)
+                    Some(
+                        dort_core::model::Provider::Mise
+                            | dort_core::model::Provider::Npm
+                            | dort_core::model::Provider::Brew
+                    )
                 )
         })
     {
         return Err(Error::Invalid(
-            "installation must select an active mise or npm tool".into(),
+            "installation must select an active mise, npm or Homebrew tool".into(),
+        ));
+    }
+    if brew_prefix.is_some()
+        && !prepared.tools.iter().any(|t| {
+            Some(&t.id) == install_tool.as_ref()
+                && t.provider == Some(dort_core::model::Provider::Brew)
+        })
+    {
+        return Err(Error::Invalid(
+            "--brew-prefix is only for Homebrew installation".into(),
         ));
     }
     if cli.dry_run {
         print_git_json(
             &serde_json::json!({"reconciliation": &prepared.scope, "bindings": &bindings,
             "inspections": previews.iter().map(|(id, p)| serde_json::json!({"id":id,"review":p.review()})).collect::<Vec<_>>(),
-            "requested_install": install_tool, "installation_review": "Requires approved inventories first; this dry-run runs no queries or installs"}),
+            "requested_install": install_tool, "brew_prefix": brew_prefix, "installation_review": "Requires approved inventories first; this dry-run runs no queries or installs"}),
         )?;
         return Ok(ExitCode::SUCCESS);
     }
@@ -440,8 +459,17 @@ fn tools_reconcile(
         !report.binaries.available() || snapshots.iter().any(|s| !s.report.available());
     let blocked = report.plan.has_blockers();
     if let Some(tool) = install_tool {
-        let preview = crate::services::installation::Request::selected(&report, tool, &snapshots)?
-            .prepare(host)?;
+        let mut request =
+            crate::services::installation::Request::selected(&report, tool, &snapshots)?;
+        if let Some(prefix) = brew_prefix {
+            if request.brew_executable().is_none() {
+                return Err(Error::Invalid(
+                    "--brew-prefix is only for Homebrew installation".into(),
+                ));
+            }
+            request.set_brew_prefix(prefix.clone());
+        }
+        let preview = request.prepare(host)?;
         if !cli.json {
             print_git_json(&preview.review())?;
         }
@@ -548,9 +576,11 @@ fn tools_inspect(
                     .ok_or_else(|| Error::Invalid("npm fallback requires --prefix".into()))?,
             })
         } else {
-            if npm_cli.is_some() || prefix.is_some() {
+            if npm_cli.is_some()
+                || (prefix.is_some() && !matches!(provider, Some(InstallationProvider::Brew)))
+            {
                 return Err(Error::Invalid(
-                    "npm fallback requires --provider npm".into(),
+                    "--npm-cli needs --provider npm; --prefix needs npm or brew".into(),
                 ));
             }
             None
@@ -562,6 +592,13 @@ fn tools_inspect(
                 executable: executable.clone(),
                 search_dirs: search_dirs.clone(),
                 npm_binding,
+                brew_prefix: if matches!(provider, Some(InstallationProvider::Brew)) {
+                    Some(prefix.clone().ok_or_else(|| {
+                        Error::Invalid("Homebrew fallback requires --prefix".into())
+                    })?)
+                } else {
+                    None
+                },
             },
         )?;
         if cli.dry_run || !cli.json {

@@ -417,7 +417,7 @@ impl State {
                         }
                         None => {
                             self.notice = Some(
-                                "Select an eligible missing exact mise package with an explicit snapshot binding.",
+                                "Select an eligible missing package with explicit snapshot and prerequisite bindings.",
                             );
                             None
                         }

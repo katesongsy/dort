@@ -122,6 +122,7 @@ impl Fixture {
         let p = install::prepare_close(
             &self.home.host,
             install::CloseRequest {
+                brew_prefix: None,
                 id: id.into(),
                 npm_binding: None,
                 executable: None,
@@ -333,6 +334,7 @@ fn unresolved_attempt_blocks_only_tools_installs_and_closure_is_guarded_and_fres
     let p = install::prepare_close(
         &f.home.host,
         install::CloseRequest {
+            brew_prefix: None,
             id: id.clone(),
             npm_binding: None,
             executable: None,
@@ -349,6 +351,7 @@ fn unresolved_attempt_blocks_only_tools_installs_and_closure_is_guarded_and_fres
         install::prepare_close(
             &f.home.host,
             install::CloseRequest {
+                brew_prefix: None,
                 id: id.clone(),
                 npm_binding: None,
                 executable: None,
@@ -381,6 +384,7 @@ fn damaged_intent_needs_explicit_scope_and_changed_head_or_failed_query_cannot_c
         install::prepare_close(
             &f.home.host,
             install::CloseRequest {
+                brew_prefix: None,
                 id: id.clone(),
                 npm_binding: None,
                 executable: None,
@@ -390,6 +394,7 @@ fn damaged_intent_needs_explicit_scope_and_changed_head_or_failed_query_cannot_c
         .is_err()
     );
     let request = install::CloseRequest {
+        brew_prefix: None,
         id: id.clone(),
         npm_binding: None,
         executable: Some(f.executable.clone()),

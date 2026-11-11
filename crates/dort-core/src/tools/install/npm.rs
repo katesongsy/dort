@@ -100,7 +100,7 @@ pub fn prepare(
     npm: Scope,
     reports: &[&inspection::Report],
 ) -> Result<Preview> {
-    let (manifest, scope, sources) = super::sources(host, &request, Some(&npm))?;
+    let (manifest, scope, sources) = super::sources(host, &request, Some(&npm), None)?;
     // The durable intent budget applies before creation. Newly pinned parents
     // expand in-memory fingerprints, not the immutable persisted intent.
     super::bounded_metadata(&scope, &sources)?;
@@ -292,7 +292,7 @@ pub(super) fn sources(scope: &super::Scope) -> Result<Sources> {
         tool_directories,
     })
 }
-fn same_directory(a: &Entry, b: &Entry) -> bool {
+pub(super) fn same_directory(a: &Entry, b: &Entry) -> bool {
     a.path == b.path
         && a.kind == b.kind
         && match (&a.fingerprint, &b.fingerprint) {

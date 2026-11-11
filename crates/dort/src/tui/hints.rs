@@ -103,9 +103,19 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
             } else {
                 match app.tools_view.installation.mode {
                     Mode::Review | Mode::CloseReview => {
-                        keys.extend([("Enter", "Confirm once"), ("d", "Scope"), ("Esc", "Back")])
+                        keys.extend([("Enter", "Confirm once"), ("d", "Scope"), ("Esc", "Back")]);
+                        if app.tools_view.installation.mode == Mode::Review
+                            && app
+                                .tools_view
+                                .installation
+                                .scope
+                                .as_ref()
+                                .is_some_and(|s| s.brew.is_some())
+                        {
+                            keys.push(("a", "Prefix"));
+                        }
                     }
-                    Mode::CloseInputs => keys.extend([
+                    Mode::CloseInputs | Mode::PrefixInputs => keys.extend([
                         ("Tab", "Field"),
                         ("Enter", "Next / Review"),
                         ("Esc", "Back"),

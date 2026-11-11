@@ -26,6 +26,8 @@ pub struct Attempt {
     pub id: String,
     pub scope: Option<Scope>,
     pub outcome: Option<Outcome>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub observed_versions: Vec<String>,
     pub problem: Option<Problem>,
     pub unresolved: bool,
     pub explicitly_closed: bool,
@@ -47,6 +49,8 @@ struct Completed {
     id: String,
     intent_sha256: String,
     outcome: Outcome,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    observed_versions: Vec<String>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -56,10 +60,22 @@ pub(super) struct ProbeScope {
     pub search_dirs: Vec<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub npm_binding: Option<super::inspection::NpmBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brew_prefix: Option<PathBuf>,
 }
 impl ProbeScope {
     pub(super) fn preview(&self) -> Result<super::inspection::Preview> {
-        if let Some(b) = &self.npm_binding {
+        if let Some(prefix) = &self.brew_prefix {
+            if self.npm_binding.is_some() || !super::inspection::absolute(prefix) {
+                return Err(invalid("invalid Homebrew closure scope"));
+            }
+            super::inspection::Preview::new(
+                super::inspection::Query::BrewFormulae,
+                self.executable.clone(),
+                self.home.clone(),
+                self.search_dirs.clone(),
+            )
+        } else if let Some(b) = &self.npm_binding {
             if b.node != self.executable {
                 return Err(invalid("closure Node binding differs"));
             }
@@ -79,7 +95,13 @@ impl ProbeScope {
         .map_err(|_| invalid("invalid explicit Tools closure scope"))
     }
     fn schema(&self) -> u32 {
-        if self.npm_binding.is_some() { 2 } else { 1 }
+        if self.brew_prefix.is_some() {
+            3
+        } else if self.npm_binding.is_some() {
+            2
+        } else {
+            1
+        }
     }
 }
 #[derive(Serialize, Deserialize)]
@@ -195,22 +217,25 @@ pub(super) fn valid_scope(s: &Scope) -> bool {
     let absolute = super::inspection::absolute;
     journal::valid_id(&s.repository_id)
         && [s.tool.as_str(), &s.binary].into_iter().all(token)
-        && if s.npm.is_some() {
+        && if s.brew.is_some() {
+            super::brew::formula(&s.package)
+        } else if s.npm.is_some() {
             valid_npm_package(&s.package)
         } else {
             token(&s.package)
         }
-        && matches!(
-            super::VersionPolicy::parse(
-                if s.npm.is_some() {
-                    crate::model::Provider::Npm
-                } else {
-                    crate::model::Provider::Mise
-                },
-                Some(&s.version)
-            ),
-            Ok(super::VersionPolicy::Exact { .. })
-        )
+        && (s.brew.is_some()
+            || matches!(
+                super::VersionPolicy::parse(
+                    if s.npm.is_some() {
+                        crate::model::Provider::Npm
+                    } else {
+                        crate::model::Provider::Mise
+                    },
+                    Some(&s.version)
+                ),
+                Ok(super::VersionPolicy::Exact { .. })
+            ))
         && s.version.len() <= 256
         && s.profiles.contains("base")
         && s.profiles.iter().all(|p| token(p))
@@ -226,7 +251,8 @@ pub(super) fn valid_scope(s: &Scope) -> bool {
         && !s.tool_search_dirs.is_empty()
         && s.tool_search_dirs.len() <= super::binaries::MAX_DIRECTORIES
         && s.tool_search_dirs.iter().all(|p| absolute(p))
-        && (s.npm.is_none() || super::npm::valid(s))
+        && (s.npm.is_none() || (s.brew.is_none() && super::npm::valid(s)))
+        && (s.brew.is_none() || super::brew::valid(s))
 }
 fn valid_npm_package(s: &str) -> bool {
     let name = |p: &str| {
@@ -242,10 +268,25 @@ fn valid_npm_package(s: &str) -> bool {
         name(s)
     }
 }
+fn schema(scope: &Scope) -> u32 {
+    if scope.brew.is_some() {
+        3
+    } else if scope.npm.is_some() {
+        2
+    } else {
+        1
+    }
+}
 fn intent(dir: &PrivateDir, id: &str) -> Result<Intent> {
     let i: Intent = read(dir, "intent.json")?;
-    if i.schema != if i.scope.npm.is_some() { 2 } else { 1 }
+    if i.schema != schema(&i.scope)
         || i.scope.npm.is_some() != i.sources.npm.is_some()
+        || i.scope.brew.is_some() != i.sources.brew.is_some()
+        || match (&i.scope.brew, &i.sources.brew_probe) {
+            (Some(b), Some(p)) => !p.valid(b),
+            (None, None) => false,
+            _ => true,
+        }
         || i.id != id
         || !valid_scope(&i.scope)
         || i.sources.manifest.path != i.scope.repository.join("dort.toml")
@@ -311,6 +352,7 @@ fn scan(dir: &PrivateDir, id: &str) -> Result<Attempt> {
         id: id.into(),
         scope: i.as_ref().map(|i| i.scope.clone()),
         outcome: None,
+        observed_versions: Vec::new(),
         problem: None,
         unresolved: true,
         explicitly_closed: false,
@@ -333,9 +375,19 @@ fn scan(dir: &PrivateDir, id: &str) -> Result<Attempt> {
         if let (Some(i), Some(c)) = (&i, completed)
             && c.schema == i.schema
             && c.id == id
+            && (i.schema == 3 || c.outcome.package != super::PackageState::ProviderCurrentPresent)
+            && (i.schema != 3 || c.outcome.package != super::PackageState::ExactPresent)
+            && (i.schema == 3 || c.observed_versions.is_empty())
+            && c.observed_versions.len() <= 256
+            && c.observed_versions
+                .iter()
+                .all(|v| super::super::valid_observed_version(v) && !v.starts_with("HEAD"))
+            && (c.outcome.package != super::PackageState::ProviderCurrentPresent
+                || !c.observed_versions.is_empty())
             && c.intent_sha256 == journal::digest(&read_bytes(dir, "intent.json")?)
         {
             a.outcome = Some(c.outcome);
+            a.observed_versions = c.observed_versions;
         } else {
             a.problem = Some(Problem::Malformed);
         }
@@ -408,7 +460,7 @@ pub(super) fn begin(
     }
     let id = adoption::transaction_id();
     let bytes = encode(&Intent {
-        schema: if scope.npm.is_some() { 2 } else { 1 },
+        schema: schema(&scope),
         id: id.clone(),
         scope,
         sources,
@@ -442,6 +494,7 @@ pub(super) fn finish(
     lock: &WriterLock,
     handle: &Handle,
     outcome: Outcome,
+    observed_versions: Vec<String>,
 ) -> Result<()> {
     lock.check_context(host)?;
     verify_pending(host, handle)?;
@@ -451,6 +504,7 @@ pub(super) fn finish(
         id: handle.id.clone(),
         intent_sha256: journal::digest(&read_bytes(&dir, "intent.json")?),
         outcome,
+        observed_versions,
     };
     dir.create("outcome.json", &encode(&completed)?)
 }

@@ -557,7 +557,7 @@ def tool_install_workflows(binary, base, env):
         session.wait(b'Tools installation details')
         session.send(b'd')
         session.click_label('[Install exact version')
-        session.wait(b'Installing exact version')
+        session.wait(b'Installing package')
         session.send(b'q')
         session.wait(b'waiting for worker')
         (home / 'release').write_text('release fixture')
@@ -644,7 +644,7 @@ def npm_install_workflows(binary, base, env):
         session.wait(b'bin/man')
         session.wait(b'No rollback')
         session.send(b'\r')
-        session.wait(b'Installing exact version')
+        session.wait(b'Installing package')
         session.send(b'\x03')
         session.wait(b'waiting for worker')
         (home / 'release').write_text('fixture')
@@ -680,6 +680,108 @@ def npm_install_workflows(binary, base, env):
     print('PASS damaged npm attempt provider/Node/CLI/prefix form and compact one-activation closure')
 
 
+def brew_install_workflows(binary, base, env):
+    home, repo, bin_dir = (base / name for name in ('brew-home', 'brew-repo', 'brew-bin'))
+    for directory in (home, repo, bin_dir):
+        directory.mkdir(mode=0o700)
+    (repo / '.git').mkdir()
+    manifest = repo / 'dort.toml'
+    manifest.write_text("schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='brew',package='demo'}\n")
+    prefix = home / 'prefix'
+    for name in ('Homebrew/bin', 'Homebrew/Library', 'Cellar', 'bin', 'etc', 'include', 'lib', 'opt', 'sbin', 'share', 'var/homebrew'):
+        (prefix / name).mkdir(parents=True, exist_ok=True)
+    git = bin_dir / 'git'
+    git.write_text('#!/bin/sh\nfor arg do\ncase "$arg" in\nconfig) exit 1;;\nrev-parse) pwd -P; exit 0;;\nstatus) printf "# branch.head main\\000"; exit 0;;\nesac\ndone\nexit 94\n')
+    git.chmod(0o700)
+    brew = prefix / 'Homebrew/bin/brew'
+    brew.write_text('''#!/bin/sh
+printf '%s\\n' "$*" >> "$HOME/calls"
+case "$*" in
+'help install') printf '%s' '--formula --no-ask --skip-post-install HOMEBREW_NO_INSTALL_UPGRADE HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK HOMEBREW_NO_INSTALL_CLEANUP';;
+'--prefix') printf '%s\\n' "$HOME/prefix";;
+'--repository') printf '%s\\n' "$HOME/prefix/Homebrew";;
+'--cellar') printf '%s\\n' "$HOME/prefix/Cellar";;
+'info --json=v2 --formula homebrew/core/demo') printf '{"formulae":[{"name":"demo","full_name":"demo","tap":"homebrew/core","disabled":false,"versions":{"stable":"2.7"},"installed":['; if [ -f "$HOME/installed" ]; then printf '{"version":"2.7"}'; fi; printf ']}]}';;
+'info --json=v2 --installed --formula') if [ -f "$HOME/installed" ]; then printf '{"formulae":[{"full_name":"demo","installed":[{"version":"2.7"}]}]}'; else printf '{"formulae":[]}'; fi;;
+'install --formula --no-ask --skip-post-install homebrew/core/demo')
+printf started > "$HOME/started"
+printf PRIVATE_BREW_OUTPUT; printf PRIVATE_BREW_ERROR >&2
+n=0
+while [ ! -f "$HOME/release" ] && [ "$n" -lt 10000000 ]; do n=$((n+1)); done
+printf installed > "$HOME/installed";;
+*) exit 99;;
+esac
+''')
+    brew.chmod(0o700)
+    scoped = dict(env, HOME=str(home), PATH=str(bin_dir), XDG_CONFIG_HOME=str(home / '.config'),
+                  XDG_STATE_HOME=str(home / '.local/state'))
+    subprocess.run([binary, '--json', '--yes', 'init', str(repo)], env=scoped,
+                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    if sys.platform == 'darwin':
+        with Session([binary, 'tui'], scoped, (40, 120)) as session:
+            session.wait(b'loaded.')
+            session.send(b'\x1b[D')
+            session.wait(b'Homebrew')
+            session.send(b'e' + str(brew).encode() + b'\t\x15' + str(bin_dir).encode() + b'\t\r')
+            session.wait(b'Run query')
+            assert not (home / 'calls').exists(), 'Brew review executed a query'
+            session.send(b'\r')
+            session.wait(b'no installed packages reported')
+            session.send(b'p' + str(manifest).encode() + b'\t' + str(bin_dir).encode() + b'\t\t\r')
+            session.wait(b'Space chooses')
+            session.send(b' \t\r')
+            session.wait(b'Review core formula install')
+            before = (home / 'calls').read_text()
+            session.send(b'i')
+            session.wait(b'CAN EXECUTE')
+            assert (home / 'calls').read_text() == before
+            session.send(b'a')
+            session.wait(b'Expected physical Homebrew prefix')
+            session.send(b'\r')
+            session.wait(b'Install core formula')
+            session.resize((14, 48))
+            session.wait(b'native links')
+            session.wait(b'No rollback')
+            session.send(b'\r')
+            session.wait(b'Installing package')
+            session.send(b'\x03')
+            session.wait(b'waiting for worker')
+            (home / 'release').write_text('fixture')
+            session.finish()
+            assert b'PRIVATE_BREW' not in session.data
+        assert (home / 'installed').exists()
+        print('PASS Homebrew current-version/native-effects review, retained prefix and joined Ctrl-C')
+    else:
+        print('SKIP Homebrew installation PTY: declarations are macOS-only; explicit macOS fake-host core/TUI tests remain portable')
+    damaged = home / '.local/state/dort/tools-attempts' / ('0' * 64)
+    damaged.mkdir(mode=0o700, parents=True)
+    before = (home / 'calls').read_text() if (home / 'calls').exists() else ''
+    with Session([binary, 'tui'], scoped, (40, 120)) as session:
+        session.wait(b'loaded.')
+        session.navigate('Tools', 'Installation attempts [i]')
+        session.wait(b'UNRESOLVED')
+        session.send(b'c')
+        session.wait(b'Trusted mise executable')
+        session.click_label('Provider: mise')
+        session.wait(b'Trusted Node executable')
+        session.click_label('Provider: npm')
+        session.wait(b'Trusted Homebrew executable')
+        session.click_label('Trusted Homebrew executable')
+        for value in (brew, bin_dir, prefix):
+            session.send(b'\x15' + str(value).encode() + b'\t')
+        session.send(b'\r')
+        session.wait(b'Inspect and close attempt')
+        assert ((home / 'calls').read_text() if (home / 'calls').exists() else '') == before
+        session.resize((14, 48))
+        session.wait(b'Inspect and close attempt')
+        session.send(b'\r')
+        session.wait(b'Explicitly closed')
+        session.send(b'\x1bq')
+        session.finish()
+    assert (home / 'calls').read_text() == before + '--prefix\ninfo --json=v2 --installed --formula\n'
+    print('PASS damaged Homebrew attempt retained three-field scope and compact fresh closure')
+
+
 def run():
     screen = Screen((2, 20))
     screen.feed(b"Git executes\x1b[")
@@ -709,6 +811,7 @@ def run():
         tools_workflows(binary, base, env)
         tool_install_workflows(binary, base, env)
         npm_install_workflows(binary, base, env)
+        brew_install_workflows(binary, base, env)
         tools_reconciliation_workflows(binary, base, env)
         tool_declaration_workflows(binary, base, env)
 

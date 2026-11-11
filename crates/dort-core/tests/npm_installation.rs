@@ -503,6 +503,7 @@ fn historical_npm_closure_does_not_require_current_manifest_or_invent_runtime_tr
     let id = f.pending();
     fs::write(f.repo.join("dort.toml"), "changed manifest").unwrap();
     let request = install::CloseRequest {
+        brew_prefix: None,
         id: id.clone(),
         executable: None,
         search_dirs: vec![],
@@ -524,6 +525,7 @@ fn historical_npm_closure_does_not_require_current_manifest_or_invent_runtime_tr
     fs::write(f.attempt(&id).join("intent.json"), "DAMAGED_PRIVATE").unwrap();
     assert!(install::diagnose(&f.home.host).unwrap()[0].unresolved);
     let request = install::CloseRequest {
+        brew_prefix: None,
         id,
         executable: Some(f.node.clone()),
         search_dirs: f.request().search_dirs,
@@ -684,6 +686,7 @@ fn mixed_legacy_and_npm_attempts_share_only_the_explicit_tools_guard() {
     let p = install::prepare_close(
         &f.home.host,
         install::CloseRequest {
+            brew_prefix: None,
             id,
             executable: None,
             search_dirs: vec![],
@@ -713,6 +716,7 @@ fn damaged_attempt_and_changed_cli_or_head_cannot_be_closed_with_stale_approval(
     let f = Fixture::new();
     let id = f.pending();
     let request = install::CloseRequest {
+        brew_prefix: None,
         id: id.clone(),
         executable: None,
         search_dirs: vec![],

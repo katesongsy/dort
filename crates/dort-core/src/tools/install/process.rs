@@ -33,7 +33,9 @@ pub(super) fn run(scope: &Scope, timeout: Duration) -> ProcessOutcome {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
-    if scope.npm.is_none() {
+    if scope.brew.is_some() {
+        super::brew::environment(&mut command);
+    } else if scope.npm.is_none() {
         command
             .env("MISE_NO_CONFIG", "1")
             .env("MISE_NO_ENV", "1")

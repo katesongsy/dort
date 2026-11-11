@@ -16,6 +16,7 @@ pub enum Mode {
     #[default]
     Attempts,
     LoadingInstall,
+    PrefixInputs,
     Review,
     Result,
     CloseInputs,
@@ -34,6 +35,10 @@ pub struct State {
     pub selected: usize,
     pub fields: [String; 4],
     pub close_npm: bool,
+    pub close_brew: bool,
+    close_brew_draft: [String; 4],
+    brew_prefix: String,
+    brew_drafts: std::collections::BTreeMap<PathBuf, String>,
     close_mise_draft: [String; 2],
     close_npm_draft: [String; 4],
     pub focus: usize,
@@ -68,13 +73,23 @@ impl State {
         matches!(
             self.mode,
             Mode::CloseInputs
+                | Mode::PrefixInputs
                 | Mode::Review
                 | Mode::CloseReview
                 | Mode::LoadingInstall
                 | Mode::LoadingClose
         )
     }
-    pub fn prepare(&mut self, request: installation::Request) -> Task {
+    pub fn prepare(&mut self, mut request: installation::Request) -> Task {
+        if let Some(executable) = request.brew_executable().map(std::path::Path::to_owned) {
+            if let Some(draft) = self.brew_drafts.get(&executable) {
+                request.set_brew_prefix(PathBuf::from(draft));
+            }
+            self.brew_prefix = request
+                .brew_prefix()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+        }
         self.clear_approvals();
         self.mode = Mode::LoadingInstall;
         self.details = false;
@@ -84,7 +99,16 @@ impl State {
         Task::ToolInstallPrepare(Box::new(request))
     }
     pub fn preparation_failed(&mut self, error: &str) {
-        self.summary = "Review unavailable. r requests a fresh preview; Esc returns.".into();
+        self.summary = if self
+            .request
+            .as_ref()
+            .is_some_and(|r| r.brew_executable().is_some())
+        {
+            "Review unavailable. a edits Advanced prefix; r requests a fresh preview; Esc returns."
+        } else {
+            "Review unavailable. r requests a fresh preview; Esc returns."
+        }
+        .into();
         self.error = Some(error.into());
     }
     pub fn retry_preview(&mut self) -> Option<Task> {
@@ -101,7 +125,13 @@ impl State {
     pub fn reviewed(&mut self, preview: install::Preview) {
         self.scope = Some(preview.review().scope.clone());
         let s = preview.review().scope;
-        self.summary = if let Some(npm) = &s.npm {
+        self.summary = if let Some(brew) = &s.brew {
+            format!(
+                "Homebrew · provider-current · 10m deadline\nBuild/dependency code CAN EXECUTE.\nDependencies may upgrade; native links may\nexpose commands on PATH. No rollback.\n{} · Prefix: {}\nFresh help/layout/formula/catalog probes.\na: Advanced prefix · d: full scope · q waits",
+                s.package,
+                ui::inline(&brew.prefix.display().to_string())
+            )
+        } else if let Some(npm) = &s.npm {
             format!(
                 "npm install · scripts off · 10m deadline\nDependencies + bin/man links may expose\ncommands on PATH. No rollback. q waits.\nFresh target/runtime/prerequisite queries.\n{}@{}\nPrefix: {}\nd: full scope and query details",
                 s.package,
@@ -128,9 +158,11 @@ impl State {
         match report {
             Ok(report) => {
                 self.summary = if report.no_op {
-                    "Exact version already reported; no installer ran."
+                    "Matching package already reported; no installer ran."
                 } else if installation::succeeded(&report) {
-                    if report.scope.npm.is_some() {
+                    if report.scope.brew.is_some() {
+                        "Homebrew provider-current formula reported present, not exact-pinned. Native links may expose commands on PATH."
+                    } else if report.scope.npm.is_some() {
                         "Exact npm package reported installed; native links may expose commands on PATH."
                     } else { "Exact version reported installed. Inactive mise versions are normal." }
                 } else {
@@ -190,6 +222,31 @@ impl State {
                 self.close_npm = true;
             }
         }
+        if self.close_brew_draft[0].is_empty()
+            && let Some(d) = snapshots
+                .iter()
+                .rev()
+                .map(|s| &s.report.provider.description)
+                .find(|d| d.query == dort_core::tools::inspection::Query::BrewFormulae)
+        {
+            self.close_brew_draft = [
+                d.executable.display().to_string(),
+                d.trusted_search_path
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(":"),
+                install::brew::prefix_hint(&d.executable)
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default(),
+                String::new(),
+            ];
+            if self.fields[0].is_empty() {
+                self.fields = self.close_brew_draft.clone();
+                self.close_brew = true;
+                self.close_npm = false;
+            }
+        }
         Task::ToolAttempts
     }
     pub fn attempts_ready(&mut self, result: Result<Vec<install::Attempt>, String>) {
@@ -215,6 +272,7 @@ impl State {
             executable: None,
             search_dirs: vec![],
             npm_binding: None,
+            brew_prefix: None,
         };
         self.close_request = Some(request.clone());
         self.details = false;
@@ -228,17 +286,36 @@ impl State {
             None
         }
     }
-    fn toggle_close_provider(&mut self) {
+    fn close_field_count(&self) -> usize {
         if self.close_npm {
+            4
+        } else if self.close_brew {
+            3
+        } else {
+            2
+        }
+    }
+    fn toggle_close_provider(&mut self) {
+        if self.close_brew {
+            self.close_brew_draft = self.fields.clone();
+            self.fields = [
+                self.close_mise_draft[0].clone(),
+                self.close_mise_draft[1].clone(),
+                String::new(),
+                String::new(),
+            ];
+            self.close_brew = false;
+        } else if self.close_npm {
             self.close_npm_draft = self.fields.clone();
-            self.fields[0] = self.close_mise_draft[0].clone();
-            self.fields[1] = self.close_mise_draft[1].clone();
+            self.fields = self.close_brew_draft.clone();
+            self.close_npm = false;
+            self.close_brew = true;
         } else {
             self.close_mise_draft = [self.fields[0].clone(), self.fields[1].clone()];
             self.fields = self.close_npm_draft.clone();
+            self.close_npm = true;
         }
-        self.close_npm = !self.close_npm;
-        self.focus = if self.close_npm { 5 } else { 3 };
+        self.focus = self.close_field_count() + 1;
     }
     pub fn close_reviewed(&mut self, preview: install::ClosePreview) {
         self.metadata =
@@ -273,9 +350,47 @@ impl State {
             }
         }
     }
+    fn retain_prefix_draft(&mut self) {
+        if let Some(request) = self.request.as_mut() {
+            if let Some(exe) = request.brew_executable().map(std::path::Path::to_owned) {
+                self.brew_drafts.insert(exe, self.brew_prefix.clone());
+            }
+            request.set_brew_prefix(PathBuf::from(&self.brew_prefix));
+        }
+    }
     pub fn key(&mut self, key: KeyEvent, dry_run: bool, snapshots: &[Snapshot]) -> Option<Outcome> {
+        if self.mode == Mode::PrefixInputs {
+            return match key.code {
+                KeyCode::Esc => {
+                    self.retain_prefix_draft();
+                    self.mode = Mode::LoadingInstall;
+                    self.preparation_failed("Prefix edit retained; request a fresh review.");
+                    None
+                }
+                KeyCode::Tab | KeyCode::BackTab | KeyCode::Up | KeyCode::Down => {
+                    self.focus = 1 - self.focus.min(1);
+                    None
+                }
+                KeyCode::Enter if self.focus == 0 => {
+                    self.focus = 1;
+                    None
+                }
+                KeyCode::Enter => {
+                    self.retain_prefix_draft();
+                    let request = self.request.as_mut()?;
+                    self.mode = Mode::LoadingInstall;
+                    self.error = None;
+                    Some(Outcome::task(Task::ToolInstallPrepare(request.clone())))
+                }
+                _ if self.focus == 0 => {
+                    edit_text(&mut self.brew_prefix, key);
+                    None
+                }
+                _ => None,
+            };
+        }
         if self.mode == Mode::CloseInputs {
-            let count = if self.close_npm { 4 } else { 2 };
+            let count = self.close_field_count();
             return match key.code {
                 KeyCode::Esc => {
                     self.mode = Mode::Attempts;
@@ -297,6 +412,7 @@ impl State {
                     let request = self.close_request.as_mut()?;
                     request.executable = Some(PathBuf::from(&self.fields[0]));
                     request.search_dirs = self.fields[1].split(':').map(PathBuf::from).collect();
+                    request.brew_prefix = self.close_brew.then(|| PathBuf::from(&self.fields[2]));
                     request.npm_binding =
                         self.close_npm
                             .then(|| dort_core::tools::inspection::NpmBinding {
@@ -330,6 +446,18 @@ impl State {
             return None;
         }
         match key.code {
+            KeyCode::Char('a')
+                if matches!(self.mode, Mode::Review | Mode::LoadingInstall)
+                    && self
+                        .request
+                        .as_ref()
+                        .is_some_and(|r| r.brew_executable().is_some()) =>
+            {
+                self.preview = None;
+                self.mode = Mode::PrefixInputs;
+                self.focus = usize::from(!self.brew_prefix.is_empty());
+                self.error = None;
+            }
             KeyCode::Esc if self.mode == Mode::CloseReview => {
                 self.close_preview = None;
                 self.mode = Mode::Attempts;
@@ -393,8 +521,32 @@ impl State {
             );
             return;
         }
+        if self.mode == Mode::PrefixInputs {
+            let rect = Rect::new(area.x, area.y, area.width, 3.min(area.height));
+            hits.click(rect, Target::ToolInstallControl(0, false));
+            ui::input(
+                frame,
+                rect,
+                "Expected physical Homebrew prefix · absolute",
+                &self.brew_prefix,
+                self.focus == 0,
+            );
+            if area.height > 3 {
+                let rect = Rect::new(area.x, area.y + 3, area.width, 1);
+                hits.click(rect, Target::ToolInstallControl(1, true));
+                frame.render_widget(
+                    Paragraph::new(Line::from(ui::button(
+                        "Review installation",
+                        "Enter",
+                        self.focus == 1,
+                    ))),
+                    rect,
+                );
+            }
+            return;
+        }
         if self.mode == Mode::CloseInputs {
-            let count = if self.close_npm { 4 } else { 2 };
+            let count = self.close_field_count();
             let budget = area.height.saturating_sub(1);
             let first = if usize::from(budget) < count * 3 + 2 {
                 self.focus.min(count)
@@ -411,9 +563,11 @@ impl State {
                 hits.click(rect, Target::ToolInstallControl(i, i >= count));
                 if i < count {
                     let title = match i {
+                        0 if self.close_brew => "Trusted Homebrew executable · absolute",
                         0 if self.close_npm => "Trusted Node executable · absolute",
                         0 => "Trusted mise executable · absolute",
                         1 => "Trusted child PATH · colon-separated",
+                        2 if self.close_brew => "Original Homebrew prefix · absolute",
                         2 => "Trusted npm CLI script · absolute",
                         _ => "Original npm global prefix · absolute",
                     };
@@ -421,8 +575,10 @@ impl State {
                 } else {
                     let label = if i == count {
                         "Review closure"
+                    } else if self.close_brew {
+                        "Provider: brew · change to mise"
                     } else if self.close_npm {
-                        "Provider: npm · change to mise"
+                        "Provider: npm · change to brew"
                     } else {
                         "Provider: mise · change to npm"
                     };
@@ -473,7 +629,11 @@ impl State {
                             attempt
                                 .scope
                                 .as_ref()
-                                .map(|s| format!("{}@{}", s.package, s.version))
+                                .map(|s| if s.brew.is_some() {
+                                    format!("{} (provider-current)", s.package)
+                                } else {
+                                    format!("{}@{}", s.package, s.version)
+                                })
                                 .unwrap_or("Unknown scope".into())
                         ),
                         area.width,
@@ -524,6 +684,10 @@ impl State {
                 Paragraph::new(Line::from(ui::button(
                     if dry_run {
                         "Preview only · execution disabled"
+                    } else if self.mode == Mode::Review
+                        && self.scope.as_ref().is_some_and(|s| s.brew.is_some())
+                    {
+                        "Install core formula · 10m"
                     } else if self.mode == Mode::Review {
                         "Install exact version · 10m"
                     } else {

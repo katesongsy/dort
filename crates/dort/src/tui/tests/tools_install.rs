@@ -1,3 +1,5 @@
+#[path = "tools_install_brew.rs"]
+mod brew;
 use super::{
     actions::{self, Task},
     app::{App, Tab},
@@ -68,6 +70,43 @@ impl Fixture {
         fs::write(f.host.home.join("npm-cli.js"), "TRUSTED_CLI").unwrap();
         f
     }
+    fn new_brew() -> Self {
+        let mut f = Self::new();
+        f.host.platform = Platform::Macos;
+        fs::write(f.repo.join("dort.toml"), "schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='brew',package='demo'}\n").unwrap();
+        let prefix = f.host.home.join("prefix");
+        for d in [
+            "Homebrew/bin",
+            "Homebrew/Library",
+            "Cellar",
+            "bin",
+            "etc",
+            "include",
+            "lib",
+            "opt",
+            "sbin",
+            "share",
+            "var/homebrew",
+        ] {
+            fs::create_dir_all(prefix.join(d)).unwrap();
+        }
+        f.executable = prefix.join("Homebrew/bin/brew");
+        fs::write(&f.executable, r##"#!/bin/sh
+printf '%s\n' "$*" >> "$HOME/calls"
+case "$*" in
+'help install') printf '%s' '--formula --no-ask --skip-post-install HOMEBREW_NO_INSTALL_UPGRADE HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK HOMEBREW_NO_INSTALL_CLEANUP';;
+'--prefix') printf '%s\n' "$HOME/prefix";;
+'--repository') printf '%s\n' "$HOME/prefix/Homebrew";;
+'--cellar') printf '%s\n' "$HOME/prefix/Cellar";;
+'info --json=v2 --formula homebrew/core/demo') printf '{"formulae":[{"name":"demo","full_name":"demo","tap":"homebrew/core","disabled":false,"versions":{"stable":"2.7"},"installed":['; if [ -f "$HOME/installed" ]; then printf '{"version":"2.7"}'; fi; printf ']}]}';;
+'info --json=v2 --installed --formula') if [ -f "$HOME/installed" ]; then printf '{"formulae":[{"full_name":"demo","installed":[{"version":"2.7"}]}]}'; else printf '{"formulae":[]}'; fi;;
+'install --formula --no-ask --skip-post-install homebrew/core/demo') printf installed > "$HOME/installed";;
+*) exit 99;;
+esac
+"##).unwrap();
+        fs::set_permissions(&f.executable, fs::Permissions::from_mode(0o700)).unwrap();
+        f
+    }
     fn npm_app(&self, dry: bool) -> App {
         let mut app = App::new(dry);
         app.tab = Tab::Tools;
@@ -126,11 +165,14 @@ impl Fixture {
         fs::read_to_string(self.host.home.join("calls")).unwrap_or_default()
     }
     fn app(&self, dry: bool) -> App {
+        self.app_query(dry, Query::MiseInstalled)
+    }
+    fn app_query(&self, dry: bool, query: Query) -> App {
         let snapshot = Snapshot {
             id: "s1".into(),
             report: std::sync::Arc::new(
                 tools::Request {
-                    query: Query::MiseInstalled,
+                    query,
                     executable: self.executable.clone(),
                     search_dirs: vec![self.bin.clone()],
                     manifest: None,
@@ -468,6 +510,10 @@ fn damaged_npm_closure_has_retained_provider_drafts_and_compact_focus_caret() {
     app.tools_view.installation.focus = 5;
     key(&mut app, KeyCode::Enter);
     assert!(!app.tools_view.installation.close_npm);
+    assert!(app.tools_view.installation.close_brew);
+    app.tools_view.installation.focus = 4;
+    key(&mut app, KeyCode::Enter);
+    assert!(!app.tools_view.installation.close_brew);
     app.tools_view.installation.focus = 3;
     key(&mut app, KeyCode::Enter);
     assert!(app.tools_view.installation.close_npm);

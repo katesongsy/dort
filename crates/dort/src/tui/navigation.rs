@@ -148,7 +148,7 @@ pub fn location(app: &App) -> &'static str {
             | super::tools_install::Mode::LoadingClose
             | super::tools_install::Mode::CloseReview => "Tools / Close attempt",
             super::tools_install::Mode::Result => "Tools / Installation outcome",
-            _ => "Tools / Exact mise install",
+            _ => "Tools / Package installation",
         },
         Tab::Tools => "Tools / Inspection and comparison",
         Tab::Files if app.discovering => "Files / Discover",
