@@ -73,6 +73,8 @@ struct RowClick {
 }
 pub struct App {
     pub appearance: super::appearance::Appearance,
+    pub motion: super::components::motion::Indicator,
+    pub reduced_motion: bool,
     pub tab: Tab,
     pub shell: Shell,
     pub help: Option<super::help::State>,
@@ -128,6 +130,8 @@ impl App {
     pub fn new(dry_run: bool) -> Self {
         Self {
             appearance: Default::default(),
+            motion: Default::default(),
+            reduced_motion: false,
             tab: Tab::Overview,
             shell: Shell::new(),
             help: None,
@@ -181,6 +185,7 @@ impl App {
         }
     }
     pub fn start(&mut self, writing: bool) {
+        self.motion.reset();
         self.navigation.menu = None;
         self.last_click = None;
         self.inventory.pending_g = false;
@@ -1083,6 +1088,27 @@ impl App {
             }
             Target::ToolsRow(index) => {
                 self.tools_view.selected = index;
+                None
+            }
+            Target::InventoryKey(code) => {
+                if self.tab == Tab::Tools
+                    && self.tools_view.browsing_inventory()
+                    && !self.busy
+                    && self.preview.is_none()
+                    && self.error.is_none()
+                    && !self.show_result
+                {
+                    self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height)
+                } else {
+                    None
+                }
+            }
+            Target::InventoryChoice(index) => {
+                if self.tab == Tab::Tools
+                    && let Some(selected) = self.tools_view.inventory_more.as_mut()
+                {
+                    *selected = index.min(7);
+                }
                 None
             }
             Target::ToolsControl(index, activate) => {

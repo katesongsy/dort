@@ -195,7 +195,8 @@ impl App {
         self.navigation.menu = Some(Menu {
             group: selected_group.min(GROUPS.len() - 1),
             selected: 0,
-            expanded: width >= 80,
+            expanded: width >= 80
+                && !(self.tab == Tab::Tools && self.tools_view.browsing_inventory()),
             content_focus,
             content_scroll,
         });
@@ -306,7 +307,7 @@ pub fn bar(frame: &mut Frame, area: Rect, app: &App) {
     }
     let mut x = area.x;
     for (i, name) in GROUPS.iter().enumerate() {
-        let label = format!(" {name} ▾ ");
+        let label = format!(" {name} {} ", ui::glyphs::MENU);
         let width = label.chars().count() as u16;
         let rect = Rect::new(x, area.y, width.min(area.right().saturating_sub(x)), 1);
         let selected = app.navigation.menu.is_some_and(|m| m.group == i)

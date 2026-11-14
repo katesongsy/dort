@@ -712,6 +712,7 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
             crate::environment::launch_directory()?,
             crate::environment::resolve_git().map_err(|error| error.to_string()),
             crate::environment::terminal_appearance(),
+            crate::environment::reduced_motion(),
         )?;
         return Ok(ExitCode::SUCCESS);
     }

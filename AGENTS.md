@@ -2,6 +2,12 @@
 
 These repository instructions apply to all files unless a more specific instruction overrides them.
 
+## Mandatory TUI design contract
+
+Before changing TUI behavior or presentation, read [the design system](docs/design-system.md) and [interaction contracts](docs/tui-interactions.md). These tracked pages are the authoritative standards; ignored proposals are not required build/agent inputs. Identify the shared components/semantic roles you will reuse before editing. All shared visual components belong in the Rust module folder `crates/dort/src/tui/components/` (not a separate Cargo package); page/workflow controllers and approval ownership stay outside. Keep colors, emphasis, semantic glyphs and motion in that shared foundation, not page-specific implementations. Use one foreground action strip, distinct input/fact/selection/feedback styles and honest progress; preserve every approval/privacy/joined-worker invariant. New component semantics, exceptions or standard changes require explicit operator review. Do not silently remap unrelated workflow keys during a visual migration.
+
+Run the style checker/self-tests, actual-component/backend tests and normal workspace/docs/terminal gates. Do not weaken checks, add exceptions or regenerate visual expectations merely to make tests pass; inspect and explain differences, and obtain review for changed visual baselines. Report reused components, validation actually run and remaining deviations. Automated passes and an AI-updated snapshot are not unfamiliar-user or human visual approval. Keep temporary migration worklists/evidence in ignored specs/temp; maintain only durable rules and current behavior in tracked docs.
+
 Preserve the shared [workbench interaction contracts](docs/tui-interactions.md): workflow forms/reviews/results are navigable pages, short choices/help/final gates are explicit dimmed dialogs, field/row traversal never includes footer buttons, and Enter invokes the contextual primary action. Keep drafts and opaque previews when menus are merely opened/dismissed; discard approvals on actual navigation. Dialog/busy navigation must explain its restriction, not silently ignore input. Keep trusted decoration separate from escaped metadata, foreground-only caret/hits, compact direct actions and existing approval/privacy/joined-worker guards. Automated tests do not replace unfamiliar-user usability review.
 
 ## Scope and current capabilities
@@ -59,6 +65,8 @@ cargo test --workspace --locked -- --test-threads=1
 cargo build --workspace --locked
 python3 scripts/check-docs.py --self-test
 python3 scripts/check-docs.py
+python3 scripts/check-tui-style.py --self-test
+python3 scripts/check-tui-style.py
 python3 scripts/test-terminal.py
 python3 scripts/test-cross-device-macos.py --self-test
 python3 scripts/release.py --self-test

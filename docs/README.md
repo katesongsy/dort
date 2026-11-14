@@ -20,6 +20,7 @@ Start with the [user guide](user/README.md):
 - [Snapshot reconciliation](binary-reconciliation.md): explicit multi-snapshot binding, no-follow candidate metadata and frontend scope/freshness boundaries.
 - [Non-executable command previews](install-command-previews.md): fixed argv/control descriptions, native side-effect caveats and no execution authority.
 - [Pure tool package planning](tools-planning.md): explicit-scope claims, binary uncertainty, version/no-op semantics and dependency blockers.
+- [TUI design system](design-system.md): mandatory semantic styling, component, motion and agent-review standards.
 - [Workbench interactions](tui-interactions.md): page/dialog ownership, direct actions, retained drafts, safe text and navigation boundaries.
 - [Validation methods](validation.md): test isolation, repeatable checks, terminal/storage harnesses and what their results mean.
 - [Release mechanics](releases.md): native artifacts, provenance and tag-triggered publication guards.

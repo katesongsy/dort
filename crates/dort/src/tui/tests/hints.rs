@@ -1,0 +1,101 @@
+//! Acceptance checks: hints describe only the actual foreground interaction.
+use super::{
+    app::{App, Tab},
+    batch_ui::Editor,
+    hints,
+    tests::render,
+};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+fn key(app: &mut App, code: KeyCode) {
+    assert!(
+        app.key(KeyEvent::new(code, KeyModifiers::NONE), 80, 24)
+            .is_none()
+    );
+}
+
+#[test]
+fn declaration_footer_describes_fields_and_review_not_underlying_tools_shortcuts() {
+    let mut app = App::new(false);
+    app.tab = Tab::Tools;
+    app.tools_view.declare();
+    for c in "cspqr".chars() {
+        key(&mut app, KeyCode::Char(c));
+    }
+    assert_eq!(app.tools_view.declaration.fields[0], "cspqr");
+    let keys = hints::keys(&app);
+    assert!(keys.contains(&("Tab", "Field")));
+    assert!(keys.contains(&("Enter", "Review")));
+    assert!(!keys.iter().any(|(k, _)| ["c", "s", "p", "r"].contains(k)));
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        let screen = render(&app, w, h);
+        let footer = screen.lines().last().unwrap();
+        assert!(
+            footer.contains("Field") && footer.contains("Review"),
+            "{screen}"
+        );
+        assert!(!footer.contains("Inspect tools") && !footer.contains("Snapshots"));
+    }
+    key(&mut app, KeyCode::Tab);
+    assert_eq!(app.tools_view.declaration.focus, 1);
+    assert_eq!(app.tools_view.declaration.fields[0], "cspqr");
+}
+
+#[test]
+fn help_footer_precedes_retained_forms_menus_errors_and_running_work() {
+    for state in 0..4 {
+        let mut app = App::new(false);
+        app.tab = Tab::Tools;
+        app.tools_view.declare();
+        app.tools_view.declaration.fields[0] = "retained draft".into();
+        match state {
+            0 => (),
+            1 => key(&mut app, KeyCode::F(10)),
+            2 => app.error = Some("synthetic unavailable metadata".into()),
+            _ => app.busy = true,
+        }
+        key(&mut app, KeyCode::F(1));
+        assert!(app.help.is_some());
+        assert_eq!(
+            hints::keys(&app),
+            [
+                ("F1", "Back"),
+                ("Esc", "Back"),
+                ("PgDn", "Scroll"),
+                ("Home", "Top")
+            ]
+        );
+        for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+            let screen = render(&app, w, h);
+            let footer = screen.lines().last().unwrap();
+            assert!(
+                footer.contains("Back") && footer.contains("Scroll"),
+                "{screen}"
+            );
+            assert!(!footer.contains("Review") && !footer.contains("Retry"));
+        }
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(app.tools_view.declaration.fields[0], "retained draft");
+        assert!(app.help.is_some());
+    }
+}
+
+#[test]
+fn batch_metadata_does_not_advertise_an_inert_enter_or_hidden_review() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().canonicalize().unwrap();
+    let paths = [home.join(".config/one")].into_iter().collect();
+    let mut app = App::new(false);
+    app.batch_editor = Some(Editor::new(&paths, &home));
+    assert!(hints::keys(&app).contains(&("Enter", "Review all")));
+    app.batch_editor.as_mut().unwrap().details = true;
+    let keys = hints::keys(&app);
+    assert!(!keys.iter().any(|(k, _)| *k == "Enter"));
+    assert!(keys.contains(&("F2", "Draft")));
+    assert!(keys.contains(&("PgDn", "Scroll")));
+    let before = app.batch_editor.as_ref().unwrap().drafts[0].id.clone();
+    key(&mut app, KeyCode::Enter);
+    assert!(app.batch_editor.as_ref().unwrap().details);
+    assert_eq!(app.batch_editor.as_ref().unwrap().drafts[0].id, before);
+    assert!(home.read_dir().unwrap().next().is_none());
+}

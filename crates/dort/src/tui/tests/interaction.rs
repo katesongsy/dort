@@ -126,7 +126,7 @@ fn inspection_rows_never_focus_buttons_and_enter_approves_selected_real_queries_
     assert_eq!(app.tools_view.snapshots.len(), 1);
     assert!(app.tools_view.reconciliation.bindings.is_empty());
     let s = render(&app, 140, 40);
-    assert!(s.contains("Provider claims · Snapshot s1"), "{s}");
+    assert!(s.contains("mise · Snapshot s1"), "{s}");
     assert!(!s.contains("\\u{b7}"));
     let mut dry = f.app(true);
     assert!(key(&mut dry, KeyCode::Enter, 48, 14).is_none());
@@ -155,9 +155,15 @@ fn trusted_separators_render_but_program_path_status_metadata_stays_escaped() {
     app.tools_view.completed(report);
     app.status = "Provider metadata: · \u{202e}\u{1b}".to_owned().into();
     let s = render(&app, 320, 40);
-    assert!(s.contains("Provider claims · Snapshot s1"));
+    assert!(s.contains("mise · Snapshot s1"));
+    assert!(!s.contains("provider\\u{b7}")); // Full program identity is deliberately in Details.
+    assert!(key(&mut app, KeyCode::Enter, 320, 40).is_none());
+    let s = render(&app, 320, 40);
     assert!(s.contains("\\u{b7}") && s.contains("\\u{202e}") && s.contains("\\u{1b}"));
     assert!(!s.contains('\u{202e}') && !s.contains('\u{1b}'));
+    app.tab = Tab::Overview; // Ordinary status still uses the escaped metadata boundary.
+    let s = render(&app, 320, 40);
+    assert!(s.contains("\\u{b7}") && s.contains("\\u{202e}") && s.contains("\\u{1b}"));
     app.status = "Trusted · separator".into();
     let s = render(&app, 80, 24);
     assert!(s.contains("Trusted · separator"));
@@ -165,6 +171,8 @@ fn trusted_separators_render_but_program_path_status_metadata_stays_escaped() {
         super::appearance::Appearance::classify(Some("vt100"), None, None, Some("C"), None);
     let s = render(&app, 320, 40);
     assert!(s.contains("Trusted | separator"));
+    app.status = "Provider metadata: · \u{202e}\u{1b}".to_owned().into();
+    let s = render(&app, 320, 40);
     assert!(s.contains("\\u{202e}") && s.contains("\\u{b7}"));
     assert_eq!(ui::chrome_clip("界界界", 4), "...");
 }

@@ -112,6 +112,9 @@ impl State {
     pub fn text_entry(&self) -> bool {
         self.mode != Mode::Results
     }
+    pub(super) fn binding_metadata(&self) -> bool {
+        self.binding_details
+    }
     pub fn ready(&mut self, prepared: Prepared) {
         self.bindings
             .retain(|id, _| prepared.tools.iter().any(|t| &t.id == id));

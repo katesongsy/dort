@@ -33,21 +33,16 @@ impl Appearance {
         }
     }
 
+    pub(super) fn ascii(self) -> bool {
+        self.ascii
+    }
+
     pub(super) fn apply(self, buffer: &mut Buffer) {
         for cell in &mut buffer.content {
             if self.ascii {
                 // Only trusted, single-cell decoration. Unknown symbols are not
                 // rewritten: metadata escaping belongs to its existing boundary.
-                let replacement = match cell.symbol() {
-                    "┌" | "┐" | "└" | "┘" | "├" | "┤" | "┬" | "┴" | "┼" => {
-                        Some("+")
-                    }
-                    "─" => Some("-"),
-                    "│" | "·" => Some("|"),
-                    "▾" => Some("v"),
-                    "▸" => Some(">"),
-                    _ => None,
-                };
+                let replacement = super::components::glyphs::ascii(cell.symbol());
                 if let Some(symbol) = replacement {
                     cell.set_symbol(symbol);
                 }
@@ -118,8 +113,24 @@ mod tests {
         use ratatui::layout::Rect;
         let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 1));
         let symbols = [
-            "┌", "┐", "└", "┘", "├", "┤", "┬", "┴", "┼", "─", "│", "·", "é", "x", "\\", "+", "▾",
-            "▸",
+            "┌",
+            "┐",
+            "└",
+            "┘",
+            "├",
+            "┤",
+            "┬",
+            "┴",
+            "┼",
+            "─",
+            "│",
+            "·",
+            "é",
+            "x",
+            "\\",
+            "+",
+            crate::tui::components::glyphs::MENU,
+            crate::tui::components::glyphs::EXPAND,
         ];
         for (cell, symbol) in buffer.content.iter_mut().zip(symbols) {
             cell.set_symbol(symbol);

@@ -2,7 +2,7 @@
 
 [Documentation](README.md) · [Architecture](../ARCHITECTURE.md) · [Contributor instructions](../AGENTS.md)
 
-[Workbench interaction contracts](tui-interactions.md) are checked across compact/baseline/wide layouts: field/row-only traversal, direct primary actions, retained drafts and real opaque previews on menu dismissal versus discarded approvals on actual navigation, dimmed foreground-only dialogs, blocked-navigation feedback, caret/hit ownership and trusted Unicode versus escaped hostile metadata. Disposable-fixture PTY journeys cover page menus, dialog outside-click capture and direct row approval alongside existing mutation/disclosure/privacy checks. These automated checks do not establish unfamiliar-user intuitiveness.
+[Workbench interaction contracts](tui-interactions.md) are checked across compact/baseline/wide layouts: field/row-only traversal, direct primary actions, retained drafts and real opaque previews on menu dismissal versus discarded approvals on actual navigation, dimmed foreground-only dialogs, blocked-navigation feedback, caret/hit ownership and trusted Unicode versus escaped hostile metadata. Disposable-fixture PTY journeys cover page menus, dialog outside-click capture and direct row approval alongside existing mutation/disclosure/privacy checks. Foreground-hint assertions also verify that Help overrides retained menus/forms/tasks/errors, declaration hints do not advertise literal browsing shortcuts, and metadata views omit inert Enter/hidden row actions. These automated checks do not establish unfamiliar-user intuitiveness.
 
 This is a maintained technical reference for the test infrastructure, not a release checklist, implementation plan or record of a particular candidate's results. Test counts, run IDs, temporary evidence and unfinished milestone gates belong in ignored planning notes and local artifacts. A passing earlier revision is not evidence for a changed working tree.
 
@@ -17,6 +17,8 @@ cargo test --workspace --locked -- --test-threads=1 --nocapture
 cargo build --workspace --locked
 python3 scripts/check-docs.py --self-test
 python3 scripts/check-docs.py
+python3 scripts/check-tui-style.py --self-test
+python3 scripts/check-tui-style.py
 python3 scripts/test-terminal.py
 python3 scripts/test-cross-device-macos.py --self-test
 python3 scripts/release.py --self-test
@@ -32,6 +34,20 @@ The Python scripts use only the standard library. Ordinary checks do not install
 The [documentation checker](../scripts/check-docs.py) scans maintained root Markdown, `docs/` recursively (including `docs/user/`) and crate READMEs recursively. It validates inline local links/fragments, ignores fenced examples and rejects links to ignored specifications. It is not a general Markdown parser or external-URL checker. Keep its self-tests aligned with the documentation layout.
 
 The [source-package guards](../scripts/check-crates.py) check registry-restricted metadata, matching core dependency versions, canonical license/example copies and literal Rust include resources. Cargo packages and builds both workspace archives, staging interdependent crates in a temporary local registry before initial publication. Archive guards then bind the exact clean commit and compare source/resource bytes and standalone manifests. Mount-free self-tests exercise missing/out-of-package resources and unsafe/duplicate tar paths. These checks do not authenticate or upload; `cargo publish --dry-run` is an additional non-upload check, never permission to publish. See [release mechanics](releases.md) for the separate irreversible publication boundary.
+
+## Shared visual components and design boundary
+
+The [design system](design-system.md) and [interaction contracts](tui-interactions.md) are mandatory contributor inputs. Shared Rust widgets/recipes, glyphs, framing and deterministic motion live in `crates/dort/src/tui/components/`; workflow controllers and opaque approvals stay outside.
+
+The [style checker](../scripts/check-tui-style.py) rejects raw color/emphasis operations outside exact shared owners, known semantic glyph literals outside the glyph module, private monotonic animation clocks outside event/mouse boundaries and blocking thread sleeps. It masks Rust comments/literals appropriately, includes standard-library self-tests and has no legacy exception list or automatic blessing command. It is a bounded mechanical guard, not a parser proving every design rule or a replacement for visual review.
+
+[Actual-component tests](../crates/dort/src/tui/tests/design_system.rs) render shared Ratatui cells at compact, baseline and wide sizes, checking semantic labels/styles, selection, Unicode/ASCII and monochrome behavior with fixture-only data. Motion tests use explicit durations, not sleeps or real processes; inventory/backend/PTY checks cover the single foreground strip, More dismissal/filter retention, raw row identity and no query replay. To export the real shared widgets for visual review:
+
+```sh
+python3 scripts/render-tui-gallery.py --output temp/tui-gallery-review
+```
+
+The [gallery launcher](../scripts/render-tui-gallery.py) discovers a fresh locked Cargo test executable, runs only its fixture export probe in an isolated canonical child HOME/PATH and creates an HTML cell rendering below repository `temp/`. The output directory must be empty; artifacts are never automatically overwritten or treated as approved visual baselines. Normal tests do not export files. Reference color rendering is not a screenshot of a user's terminal. Automated cell/PTY/gallery checks do not establish unfamiliar-user intuitiveness; changed expectations and new visual semantics still require review.
 
 ## Homebrew integration checks
 

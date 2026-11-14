@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
     crossterm::event::{KeyCode, KeyEvent},
     layout::Rect,
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
@@ -111,7 +111,7 @@ impl Patch {
                     } else if original.starts_with("@@") {
                         super::components::accent()
                     } else if original.starts_with('+') {
-                        Style::default().fg(Color::Green)
+                        super::components::success()
                     } else if original.starts_with('-') {
                         super::components::danger()
                     } else {
@@ -163,7 +163,7 @@ fn patch_viewport_styles_hunks_and_changes_even_when_scrolled_horizontally() {
     assert_eq!(text.lines[0].spans[1].style, super::components::heading());
     assert_eq!(text.lines[1].spans[1].style, super::components::accent());
     assert_eq!(text.lines[2].spans[1].style, super::components::danger());
-    assert_eq!(text.lines[3].spans[1].style.fg, Some(Color::Green));
+    assert_eq!(text.lines[3].spans[1].style, super::components::success());
     assert!(text.lines[3].to_string().contains("4 │+new"));
     let horizontal = patch.styled_viewport(2, 1, 30, 1);
     assert_eq!(

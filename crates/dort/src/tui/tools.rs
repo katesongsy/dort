@@ -20,6 +20,16 @@ const QUERIES: [Query; 4] = [
     Query::MiseInstalled,
     Query::NpmGlobals,
 ];
+const INVENTORY_ACTIONS: [(&str, KeyCode, &str); 8] = [
+    ("Inspection details", KeyCode::Char('d'), "Metadata"),
+    ("Inspect again", KeyCode::Char('r'), "Review"),
+    ("Inspection settings", KeyCode::Char('e'), "Draft"),
+    ("Filter packages", KeyCode::Char('/'), "Display"),
+    ("Compare declared tools", KeyCode::Char('p'), "Read-only"),
+    ("Add declaration", KeyCode::Char('a'), "Draft"),
+    ("Previous inspections", KeyCode::Char('s'), "Metadata"),
+    ("Installation attempts", KeyCode::Char('i'), "Metadata"),
+];
 const LABELS: [&str; 7] = [
     "Provider · Space cycles brew/apt/mise/npm",
     "Trusted executable (Node for npm) · absolute",
@@ -59,6 +69,7 @@ pub struct State {
     pub search: String,
     pub searching: bool,
     pub details: bool,
+    pub inventory_more: Option<usize>,
     pub selected: usize,
     pub scroll: u16,
     matching: Vec<usize>,
@@ -96,6 +107,7 @@ impl Default for State {
             search: String::new(),
             searching: false,
             details: false,
+            inventory_more: None,
             selected: 0,
             scroll: 0,
             matching: vec![],
@@ -273,7 +285,19 @@ impl State {
         self.report = None;
         Some(Task::ToolsInspectSelected(approvals))
     }
+    pub fn browsing_inventory(&self) -> bool {
+        self.report.is_some()
+            && !self.setup
+            && !self.configuring
+            && self.preview.is_none()
+            && !self.catalog_browser
+            && !self.recon_open
+            && !self.install_open
+            && !self.declaration_open
+            && !self.details
+    }
     pub fn leave(&mut self) {
+        self.inventory_more = None;
         self.fresh_review = false;
         self.preview = None;
         self.defaults = None;
@@ -291,6 +315,7 @@ impl State {
         self.declaration_open = true;
     }
     pub fn shrink(&mut self) {
+        self.inventory_more = None;
         self.installation.clear_approvals();
         if self.setup {
             self.defaults = None;
@@ -406,6 +431,33 @@ impl State {
     }
     /// Some means locally handled, including printable text that must not become shortcuts.
     pub fn key(&mut self, key: KeyEvent, dry_run: bool) -> Option<Option<Task>> {
+        if let Some(selected) = self.inventory_more.as_mut() {
+            match key.code {
+                KeyCode::Esc | KeyCode::F(2) => self.inventory_more = None,
+                KeyCode::Down | KeyCode::Tab => {
+                    *selected = (*selected + 1) % INVENTORY_ACTIONS.len()
+                }
+                KeyCode::Up | KeyCode::BackTab => {
+                    *selected = (*selected + INVENTORY_ACTIONS.len() - 1) % INVENTORY_ACTIONS.len()
+                }
+                KeyCode::PageDown => *selected = (*selected + 3).min(INVENTORY_ACTIONS.len() - 1),
+                KeyCode::PageUp => *selected = selected.saturating_sub(3),
+                KeyCode::Home => *selected = 0,
+                KeyCode::End => *selected = INVENTORY_ACTIONS.len() - 1,
+                KeyCode::Enter => {
+                    let code = INVENTORY_ACTIONS[*selected].1;
+                    self.inventory_more = None;
+                    self.searching = false;
+                    return self.key(KeyEvent::new(code, KeyModifiers::NONE), dry_run);
+                }
+                _ => (),
+            }
+            return Some(None);
+        }
+        if key.code == KeyCode::F(2) && self.browsing_inventory() {
+            self.inventory_more = Some(0);
+            return Some(None);
+        }
         if self.install_open {
             return Some(match self.installation.key(key, dry_run, &self.snapshots) {
                 Some(super::tools_install::Outcome::Back) => {
@@ -837,99 +889,156 @@ impl State {
             );
             return;
         }
+        let provider = match report.provider.description.query {
+            Query::BrewFormulae => "Homebrew",
+            Query::DpkgPackages => "APT",
+            Query::MiseInstalled => "mise",
+            Query::NpmGlobals => "npm",
+        };
+        let snapshot = self
+            .snapshots
+            .get(self.current)
+            .map(|s| ui::inline(&s.id))
+            .unwrap_or_else(|| "unknown".into());
+        let count = match &report.provider.observation {
+            Observation::Complete { installations } => {
+                format!("{}/{} reported", self.matching.len(), installations.len())
+            }
+            Observation::Unavailable { .. } => "Unavailable".into(),
+        };
         ui::chrome_prose(
             frame,
             Rect::new(area.x, area.y, area.width, 1),
             &format!(
-                "Provider claims · Snapshot {} · {:?} · {}",
-                self.snapshots
-                    .get(self.current)
-                    .map(|s| ui::inline(&s.id))
-                    .unwrap_or_else(|| "unknown".into()),
-                report.provider.description.query,
-                ui::inline(&report.provider.description.executable.display().to_string())
+                "{provider} {} Snapshot {snapshot} {} {count}",
+                ui::glyphs::SEPARATOR,
+                ui::glyphs::SEPARATOR
             ),
-            ui::heading(),
+            ui::design::Tone::Information.style(),
         );
-        ui::input(
+        if area.height < 3 {
+            return;
+        }
+        let filter = ui::design::filter(
             frame,
-            Rect::new(area.x, area.y + 1, area.width, 3),
-            "Search metadata · / edits · c configure · r fresh review · d scope",
+            Rect::new(area.x, area.y + 1, area.width, 1),
+            "Filter packages",
             &self.search,
-            self.searching && hits.input_focus_allowed(),
+            self.searching && self.inventory_more.is_none() && hits.input_focus_allowed(),
         );
+        hits.click(filter, Target::InventoryKey(KeyCode::Char('/')));
         let rows = Rect::new(
             area.x,
-            area.y + 4,
+            area.y + 2,
             area.width,
-            area.height.saturating_sub(4),
+            area.height.saturating_sub(2),
         );
         match &report.provider.observation {
-            Observation::Unavailable { reason } => ui::prose(
+            Observation::Unavailable { reason } => ui::design::notice(
                 frame,
                 rows,
-                &format!(
-                    "UNAVAILABLE: {reason}\nNot a healthy empty inventory. r prepares a fresh review; it never replays approval."
-                ),
-                ui::warning(),
+                "Inspection unavailable",
+                &format!("{reason}\nNot a healthy empty inventory."),
+                ui::design::Tone::Attention,
             ),
             Observation::Complete { installations } => {
                 if installations.is_empty() {
-                    ui::chrome_prose(
+                    ui::design::notice(
                         frame,
                         rows,
-                        "Query complete · no installed packages reported. Not proof of binary absence or Dort ownership.",
-                        ui::muted(),
+                        "0 packages reported",
+                        "The provider reported an empty inventory in this scope. Not proof of binary absence or Dort ownership.",
+                        ui::design::Tone::Neutral,
                     );
                     return;
                 }
                 if self.matching.is_empty() {
-                    ui::chrome_prose(
+                    ui::design::notice(
                         frame,
                         rows,
-                        "No matches · Esc clears the display filter.",
-                        ui::muted(),
+                        "No matching packages",
+                        "Change or clear the display filter. The inspection is retained.",
+                        ui::design::Tone::Neutral,
                     );
                     return;
                 }
-                let capacity = usize::from(rows.height.saturating_sub(1)).max(1);
+                let capacity = ui::design::pair_capacity(rows).max(1);
                 self.capacity.set(capacity);
                 let offset = self.selected.saturating_sub(capacity - 1);
-                let mut lines = vec![Line::styled(
-                    format!(
-                        "{} shown / {} provider claims · package | version",
-                        self.matching.len(),
-                        installations.len()
-                    ),
-                    ui::muted(),
-                )];
-                for (position, index) in
-                    self.matching.iter().enumerate().skip(offset).take(capacity)
-                {
-                    let entry = &installations[*index];
-                    hits.click(
-                        Rect::new(
-                            rows.x,
-                            rows.y + 1 + (position - offset) as u16,
-                            rows.width,
-                            1,
-                        ),
-                        Target::ToolsRow(position),
-                    );
-                    lines.push(Line::styled(
-                        ui::clip(
-                            &format!("{} | {}", entry.package, entry.version),
-                            rows.width,
-                        ),
-                        if position == self.selected {
-                            ui::selected()
-                        } else {
-                            ui::muted()
-                        },
-                    ));
-                }
-                frame.render_widget(Paragraph::new(lines), rows);
+                let visible: Vec<_> = self
+                    .matching
+                    .iter()
+                    .enumerate()
+                    .skip(offset)
+                    .take(capacity)
+                    .map(|(identity, index)| {
+                        let entry = &installations[*index];
+                        ui::design::PairRow {
+                            identity,
+                            values: [&entry.package, &entry.version],
+                        }
+                    })
+                    .collect();
+                ui::design::pairs(
+                    frame,
+                    rows,
+                    ui::design::PairTable {
+                        headers: ["PACKAGE", "VERSION"],
+                        rows: &visible,
+                        selected: self.selected,
+                    },
+                    hits,
+                    Target::ToolsRow,
+                );
             }
+        }
+    }
+    pub fn draw_inventory_more(
+        &self,
+        frame: &mut Frame,
+        hits: &super::input::Hits,
+        notice: Option<&'static str>,
+    ) {
+        let Some(selected) = self.inventory_more else {
+            return;
+        };
+        let area = ui::design::choice_dialog(frame, "More actions", hits);
+        let body = Rect::new(
+            area.x,
+            area.y,
+            area.width,
+            area.height.saturating_sub(u16::from(notice.is_some())),
+        );
+        let capacity = ui::design::pair_capacity(body).max(1);
+        let offset = selected.saturating_sub(capacity - 1);
+        let rows: Vec<_> = INVENTORY_ACTIONS
+            .iter()
+            .enumerate()
+            .skip(offset)
+            .take(capacity)
+            .map(|(identity, (label, _, effect))| ui::design::PairRow {
+                identity,
+                values: [label, effect],
+            })
+            .collect();
+        ui::design::pairs(
+            frame,
+            body,
+            ui::design::PairTable {
+                headers: ["ACTION", "EFFECT"],
+                rows: &rows,
+                selected,
+            },
+            hits,
+            Target::InventoryChoice,
+        );
+        if let Some(notice) = notice {
+            ui::chrome_prose(
+                frame,
+                Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1),
+                notice,
+                ui::warning(),
+            );
         }
     }
     fn form(&self, frame: &mut Frame, area: Rect, hits: &super::input::Hits) {

@@ -1,6 +1,6 @@
 # Workbench interaction contracts
 
-The workbench separates navigation surfaces from approval ownership. End-user keys and workflows are documented in the [command reference](user/commands.md#interactive-interface).
+The [design system](design-system.md) is the mandatory visual/component standard for new or changed surfaces; it is not a claim that every legacy screen already conforms. The workbench separates navigation surfaces from approval ownership. End-user keys and workflows are documented in the [command reference](user/commands.md#interactive-interface).
 
 ## Pages and dialogs
 
@@ -20,7 +20,11 @@ Batch adoption separates list selection from the three-field item form. List Ent
 
 Discover Enter remains inspection, not adoption; Recovery Enter remains inspection. Git patch content still requires its separate deliberate warning and explicit disclosure action. Approval, dry-run, layout-floor, shrink, freshness, source identity, unresolved-attempt and joined-worker contracts remain in the core services and existing frontend gates; navigation hints do not grant authority.
 
+Provider inventory browsing uses the shared one-line filter and aligned package/version table under one location header and source summary. One foreground action strip owns direct Details/Done, More and Help actions; the obsolete search-title and extra status/toolbar hints are withheld on this surface. A retained failed-write/possible-partial-effects warning remains visible as an inline risk notice; simplifying chrome must not discard it. F2 opens contextual More, whose explicit choices retain ordinary query/preview boundaries. Esc/outside-click guards, retained filter/draft focus and row identities stay independent of approval; full program scope remains in Details. Places opens destination choices even on wide inventory layouts. Legacy workflow controls remain as documented until their own coherent migration.
+
 ## Text and validation
+
+Contextual footer hints follow the actual foreground: Help overrides retained pages/menus/tasks/errors; declaration and Advanced pages describe field/review actions rather than browsing shortcuts. Metadata subviews advertise scrolling and explicit Back controls, never hidden row selections or inert Enter actions. Reconciliation binding hints distinguish tool-row traversal, explicit snapshot selection and the direct Enter calculation. These hints describe existing dispatch and grant no execution authority.
 
 Trusted Unicode decoration is distinct from metadata. `StatusText` escapes owned dynamic ingress; trusted static/count chrome is explicit. Metadata still escapes non-ASCII, control and bidi characters at boundaries. There is no global unescape. Terminal-cell clipping preserves UTF-8 and existing independent ASCII/color fallbacks.
 

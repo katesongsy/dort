@@ -122,6 +122,115 @@ fn legacy_document(text: String) -> Text<'static> {
 pub fn wide_details(area: Rect, header_rows: u16) -> bool {
     area.width >= 110 && area.height.saturating_sub(header_rows) >= 14
 }
+fn inventory(frame: &mut Frame, app: &App) {
+    use super::{
+        components::design::{self, StripAction},
+        input::Target,
+    };
+    use ratatui::crossterm::event::KeyCode;
+    let area = frame.area();
+    let sections = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .split(area);
+    let places = " [Places] ";
+    let places_width = places.len() as u16;
+    let title = if area.width < 64 {
+        "Dort / Tools / Packages"
+    } else {
+        "Dort / Tools / Installed packages"
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(title, ui::heading()),
+            Span::styled(if app.dry_run { " [DRY RUN]" } else { "" }, ui::warning()),
+        ])),
+        Rect::new(area.x, area.y, area.width.saturating_sub(places_width), 1),
+    );
+    let place = Rect::new(
+        area.right().saturating_sub(places_width),
+        area.y,
+        places_width,
+        1,
+    );
+    frame.render_widget(Paragraph::new(places).style(ui::heading()), place);
+    app.hits.click(place, Target::MenuOpen);
+    let body = if app.write_warning {
+        frame.render_widget(
+            Paragraph::new(design::badge(
+                "Earlier write failed: Possible partial effects",
+                design::Tone::Error,
+            )),
+            Rect::new(sections[1].x, sections[1].y, sections[1].width, 1),
+        );
+        Rect::new(
+            sections[1].x,
+            sections[1].y + 1,
+            sections[1].width,
+            sections[1].height.saturating_sub(1),
+        )
+    } else {
+        sections[1]
+    };
+    app.tools_view.draw(frame, body, app.dry_run, &app.hits);
+    let notice = app.interaction_notice.or(app
+        .write_warning
+        .then_some("Earlier write failed: Possible partial effects"));
+    app.tools_view.draw_inventory_more(frame, &app.hits, notice);
+    let mut actions = Vec::new();
+    if app.tools_view.inventory_more.is_some() || app.navigation.menu.is_some() {
+        actions.push(StripAction {
+            key: "Enter",
+            label: "Open",
+            target: Target::InventoryKey(KeyCode::Enter),
+            primary: true,
+        });
+        actions.push(StripAction {
+            key: "Esc",
+            label: "Back",
+            target: Target::Back,
+            primary: false,
+        });
+    } else {
+        actions.push(StripAction {
+            key: "Enter",
+            label: if app.tools_view.searching {
+                "Done"
+            } else {
+                "Details"
+            },
+            target: Target::InventoryKey(KeyCode::Enter),
+            primary: true,
+        });
+        if area.width >= 76 && !app.tools_view.searching {
+            actions.push(StripAction {
+                key: "r",
+                label: "Inspect again",
+                target: Target::InventoryKey(KeyCode::Char('r')),
+                primary: false,
+            });
+        }
+        actions.push(StripAction {
+            key: "F2",
+            label: "More",
+            target: Target::InventoryKey(KeyCode::F(2)),
+            primary: false,
+        });
+    }
+    actions.push(StripAction {
+        key: "F1",
+        label: "Help",
+        target: Target::Action(Action::Help),
+        primary: false,
+    });
+    design::action_strip(frame, sections[2], &actions, &app.hits);
+    if let Some(menu) = app.navigation.menu {
+        super::navigation::popup(frame, app, menu);
+    }
+}
+
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
     app.hits.begin(area);
@@ -137,6 +246,19 @@ pub fn draw(frame: &mut Frame, app: &App) {
         if let Some(help) = &app.help {
             super::help::draw(frame, app, help);
         }
+        return;
+    }
+    if app.tab == Tab::Tools
+        && app.tools_view.browsing_inventory()
+        && app.shell.overlay.is_none()
+        && !app.busy
+        && app.error.is_none()
+        && !app.show_result
+        && app.preview.is_none()
+        && app.help.is_none()
+        && !app.batch_editor.as_ref().is_some_and(|e| e.open)
+    {
+        inventory(frame, app);
         return;
     }
     let top = 2;

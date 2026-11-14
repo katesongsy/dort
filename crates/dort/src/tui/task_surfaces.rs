@@ -578,15 +578,20 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
             ));
         }
         lines.push(Line::raw("Scope above is fixed for this task. Navigation preserves this scope. Observations update when the read finishes."));
-        panel(
-            frame,
-            area,
-            app,
+        let title = format!(
+            "{} {}",
+            app.motion.symbol(app.appearance.ascii()),
             if app.writing {
                 "Approved execution"
             } else {
                 "Reading"
-            },
+            }
+        );
+        panel(
+            frame,
+            area,
+            app,
+            &title,
             if app.exit_requested {
                 "Exit requested; waiting for worker"
             } else if app.writing {

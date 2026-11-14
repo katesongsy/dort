@@ -145,7 +145,11 @@ fn snapshots_are_distinct_immutable_and_selection_or_forgetting_never_queries() 
     key(&mut app, KeyCode::Up);
     key(&mut app, KeyCode::Enter);
     assert!(render(&app, 80, 24).contains("Snapshot s1"));
-    assert!(render(&app, 80, 24).contains("node | 22.1.0"));
+    assert!(
+        render(&app, 80, 24)
+            .lines()
+            .any(|line| line.contains("node") && line.contains("22.1.0"))
+    );
     key(&mut app, KeyCode::Char('s'));
     key(&mut app, KeyCode::Char('x'));
     assert_eq!(app.tools_view.snapshots.len(), 1);
@@ -172,10 +176,21 @@ fn explicit_bindings_reconcile_multiple_scopes_without_merging_or_executing_cand
     f.load(&mut app);
     assert!(app.tools_view.reconciliation.bindings.is_empty());
     assert!(app.tools_view.reconciliation.mode == Mode::Bindings);
+    assert!(super::hints::keys(&app).contains(&("Enter", "Reconcile")));
+    assert!(super::hints::keys(&app).contains(&("Tab", "Tool")));
     key(&mut app, KeyCode::Char(' '));
     assert_eq!(app.tools_view.reconciliation.bindings["node"], "s1");
     key(&mut app, KeyCode::Char('d'));
     assert!(render(&app, 80, 24).contains("snapshot"));
+    let hints = super::hints::keys(&app);
+    assert!(hints.contains(&("PgDn", "Scroll")));
+    assert!(
+        !hints
+            .iter()
+            .any(|(k, _)| ["Enter", "Space", "Tab"].contains(k))
+    );
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(app.tools_view.reconciliation.binding_metadata());
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Tab);
     key(&mut app, KeyCode::Char(' '));

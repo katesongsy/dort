@@ -78,6 +78,75 @@ fn type_text(app: &mut App, text: &str) {
 }
 
 #[test]
+fn inventory_has_one_action_strip_and_more_preserves_filter_without_query_replay() {
+    let f = Fixture::new(
+        "printf '{\"formulae\":[{\"full_name\":\"ripgrep\",\"installed\":[{\"version\":\"14.1.0\"}]}]}'",
+    );
+    let mut app = f.app(false);
+    f.review(&mut app);
+    let task = key(&mut app, KeyCode::Enter).unwrap();
+    f.run(&mut app, task);
+    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        let screen = render(&app, w, h);
+        assert_eq!(screen.matches("Filter packages").count(), 1, "{screen}");
+        assert_eq!(screen.matches("F1 Help").count(), 1, "{screen}");
+        assert!(
+            screen.lines().last().unwrap().contains("F2 More"),
+            "{screen}"
+        );
+        assert!(!screen.contains("Search metadata") && !screen.contains("configuration/cache"));
+        assert!(
+            screen.contains("PACKAGE") && screen.contains("VERSION") && screen.contains("ripgrep")
+        );
+    }
+    app.write_warning = true;
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        let screen = render(&app, w, h);
+        assert!(
+            screen.contains("Earlier write failed: Possible partial effects"),
+            "{screen}"
+        );
+        assert!(screen.contains("PACKAGE") && screen.lines().last().unwrap().contains("F2 More"));
+        assert_eq!(screen.matches("F1 Help").count(), 1);
+    }
+    app.write_warning = false;
+    key(&mut app, KeyCode::Char('/'));
+    type_text(&mut app, "rip");
+    key(&mut app, KeyCode::F(2));
+    assert!(app.tools_view.inventory_more.is_some());
+    assert_eq!(app.dialog_title(), Some("More actions"));
+    let screen = render(&app, 48, 14);
+    assert!(screen.contains("More actions") && screen.lines().last().unwrap().contains("Esc Back"));
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    assert!(
+        app.mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 0,
+                row: 0,
+                modifiers: KeyModifiers::NONE
+            },
+            48,
+            14
+        )
+        .is_none()
+    );
+    assert!(app.tools_view.inventory_more.is_some() && app.interaction_notice.is_some());
+    key(&mut app, KeyCode::Esc);
+    assert!(app.tools_view.searching && app.tools_view.search == "rip");
+    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
+    key(&mut app, KeyCode::F(2));
+    key(&mut app, KeyCode::Down); // Inspect again prepares a new review, never a query.
+    let task = key(&mut app, KeyCode::Enter).unwrap();
+    assert!(matches!(task, Task::ToolsPrepare(_)));
+    f.run(&mut app, task);
+    assert!(app.tools_view.preview.is_some());
+    assert_eq!(app.tools_view.snapshots.len(), 1);
+    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
+}
+
+#[test]
 fn entry_configuration_and_preview_never_query_and_printable_shortcuts_remain_text() {
     let f = Fixture::new("exit 99");
     let mut app = f.app(false);
@@ -114,11 +183,11 @@ fn explicit_activation_executes_once_searches_metadata_and_retry_needs_review() 
     assert!(app.tools_view.preview.is_none());
     f.run(&mut app, task);
     assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
-    assert!(render(&app, 80, 24).contains("2 shown / 2 provider claims"));
+    assert!(render(&app, 80, 24).contains("2/2 reported"));
     key(&mut app, KeyCode::Char('/'));
     type_text(&mut app, "RIPGREP");
     key(&mut app, KeyCode::Enter);
-    assert!(render(&app, 48, 14).contains("1 shown / 2 provider claims"));
+    assert!(render(&app, 48, 14).contains("1/2 reported"));
     key(&mut app, KeyCode::Enter);
     assert!(app.tools_view.details);
     assert!(render(&app, 80, 24).contains("Package: ripgrep"));
@@ -179,7 +248,7 @@ fn unavailable_is_not_empty_and_never_displays_raw_provider_payload() {
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.run(&mut app, task);
     let text = render(&app, 80, 24);
-    assert!(text.contains("UNAVAILABLE"));
+    assert!(text.contains("Inspection unavailable"));
     assert!(text.contains("Not a healthy empty"));
     assert!(!text.contains("PRIVATE"));
     assert!(app.tools_view.preview.is_none());
@@ -253,7 +322,7 @@ fn healthy_empty_observation_is_distinct_and_approved_query_is_not_a_write_recei
     app.complete(result);
     assert!(app.quit && app.receipt.is_none());
     app.quit = false;
-    assert!(render(&app, 80, 24).contains("no installed packages reported"));
+    assert!(render(&app, 80, 24).contains("0 packages reported"));
     assert!(!render(&app, 80, 24).contains("UNAVAILABLE"));
 }
 
@@ -303,9 +372,12 @@ fn compact_wide_forms_keep_focus_and_caret_visible_and_results_have_semantic_sel
     let mut terminal = Terminal::new(TestBackend::new(48, 14)).unwrap();
     terminal.draw(|frame| views::draw(frame, &app)).unwrap();
     assert!(
-        terminal.backend().buffer().content.iter().any(
-            |c| c.bg == Color::Cyan && c.modifier.contains(Modifier::BOLD | Modifier::REVERSED)
-        )
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .any(|c| c.bg == Color::Reset && c.modifier.contains(Modifier::REVERSED))
     );
 }
 
@@ -348,6 +420,13 @@ fn detected_collection_is_process_free_until_one_selected_confirmation() {
         );
     }
     key(&mut app, KeyCode::Char('d'));
+    let hints = super::hints::keys(&app);
+    assert!(hints.contains(&("PgDn", "Scroll")));
+    assert!(
+        !hints
+            .iter()
+            .any(|(key, _)| *key == "Enter" || *key == "Space")
+    );
     assert!(key(&mut app, KeyCode::Enter).is_none());
     assert!(!f.home.join("calls").exists());
     key(&mut app, KeyCode::Char('d'));
@@ -361,7 +440,13 @@ fn detected_collection_is_process_free_until_one_selected_confirmation() {
     f.run(&mut app, task);
     assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
     assert_eq!(app.tools_view.snapshots.len(), 1);
+    assert!(super::hints::keys(&app).contains(&("Enter", "Details")));
+    assert!(key(&mut app, KeyCode::Char('/')).is_none());
+    assert!(super::hints::keys(&app).contains(&("Enter", "Done")));
+    assert!(!super::hints::keys(&app).iter().any(|(k, _)| *k == "r"));
     assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(super::hints::keys(&app).contains(&("Enter", "Back")));
     assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
     assert!(matches!(
         key(&mut app, KeyCode::Char('r')),

@@ -35,6 +35,8 @@ pub enum Target {
     ToolsDefault(usize, bool),
     ToolsControl(usize, bool),
     ToolsRow(usize),
+    InventoryKey(ratatui::crossterm::event::KeyCode),
+    InventoryChoice(usize),
     ToolsReconControl(usize, bool),
     ToolDeclarationControl(usize, bool),
     Picker(usize, bool),

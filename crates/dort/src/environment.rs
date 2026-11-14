@@ -2,6 +2,9 @@
 use dort_core::Error;
 use std::path::PathBuf;
 
+pub fn reduced_motion() -> bool {
+    std::env::var_os("DORT_REDUCED_MOTION").is_some_and(|value| value == "1")
+}
 pub fn terminal_appearance() -> crate::tui::appearance::Appearance {
     // Non-Unicode locale values remain nonempty and conservatively request ASCII.
     let value = |name| std::env::var_os(name).map(|s| s.into_string().unwrap_or("C".into()));

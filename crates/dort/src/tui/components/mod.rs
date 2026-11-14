@@ -1,4 +1,9 @@
 //! Shared visual vocabulary. Metadata is escaped before it reaches styled widgets.
+pub mod design;
+pub mod glyphs;
+pub mod motion;
+pub(in crate::tui) mod surface;
+
 use ratatui::{
     Frame,
     layout::Rect,
@@ -69,7 +74,10 @@ pub fn warning() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 pub fn danger() -> Style {
-    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+    design::Tone::Error.style()
+}
+pub fn success() -> Style {
+    design::Tone::Success.style()
 }
 pub fn state(label: &str) -> Style {
     match label {
@@ -244,7 +252,7 @@ pub fn review_text(body: &str) -> Text<'static> {
             Line::styled(line.to_owned(), danger())
         } else if let Some(effect) = trimmed.strip_prefix("- ") {
             Line::from(vec![
-                Span::styled("▸ ", accent()),
+                Span::styled(format!("{} ", glyphs::EXPAND), accent()),
                 Span::raw(effect.to_owned()),
             ])
         } else if let Some((label, value)) = line.split_once(": ") {

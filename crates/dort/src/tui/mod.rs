@@ -17,6 +17,9 @@ mod components;
 mod consistency_tests;
 mod context;
 #[cfg(test)]
+#[path = "tests/design_system.rs"]
+mod design_system_tests;
+#[cfg(test)]
 #[path = "tests/design.rs"]
 mod design_tests;
 #[cfg(test)]
@@ -39,6 +42,9 @@ mod help;
 #[path = "tests/help.rs"]
 mod help_tests;
 mod hints;
+#[cfg(test)]
+#[path = "tests/hints.rs"]
+mod hints_tests;
 #[cfg(test)]
 #[path = "tests/ignore.rs"]
 mod ignore_tests;
@@ -113,7 +119,10 @@ use ratatui::{
     DefaultTerminal,
     crossterm::event::{self, Event, KeyEventKind},
 };
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 struct TerminalGuard;
 impl Drop for TerminalGuard {
@@ -136,9 +145,11 @@ pub fn run(
     launch_directory: PathBuf,
     git: std::result::Result<PathBuf, String>,
     appearance: appearance::Appearance,
+    reduced_motion: bool,
 ) -> Result<()> {
     let mut app = App::new(dry_run);
     app.appearance = appearance;
+    app.reduced_motion = reduced_motion;
     if repository.is_some() {
         app.origin = "--repo override";
     }
@@ -171,6 +182,7 @@ fn run_loop(
     launch(Task::Refresh, host, &mut app, worker)?;
     let mut queued = None;
     let mut dirty = true;
+    let animation_clock = Instant::now();
     let mut last_size = None;
     loop {
         let size = terminal.size().map_err(terminal_error)?;
@@ -226,6 +238,12 @@ fn run_loop(
             launch(task, host, &mut app, worker)?;
             dirty = true;
         }
+        dirty |= app.motion.update(
+            animation_clock.elapsed(),
+            app.busy && app.help.is_none() && size.width >= 48 && size.height >= 14,
+            app.reduced_motion,
+            app.appearance.ascii(),
+        );
         if dirty {
             terminal
                 .draw(|frame| {

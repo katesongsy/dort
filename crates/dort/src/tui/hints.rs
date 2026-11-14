@@ -5,6 +5,14 @@ use super::{
 };
 
 pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
+    if app.help.is_some() {
+        return vec![
+            ("F1", "Back"),
+            ("Esc", "Back"),
+            ("PgDn", "Scroll"),
+            ("Home", "Top"),
+        ];
+    }
     if app.navigation.menu.is_some() {
         return vec![("F1", "Help"), ("Esc", "Close")];
     }
@@ -19,7 +27,7 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
     } else if app.show_result && app.preview.is_none() {
         keys.extend([("Esc", "Back"), ("r", "Refresh")]);
     } else if app.confirmation.is_some() {
-        keys.extend([("Enter", "Submit"), ("Esc", "Back")]);
+        keys.extend([("Enter", "Confirm"), ("Esc", "Back")]);
     } else if let Some(preview) = &app.preview {
         if !app.dry_run && !preview.pending.blocked() {
             keys.push((
@@ -33,20 +41,22 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
         }
         keys.extend([("Esc", "Back"), ("i", "Full report")]);
     } else if let Some(editor) = app.batch_editor.as_ref().filter(|e| e.open) {
-        keys.extend([
-            (
-                "Enter",
-                if editor.details {
-                    "Back"
-                } else if editor.item_form {
-                    "Done"
-                } else {
-                    "Review all"
-                },
-            ),
-            ("F2", "Metadata"),
-            ("Esc", "Back"),
-        ]);
+        if editor.details {
+            keys.extend([("F2", "Draft"), ("PgDn", "Scroll"), ("Esc", "Back")]);
+        } else {
+            keys.extend([
+                (
+                    "Enter",
+                    if editor.item_form {
+                        "Done"
+                    } else {
+                        "Review all"
+                    },
+                ),
+                ("F2", "Metadata"),
+                ("Esc", "Back"),
+            ]);
+        }
     } else if let Some(overlay) = &app.shell.overlay {
         match overlay {
             Overlay::Ignored { paths, selected } => {
@@ -110,7 +120,9 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
             ("Esc", "Back"),
         ]);
     } else if app.tab == Tab::Tools {
-        if app.tools_view.install_open {
+        if app.tools_view.declaration_open {
+            keys.extend([("Tab", "Field"), ("Enter", "Review"), ("Esc", "Back")]);
+        } else if app.tools_view.install_open {
             use super::tools_install::Mode;
             if app.tools_view.installation.details {
                 keys.extend([("d/Esc", "Back"), ("PgDn", "Page")]);
@@ -155,20 +167,36 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
                 }
             }
         } else if app.tools_view.recon_open {
+            if app.tools_view.reconciliation.binding_metadata() {
+                keys.extend([("d/Esc", "Back"), ("PgDn", "Scroll"), ("Home", "Top")]);
+                return keys;
+            }
             match app.tools_view.reconciliation.mode {
                 super::tools_reconcile::Mode::Inputs => {
                     keys.extend([("Tab", "Field"), ("Enter", "Load"), ("Esc", "Back")])
                 }
                 super::tools_reconcile::Mode::Bindings => keys.extend([
+                    ("Enter", "Reconcile"),
                     ("Space", "Snapshot"),
+                    ("Tab", "Tool"),
                     ("d", "Scope"),
-                    ("Tab", "Control"),
                     ("Esc", "Back"),
                 ]),
-                super::tools_reconcile::Mode::Results => {
-                    keys.extend([("Enter", "Details"), ("PgDn", "Page"), ("Esc", "Back")])
-                }
+                super::tools_reconcile::Mode::Results => keys.extend([
+                    (
+                        "Enter",
+                        if app.tools_view.reconciliation.details {
+                            "Back"
+                        } else {
+                            "Details"
+                        },
+                    ),
+                    ("PgDn", "Page"),
+                    ("Esc", "Back"),
+                ]),
             }
+        } else if app.tools_view.setup && app.tools_view.details {
+            keys.extend([("d/Esc", "Back"), ("PgDn", "Scroll"), ("Home", "Top")]);
         } else if app.tools_view.setup {
             keys.extend([
                 ("Enter", "Inspect"),
@@ -192,6 +220,17 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
             ]);
         } else if app.tools_view.configuring {
             keys.extend([("Tab", "Field"), ("Enter", "Review"), ("Esc", "Back")]);
+        } else if app.tools_view.searching {
+            keys.extend([("Enter", "Done"), ("Esc", "Done"), ("Ctrl-U", "Clear")]);
+        } else if app.tools_view.details && app.tools_view.report.is_some() {
+            keys.extend([("Enter", "Back"), ("PgDn", "Scroll"), ("Esc", "Back")]);
+        } else if app.tools_view.report.is_some() {
+            keys.extend([
+                ("Enter", "Details"),
+                ("/", "Search"),
+                ("r", "Fresh review"),
+                ("F10", "Menu"),
+            ]);
         } else {
             keys.extend([
                 ("F10", "Menu"),

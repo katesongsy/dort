@@ -203,8 +203,12 @@ class Session:
         raise AssertionError("Click target was not visible")
 
     def navigate(self, group, item):
-        if self.screen.columns < 80:
-            self.click_label("F10")
+        self.settle()
+        if b'[Places]' in self.screen.text():
+            self.click_label('[Places]')
+            self.click_label(group + ' >')
+        elif self.screen.columns < 80:
+            self.click_label("[Menu]")  # Actual top-level menu affordance, including form pages.
             self.click_label(group + " >")
         else:
             self.click_label(group + (" ▾" if (group + " ▾").encode() in self.screen.text() else " v"))
@@ -320,7 +324,20 @@ def tools_workflows(binary, base, env):
         session.send(b'\r')
         session.wait(b'Run query')
         session.send(b'\r')
-        session.wait(b'1 shown / 1 provider claims')
+        session.wait(b'1/1 reported')
+        session.settle()
+        assert b'Search metadata' not in session.screen.text()
+        assert session.screen.text().count(b'F1 Help') == 1, 'Inventory has duplicate action hints'
+        session.send(b'\x1bOQ')  # F2 is contextual More on the migrated inventory surface.
+        session.wait(b'More actions')
+        assert (home / 'calls').read_text() == 'ran', 'Opening More ran a provider'
+        session.mouse(0, 0, 0)
+        session.settle()
+        assert b'More actions' in session.screen.text(), 'Outside click dismissed More'
+        session.send(b'\x1b')
+        session.settle()
+        session.wait(b'Filter packages')
+        assert (home / 'calls').read_text() == 'ran', 'Dismissing More replayed approval'
         session.send(b'/RIPGREP\r')
         session.wait(b'ripgrep')
         session.send(b'r')
@@ -330,7 +347,7 @@ def tools_workflows(binary, base, env):
         session.send(b'\x1b')
         session.wait(b'Trusted executable')
         session.send(b'\x1b')
-        session.wait(b'Provider claims')
+        session.wait(b'Filter packages')
         session.send(b'q')
         session.finish()
     assert sorted(p.name for p in home.iterdir()) == ['calls'], 'Inspection created Dort state'
@@ -489,7 +506,7 @@ def tools_reconciliation_workflows(binary, base, env):
         session.send(b'\x1b')
         session.wait(b'Load declarations')
         session.send(b'\x1b')
-        session.wait(b'Provider claims')
+        session.wait(b'Filter packages')
         session.send(b's')
         session.wait(b'Session snapshots')
         session.send(b'x')
@@ -498,7 +515,7 @@ def tools_reconciliation_workflows(binary, base, env):
         assert (home / 'calls').read_text() == 'first\nsecond\n'
         assert not (home / 'candidate-executed').exists()
         session.send(b'\x1b')
-        session.wait(b'Provider claims')
+        session.wait(b'Filter packages')
         session.send(b'q')
         session.finish()
     print('PASS multiple snapshots, explicit bindings, non-executable command previews and forget without queries')
@@ -543,7 +560,7 @@ def tool_install_workflows(binary, base, env):
         session.wait(b'[x] mise')
         assert not (home / 'calls').exists(), 'Defaults executed mise'
         session.send(b'\r')
-        session.wait(b'no installed packages reported')
+        session.wait(b'0 packages reported')
         session.send(b'p' + str(repo / 'dort.toml').encode() + b'\t' + str(lookup).encode() + b'\t\t\r')
         session.wait(b'Space chooses')
         session.send(b' \t\r')
@@ -629,7 +646,7 @@ def npm_install_workflows(binary, base, env):
         session.wait(b'Run query')
         assert (home / 'calls').read_text() == 'M', 'npm review executed a query'
         session.send(b'\r')
-        session.wait(b'no installed packages reported')
+        session.wait(b'0 packages reported')
         session.send(b'p' + str(manifest).encode() + b'\t' + str(bin_dir).encode() + b'\t\t\r')
         session.wait(b'Space chooses')
         session.send(b' \t \t\r')
@@ -726,7 +743,7 @@ esac
             session.wait(b'Run query')
             assert not (home / 'calls').exists(), 'Brew review executed a query'
             session.send(b'\r')
-            session.wait(b'no installed packages reported')
+            session.wait(b'0 packages reported')
             session.send(b'p' + str(manifest).encode() + b'\t' + str(bin_dir).encode() + b'\t\t\r')
             session.wait(b'Space chooses')
             session.send(b' \t\r')
@@ -813,7 +830,7 @@ exit 9
         session.send(b'\x1b[D')
         session.wait(b'[x] mise')
         session.send(b'\r')
-        session.wait(b'no installed packages reported')
+        session.wait(b'0 packages reported')
         session.send(b'p' + str(manifest).encode() + b'\t' + str(lookup).encode() + b'\t\t\r')
         session.wait(b'Space chooses')
         session.send(b' \t\r')
@@ -899,7 +916,7 @@ printf installed > "$HOME/installed"''',
             session.wait(b'Run query')
             assert not (home / 'calls').exists(), 'APT review executed a query'
             session.send(b'\r')
-            session.wait(b'no installed packages reported')
+            session.wait(b'0 packages reported')
             session.send(b'p' + str(manifest).encode() + b'\t' + str(bin_dir).encode() + b'\t\t\r')
             session.wait(b'Space chooses')
             session.send(b' \t\r')
@@ -970,6 +987,10 @@ def interaction_surface_workflows(binary, base, env):
             session.send(b'aq?/')
             session.wait(b'Tool ID')
             session.wait(b'q?/')
+            session.settle()
+            footer = session.screen.text().splitlines()[-1]
+            assert b'Field' in footer and b'Review' in footer, 'Declaration hints describe the underlying Tools page'
+            assert b'Inspect tools' not in footer and b'Snapshots' not in footer
             session.send(b'\x1b[21~')  # F10 opens a page menu even during text entry.
             session.wait(b'Overview')
             session.settle()
@@ -979,6 +1000,10 @@ def interaction_surface_workflows(binary, base, env):
             session.wait(b'q?/')
             session.send(b'\x1bOP')
             session.wait(b'Help: Explicit provider inspection')
+            session.settle()
+            footer = session.screen.text().splitlines()[-1]
+            assert b'Back' in footer and b'Scroll' in footer, 'Help hints describe the background page'
+            assert b'Review' not in footer
             session.send(b'\x1b[21~')
             session.wait(b'Dialog open:')
             session.mouse(0, 0, 0)  # Outside click cannot navigate or dismiss Help.
