@@ -102,10 +102,7 @@ fn submit_path(app: &mut App) -> Task {
             super::shell::Form::Choose | super::shell::Form::Init
         ))
     ));
-    if app.shell.path_focused == 0 {
-        assert!(key(app, KeyCode::Enter).is_none());
-    }
-    key(app, KeyCode::Enter).expect("activate visible path action after field advance")
+    key(app, KeyCode::Enter).expect("Enter from the path field requests the read-only preview")
 }
 fn adopt_selected(app: &mut App) {
     key(app, KeyCode::Esc); // Return to list before inspecting.
@@ -928,11 +925,10 @@ fn discovery_protects_selected_root_and_rejects_invalid_scope_without_fallback()
 fn adoption_fields(app: &mut App, target: &str, id: &str, source: &str) {
     key(app, KeyCode::Char('o'));
     type_text(app, target);
-    key(app, KeyCode::Enter);
+    key(app, KeyCode::Tab);
     type_text(app, id);
-    key(app, KeyCode::Enter);
-    type_text(app, source);
-    key(app, KeyCode::Enter); // focus Review; never executes from ordinary field
+    key(app, KeyCode::Tab);
+    type_text(app, source); // Enter now requests the read-only combined preview.
     assert!(app.preview.is_none());
 }
 
@@ -949,9 +945,12 @@ fn adoption_retains_all_input_through_missing_repository_picker_and_attachment()
     assert!(app.error.is_some());
     key(&mut app, KeyCode::Esc);
     assert_eq!(app.shell.adoption.target, "~/.q?config");
-    key(&mut app, KeyCode::Tab); // Choose repository
-    key(&mut app, KeyCode::Enter);
-    key(&mut app, KeyCode::Enter); // exact path
+    app.key(
+        KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
+        80,
+        24,
+    );
+    key(&mut app, KeyCode::Enter); // exact path in the short repository dialog
     type_text(&mut app, "repository");
     let task = submit_path(&mut app);
     run_task(&mut app, &fixture, task);
@@ -961,8 +960,11 @@ fn adoption_retains_all_input_through_missing_repository_picker_and_attachment()
     ));
     assert_eq!(app.shell.adoption.source, "files/config");
     assert!(!fixture.host.config_dir.exists() && !fixture.host.state_dir.exists());
-    key(&mut app, KeyCode::Tab); // Create/attach, from Choose button
-    key(&mut app, KeyCode::Enter);
+    app.key(
+        KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
+        80,
+        24,
+    );
     type_text(&mut app, "repository");
     let task = submit_path(&mut app);
     run_task(&mut app, &fixture, task);
@@ -974,7 +976,7 @@ fn adoption_retains_all_input_through_missing_repository_picker_and_attachment()
         Some(Overlay::Form(Form::Adopt))
     ));
     assert_eq!(app.shell.adoption.id, "config");
-    app.shell.adoption.focused = 3;
+    app.shell.adoption.focused = 2;
     let task = key(&mut app, KeyCode::Enter).unwrap();
     run_task(&mut app, &fixture, task);
     let shared = crate::services::adopt_request(
@@ -1093,13 +1095,18 @@ fn standalone_check_is_independent_and_preserves_path_profile_drafts_on_errors()
             && screen.contains("Tool dependency order")
     );
     key(&mut app, KeyCode::Char('v'));
-    key(&mut app, KeyCode::Tab); // Check -> Profiles
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = app
+        .key(
+            KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
+            80,
+            24,
+        )
+        .unwrap();
     run_task(&mut app, &fixture, task);
     assert!(matches!(app.shell.overlay, Some(Overlay::Profiles(_))));
     key(&mut app, KeyCode::Down); // extra
-    key(&mut app, KeyCode::Enter); // toggle
-    key(&mut app, KeyCode::Down); // Apply
+    key(&mut app, KeyCode::Char(' ')); // toggle only; Enter applies from this row
+    key(&mut app, KeyCode::Down); // another row, never a footer focus stop
     let task = key(&mut app, KeyCode::Enter).unwrap();
     run_task(&mut app, &fixture, task);
     assert_eq!(app.shell.check_profiles, ["extra"]);
@@ -1117,7 +1124,7 @@ fn standalone_check_is_independent_and_preserves_path_profile_drafts_on_errors()
             .contains("extra")
     );
     fs::write(&manifest, "malformed").unwrap();
-    app.shell.manifest_focused = 1;
+    app.shell.manifest_focused = 0;
     let task = key(&mut app, KeyCode::Enter).unwrap();
     run_task(&mut app, &fixture, task);
     assert!(app.error.is_some());
@@ -1156,18 +1163,18 @@ fn temporary_profiles_are_mandatory_union_and_drive_full_inventory_and_plans() {
     );
     let screen = super::tests::render(&app, 48, 14);
     assert!(screen.contains("> [x] base") && screen.contains("Mandatory"));
-    key(&mut app, KeyCode::Enter); // base cannot be removed
+    key(&mut app, KeyCode::Char(' ')); // base cannot be removed
     let Overlay::Profiles(picker) = app.shell.overlay.as_ref().unwrap() else {
         panic!("profiles")
     };
     assert!(picker.requested.is_empty());
     key(&mut app, KeyCode::Down); // defaults
     key(&mut app, KeyCode::Down); // extra
-    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Char(' '));
     for _ in 0..3 {
         key(&mut app, KeyCode::Down);
-    } // local/platform/Apply
-    assert!(super::tests::render(&app, 48, 14).contains("> [Apply additions"));
+    } // Rows only; Enter applies without focusing a button.
+    assert!(super::tests::render(&app, 48, 14).contains("Apply additions"));
     let task = key(&mut app, KeyCode::Enter).unwrap();
     let refresh = run_task(&mut app, &fixture, task).unwrap();
     run_task(&mut app, &fixture, refresh);
@@ -1374,7 +1381,7 @@ fn failed_profile_union_leaves_prior_scope_and_invalid_inventory_is_not_empty_su
     let task = key(&mut app, KeyCode::Char('t')).unwrap();
     run_task(&mut app, &fixture, task);
     key(&mut app, KeyCode::Down);
-    key(&mut app, KeyCode::Enter); // extra
+    key(&mut app, KeyCode::Char(' ')); // extra
     // Revalidate on Apply: a later manifest edit makes the requested name unknown.
     fs::write(fixture.root.join("dort.toml"), "schema=1\n").unwrap();
     key(&mut app, KeyCode::Down);

@@ -97,7 +97,7 @@ fn forms_actions_and_search_keep_exact_drafts_scroll_and_focus() {
     assert!(
         matches!(&app.shell.overlay, Some(Overlay::Actions {query, searching:true, selected:0, ..}) if query == "q?/")
     );
-    key(&mut app, KeyCode::Esc); // results focus
+    key(&mut app, KeyCode::Down); // row focus, retaining the filter
     key(&mut app, KeyCode::Char('?'));
     assert!(matches!(app.help.as_ref().unwrap().topic, Topic::Actions));
     key(&mut app, KeyCode::F(1));
@@ -188,13 +188,17 @@ fn help_task_error_completion_and_picker_return_without_scope_changes() {
     inert(&mut app);
     let s = render(&app, 80, 24);
     assert!(!s.contains("private-path"));
-    // Mouse close is Help-only, even with retained underlying controls.
+    // Only the explicit foreground Close control dismisses Help.
+    let (column, row) = (0..24)
+        .flat_map(|y| (0..80).map(move |x| (x, y)))
+        .find(|&(x, y)| matches!(app.hits.target(x, y), Some(super::input::Target::Back)))
+        .unwrap();
     assert!(
         app.mouse(
             MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
-                column: 2,
-                row: 23,
+                column,
+                row,
                 modifiers: KeyModifiers::NONE
             },
             80,

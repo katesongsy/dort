@@ -2,6 +2,8 @@
 mod apt;
 #[path = "tools_install_brew.rs"]
 mod brew;
+#[path = "tools_outcomes.rs"]
+mod outcomes;
 use super::{
     actions::{self, Task},
     app::{App, Tab},
@@ -191,7 +193,13 @@ esac
         let mut app = App::new(dry);
         app.tab = Tab::Tools;
         app.repository = Some(self.repo.clone());
-        app.tools_view.snapshots = vec![snapshot];
+        assert!(
+            app.tools_view.completed(
+                std::sync::Arc::try_unwrap(snapshot.report)
+                    .ok()
+                    .expect("fixture owns initial report")
+            )
+        );
         let report = reconciliation::Request {
             manifest: self.repo.join("dort.toml"),
             tool_search_dirs: vec![self.bin.clone()],
@@ -224,6 +232,32 @@ esac
 }
 fn key(app: &mut App, code: KeyCode) -> Option<Task> {
     app.key(KeyEvent::new(code, KeyModifiers::NONE), 80, 24)
+}
+#[test]
+fn long_package_metadata_cannot_push_compact_install_risks_below_the_action() {
+    let f = Fixture::new();
+    let manifest = f.repo.join("dort.toml");
+    let package = "a".repeat(128);
+    fs::write(
+        &manifest,
+        fs::read_to_string(&manifest)
+            .unwrap()
+            .replace("package='demo'", &format!("package='{package}'")),
+    )
+    .unwrap();
+    let mut app = f.app(false);
+    let calls = f.calls();
+    f.review(&mut app);
+    let s = render(&app, 48, 14);
+    assert!(
+        s.contains("CAN EXECUTE")
+            && s.contains("no rollback")
+            && s.contains("No activation")
+            && s.contains("Install exact version"),
+        "{s}"
+    );
+    assert_eq!(calls, f.calls());
+    assert!(app.tools_view.installation.preview.is_some());
 }
 #[test]
 fn one_activation_consumes_the_real_install_preview_and_preserves_old_snapshots() {
@@ -267,7 +301,7 @@ fn one_activation_consumes_the_real_install_preview_and_preserves_old_snapshots(
     assert!(!render(&app, 80, 24).contains("PRIVATE"));
     let task = key(&mut app, KeyCode::Char('i')).unwrap();
     f.run(&mut app, task);
-    assert!(render(&app, 80, 24).contains("Observed outcome"));
+    assert!(render(&app, 80, 24).contains("Exact package reported"));
 }
 #[test]
 fn dry_run_shrink_navigation_and_late_preparation_cannot_approve_installation() {
@@ -468,15 +502,14 @@ fn damaged_npm_closure_has_retained_provider_drafts_and_compact_focus_caret() {
     key(&mut app, KeyCode::Char('c'));
     assert!(app.tools_view.installation.mode == Mode::CloseInputs);
     // Existing mise metadata is the initial fallback; switch deliberately to npm.
-    app.tools_view.installation.focus = 3;
-    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::F(2));
     assert!(app.tools_view.installation.close_npm);
     assert_eq!(
         app.tools_view.installation.fields[0],
         f.bin.join("node").display().to_string()
     );
     for size in [(48, 14), (80, 24), (140, 40)] {
-        for focus in 0..6 {
+        for focus in 0..4 {
             app.tools_view.installation.focus = focus;
             let mut terminal = Terminal::new(TestBackend::new(size.0, size.1)).unwrap();
             terminal.draw(|frame| views::draw(frame, &app)).unwrap();
@@ -509,24 +542,20 @@ fn damaged_npm_closure_has_retained_provider_drafts_and_compact_focus_caret() {
             }
         }
     }
-    app.tools_view.installation.focus = 5;
-    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::F(2));
     assert!(!app.tools_view.installation.close_npm);
     assert!(app.tools_view.installation.close_brew);
-    app.tools_view.installation.focus = 4;
-    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::F(2));
     assert!(!app.tools_view.installation.close_brew);
     assert!(app.tools_view.installation.close_apt);
-    app.tools_view.installation.focus = 3;
-    key(&mut app, KeyCode::Enter); // mise
-    app.tools_view.installation.focus = 3;
-    key(&mut app, KeyCode::Enter); // npm
+    key(&mut app, KeyCode::F(2)); // mise
+    key(&mut app, KeyCode::F(2)); // npm
     assert!(app.tools_view.installation.close_npm);
     assert_eq!(
         app.tools_view.installation.fields[2],
         f.host.home.join("npm-cli.js").display().to_string()
     );
-    app.tools_view.installation.focus = 4;
+    app.tools_view.installation.focus = 0;
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.run(&mut app, task);
     assert!(app.tools_view.installation.mode == Mode::CloseReview);
@@ -547,5 +576,10 @@ fn unavailable_attempt_storage_is_not_a_healthy_empty_list() {
     let screen = render(&app, 80, 24);
     assert!(screen.contains("Attempts unavailable"));
     assert!(!screen.contains("No installation attempts"));
+    assert!(screen.contains("Start fresh review"));
+    assert!(matches!(
+        key(&mut app, KeyCode::Char('f')),
+        Some(Task::ToolsDetect(_))
+    ));
     assert_eq!(f.calls(), "Q");
 }

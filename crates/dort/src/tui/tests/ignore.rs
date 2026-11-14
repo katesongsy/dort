@@ -223,7 +223,8 @@ fn help_retains_real_preview_confirmation_and_shrink_still_clears_approval() {
     f.finish(&mut app, task);
     let original = app.preview.as_ref().unwrap().text.clone();
     key(&mut app, KeyCode::F(10));
-    assert!(app.navigation.menu.is_none() && app.preview.is_some());
+    assert!(app.navigation.menu.is_some() && app.preview.is_some());
+    key(&mut app, KeyCode::Esc); // Dismissing a menu retains the real preview.
     key(&mut app, KeyCode::F(1));
     for code in [
         KeyCode::Enter,
@@ -261,6 +262,19 @@ fn help_retains_real_preview_confirmation_and_shrink_still_clears_approval() {
     let refresh = f.finish(&mut app, task).unwrap();
     f.finish(&mut app, refresh);
     assert_eq!(Rules::load(&f.host).unwrap().paths().count(), 1);
+}
+#[test]
+fn actual_menu_navigation_drops_real_preview_ownership_without_any_write() {
+    let f = Fixture::new();
+    let mut app = f.app(false);
+    let task = key(&mut app, KeyCode::Char('I')).unwrap();
+    f.finish(&mut app, task);
+    assert!(app.preview.is_some());
+    app.open_menu(1, 80);
+    key(&mut app, KeyCode::Enter);
+    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.tab == super::app::Tab::Overview);
+    assert!(!f.host.config_dir.exists() && !f.host.state_dir.exists());
 }
 #[test]
 fn ignore_preview_cancel_dry_run_and_small_layout_cannot_write() {

@@ -1,5 +1,7 @@
 # Session snapshots and binary metadata reconciliation
 
+Reconciliation uses the [shared navigable page model](tui-interactions.md). Input Tab traversal stays among its three fields; Enter loads declarations from any field. Binding traversal stays on tool rows, Space explicitly chooses a snapshot, and Enter calculates metadata from any row. Neither row navigation nor calculation grants provider execution or installation authority.
+
 Tools reconciliation connects explicit provider-inspection snapshots to the [pure package planner](tools-planning.md). It does not install packages, execute discovered candidates, infer ownership, create receipts/trust or change any lifecycle journal. End-user usage is in [snapshot reconciliation](user/commands.md#snapshot-reconciliation).
 
 ## Collection and scope selection

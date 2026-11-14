@@ -362,13 +362,5 @@ impl Request {
 }
 
 pub fn succeeded(report: &install::Report) -> bool {
-    report.no_op
-        || report.outcome.is_some_and(|o| {
-            o.process == install::ProcessOutcome::Success
-                && matches!(
-                    o.package,
-                    install::PackageState::ExactPresent
-                        | install::PackageState::ProviderCurrentPresent
-                )
-        })
+    report.no_op || report.outcome.is_some_and(install::Outcome::succeeded)
 }

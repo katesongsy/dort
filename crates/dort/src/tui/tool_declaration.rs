@@ -1,12 +1,10 @@
-//! Retained desired-metadata draft. Review and typed mutation approval are separate.
+//! Retained desired-metadata draft. Review and explicit mutation approval are separate.
 use super::{actions::Task, components as ui, input::Target, shell::edit_text};
 use crate::services::declaration::Request;
 use ratatui::{
     Frame,
     crossterm::event::{KeyCode, KeyEvent},
     layout::Rect,
-    text::Line,
-    widgets::Paragraph,
 };
 const LABELS: [&str; 12] = [
     "Tool ID",
@@ -65,6 +63,12 @@ impl State {
                 Some(Task::ToolDeclaration(r))
             }
             Err(e) => {
+                self.focus = [0, 1, 5, 9]
+                    .into_iter()
+                    .find(|&i| {
+                        self.fields[i].is_empty() && (i < 2 || !self.fields[i - 1].is_empty())
+                    })
+                    .unwrap_or(self.focus.min(11));
                 self.failure = Some(super::actions::diagnostic(&e));
                 None
             }
@@ -72,10 +76,9 @@ impl State {
     }
     pub fn key(&mut self, key: KeyEvent) -> Option<Task> {
         match key.code {
-            KeyCode::Tab | KeyCode::Down => self.focus = (self.focus + 1) % 14,
-            KeyCode::BackTab | KeyCode::Up => self.focus = (self.focus + 13) % 14,
-            KeyCode::Enter if self.focus == 12 => return self.prepare(),
-            KeyCode::Enter => self.focus = (self.focus + 1) % 14,
+            KeyCode::Tab | KeyCode::Down => self.focus = (self.focus + 1) % 12,
+            KeyCode::BackTab | KeyCode::Up => self.focus = (self.focus + 11) % 12,
+            KeyCode::Enter => return self.prepare(),
             _ if self.focus < 12 => {
                 edit_text(&mut self.fields[self.focus], key);
                 self.failure = None;
@@ -85,56 +88,31 @@ impl State {
         None
     }
     pub fn draw(&self, frame: &mut Frame, area: Rect, hits: &super::input::Hits) {
-        let header = Rect::new(area.x, area.y, area.width, 2.min(area.height));
-        ui::prose(
-            frame,
-            header,
-            "Add tool declaration · selected registered repository/session profiles\nDesired metadata only · NOT installed-binary adoption or a package install",
-            ui::heading(),
-        );
-        let area = Rect::new(
-            area.x,
-            area.y + header.height,
-            area.width,
-            area.height.saturating_sub(header.height),
-        );
-        let budget = usize::from(area.height.saturating_sub(2));
-        let height = |i: usize| if i < 12 { 3 } else { 1 };
-        let mut start = 0;
-        let mut used = 0;
-        for i in (0..=self.focus).rev() {
-            if used + height(i) > budget {
-                break;
-            }
-            used += height(i);
-            start = i;
-        }
-        if (0..14).map(height).sum::<usize>() <= budget {
-            start = 0;
-        }
-        let mut y = area.y;
-        for (i, label) in LABELS
+        let fields: Vec<_> = LABELS
             .iter()
-            .chain(["Review declaration · Enter", "Back · Enter"].iter())
-            .enumerate()
-            .skip(start)
-        {
-            let h = height(i) as u16;
-            if y + h > area.bottom().saturating_sub(2) {
-                break;
-            }
-            let rect = Rect::new(area.x, y, area.width, h);
-            hits.click(rect, Target::ToolDeclarationControl(i, i >= 12));
-            if i < 12 {
-                ui::input(frame, rect, label, &self.fields[i], self.focus == i);
-            } else {
-                frame.render_widget(
-                    Paragraph::new(Line::from(ui::button(label, "", self.focus == i))),
-                    rect,
-                );
-            }
-            y += h;
-        }
-        ui::prose(frame, Rect::new(area.x, area.bottom().saturating_sub(2), area.width, 2.min(area.height)), self.failure.as_deref().unwrap_or("Tab/Shift-Tab: fields · Enter: next/review · Esc: back (draft retained)\nAdd-only; identical = no-op, conflicting ID refused. Review, then Confirm · Enter."), if self.failure.is_some() { ui::warning() } else { ui::muted() });
+            .zip(&self.fields)
+            .map(|(label, value)| (*label, value.as_str()))
+            .collect();
+        let hint = self
+            .failure
+            .as_ref()
+            .map(|e| ui::inline(e))
+            .unwrap_or_else(|| "Tab: fields · Enter: review declaration · Esc: Back".into());
+        ui::field_page(
+            frame,
+            area,
+            &fields,
+            self.focus,
+            hits,
+            |i| Target::ToolDeclarationControl(i, false),
+            ui::FormActions {
+                buttons: &[ui::ActionButton {
+                    label: "Review declaration",
+                    key: "Enter",
+                    target: Target::ToolDeclarationControl(12, true),
+                }],
+                hint: &hint,
+            },
+        );
     }
 }

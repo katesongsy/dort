@@ -44,6 +44,9 @@ mod hints;
 mod ignore_tests;
 mod ignored;
 mod input;
+#[cfg(test)]
+#[path = "tests/interaction.rs"]
+mod interaction_tests;
 mod inventory;
 #[cfg(test)]
 #[path = "tests/menus.rs"]
@@ -70,6 +73,7 @@ mod recovery_tests;
 mod responsiveness_tests;
 mod review;
 mod shell;
+mod surface;
 #[cfg(test)]
 #[path = "tests/task_surface.rs"]
 mod task_surface_tests;
@@ -181,7 +185,10 @@ fn run_loop(
                 && !app.exit_requested
             {
                 dirty = true;
-                app.status = format!("{} · sequence {}", progress.boundary, progress.sequence);
+                app.status = components::StatusText::chrome(format!(
+                    "{} · sequence {}",
+                    progress.boundary, progress.sequence
+                ));
                 if let Some(activity) = &mut app.activity {
                     activity.progress = Some(progress);
                 }

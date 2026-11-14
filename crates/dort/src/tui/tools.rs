@@ -9,7 +9,7 @@ use ratatui::{
     Frame,
     crossterm::event::{KeyCode, KeyEvent, KeyModifiers},
     layout::Rect,
-    text::{Line, Span},
+    text::Line,
     widgets::Paragraph,
 };
 use std::{cell::Cell, path::PathBuf};
@@ -36,8 +36,10 @@ pub struct State {
     pub setup: bool,
     pub defaults: Option<crate::services::inspection_defaults::Defaults>,
     pub default_focus: usize,
+    pub default_feedback: Option<&'static str>,
     pub default_query: usize,
     pub collection_result: bool,
+    pub fresh_review: bool,
     drafts: [Option<[String; 6]>; 4],
     pub focus: usize,
     pub preview: Option<tools::Preview>,
@@ -70,9 +72,11 @@ impl Default for State {
             configuring: false,
             setup: false,
             defaults: None,
-            default_focus: 4,
+            default_focus: 0,
+            default_feedback: None,
             default_query: 0,
             collection_result: false,
+            fresh_review: false,
             drafts: Default::default(),
             focus: 0,
             preview: None,
@@ -102,9 +106,9 @@ impl Default for State {
 impl State {
     fn controls(&self) -> Vec<usize> {
         if self.query == 3 {
-            (0..9).collect()
+            (0..7).collect()
         } else {
-            vec![0, 1, 2, 7, 8]
+            vec![0, 1, 2]
         }
     }
     pub fn text_entry(&self) -> bool {
@@ -116,13 +120,14 @@ impl State {
             || (self.recon_open && self.reconciliation.text_entry())
     }
     pub fn configure(&mut self) -> Task {
-        if self.fields.iter().any(|f| !f.is_empty()) {
+        if self.drafts[self.query].is_some() || self.fields.iter().any(|f| !f.is_empty()) {
             self.drafts[self.query] = Some(self.fields.clone());
         }
         self.leave();
         self.notice = None;
         self.setup = true;
-        self.default_focus = 4;
+        self.default_focus = self.query;
+        self.default_feedback = None;
         self.default_query = self.query;
         self.details = false;
         let mut inputs = crate::environment::inspection_inputs();
@@ -156,24 +161,37 @@ impl State {
                         .is_some_and(|r| !r.executable.as_os_str().is_empty())
                 })
                 .unwrap_or(0);
-            self.default_focus = 5;
+            self.default_focus = self.default_query;
         }
+        if let Some(selected) = defaults.choices.iter().position(|c| c.selected) {
+            self.default_focus = selected;
+        }
+        self.default_focus = self.default_focus.min(3);
+        self.default_query = self.default_focus;
         self.defaults = Some(defaults);
         self.scroll = 0;
     }
     pub fn select_advanced(&mut self) {
-        self.drafts[self.query] = Some(self.fields.clone());
         let query = if self.default_focus < 4 {
             self.default_focus
         } else {
             self.default_query
         };
+        let retained = self.drafts[query].is_some()
+            || (query == self.query && self.fields.iter().any(|f| !f.is_empty()));
+        if !self.fresh_review
+            || self.drafts[self.query].is_some()
+            || self.fields.iter().any(|f| !f.is_empty())
+        {
+            self.drafts[self.query] = Some(self.fields.clone());
+        }
         self.query = query;
         self.fields = self.drafts[query].clone().unwrap_or_default();
         if let Some(request) = self
             .defaults
             .as_ref()
             .and_then(|d| d.choices[query].request.as_ref())
+            && !(self.fresh_review && retained)
         {
             let defaults = [
                 request.executable.display().to_string(),
@@ -219,6 +237,7 @@ impl State {
     }
     fn approve_selected(&mut self, dry_run: bool) -> Option<Task> {
         if dry_run {
+            self.default_feedback = Some("Preview only: inventory execution is disabled.");
             return None;
         }
         let defaults = self.defaults.as_mut()?;
@@ -228,6 +247,9 @@ impl State {
             .filter(|c| c.selected && c.preview.is_some())
             .count();
         if count == 0 {
+            self.default_feedback = Some(
+                "No inventories selected. Space selects available rows; e edits missing paths.",
+            );
             return None;
         }
         if self.snapshots.len().saturating_add(count) > reconciliation::MAX_SNAPSHOTS
@@ -252,6 +274,7 @@ impl State {
         Some(Task::ToolsInspectSelected(approvals))
     }
     pub fn leave(&mut self) {
+        self.fresh_review = false;
         self.preview = None;
         self.defaults = None;
         self.setup = false;
@@ -389,14 +412,23 @@ impl State {
                     self.install_open = false;
                     None
                 }
+                Some(super::tools_install::Outcome::FreshReview) => {
+                    // Navigation/metadata discovery only. Never reuse historical
+                    // install inputs as approvals or bind a new catalog here.
+                    self.reconciliation.invalidate();
+                    self.reconciliation
+                        .stale_for_install
+                        .extend(self.snapshots.iter().map(|s| s.id.clone()));
+                    let task = self.configure();
+                    self.fresh_review = true;
+                    Some(task)
+                }
                 Some(super::tools_install::Outcome::Task(task)) => Some(*task),
                 None => None,
             });
         }
         if self.declaration_open {
-            if key.code == KeyCode::Esc
-                || (key.code == KeyCode::Enter && self.declaration.focus == 13)
-            {
+            if key.code == KeyCode::Esc {
                 self.declaration_open = false;
                 return Some(None);
             }
@@ -493,18 +525,15 @@ impl State {
                     self.leave();
                     self.notice = None;
                 }
-                KeyCode::Tab | KeyCode::Down => self.default_focus = (self.default_focus + 1) % 7,
-                KeyCode::BackTab | KeyCode::Up => self.default_focus = (self.default_focus + 6) % 7,
-                KeyCode::Enter
-                    if self.default_focus < 4
-                        && self
-                            .defaults
-                            .as_ref()
-                            .is_some_and(|d| d.choices[self.default_focus].preview.is_none()) =>
-                {
-                    self.select_advanced()
+                KeyCode::Tab | KeyCode::Down => {
+                    self.default_focus = (self.default_focus + 1) % 4;
+                    self.default_feedback = None;
                 }
-                KeyCode::Char(' ') | KeyCode::Enter if self.default_focus < 4 => {
+                KeyCode::BackTab | KeyCode::Up => {
+                    self.default_focus = (self.default_focus + 3) % 4;
+                    self.default_feedback = None;
+                }
+                KeyCode::Char(' ') => {
                     if let Some(choice) = self
                         .defaults
                         .as_mut()
@@ -512,19 +541,18 @@ impl State {
                         && choice.preview.is_some()
                     {
                         choice.selected = !choice.selected;
+                        self.default_feedback = None;
+                    } else {
+                        self.default_feedback = Some(
+                            "Inventory unavailable. Press e to enter the missing trusted scope.",
+                        );
                     }
                 }
-                KeyCode::Enter if self.default_focus == 4 => {
+                KeyCode::Enter => {
                     return Some(self.approve_selected(dry_run));
                 }
-                KeyCode::Char('e') | KeyCode::Enter
-                    if self.default_focus == 5 || key.code == KeyCode::Char('e') =>
-                {
-                    self.select_advanced()
-                }
-                KeyCode::Char('r') | KeyCode::Enter
-                    if self.default_focus == 6 || key.code == KeyCode::Char('r') =>
-                {
+                KeyCode::Char('e') => self.select_advanced(),
+                KeyCode::Char('r') => {
                     return Some(Some(self.configure()));
                 }
                 KeyCode::Char('d') => self.details = !self.details,
@@ -559,7 +587,11 @@ impl State {
             let controls = self.controls();
             let pos = controls.iter().position(|i| *i == self.focus).unwrap_or(0);
             match key.code {
-                KeyCode::Esc => self.configuring = false,
+                KeyCode::Esc => {
+                    self.drafts[self.query] = Some(self.fields.clone());
+                    self.configuring = false;
+                    self.setup = self.defaults.is_some();
+                }
                 KeyCode::Tab | KeyCode::Down => self.focus = controls[(pos + 1) % controls.len()],
                 KeyCode::BackTab | KeyCode::Up => {
                     self.focus = controls[(pos + controls.len() - 1) % controls.len()]
@@ -567,13 +599,21 @@ impl State {
                 KeyCode::Char(' ') | KeyCode::Left | KeyCode::Right if self.focus == 0 => {
                     self.default_query =
                         (self.query + if key.code == KeyCode::Left { 3 } else { 1 }) % 4;
-                    self.default_focus = 5;
+                    self.default_focus = self.default_query;
                     self.select_advanced();
                     self.focus = 0;
                 }
-                KeyCode::Enter if self.focus == 8 => self.configuring = false,
-                KeyCode::Enter if self.focus == 7 => return Some(Some(self.prepare())),
-                KeyCode::Enter => self.focus = controls[(pos + 1) % controls.len()],
+                KeyCode::Enter => {
+                    if let Some(missing) = self
+                        .fields
+                        .iter()
+                        .take(if self.query == 3 { 6 } else { 2 })
+                        .position(|f| f.is_empty())
+                    {
+                        self.focus = missing + 1;
+                    }
+                    return Some(Some(self.prepare()));
+                }
                 _ if (1..=6).contains(&self.focus) => {
                     edit_text(&mut self.fields[self.focus - 1], key)
                 }
@@ -718,7 +758,7 @@ impl State {
             return;
         }
         if let Some(notice) = self.notice {
-            ui::prose(frame, area, notice, ui::warning());
+            ui::chrome_prose(frame, area, notice, ui::warning());
             return;
         }
         if self.setup {
@@ -797,17 +837,17 @@ impl State {
             );
             return;
         }
-        ui::prose(
+        ui::chrome_prose(
             frame,
             Rect::new(area.x, area.y, area.width, 1),
             &format!(
                 "Provider claims · Snapshot {} · {:?} · {}",
                 self.snapshots
                     .get(self.current)
-                    .map(|s| s.id.as_str())
-                    .unwrap_or("unknown"),
+                    .map(|s| ui::inline(&s.id))
+                    .unwrap_or_else(|| "unknown".into()),
                 report.provider.description.query,
-                report.provider.description.executable.display()
+                ui::inline(&report.provider.description.executable.display().to_string())
             ),
             ui::heading(),
         );
@@ -816,7 +856,7 @@ impl State {
             Rect::new(area.x, area.y + 1, area.width, 3),
             "Search metadata · / edits · c configure · r fresh review · d scope",
             &self.search,
-            self.searching,
+            self.searching && hits.input_focus_allowed(),
         );
         let rows = Rect::new(
             area.x,
@@ -835,7 +875,7 @@ impl State {
             ),
             Observation::Complete { installations } => {
                 if installations.is_empty() {
-                    ui::prose(
+                    ui::chrome_prose(
                         frame,
                         rows,
                         "Query complete · no installed packages reported. Not proof of binary absence or Dort ownership.",
@@ -844,7 +884,7 @@ impl State {
                     return;
                 }
                 if self.matching.is_empty() {
-                    ui::prose(
+                    ui::chrome_prose(
                         frame,
                         rows,
                         "No matches · Esc clears the display filter.",
@@ -893,67 +933,31 @@ impl State {
         }
     }
     fn form(&self, frame: &mut Frame, area: Rect, hits: &super::input::Hits) {
-        let controls = self.controls();
-        let budget = usize::from(area.height.saturating_sub(1));
-        let position = controls.iter().position(|i| *i == self.focus).unwrap_or(0);
-        let height = |id: usize| if id < 7 { 3 } else { 1 };
-        let mut start = 0;
-        let mut used = 0;
-        for i in (0..=position).rev() {
-            if used + height(controls[i]) > budget {
-                break;
-            }
-            used += height(controls[i]);
-            start = i;
+        let provider = format!("{:?}", QUERIES[self.query]);
+        let mut fields = vec![(LABELS[0], provider.as_str())];
+        for (i, label) in LABELS
+            .iter()
+            .enumerate()
+            .take(if self.query == 3 { 7 } else { 3 })
+            .skip(1)
+        {
+            fields.push((*label, self.fields[i - 1].as_str()));
         }
-        if controls.iter().map(|id| height(*id)).sum::<usize>() <= budget {
-            start = 0;
-        }
-        let mut y = area.y;
-        for &id in controls.iter().skip(start) {
-            let h = height(id) as u16;
-            if y + h > area.bottom().saturating_sub(1) {
-                break;
-            }
-            let rect = Rect::new(area.x, y, area.width, h);
-            hits.click(rect, Target::ToolsControl(id, id >= 7));
-            if id < 7 {
-                let provider = format!("{:?}", QUERIES[self.query]);
-                ui::input(
-                    frame,
-                    rect,
-                    LABELS[id],
-                    if id == 0 {
-                        &provider
-                    } else {
-                        &self.fields[id - 1]
-                    },
-                    self.focus == id,
-                );
-            } else {
-                frame.render_widget(
-                    Paragraph::new(Line::from(Span::styled(
-                        if id == 7 {
-                            "[Review exact query · Enter]"
-                        } else {
-                            "[Back · Enter]"
-                        },
-                        if self.focus == id {
-                            ui::selected()
-                        } else {
-                            ui::accent()
-                        },
-                    ))),
-                    rect,
-                );
-            }
-            y += h;
-        }
-        ui::prose(
+        ui::field_page(
             frame,
-            Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1),
-            "Tab/Shift-Tab move · Enter advances · Esc back · Ctrl-U clears",
-            ui::muted(),
+            area,
+            &fields,
+            self.focus,
+            hits,
+            |i| Target::ToolsControl(i, false),
+            ui::FormActions {
+                buttons: &[ui::ActionButton {
+                    label: "Review exact query",
+                    key: "Enter",
+                    target: Target::ToolsControl(7, true),
+                }],
+                hint: "Tab: fields · Enter: review query · Esc: Back · Ctrl-U clears",
+            },
         );
     }
 }

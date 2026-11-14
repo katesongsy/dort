@@ -74,6 +74,9 @@ fn profiles(standalone: bool) -> App {
 // the renderer's final-page clamp. Wrapped paths must reconstruct without gaps;
 // direct offset assignment would hide oversized keyboard steps at the floor.
 fn paged_cells(app: &mut App, modal: bool) -> String {
+    if modal && !app.shell.picker_details {
+        key(app, KeyCode::F(3));
+    }
     let mut joined = String::new();
     for _ in 0..120 {
         let mut terminal = Terminal::new(TestBackend::new(48, 14)).unwrap();
@@ -91,7 +94,7 @@ fn paged_cells(app: &mut App, modal: bool) -> String {
                                 Some(Overlay::Profiles(_) | Overlay::Repositories { .. })
                             )
                         {
-                            "Selection details"
+                            "Selection metadata"
                         } else {
                             "┌"
                         },
@@ -102,11 +105,16 @@ fn paged_cells(app: &mut App, modal: bool) -> String {
         // Task errors pin a risk/read-only banner outside the scroll viewport.
         // Exclude that fixed row when stitching, not any diagnostic/path cells.
         let pinned_rows = u16::from(app.error.is_some());
+        let left = (0..48).find(|x| b[(*x, y)].symbol() == "┌").unwrap();
+        let right = (left..48)
+            .rev()
+            .find(|x| b[(*x, y)].symbol() == "┐")
+            .unwrap();
         for row in y + 1 + pinned_rows..14 {
-            if b[(0, row)].symbol() == "└" {
+            if b[(left, row)].symbol() == "└" {
                 break;
             }
-            for x in 1..47 {
+            for x in left + 1..right {
                 viewport.push_str(b[(x, row)].symbol());
             }
         }
@@ -129,12 +137,7 @@ fn paged_cells(app: &mut App, modal: bool) -> String {
         } else {
             app.details_scroll
         },
-        offset
-            - if modal {
-                app.shell.page_rows.get().max(1)
-            } else {
-                2
-            }
+        offset - 2 // Expanded metadata scrolls by overlapping two-row steps.
     );
     assert!(key(app, KeyCode::Home).is_none());
     assert_eq!(
@@ -145,6 +148,9 @@ fn paged_cells(app: &mut App, modal: bool) -> String {
         },
         0
     );
+    if modal {
+        key(app, KeyCode::F(3));
+    }
     joined
 }
 #[test]
@@ -166,9 +172,9 @@ fn profile_table_distinguishes_membership_focus_and_apply_without_changing_scope
             assert!(screen.contains(label));
         }
     }
-    key(&mut app, KeyCode::Enter); // mandatory base is immutable
+    key(&mut app, KeyCode::Char(' ')); // mandatory base is immutable
     key(&mut app, KeyCode::Down);
-    key(&mut app, KeyCode::Enter); // default is immutable too
+    key(&mut app, KeyCode::Char(' ')); // default is immutable too
     key(&mut app, KeyCode::Down);
     key(&mut app, KeyCode::Char(' ')); // optional addition
     let Some(Overlay::Profiles(p)) = &app.shell.overlay else {
@@ -179,7 +185,7 @@ fn profile_table_distinguishes_membership_focus_and_apply_without_changing_scope
     for _ in 0..3 {
         key(&mut app, KeyCode::Down);
     }
-    assert!(render(&app, 48, 14).contains("> [Apply additions"));
+    assert!(render(&app, 48, 14).contains("Apply additions"));
     let Some(Task::Profiles {
         manifest,
         requested,
@@ -265,14 +271,14 @@ fn repository_picker_preserves_raw_indices_and_retained_create_adopt_drafts() {
     key(&mut app, KeyCode::Char('o'));
     app.shell.adoption.target = "~/.keep-draft".into();
     key(&mut app, KeyCode::Char('p')); // text in target, not navigation
-    // Use the actual Choose button to retain adoption return intent.
-    app.shell.adoption.focused = 4;
-    key(&mut app, KeyCode::Enter);
-    for _ in 0..3 {
-        key(&mut app, KeyCode::Down);
-    }
-    assert!(render(&app, 48, 14).contains("> [Create/attach"));
-    assert!(key(&mut app, KeyCode::Enter).is_none());
+    // Direct nonprinting Choose and Create actions retain the adoption parent.
+    app.key(
+        KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
+        48,
+        14,
+    );
+    assert!(render(&app, 48, 14).contains("Create/attach"));
+    assert!(key(&mut app, KeyCode::F(2)).is_none());
     assert!(matches!(app.shell.overlay, Some(Overlay::Form(Form::Init))));
     key(&mut app, KeyCode::Esc);
     assert!(matches!(
@@ -285,6 +291,7 @@ fn repository_picker_preserves_raw_indices_and_retained_create_adopt_drafts() {
 fn picker_details_start_at_first_row_and_all_contributors_are_key_reachable() {
     for standalone in [false, true] {
         let mut app = profiles(standalone);
+        key(&mut app, KeyCode::F(3));
         assert!(render(&app, 48, 14).contains("Temporary profiles | Never persisted"));
         assert_eq!(app.shell.scroll, 0);
         let text = paged_cells(&mut app, true);

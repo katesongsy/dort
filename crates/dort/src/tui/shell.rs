@@ -218,6 +218,8 @@ pub struct Shell {
     pub page_rows: std::cell::Cell<u16>,
     pub init_draft: String,
     pub path_focused: usize,
+    pub form_details: bool,
+    pub picker_details: bool,
     pub choose_draft: String,
     pub adoption: AdoptionDraft,
     pub return_to_adopt: bool,
@@ -246,6 +248,8 @@ impl Shell {
             page_rows: std::cell::Cell::new(1),
             init_draft: String::new(),
             path_focused: 0,
+            form_details: false,
+            picker_details: false,
             choose_draft: String::new(),
             adoption: AdoptionDraft::new(),
             return_to_adopt: false,
@@ -275,6 +279,9 @@ impl Shell {
         };
     }
     pub fn text_entry(&self) -> bool {
+        if self.form_details && matches!(self.overlay, Some(Overlay::Form(_))) {
+            return false;
+        }
         matches!(
             self.overlay,
             Some(Overlay::Actions {
@@ -310,7 +317,81 @@ impl Shell {
             Form::KeepId | Form::RemoveId => &self.unmanage_id,
         }
     }
+    pub fn form_action(&mut self, command: super::forms::Command) -> Option<Intent> {
+        let Some(Overlay::Form(form)) = self.overlay else {
+            return None;
+        };
+        use super::forms::Command;
+        match command {
+            Command::Submit => Some(Intent::Submit(form)),
+            Command::Choose => Some(Intent::Action(Action::Choose)),
+            Command::Create => Some(Intent::Action(Action::Init)),
+            Command::Profiles if form == Form::Check => {
+                Some(Intent::Action(Action::StandaloneProfiles))
+            }
+            Command::Profiles => None,
+            Command::Details => {
+                self.form_details = !self.form_details;
+                self.scroll = 0;
+                None
+            }
+            Command::Discard => {
+                match form {
+                    Form::Adopt => self.adoption = AdoptionDraft::new(),
+                    Form::Check => {
+                        self.manifest_draft.clear();
+                        self.check_profiles.clear();
+                    }
+                    _ => (),
+                };
+                None
+            }
+        }
+    }
     pub fn key(&mut self, key: KeyEvent, known_count: usize) -> Option<Intent> {
+        if matches!(
+            self.overlay,
+            Some(Overlay::Profiles(_) | Overlay::Repositories { .. } | Overlay::Actions { .. })
+        ) {
+            if key.code == KeyCode::F(3) {
+                self.picker_details = !self.picker_details;
+                self.scroll = 0;
+                return None;
+            }
+            if self.picker_details {
+                if key.code == KeyCode::Esc {
+                    self.picker_details = false;
+                } else {
+                    scroll_details(&mut self.scroll, key.code);
+                }
+                return None;
+            }
+        }
+        if matches!(self.overlay, Some(Overlay::Form(_))) {
+            if key.code == KeyCode::F(2) {
+                return self.form_action(super::forms::Command::Details);
+            }
+            if self.form_details {
+                if key.code == KeyCode::Esc {
+                    self.form_details = false;
+                } else {
+                    scroll_details(&mut self.scroll, key.code);
+                }
+                return None;
+            }
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                let command = match key.code {
+                    KeyCode::Char('r') => Some(super::forms::Command::Choose),
+                    KeyCode::Char('n') => Some(super::forms::Command::Create),
+                    KeyCode::Char('p') => Some(super::forms::Command::Profiles),
+                    KeyCode::Char('d') => Some(super::forms::Command::Discard),
+                    _ => None,
+                };
+                if let Some(command) = command {
+                    return self.form_action(command);
+                }
+            }
+        }
         if !matches!(key.code, KeyCode::PageUp | KeyCode::PageDown) {
             self.scroll = 0;
         }
@@ -347,15 +428,28 @@ impl Shell {
                             None
                         }
                     }
-                    KeyCode::Down => picker.selected = (picker.selected + 1).min(count),
-                    KeyCode::Up => picker.selected = picker.selected.saturating_sub(1),
-                    KeyCode::Enter if picker.selected == count => {
+                    KeyCode::Down | KeyCode::Tab => {
+                        picker.selected = (picker.selected + 1).min(count.saturating_sub(1))
+                    }
+                    KeyCode::Up | KeyCode::BackTab => {
+                        picker.selected = picker.selected.saturating_sub(1)
+                    }
+                    KeyCode::PageDown => {
+                        picker.selected = (picker.selected + usize::from(self.page_rows.get()))
+                            .min(count.saturating_sub(1))
+                    }
+                    KeyCode::PageUp => {
+                        picker.selected = picker
+                            .selected
+                            .saturating_sub(usize::from(self.page_rows.get()))
+                    }
+                    KeyCode::Enter => {
                         return Some(Intent::ApplyProfiles {
                             manifest: picker.standalone.then(|| picker.report.manifest.clone()),
                             requested: picker.requested.clone(),
                         });
                     }
-                    KeyCode::Enter | KeyCode::Char(' ') => {
+                    KeyCode::Char(' ') => {
                         if let Some(name) = picker.report.choices.known.iter().nth(picker.selected)
                             && !picker.report.choices.mandatory.contains(name)
                         {
@@ -376,10 +470,9 @@ impl Shell {
                 match key.code {
                     KeyCode::Esc => self.overlay = None,
                     KeyCode::Tab | KeyCode::BackTab => {
-                        self.unmanage_focused = 1 - self.unmanage_focused;
+                        self.unmanage_focused = 0;
                         self.scroll = 0;
                     }
-                    KeyCode::Enter if self.unmanage_focused == 0 => self.unmanage_focused = 1,
                     KeyCode::Enter => return Some(Intent::Submit(form)),
                     _ if self.unmanage_focused == 0 => edit_text(&mut self.unmanage_id, key),
                     _ => (),
@@ -388,31 +481,11 @@ impl Shell {
             Overlay::Form(Form::Check) => match key.code {
                 KeyCode::Esc => self.overlay = None,
                 KeyCode::Tab | KeyCode::BackTab => {
-                    self.manifest_focused = (self.manifest_focused
-                        + if key.code == KeyCode::BackTab
-                            || key.modifiers.contains(KeyModifiers::SHIFT)
-                        {
-                            3
-                        } else {
-                            1
-                        })
-                        % 4;
+                    self.manifest_focused = 0;
                     self.scroll = 0;
                 }
-                KeyCode::Enter if self.manifest_focused == 0 => self.manifest_focused = 1,
-                KeyCode::Enter if self.manifest_focused == 1 => {
-                    return Some(Intent::Submit(Form::Check));
-                }
-                KeyCode::Enter if self.manifest_focused == 2 => {
-                    return Some(Intent::Action(Action::StandaloneProfiles));
-                }
-                KeyCode::Enter => {
-                    self.manifest_draft.clear();
-                    self.check_profiles.clear();
-                    self.manifest_focused = 0;
-                }
-                _ if self.manifest_focused == 0 => edit_text(&mut self.manifest_draft, key),
-                _ => (),
+                KeyCode::Enter => return Some(Intent::Submit(Form::Check)),
+                _ => edit_text(&mut self.manifest_draft, key),
             },
             Overlay::Form(Form::Adopt) => {
                 let draft = &mut self.adoption;
@@ -421,23 +494,10 @@ impl Shell {
                     KeyCode::Tab | KeyCode::BackTab => {
                         let backwards = key.code == KeyCode::BackTab
                             || key.modifiers.contains(KeyModifiers::SHIFT);
-                        draft.focused = (draft.focused + if backwards { 6 } else { 1 }) % 7;
+                        draft.focused = (draft.focused + if backwards { 2 } else { 1 }) % 3;
                         self.scroll = 0;
                     }
-                    KeyCode::Enter if draft.focused < 3 => draft.focused += 1,
-                    KeyCode::Enter if draft.focused == 3 => {
-                        return Some(Intent::Submit(Form::Adopt));
-                    }
-                    KeyCode::Enter if draft.focused == 4 => {
-                        return Some(Intent::Action(Action::Choose));
-                    }
-                    KeyCode::Enter if draft.focused == 5 => {
-                        return Some(Intent::Action(Action::Init));
-                    }
-                    KeyCode::Enter => {
-                        self.adoption = AdoptionDraft::new();
-                        self.scroll = 0;
-                    }
+                    KeyCode::Enter => return Some(Intent::Submit(Form::Adopt)),
                     _ => match draft.focused {
                         0 => edit_text(&mut draft.target, key),
                         1 => edit_text(&mut draft.id, key),
@@ -455,35 +515,31 @@ impl Shell {
                 };
                 match key.code {
                     KeyCode::Esc => self.back(),
-                    KeyCode::Tab | KeyCode::BackTab => {
-                        self.path_focused = (self.path_focused
-                            + if key.code == KeyCode::BackTab
-                                || key.modifiers.contains(KeyModifiers::SHIFT)
-                            {
-                                2
-                            } else {
-                                1
-                            })
-                            % 3;
-                    }
-                    KeyCode::Enter if self.path_focused == 0 => self.path_focused = 1,
-                    KeyCode::Enter if self.path_focused == 1 => return Some(Intent::Submit(form)),
-                    KeyCode::Enter => self.back(),
+                    KeyCode::Tab | KeyCode::BackTab => self.path_focused = 0,
+                    KeyCode::Enter => return Some(Intent::Submit(form)),
                     _ if self.path_focused == 0 => edit_text(draft, key),
                     _ => (),
                 }
             }
             Overlay::Repositories { selected } => match key.code {
                 KeyCode::Esc => self.back(),
-                KeyCode::Down => *selected = selected.saturating_add(1).min(known_count + 2),
-                KeyCode::Up => *selected = selected.saturating_sub(1),
+                KeyCode::Down | KeyCode::Tab => {
+                    *selected = selected.saturating_add(1).min(known_count + 1)
+                }
+                KeyCode::Up | KeyCode::BackTab => *selected = selected.saturating_sub(1),
+                KeyCode::PageDown => {
+                    *selected = (*selected + usize::from(self.page_rows.get())).min(known_count + 1)
+                }
+                KeyCode::PageUp => {
+                    *selected = selected.saturating_sub(usize::from(self.page_rows.get()))
+                }
                 KeyCode::Enter if *selected == 0 => {
                     self.scroll = 0;
                     self.path_focused = 0;
                     self.overlay = Some(Overlay::Form(Form::Choose))
                 }
                 KeyCode::Enter if *selected == 1 => return Some(Intent::Active),
-                KeyCode::Enter if *selected == known_count + 2 => {
+                KeyCode::F(2) => {
                     return Some(Intent::Action(Action::Init));
                 }
                 KeyCode::Enter => return Some(Intent::Known(*selected - 2)),
@@ -495,7 +551,6 @@ impl Shell {
                 searching,
                 entries,
             } => match key.code {
-                KeyCode::Esc if *searching => *searching = false,
                 KeyCode::Esc => self.overlay = None,
                 KeyCode::Down => {
                     *searching = false;
@@ -508,6 +563,18 @@ impl Shell {
                 KeyCode::Up => {
                     *searching = false;
                     *selected = selected.saturating_sub(1);
+                }
+                KeyCode::PageDown => {
+                    *searching = false;
+                    *selected = (*selected + usize::from(self.page_rows.get())).min(
+                        super::palette::matches(entries, query)
+                            .len()
+                            .saturating_sub(1),
+                    );
+                }
+                KeyCode::PageUp => {
+                    *searching = false;
+                    *selected = selected.saturating_sub(usize::from(self.page_rows.get()));
                 }
                 KeyCode::Enter => {
                     if let Some(entry) = super::palette::matches(entries, query).get(*selected) {

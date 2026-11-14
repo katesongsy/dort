@@ -166,7 +166,7 @@ fn search(frame: &mut Frame, area: Rect, app: &App) {
         ])),
         area,
     );
-    if editing && !app.busy && area.width > 0 {
+    if editing && app.hits.input_focus_allowed() && !app.busy && area.width > 0 {
         frame.set_cursor_position((caret.min(area.right().saturating_sub(1)), area.y));
     }
 }

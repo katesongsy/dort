@@ -138,7 +138,7 @@ impl State {
                 self.result = None;
                 self.mode = Mode::Inputs;
                 self.failure = Some(error);
-                self.focus = 3;
+                self.focus = 0;
             }
         }
     }
@@ -186,11 +186,9 @@ impl State {
         if self.mode == Mode::Inputs {
             match key.code {
                 KeyCode::Esc => return Some(Outcome::Back),
-                KeyCode::Tab | KeyCode::Down => self.focus = (self.focus + 1) % 5,
-                KeyCode::BackTab | KeyCode::Up => self.focus = (self.focus + 4) % 5,
-                KeyCode::Enter if self.focus == 3 => return Some(self.load()),
-                KeyCode::Enter if self.focus == 4 => return Some(Outcome::Back),
-                KeyCode::Enter => self.focus = (self.focus + 1) % 5,
+                KeyCode::Tab | KeyCode::Down => self.focus = (self.focus + 1) % 3,
+                KeyCode::BackTab | KeyCode::Up => self.focus = (self.focus + 2) % 3,
+                KeyCode::Enter => return Some(self.load()),
                 _ if self.focus < 3 => edit_text(&mut self.fields[self.focus], key),
                 _ => (),
             }
@@ -202,11 +200,11 @@ impl State {
             match key.code {
                 KeyCode::Esc => {
                     self.mode = Mode::Inputs;
-                    self.focus = 3;
+                    self.focus = 0;
                 }
-                KeyCode::Tab | KeyCode::Down => self.focus = (self.focus + 1) % (count + 2),
+                KeyCode::Tab | KeyCode::Down => self.focus = (self.focus + 1) % count.max(1),
                 KeyCode::BackTab | KeyCode::Up => {
-                    self.focus = (self.focus + count + 1) % (count + 2)
+                    self.focus = (self.focus + count.saturating_sub(1)) % count.max(1)
                 }
                 KeyCode::Char(' ') | KeyCode::Left | KeyCode::Right if self.focus < count => {
                     let tool = &prepared.tools[self.focus];
@@ -247,7 +245,7 @@ impl State {
                         self.scroll = 0;
                     }
                 }
-                KeyCode::Enter if self.focus == count => {
+                KeyCode::Enter => {
                     let prepared = Box::new(self.prepared.take()?);
                     self.mode = Mode::Results;
                     self.result = None;
@@ -256,11 +254,7 @@ impl State {
                         bindings: self.bindings.clone(),
                     });
                 }
-                KeyCode::Enter if self.focus == count + 1 => {
-                    self.mode = Mode::Inputs;
-                    self.focus = 3;
-                }
-                KeyCode::Enter => self.focus = (self.focus + 1) % (count + 2),
+
                 _ => (),
             }
             return None;
@@ -273,7 +267,7 @@ impl State {
             }
             KeyCode::Esc | KeyCode::Char('b') => {
                 self.mode = Mode::Inputs;
-                self.focus = 3;
+                self.focus = 0;
             }
             KeyCode::Char('c') if !self.details && self.needs_inventory() => {
                 return Some(Outcome::FreshInventory);
@@ -369,7 +363,7 @@ impl State {
         } else {
             "Package proposals/no-ops only"
         };
-        ui::prose(
+        ui::chrome_prose(
             frame,
             Rect::new(area.x, area.y, area.width, 2),
             &format!(
@@ -499,7 +493,7 @@ impl State {
         snapshots: &[Snapshot],
         hits: &super::input::Hits,
     ) {
-        let mut fields: Vec<(String, String)> = if self.mode == Mode::Inputs {
+        let fields: Vec<(String, String)> = if self.mode == Mode::Inputs {
             [
                 "Manifest · absolute",
                 "Tool search directories · colon-separated",
@@ -540,72 +534,48 @@ impl State {
                 })
                 .unwrap_or_default()
         };
-        let field_count = fields.len();
-        fields.push((
-            if self.mode == Mode::Inputs {
-                "Load declarations · Enter"
-            } else {
-                "Reconcile metadata · Enter"
-            }
-            .into(),
-            String::new(),
-        ));
-        fields.push(("Back · Enter".into(), String::new()));
-        let reserved = if self.failure.is_some() { 2 } else { 1 };
-        let budget = usize::from(area.height.saturating_sub(reserved));
-        let height = |i: usize| if i < field_count { 3 } else { 1 };
-        let focus = self.focus.min(fields.len() - 1);
-        let mut start = 0;
-        let mut used = 0;
-        for i in (0..=focus).rev() {
-            if used + height(i) > budget {
-                break;
-            }
-            used += height(i);
-            start = i;
-        }
-        if (0..fields.len()).map(height).sum::<usize>() <= budget {
-            start = 0;
-        }
-        let mut y = area.y;
-        for (i, (label, value)) in fields.iter().enumerate().skip(start) {
-            let h = height(i) as u16;
-            if y + h > area.bottom().saturating_sub(reserved) {
-                break;
-            }
-            let rect = Rect::new(area.x, y, area.width, h);
-            hits.click(rect, Target::ToolsReconControl(i, i >= field_count));
-            if i < field_count {
-                ui::input(frame, rect, label, value, i == focus);
-            } else {
-                frame.render_widget(
-                    Paragraph::new(Line::from(ui::button(label, "", i == focus))),
-                    rect,
-                );
-            }
-            y += h;
-        }
-        let message = self
+        let count = fields.len();
+        let values: Vec<_> = fields
+            .iter()
+            .map(|(label, value)| (label.as_str(), value.as_str()))
+            .collect();
+        let primary = if self.mode == Mode::Inputs {
+            "Load declarations"
+        } else {
+            "Reconcile metadata"
+        };
+        let hint = self
             .failure
-            .as_deref()
-            .unwrap_or(if self.mode == Mode::Inputs {
-                "Metadata only · no query. Tool dirs are NOT provider child PATH."
-            } else {
-                "Space chooses · d inspects scope · unbound stays not observed."
+            .as_ref()
+            .map(|e| ui::inline(e))
+            .unwrap_or_else(|| {
+                if self.mode == Mode::Inputs {
+                    "Tab: fields · Enter: load · Esc: Back".into()
+                } else {
+                    "Up/Down: tool · Space: choose snapshot · Enter: reconcile".into()
+                }
             });
-        ui::prose(
+        ui::field_page(
             frame,
-            Rect::new(
-                area.x,
-                area.bottom().saturating_sub(reserved),
-                area.width,
-                reserved,
-            ),
-            message,
-            if self.failure.is_some() {
-                ui::warning()
-            } else {
-                ui::muted()
+            area,
+            &values,
+            self.focus,
+            hits,
+            |i| Target::ToolsReconControl(i, false),
+            ui::FormActions {
+                buttons: &[
+                    ui::ActionButton {
+                        label: primary,
+                        key: "Enter",
+                        target: Target::ToolsReconControl(count, true),
+                    },
+                    ui::ActionButton {
+                        label: "Back",
+                        key: "Esc",
+                        target: Target::Back,
+                    },
+                ],
+                hint: &hint,
             },
         );
     }

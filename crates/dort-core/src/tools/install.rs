@@ -17,9 +17,11 @@ mod attempts;
 pub mod brew;
 mod closure;
 pub mod npm;
+mod outcomes;
 mod process;
 pub use attempts::{Attempt, Problem, diagnose};
 pub use closure::{CloseApproval, ClosePreview, CloseRequest, CloseReview, close, prepare_close};
+pub use outcomes::{NextStep, Status, Summary};
 
 pub const TIMEOUT_SECONDS: u64 = 600;
 pub const WARNING: &str = "Installs one exact mise version without activation. Provider/backend/package code and downloads can change data and caches. Not a sandbox or an atomic operation. A 10-minute deadline may stop a partially completed install; no rollback is performed.";
@@ -216,13 +218,11 @@ pub struct Outcome {
     pub package: PackageState,
     pub binary: BinaryState,
 }
-#[derive(Serialize)]
 pub struct Report {
     pub scope: Scope,
     pub attempt_id: Option<String>,
     pub no_op: bool,
     pub outcome: Option<Outcome>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub observed_versions: Vec<String>,
     pub possible_partial_effects: bool,
     pub readiness_verified: bool,

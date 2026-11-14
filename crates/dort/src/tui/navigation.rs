@@ -175,20 +175,15 @@ impl App {
         }
     }
     pub(super) fn menus_available(&self) -> bool {
-        !self.busy
-            && self.error.is_none()
-            && !self.show_result
-            && self.preview.is_none()
-            && self.confirmation.is_none()
-            && self.shell.overlay.is_none()
-            && !self.batch_editor.as_ref().is_some_and(|e| e.open)
-            && !(self.tab == Tab::Git && self.git_view.navigation_input())
-            && !(self.tab == Tab::Tools && self.tools_view.text_entry())
+        self.navigation_block().is_none()
     }
     pub(super) fn open_menu(&mut self, selected_group: usize, width: u16) {
-        if !self.menus_available() {
+        if let Some(reason) = self.navigation_block() {
+            self.interaction_notice = Some(reason);
+            self.status = reason.into();
             return;
         }
+        self.interaction_notice = None;
         if self.git_view.sensitive() {
             self.git_view.discard_patch();
         }
@@ -214,6 +209,7 @@ impl App {
             return None;
         }
         self.navigation.menu = None;
+        self.leave_page_for_navigation();
         match item {
             Item::Manifest => {
                 self.go_tab(Tab::Checks);
@@ -278,13 +274,23 @@ impl App {
     }
 }
 pub fn bar(frame: &mut Frame, area: Rect, app: &App) {
+    if let Some(reason) = app.navigation_block() {
+        ui::chrome_prose(
+            frame,
+            area,
+            &ui::chrome_clip(reason, area.width),
+            ui::muted(),
+        );
+        app.hits.click(area, Target::NavigationBlocked);
+        return;
+    }
     if area.width < 80 {
         let label = if app.menus_available() {
             format!(" [Menu]  {}", location(app))
         } else {
             " [Menu available after this interaction]".into()
         };
-        ui::prose(
+        ui::chrome_prose(
             frame,
             Rect::new(area.x, area.y, area.width, 1),
             &label,
@@ -404,7 +410,7 @@ pub fn popup(frame: &mut Frame, app: &App, menu: Menu) {
             ui::accent()
         };
         frame.render_widget(
-            Paragraph::new(ui::clip(
+            Paragraph::new(ui::chrome_clip(
                 &format!("{}{}", if selected { "> " } else { "  " }, label),
                 inner.width,
             ))
@@ -425,6 +431,11 @@ pub fn popup(frame: &mut Frame, app: &App, menu: Menu) {
     }
     if let Some(reason) = footer_reason {
         let footer = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
-        ui::prose(frame, footer, &ui::clip(reason, inner.width), ui::warning());
+        ui::chrome_prose(
+            frame,
+            footer,
+            &ui::chrome_clip(reason, inner.width),
+            ui::warning(),
+        );
     }
 }

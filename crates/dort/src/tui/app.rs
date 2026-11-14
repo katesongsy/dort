@@ -119,7 +119,8 @@ pub struct App {
     pub quit: bool,
     pub dry_run: bool,
     preview_only_locked: bool,
-    pub status: String,
+    pub status: super::components::StatusText,
+    pub interaction_notice: Option<&'static str>,
     pub error: Option<String>,
     pub failed_write: bool,
 }
@@ -131,6 +132,7 @@ impl App {
             shell: Shell::new(),
             help: None,
             navigation: Default::default(),
+            interaction_notice: None,
             repository: None,
             origin: "registered active",
             launch_directory: PathBuf::from("/"),
@@ -243,16 +245,16 @@ impl App {
                 self.status = if writing {
                     format!(
                         "Error: {error}\nA failed write may leave partial effects. Inspect Recovery; nothing is automatically undone."
-                    )
+                    ).into()
                 } else {
-                    format!("Read failed: {error}\nEsc returns to retained input and scope.")
+                    format!("Read failed: {error}\nEsc returns to retained input and scope.").into()
                 };
                 self.preview = None;
                 self.confirmation = None;
                 if writing {
                     self.retry = None;
                 }
-                self.error = Some(self.status.clone());
+                self.error = Some(self.status.to_string());
             }
             Ok(Output::DiscoverContent(_) | Output::DiscoveryTree(_)) => unreachable!(),
             Ok(Output::History { rows, error }) => {
@@ -357,9 +359,9 @@ impl App {
                     stored += usize::from(self.tools_view.completed(report));
                 }
                 self.tools_view.collection_result = true;
-                self.status = format!(
+                self.status = super::components::StatusText::chrome(format!(
                     "Inspected {count} scopes · {stored} snapshots retained · {unavailable} unavailable. s browses results; p compares declarations."
-                );
+                ));
             }
             Ok(Output::ToolsPreview(preview)) => {
                 if self.tab == Tab::Tools && !self.quit {
@@ -477,7 +479,7 @@ impl App {
                     self.status = format!(
                         "{} completed; Discover refreshed. Receipt in details; Recovery retains transaction history.",
                         receipt.operation
-                    );
+                    ).into();
                 }
             }
             Ok(Output::Selected(repository, data)) => {
@@ -530,7 +532,7 @@ impl App {
                     }
                     .into();
                 }
-                Err(error) => self.status = super::actions::diagnostic(&error),
+                Err(error) => self.status = super::actions::diagnostic(&error).into(),
             },
             Ok(Output::Completed(completion)) => {
                 if matches!(completion.operation, "Tool declaration" | "Rollback") {
@@ -637,6 +639,12 @@ impl App {
                 {
                     Some(KeyCode::Esc)
                 }
+                MouseEventKind::Down(ratatui::crossterm::event::MouseButton::Left) => {
+                    let reason = "Help dialog open: close it with Esc before navigating.";
+                    self.interaction_notice = Some(reason);
+                    self.status = reason.into();
+                    None
+                }
                 _ => None,
             };
             return code
@@ -741,6 +749,17 @@ impl App {
         if event.kind != MouseEventKind::Down(MouseButton::Left) {
             return None;
         }
+        if matches!(
+            self.hits.target(event.column, event.row),
+            Some(Target::NavigationBlocked)
+        ) {
+            let reason = self
+                .navigation_block()
+                .unwrap_or("Close or cancel the dialog with Esc before navigating.");
+            self.interaction_notice = Some(reason);
+            self.status = reason.into();
+            return None;
+        }
         if self.confirmation.is_some() {
             let code = match self.hits.target(event.column, event.row) {
                 Some(Target::ConfirmAction) => KeyCode::Enter,
@@ -792,6 +811,14 @@ impl App {
             return None;
         }
         match target {
+            Target::NavigationBlocked => {
+                let reason = self
+                    .navigation_block()
+                    .unwrap_or("Close or cancel the dialog with Esc before navigating.");
+                self.interaction_notice = Some(reason);
+                self.status = reason.into();
+                None
+            }
             Target::MenuOpen => {
                 self.open_menu(super::navigation::group(self), width);
                 None
@@ -830,15 +857,24 @@ impl App {
                 self.inventory.details = false;
                 None
             }
+            Target::BatchDetails => self
+                .batch_editor
+                .as_mut()
+                .filter(|e| e.open)?
+                .key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE)),
             Target::BatchEdit => {
                 self.batch_editor.as_mut().filter(|e| e.open)?.edit_item();
                 None
             }
             Target::BatchControl(index, activate) => {
                 let editor = self.batch_editor.as_mut().filter(|e| e.open)?;
-                editor.focused = index;
-                if !editor.item_form && index < editor.drafts.len() * 3 {
-                    editor.item = index / 3;
+                if !activate {
+                    if editor.item_form {
+                        editor.focused = editor.item * 3 + index % 3;
+                    } else if index < editor.drafts.len() * 3 {
+                        editor.item = index / 3;
+                        editor.focused = editor.drafts.len() * 3;
+                    }
                 }
                 if activate {
                     editor.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
@@ -906,7 +942,9 @@ impl App {
                 if self.tab != Tab::Tools || !self.tools_view.declaration_open {
                     return None;
                 }
-                self.tools_view.declaration.focus = index;
+                if !activate {
+                    self.tools_view.declaration.focus = index.min(11);
+                }
                 if activate {
                     return self
                         .tools_view
@@ -922,7 +960,9 @@ impl App {
                 if self.tab != Tab::Tools || !self.tools_view.recon_open {
                     return None;
                 }
-                self.tools_view.reconciliation.focus = index;
+                if !activate {
+                    self.tools_view.reconciliation.focus = index;
+                }
                 if activate {
                     self.key(
                         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
@@ -932,6 +972,16 @@ impl App {
                 } else {
                     None
                 }
+            }
+            Target::ToolInstallFreshReview => {
+                if self.tab != Tab::Tools || !self.tools_view.install_open {
+                    return None;
+                }
+                self.key(
+                    KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE),
+                    width,
+                    height,
+                )
             }
             Target::ToolInstallCollect => {
                 if self.tab != Tab::Tools
@@ -975,11 +1025,33 @@ impl App {
                     height,
                 )
             }
+            Target::ToolInstallProvider => {
+                if self.tab != Tab::Tools
+                    || !self.tools_view.install_open
+                    || self.tools_view.installation.mode != super::tools_install::Mode::CloseInputs
+                {
+                    return None;
+                }
+                self.key(
+                    KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE),
+                    width,
+                    height,
+                )
+            }
             Target::ToolInstallControl(index, activate) => {
                 if self.tab != Tab::Tools || !self.tools_view.install_open {
                     return None;
                 }
-                self.tools_view.installation.focus = index;
+                if !activate {
+                    let count = match self.tools_view.installation.mode {
+                        super::tools_install::Mode::AptInputs => 3,
+                        super::tools_install::Mode::CloseInputs => {
+                            self.tools_view.installation.close_field_count()
+                        }
+                        _ => 1,
+                    };
+                    self.tools_view.installation.focus = index.min(count - 1);
+                }
                 if activate {
                     self.key(
                         KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
@@ -994,13 +1066,17 @@ impl App {
                 if self.tab != Tab::Tools || !self.tools_view.setup {
                     return None;
                 }
-                self.tools_view.default_focus = index;
+                if index < 4 {
+                    self.tools_view.default_focus = index;
+                }
                 if activate {
-                    self.key(
-                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-                        width,
-                        height,
-                    )
+                    let code = match index {
+                        0..=3 => KeyCode::Char(' '),
+                        4 => KeyCode::Enter,
+                        5 => KeyCode::Char('e'),
+                        _ => KeyCode::Char('r'),
+                    };
+                    self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height)
                 } else {
                     None
                 }
@@ -1013,10 +1089,19 @@ impl App {
                 if self.tab != Tab::Tools || !self.tools_view.configuring {
                     return None;
                 }
-                self.tools_view.focus = index;
+                if !activate {
+                    self.tools_view.focus = index;
+                }
                 if activate {
                     self.key(
-                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                        KeyEvent::new(
+                            if index == 8 {
+                                KeyCode::Esc
+                            } else {
+                                KeyCode::Enter
+                            },
+                            KeyModifiers::NONE,
+                        ),
                         width,
                         height,
                     )
@@ -1024,16 +1109,18 @@ impl App {
                     None
                 }
             }
+            Target::FormAction(command) => self
+                .shell
+                .form_action(command)
+                .and_then(|intent| self.intent(intent)),
             Target::FormControl(index, activate) => {
                 match self.shell.overlay {
-                    Some(Overlay::Form(Form::Adopt)) => self.shell.adoption.focused = index,
-                    Some(Overlay::Form(Form::Check)) => self.shell.manifest_focused = index,
+                    Some(Overlay::Form(Form::Adopt)) => self.shell.adoption.focused = index.min(2),
+                    Some(Overlay::Form(Form::Check)) => self.shell.manifest_focused = 0,
                     Some(Overlay::Form(Form::KeepId | Form::RemoveId)) => {
-                        self.shell.unmanage_focused = index
+                        self.shell.unmanage_focused = 0
                     }
-                    Some(Overlay::Form(Form::Choose | Form::Init)) => {
-                        self.shell.path_focused = index
-                    }
+                    Some(Overlay::Form(Form::Choose | Form::Init)) => self.shell.path_focused = 0,
                     _ => return None,
                 }
                 if activate {
@@ -1046,21 +1133,48 @@ impl App {
                     None
                 }
             }
+            Target::PickerDetails => {
+                if !matches!(
+                    self.shell.overlay,
+                    Some(
+                        Overlay::Profiles(_)
+                            | Overlay::Repositories { .. }
+                            | Overlay::Actions { .. }
+                    )
+                ) {
+                    return None;
+                }
+                self.key(
+                    KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE),
+                    width,
+                    height,
+                )
+            }
             Target::Picker(index, activate) => {
+                let mut key = KeyCode::Enter;
                 match &mut self.shell.overlay {
-                    Some(Overlay::Repositories { selected }) => *selected = index,
-                    Some(Overlay::Profiles(picker)) => picker.selected = index,
+                    Some(Overlay::Repositories { selected }) => {
+                        let count = self.data.as_ref().map_or(0, |d| d.known_roots.len()) + 2;
+                        if index >= count {
+                            key = KeyCode::F(2);
+                        } else {
+                            *selected = index;
+                        }
+                    }
+                    Some(Overlay::Profiles(picker)) => {
+                        let count = picker.report.choices.known.len();
+                        if index < count {
+                            picker.selected = index;
+                            key = KeyCode::Char(' ');
+                        }
+                    }
                     Some(Overlay::Ignored { paths, selected }) if index < paths.len() => {
                         *selected = index
                     }
                     _ => return None,
                 }
                 if activate {
-                    self.key(
-                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-                        width,
-                        height,
-                    )
+                    self.key(KeyEvent::new(key, KeyModifiers::NONE), width, height)
                 } else {
                     None
                 }
@@ -1192,6 +1306,25 @@ impl App {
             return None;
         }
         self.resize(width, height);
+        if key.code == KeyCode::F(10)
+            && self.navigation.menu.is_none()
+            && width >= 48
+            && height >= 14
+        {
+            self.open_menu(super::navigation::group(self), width);
+            return None;
+        }
+        if self.dialog_title().is_some()
+            && matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::F(10))
+        {
+            let reason = self
+                .navigation_block()
+                .unwrap_or("Close this dialog with Esc before navigating.");
+            self.interaction_notice = Some(reason);
+            self.status = reason.into();
+            return None;
+        }
+        self.interaction_notice = None;
         if let Some(help) = &mut self.help {
             match key.code {
                 KeyCode::Esc | KeyCode::F(1) | KeyCode::Char('?') => self.help = None,
@@ -1364,7 +1497,7 @@ impl App {
                     Some(Task::Execute(approved))
                 }
                 Err(error) => {
-                    self.status = super::actions::diagnostic(&error);
+                    self.status = super::actions::diagnostic(&error).into();
                     None
                 }
             };
@@ -1442,14 +1575,23 @@ impl App {
             return editor.key(key);
         }
         if self.shell.overlay.is_some() {
-            if key.code == KeyCode::Home {
-                self.shell.scroll = 0;
-            }
-            if key.code == KeyCode::PageDown {
-                self.shell.page(true);
-            }
-            if key.code == KeyCode::PageUp {
-                self.shell.page(false);
+            let report_scroll = !self.shell.form_details
+                && !self.shell.picker_details
+                && !matches!(
+                    self.shell.overlay,
+                    Some(
+                        Overlay::Profiles(_)
+                            | Overlay::Repositories { .. }
+                            | Overlay::Actions { .. }
+                    )
+                );
+            if report_scroll {
+                match key.code {
+                    KeyCode::Home => self.shell.scroll = 0,
+                    KeyCode::PageDown => self.shell.page(true),
+                    KeyCode::PageUp => self.shell.page(false),
+                    _ => (),
+                }
             }
             let count = self.data.as_ref().map_or(0, |data| data.known_roots.len());
             if let Some(intent) = self.shell.key(key, count) {
@@ -1869,6 +2011,7 @@ impl App {
                 if matches!(self.shell.overlay, Some(Overlay::Actions { .. }))
                     && let Some(reason) = self.action_reason(action)
                 {
+                    self.interaction_notice = Some(reason);
                     self.status = reason.into();
                     return None;
                 }
@@ -1907,7 +2050,11 @@ impl App {
                 .map(|root| Task::Select(Some(root.clone()))),
             Intent::Submit(Form::Adopt) => {
                 let draft = &self.shell.adoption;
-                if draft.target.is_empty() || draft.id.is_empty() || draft.source.is_empty() {
+                if let Some(i) = [&draft.target, &draft.id, &draft.source]
+                    .iter()
+                    .position(|s| s.is_empty())
+                {
+                    self.shell.adoption.focused = i;
                     self.status =
                         "Enter TARGET, ID and repository-relative SOURCE; draft retained.".into();
                     return None;
@@ -1966,13 +2113,15 @@ impl App {
             return None;
         }
         if let Some(reason) = self.action_reason(action) {
+            self.interaction_notice = Some(reason);
             self.status = reason.into();
-            self.shell.overlay = None;
             return None;
         }
         self.failed_write = false;
         self.show_result = false;
         self.shell.scroll = 0;
+        self.shell.form_details = false;
+        self.shell.picker_details = false;
         if matches!(self.shell.overlay, Some(Overlay::Form(Form::Adopt)))
             && matches!(action, Action::Choose | Action::Init)
         {
@@ -2166,7 +2315,9 @@ impl App {
         None
     }
     pub fn text_entry(&self) -> bool {
-        self.batch_editor.as_ref().is_some_and(|e| e.open)
+        self.batch_editor
+            .as_ref()
+            .is_some_and(|e| e.open && e.item_form && !e.details)
             || self.shell.text_entry()
             || (self.tab == Tab::Git && self.git_view.text_entry())
             || (self.tab == Tab::Tools && self.tools_view.text_entry())
@@ -2611,7 +2762,8 @@ impl App {
         match approval {
             Ok(a) => Some(Task::Execute(super::actions::Approved::Batch(Box::new(a)))),
             Err(error) => {
-                self.status = format!("Approval refused: {}", super::actions::diagnostic(&error));
+                self.status =
+                    format!("Approval refused: {}", super::actions::diagnostic(&error)).into();
                 None
             }
         }
@@ -2641,6 +2793,7 @@ impl App {
                     Err(error) => {
                         self.status =
                             format!("Approval refused: {}", super::actions::diagnostic(&error))
+                                .into()
                     }
                 }
             }

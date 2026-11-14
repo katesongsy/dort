@@ -90,7 +90,7 @@ fn adoption_text(app: &App, height: u16, width: u16) -> String {
             .or(app.repository.as_ref()),
         app.data.as_ref().map(|d| &d.profiles)
     ));
-    text.push_str("Tab/Shift-Tab: fields/buttons | Enter: advance field or activate button\nEsc: back, retaining draft | Ctrl-U: clear current field\nMissing repository? Choose or Create/attach above, then return to this draft.\nSOURCE is repository-relative. Review content privately before adoption.\nOnly owned, single-link ordinary files; core refusals are authoritative.\nDiscover previews selected content; Adopt all explicitly approves a fresh review.");
+    text.push_str("Tab/Shift-Tab: fields only | Enter: request read-only preview\nEsc: back, retaining draft | Ctrl-U: clear current field\nCtrl-R: choose repository | Ctrl-N: create/attach | Ctrl-D: reset draft\nF2: inspect metadata or return to fields. Missing repository? Choose or Create, then return to this draft.\nSOURCE is repository-relative. Review content privately before adoption.\nOnly owned, single-link ordinary files; core refusals are authoritative.\nDiscover previews selected content; Adopt all explicitly approves a fresh review.");
     text
 }
 
@@ -119,7 +119,7 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16
                 height,
                 width,
             );
-            text.push_str(&format!("\nFull ID: {:?}\nTab: field/review | Enter: advance or review\nThe preview uses this exact ID. Core validates exact ID and scope.\nBoth modes retain source. Keep materializes an ordinary file; delete removes the link.\nConfirmation identifies the exact mapping selected for deletion.\nEsc returns to the retained draft.\n", app.shell.unmanage_id));
+            text.push_str(&format!("\nFull ID: {:?}\nTab: field only | Enter: request read-only review\nThe preview uses this exact ID. Core validates exact ID and scope.\nBoth modes retain source. Keep materializes an ordinary file; delete removes the link.\nConfirmation identifies the exact mapping selected for deletion.\nEsc returns to the retained draft.\n", app.shell.unmanage_id));
             text
         }
         Overlay::Form(Form::Check) => {
@@ -136,11 +136,11 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16
                 height,
                 width,
             );
-            text.push_str(&format!("\nFull path: {:?}\nRequested additions: {:?}\nRelative path base: {:?}\nTab/Shift-Tab fields/buttons; Enter advances/activates\nEsc back, retaining draft | Ctrl-U clear path\nAn independent manifest path is accepted. Local profiles still contribute.\nValidates declarations, dependencies and capabilities. Files inspects live state; verify installed tools separately.", app.shell.manifest_draft, app.shell.check_profiles, app.launch_directory));
+            text.push_str(&format!("\nFull path: {:?}\nRequested additions: {:?}\nRelative path base: {:?}\nTab/Shift-Tab: field only; Enter checks the manifest\nCtrl-P: temporary profiles | Ctrl-D: reset | F2: metadata/fields\nEsc back, retaining draft | Ctrl-U clear path\nAn independent manifest path is accepted. Local profiles still contribute.\nValidates declarations, dependencies and capabilities. Files inspects live state; verify installed tools separately.", app.shell.manifest_draft, app.shell.check_profiles, app.launch_directory));
             text
         }
         Overlay::About => format!(
-            "Dort {} | About\nGit-native developer environment manager\nExperimental guarded local workflows. MIT license.\n\nSupported hosts: macOS and Ubuntu, ARM64 / x86_64.\nLocal create/attach, discovery/adoption, link apply/unmanage, guarded recovery, structural checks, explicit Tools inspection/snapshot reconciliation, one missing exact mise/npm package or provider-current Homebrew core formula with attempt inspection/closure, and read-only Git.\nProvider/backend/package code and downloads may change data and caches. Install deadline: 10 minutes; no rollback. Mise stays inactive; npm/Homebrew native links can expose commands. Homebrew build/dependency code can execute; dependencies may upgrade.\n\nOther package installations, templates, secrets, synchronization and Git writes are not supported.\nExecution requires reviewed, explicit approval. Failed writes may retain partial effects; inspect Recovery.\nGit patches may expose secrets; each view requires deliberate disclosure.\nBackups are private and unencrypted. Keep independent backups for hardware or power failures.\n\nEsc: return to prior destination and focus",
+            "Dort {} | About\nGit-native developer environment manager\nExperimental guarded local workflows. MIT license.\n\nSupported hosts: macOS and Ubuntu, ARM64 / x86_64.\nLocal create/attach, discovery/adoption, link apply/unmanage, guarded recovery, structural checks, explicit Tools inspection/snapshot reconciliation, one missing exact mise/npm package or provider-current Homebrew core/Ubuntu APT package with honest attempt outcomes and guarded closure, and read-only Git.\nProvider/backend/package code and downloads may change data and caches. Unprivileged installs have a 10-minute deadline; no rollback. APT requests trusted noninteractive sudo supervision (-n -T 600); policy may refuse, with no password handling or untimed fallback. If overdue, Dort waits joined; root scripts/dependencies/services and system/config/data effects are possible, without proof every privileged descendant terminated. Mise stays inactive; npm/Homebrew native links can expose commands. Homebrew build/dependency code can execute; dependencies may upgrade.\n\nOther package installations, templates, secrets, synchronization and Git writes are not supported.\nExecution requires reviewed, explicit approval. Failed writes may retain partial/ongoing effects. Inspect Tools attempts for installs; Recovery for file/bootstrap changes.\nGit patches may expose secrets; each view requires deliberate disclosure.\nBackups are private and unencrypted. Keep independent backups for hardware or power failures.\n\nEsc: return to prior destination and focus",
             env!("CARGO_PKG_VERSION")
         ),
         Overlay::Form(Form::Adopt) => adoption_text(app, height, width),
@@ -149,7 +149,7 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16
             let root =
                 crate::services::resolve_root(std::path::Path::new(draft), &app.launch_directory);
             format!(
-                "{}\n{}\n\nFull draft: {draft:?}\nResolved path: {root:?}\nLaunch directory: {:?}\nEnter: advance field, then {} | Esc: back, retaining draft\nCtrl-U: discard draft\n{}",
+                "{}\n{}\n\nFull draft: {draft:?}\nResolved path: {root:?}\nLaunch directory: {:?}\nEnter: {} from the path field | Esc: back, retaining draft\nCtrl-U: discard draft\n{}",
                 match form {
                     Form::Choose => "Choose exact root (session only)",
                     Form::Init => "Create/attach local repository",

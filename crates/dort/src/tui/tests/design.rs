@@ -137,11 +137,14 @@ fn input_has_a_real_visible_caret_and_field_button_hierarchy() {
         let label = locate(t.backend().buffer(), "TARGET");
         assert_eq!(t.backend().buffer()[label].fg, Color::Cyan);
     }
-    app.shell.adoption.focused = 3;
+    for _ in 0..3 {
+        key(&mut app, KeyCode::Tab);
+    }
+    assert_eq!(app.shell.adoption.focused, 0);
     let b = buffer(&app, 48, 14);
-    let action = locate(&b, "> [Review");
-    assert!(b[action].modifier.contains(Modifier::REVERSED));
-    assert_ne!(b[action].bg, Color::Reset);
+    let action = locate(&b, "[Review");
+    assert!(!b[action].modifier.contains(Modifier::REVERSED));
+    assert_eq!(b[action].fg, Color::Cyan);
 }
 #[test]
 fn arrows_change_destination_and_tab_does_not_select_screen_regions() {
@@ -664,17 +667,13 @@ fn git_metadata_unknown_empty_and_filter_caret_remain_distinct_at_the_floor() {
     }
 }
 #[test]
-fn single_path_field_cannot_submit_until_the_visible_action_is_activated() {
+fn single_path_enter_requests_a_preview_without_mutation() {
     let mut app = App::new(false);
     app.git = Ok("/trusted/git".into());
     key(&mut app, KeyCode::Char('n'));
     app.shell.init_draft = "/synthetic/new-repository".into();
-    assert!(
-        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 80, 24)
-            .is_none()
-    );
-    assert_eq!(app.shell.path_focused, 1);
-    assert!(render(&app, 80, 24).contains("> [Review read-only preview"));
+    assert_eq!(app.shell.path_focused, 0);
+    assert!(render(&app, 80, 24).contains("Review read-only preview"));
     assert!(matches!(
         app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 80, 24),
         Some(super::actions::Task::Init { .. })

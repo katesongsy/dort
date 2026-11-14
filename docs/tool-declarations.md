@@ -1,5 +1,7 @@
 # Tool declaration transactions
 
+The TUI declaration form is a navigable page following the [shared interaction contracts](tui-interactions.md). Tab/Shift-Tab traverses its twelve fields only; Enter from any field prepares the process-free preview. Saving still requires the separate real confirmation gate. Menu dismissal retains drafts/reviews; actual navigation drops pending approval.
+
 Tool declarations are desired metadata, not package installation, installed-binary adoption or provider ownership. CLI `tools declare` and Tools → Add tool declaration share `services/declaration.rs` and the core `tools::declaration` service. Only an already registered repository is eligible. No provider, candidate binary or Git process is dispatched.
 
 ## Preview and focused edit

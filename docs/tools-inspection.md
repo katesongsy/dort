@@ -1,5 +1,7 @@
 # Core provider inspection
 
+The [shared workbench interaction contracts](tui-interactions.md) apply to inventory pages: manager rows are the only traversal stops, Enter consumes selected real previews once, and `e` opens the selected manager’s Advanced form. Tab traverses Advanced fields only; Enter prepares a review, not execution. Menus remain usable on these pages, without replaying queries.
+
 `dort_core::tools::inspection` implements deliberate local provider queries. CLI `tools inspect`, the explicit collection phase of `tools reconcile`, and the Tools TUI expose the same live-preview/approval capability through `services::tools`. Separately approved metadata snapshots feed [explicit reconciliation](binary-reconciliation.md) through the [pure package planner](tools-planning.md). These inspection APIs do not install packages. The separate [bounded Tools installation](tool-installation.md) capabilities reuse fixed inventory queries for fresh validation and post-observation. The Homebrew installer separately discloses help/layout/canonical-formula probes; ordinary inspection collection never adds them. Pure version policies in `tools.rs`, manifest checks, filesystem observation and planners do not execute providers. End-user usage is in the [command reference](user/commands.md#provider-inspection).
 
 ## Frontend workflow

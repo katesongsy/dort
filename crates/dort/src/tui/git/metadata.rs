@@ -142,7 +142,7 @@ fn filter(frame: &mut Frame, area: Rect, view: &View<'_>) {
         ])),
         area,
     );
-    if editing && true && !view.busy && area.width > 0 {
+    if editing && view.hits.input_focus_allowed() && !view.busy && area.width > 0 {
         frame.set_cursor_position((caret.min(area.right().saturating_sub(1)), area.y));
     }
 }
@@ -167,7 +167,7 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         Paragraph::new(Line::from(vec![
             Span::styled("Git / ", ui::heading()),
             Span::styled(
-                ui::clip(view.comparison.label(), area.width.saturating_sub(6)),
+                ui::chrome_clip(view.comparison.label(), area.width.saturating_sub(6)),
                 ui::accent(),
             ),
         ])),

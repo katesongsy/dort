@@ -251,7 +251,7 @@ fn menu_focus_owns_help_quit_caret_and_outside_clicks_without_editing_search() {
     assert!(app.navigation.menu.is_none() && app.preview.is_none() && app.confirmation.is_none());
 }
 #[test]
-fn forms_tasks_errors_and_git_scope_input_cannot_be_bypassed_by_menus() {
+fn pages_keep_menus_while_tasks_retain_the_joined_navigation_guard() {
     for form in [
         Form::Init,
         Form::Choose,
@@ -263,7 +263,9 @@ fn forms_tasks_errors_and_git_scope_input_cannot_be_bypassed_by_menus() {
         let mut app = App::new(false);
         app.shell.overlay = Some(Overlay::Form(form));
         key(&mut app, KeyCode::F(10), 80, 24);
-        assert!(app.navigation.menu.is_none() && app.shell.overlay.is_some());
+        assert!(app.navigation.menu.is_some() && app.shell.overlay.is_some());
+        key(&mut app, KeyCode::Esc, 80, 24);
+        assert!(app.shell.overlay.is_some());
     }
     let mut app = App::new(false);
     app.start(false);
@@ -274,14 +276,15 @@ fn forms_tasks_errors_and_git_scope_input_cannot_be_bypassed_by_menus() {
     let mut app = App::new(false);
     app.error = Some("metadata failure".into());
     key(&mut app, KeyCode::F(10), 80, 24);
-    assert!(app.navigation.menu.is_none());
+    assert!(app.navigation.menu.is_some());
     let mut app = App::new(false);
     app.tab = Tab::Git;
     app.git_view.editing_root = true;
     app.git_view.draft = "retained Git scope".into();
     key(&mut app, KeyCode::F(10), 80, 24);
-    assert!(app.navigation.menu.is_none());
+    assert!(app.navigation.menu.is_some());
     assert_eq!(app.git_view.draft, "retained Git scope");
+    key(&mut app, KeyCode::Esc, 80, 24);
     app.git_view.editing_root = false;
     key(&mut app, KeyCode::F(10), 80, 24);
     assert!(app.navigation.menu.is_some());

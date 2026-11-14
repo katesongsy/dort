@@ -234,8 +234,17 @@ impl State {
     pub fn text_entry(&self) -> bool {
         self.editing_root || self.search.editing || self.confirmation.is_some()
     }
+    // Local input routing only, not page modality or menu availability.
     pub fn navigation_input(&self) -> bool {
         self.editing_root || self.confirmation.is_some()
+    }
+    pub fn disclosure_pending(&self) -> bool {
+        self.confirmation.is_some()
+    }
+    pub fn leave_page(&mut self) {
+        self.editing_root = false;
+        self.search.editing = false;
+        self.discard_patch();
     }
     pub fn sensitive(&self) -> bool {
         self.confirmation.is_some() || self.patch.is_some() || self.awaiting_patch

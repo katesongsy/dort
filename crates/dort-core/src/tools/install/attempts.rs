@@ -21,17 +21,14 @@ pub enum Problem {
     Malformed,
     Changed,
 }
-#[derive(Serialize)]
 pub struct Attempt {
     pub id: String,
     pub scope: Option<Scope>,
     pub outcome: Option<Outcome>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub observed_versions: Vec<String>,
     pub problem: Option<Problem>,
     pub unresolved: bool,
     pub explicitly_closed: bool,
-    #[serde(skip)]
     pub(super) head: String,
 }
 #[derive(Serialize, Deserialize)]

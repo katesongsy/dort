@@ -158,24 +158,23 @@ fn separate_item_form_retains_edits_and_only_returns_to_combined_review() {
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let screen = render(&app, w, h);
         assert!(screen.contains("Edit item"));
-        assert!(!screen.contains("Review all") && !screen.contains("Files /"));
+        assert!(!screen.contains("Review all") && screen.contains("Page · Files /"));
         assert!(!screen.contains("Adopt all") && !screen.contains("Content ·"));
     }
-    key(&mut app, KeyCode::Enter); // TARGET -> ID, not a preview.
+    key(&mut app, KeyCode::Tab); // TARGET -> ID, fields only.
     clear(&mut app);
     text(&mut app, "edited-item"); // e is literal text inside the form.
-    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Tab);
     clear(&mut app);
     text(&mut app, "files/edited-item");
-    assert!(key(&mut app, KeyCode::Enter).is_none()); // SOURCE -> Done.
-    assert!(key(&mut app, KeyCode::Enter).is_none()); // Done -> list only.
+    assert!(key(&mut app, KeyCode::Enter).is_none()); // Done from any field: list only.
     let editor = app.batch_editor.as_ref().unwrap();
     assert!(!editor.item_form && editor.open);
     assert_eq!(editor.drafts[1].id, "edited-item");
     assert!(app.preview.is_none());
     key(&mut app, KeyCode::Char('k'));
     key(&mut app, KeyCode::Char('e'));
-    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Tab);
     clear(&mut app);
     text(&mut app, "retained-on-escape");
     key(&mut app, KeyCode::Esc);
@@ -283,28 +282,25 @@ fn tree_folds_marks_hidden_items_and_batch_editor_retains_real_fields_at_floor()
         super::files::FORMATTED_ROWS.with(|rows| rows.set(0));
         let covered = render(&app, w, h);
         assert!(covered.contains("All editable defaults"));
-        assert!(
-            !covered.contains("Files / Discover")
-                && !covered.contains("Content ·")
-                && !covered.contains("Details ·")
-        );
+        assert!(!covered.contains("Content ·") && !covered.contains("Details ·"));
         assert_eq!(
             super::files::FORMATTED_ROWS.with(|rows| rows.get()),
             0,
             "Discover must not render behind the batch editor"
         );
     }
-    // Review is focused by default: no per-file visit is required to accept defaults.
+    // Enter reviews all defaults from the list; no footer traversal is needed.
     assert_eq!(app.batch_editor.as_ref().unwrap().focused, 6);
-    key(&mut app, KeyCode::Tab); // First target.
+    key(&mut app, KeyCode::Char('e')); // Local item page.
     key(&mut app, KeyCode::Tab); // First ID.
     clear(&mut app);
     text(&mut app, "custom-a");
     key(&mut app, KeyCode::Tab);
     clear(&mut app);
     text(&mut app, "files/custom-a");
-    // Every draft is already in the combined list; no Prev/Next acceptance loop.
-    key(&mut app, KeyCode::Tab);
+    // Done retains one edited draft; no per-file acceptance is required.
+    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Tab); // Next list row.
     assert_eq!(app.batch_editor.as_ref().unwrap().item, 1);
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Char('E'));

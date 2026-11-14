@@ -73,21 +73,12 @@ fn compact_forms_and_profile_picker_always_show_focused_control() {
     use super::shell::{Form, Overlay};
     let mut app = App::new(false);
     app.shell.overlay = Some(Overlay::Form(Form::Adopt));
-    let prefixes = [
-        "TARGET",
-        "ID",
-        "SOURCE",
-        "Review",
-        "Choose",
-        "Create/attach",
-        "Discard",
-    ];
+    let prefixes = ["TARGET", "ID", "SOURCE"]; // Only fields participate in traversal.
     for (i, prefix) in prefixes.iter().enumerate() {
         app.shell.adoption.focused = i;
         let screen = render(&app, 48, 14);
         assert!(
-            screen.contains(&format!("{prefix} · Focus"))
-                || screen.contains(&format!("> [{prefix}")),
+            screen.contains(&format!("{prefix} · Focus")) && screen.contains("Review"),
             "focused control {i} not visible: {screen}"
         );
     }
@@ -98,24 +89,16 @@ fn compact_forms_and_profile_picker_always_show_focused_control() {
     let screen = render(&app, 48, 14);
     assert!(screen.contains("..."));
     app.shell.overlay = Some(Overlay::Form(Form::Check));
-    for (i, prefix) in [
-        "Manifest path",
-        "Check manifest",
-        "Temporary profiles",
-        "Discard",
-    ]
-    .iter()
-    .enumerate()
-    {
-        app.shell.manifest_focused = i;
-        assert!(
-            render(&app, 48, 14).contains(&format!("{prefix} · Focus"))
-                || render(&app, 48, 14).contains(&format!("> [{prefix}"))
-        );
+    for _ in 0..8 {
+        app.key(key(KeyCode::Tab), 48, 14);
+        assert_eq!(app.shell.manifest_focused, 0);
+        let text = render(&app, 48, 14);
+        assert!(text.contains("Manifest path · Focus") && text.contains("Check manifest"));
     }
     app.shell.overlay = Some(Overlay::Form(Form::RemoveId));
-    app.shell.unmanage_focused = 1;
-    assert!(render(&app, 48, 14).contains("> [Review"));
+    app.shell.unmanage_focused = 0;
+    assert!(render(&app, 48, 14).contains("Exact ID · Focus"));
+    assert!(render(&app, 48, 14).contains("Review"));
     app.shell.overlay = None;
     app.tab = Tab::Overview;
     app.key(key(KeyCode::Left), 80, 24);
@@ -269,11 +252,10 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
         app.key(key(KeyCode::Char(c)), 80, 24);
     }
     assert!(render(&app, 80, 24).contains("No matching actions")); // session commands live in menus
-    app.key(key(KeyCode::Esc), 80, 24); // search -> results
-    app.key(key(KeyCode::Esc), 80, 24); // close, restoring invoking focus
+    app.key(key(KeyCode::Esc), 80, 24); // Close the explicit dialog in one action.
     app.details_scroll = 3;
     app.key(key(KeyCode::Char('?')), 80, 24);
-    assert!(render(&app, 100, 40).contains("| Help"));
+    assert!(render(&app, 100, 40).contains("Dialog · Help"));
     app.key(key(KeyCode::PageDown), 80, 24);
     assert_eq!(app.help.as_ref().unwrap().scroll, 2);
     app.key(key(KeyCode::Esc), 80, 24);
@@ -287,7 +269,7 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     }
     assert!(!app.quit);
     assert!(matches!(&app.shell.overlay, Some(Overlay::Actions { query, .. }) if query == "q?/"));
-    app.key(key(KeyCode::Esc), 80, 24); // leave search, retain query
+    app.key(key(KeyCode::Down), 80, 24); // row focus, retain the literal query
     app.key(key(KeyCode::Delete), 80, 24);
     assert!(matches!(&app.shell.overlay, Some(Overlay::Actions { query, .. }) if query.is_empty()));
     app.key(key(KeyCode::Esc), 80, 24);

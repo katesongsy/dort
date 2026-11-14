@@ -447,7 +447,7 @@ def tools_reconciliation_workflows(binary, base, env):
         session.wait(b'loaded.')
         session.send(b'\x1b[D')
         session.wait(b'Inspect installed tools')
-        session.send(b'e\x1b[Z  \t' + scopes[0]['executable'].encode() + b'\t\x15/no-external-programs\t\r')
+        session.send(b'e\x1b[Z  \t' + scopes[0]['executable'].encode() + b'\t\x15/no-external-programs\r')
         session.wait(b'Run query')
         session.send(b'\r')
         session.wait(b'Snapshot s1')
@@ -620,7 +620,7 @@ def npm_install_workflows(binary, base, env):
         assert (home / 'calls').read_text() == 'M'
         session.send(b'c')
         session.wait(b'Inspect installed tools')
-        session.send(b'\x1b[Ze')  # npm row immediately before the collection button
+        session.send(b'\x1b[Be')  # Move from mise to npm, then Advanced.
         session.wait(b'Global npm prefix')
         session.click_label('Trusted executable')
         for value in (node, bin_dir, manifest, 'node', cli, prefix):
@@ -783,6 +783,81 @@ esac
     print('PASS damaged Homebrew attempt retained three-field scope and compact fresh closure')
 
 
+def tool_outcome_workflows(binary, base, env):
+    home, repo, bin_dir, lookup = (base / name for name in ('outcome-home', 'outcome-repo', 'outcome-bin', 'outcome-lookup'))
+    for directory in (home, repo, bin_dir, lookup):
+        directory.mkdir(mode=0o700)
+    (repo / '.git').mkdir()
+    manifest = repo / 'dort.toml'
+    manifest.write_text("schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='mise',package='demo',version='1.2.3'}\nubuntu={provider='mise',package='demo',version='1.2.3'}\n")
+    git = bin_dir / 'git'
+    git.write_text('#!/bin/sh\nfor arg do\ncase "$arg" in\nconfig) exit 1;;\nrev-parse) pwd -P; exit 0;;\nstatus) printf "# branch.head main\\000"; exit 0;;\nesac\ndone\nexit 94\n')
+    git.chmod(0o700)
+    mise = bin_dir / 'mise'
+    mise.write_text('''#!/bin/sh
+if [ "$1" = ls ]; then
+printf Q >> "$HOME/calls"
+if [ -f "$HOME/installed" ]; then printf '{"demo":[{"version":"1.2.3","installed":true}]}'; else printf '{}'; fi
+exit 0
+fi
+printf I >> "$HOME/calls"
+printf PRIVATE_OUTCOME; printf PRIVATE_ERROR >&2
+printf installed > "$HOME/installed"
+exit 9
+''')
+    mise.chmod(0o700)
+    scoped = dict(env, HOME=str(home), PATH=str(bin_dir), XDG_CONFIG_HOME=str(home / '.config'), XDG_STATE_HOME=str(home / '.local/state'))
+    subprocess.run([binary, '--json', '--yes', 'init', str(repo)], env=scoped, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    with Session([binary, 'tui'], scoped) as session:
+        session.wait(b'loaded.')
+        session.send(b'\x1b[D')
+        session.wait(b'[x] mise')
+        session.send(b'\r')
+        session.wait(b'no installed packages reported')
+        session.send(b'p' + str(manifest).encode() + b'\t' + str(lookup).encode() + b'\t\t\r')
+        session.wait(b'Space chooses')
+        session.send(b' \t\r')
+        session.wait(b'Review exact mise install')
+        session.send(b'i')
+        session.wait(b'Install exact version')
+        session.send(b'\r')
+        session.wait(b'Process failed')
+        session.wait(b'Package: exact version reported present')
+        assert (home / 'calls').read_text() == 'QQIQ'
+        attempts = home / '.local/state/dort/tools-attempts'
+        before = {p.relative_to(attempts): p.read_bytes() for p in attempts.glob('*/*.json')}
+        session.resize((14, 48))
+        session.wait(b'Process failed')
+        session.wait(b'reported present')
+        session.click_label('Start fresh review')
+        session.wait(b'Fresh review')
+        session.wait(b'no replay')
+        assert (home / 'calls').read_text() == 'QQIQ', 'Fresh review ran an unapproved query'
+        assert before == {p.relative_to(attempts): p.read_bytes() for p in attempts.glob('*/*.json')}
+        session.send(b'\r')
+        session.wait(b'Snapshot s2')
+        assert (home / 'calls').read_text() == 'QQIQQ'
+        session.resize((40, 120))
+        session.wait(b'Snapshot s2')  # Wait for the grown frame, not stale pre-resize geometry.
+        session.send(b'p')
+        session.wait(b'Load declarations')
+        session.click_label('Load declarations')
+        session.wait(b'Space chooses')
+        session.wait(b's1')  # A new catalog must not silently replace the old binding.
+        session.click_label('demo (demo)')
+        session.send(b' ')
+        session.wait(b's2')
+        session.click_label('Reconcile metadata')
+        session.wait(b'Package no-op')
+        session.send(b'i')  # A matching package is not an upgrade/reinstall request.
+        assert (home / 'calls').read_text() == 'QQIQQ'
+        session.send(b'\x1bq')
+        session.finish()
+        assert b'PRIVATE_OUTCOME' not in session.data and b'PRIVATE_ERROR' not in session.data
+    assert before == {p.relative_to(attempts): p.read_bytes() for p in attempts.glob('*/*.json')}
+    print('PASS failed process with package present, compact fresh-review click, new query approval and explicit new-ID binding without replay')
+
+
 def apt_install_workflows(binary, base, env):
     home, repo, bin_dir, programs = (base / name for name in ('apt-home', 'apt-repo', 'apt-bin', 'apt-programs'))
     for directory in (home, repo, bin_dir, programs):
@@ -818,6 +893,7 @@ printf installed > "$HOME/installed"''',
             session.send(b'\x1b[D')
             session.wait(b'apt / dpkg packages')
             session.click_label('apt / dpkg packages')
+            session.send(b'e')
             session.wait(b'Trusted executable')
             session.send(str(programs / 'dpkg-query').encode() + b'\t\x15' + str(bin_dir).encode() + b'\t\r')
             session.wait(b'Run query')
@@ -878,6 +954,57 @@ printf installed > "$HOME/installed"''',
     print('PASS damaged APT closure uses only retained dpkg/PATH fields, never sudo authentication')
 
 
+def interaction_surface_workflows(binary, base, env):
+    for size in ((14, 48), (24, 80), (40, 140)):
+        home = base / ('interaction-home-' + str(size[1]))
+        home.mkdir(mode=0o700)
+        scoped = dict(env, HOME=str(home), XDG_CONFIG_HOME=str(home / '.config'),
+                      XDG_STATE_HOME=str(home / '.local/state'))
+        with Session([binary, 'tui'], scoped, size) as session:
+            session.wait(b'loaded.')
+            session.send(b'\x1b[D')
+            session.wait(b'Inspect installed tools')
+            session.settle()
+            assert b'\\u{b7}' not in session.screen.text(), 'Trusted decoration was metadata-escaped'
+            assert '·'.encode() in session.screen.text(), 'UTF-8 chrome lost its actual separator'
+            session.send(b'aq?/')
+            session.wait(b'Tool ID')
+            session.wait(b'q?/')
+            session.send(b'\x1b[21~')  # F10 opens a page menu even during text entry.
+            session.wait(b'Overview')
+            session.settle()
+            session.send(b'\x1b')
+            session.settle()
+            session.wait(b'Tool ID')
+            session.wait(b'q?/')
+            session.send(b'\x1bOP')
+            session.wait(b'Help: Explicit provider inspection')
+            session.send(b'\x1b[21~')
+            session.wait(b'Dialog open:')
+            session.mouse(0, 0, 0)  # Outside click cannot navigate or dismiss Help.
+            session.settle()
+            assert b'Help: Explicit provider inspection' in session.screen.text(), 'Outside click dismissed the dialog'
+            session.send(b'\x1b')
+            session.settle()
+            session.wait(b'Tool ID')
+            session.wait(b'q?/')
+            session.destination('Checks')  # A real menu destination is not silently ignored.
+            session.wait(b'Checks')
+            session.navigate('Tools', 'Inspect installed tools [c]')
+            session.wait(b'Review selected inspections.')  # Join metadata discovery before input.
+            session.settle()
+            session.send(b'a')
+            session.wait(b'Tool ID')
+            session.wait(b'q?/')  # Actual navigation retains drafts, not approvals.
+            session.send(b'\x1b')
+            session.wait(b'Inspect installed tools')
+            session.settle()
+            session.send(b'q')
+            session.finish()
+        assert not list(home.iterdir()), 'Page/dialog navigation created state'
+        print('PASS page menus during text entry, retained draft, dialog feedback/outside capture and UTF-8 chrome', size)
+
+
 def run():
     screen = Screen((2, 20))
     screen.feed(b"Git executes\x1b[")
@@ -904,11 +1031,13 @@ def run():
             assert not list(home.iterdir()), "Read-only TUI startup created state"
             print("PASS entry/exit", args, size)
 
+        interaction_surface_workflows(binary, base, env)
         tools_workflows(binary, base, env)
         tool_install_workflows(binary, base, env)
         npm_install_workflows(binary, base, env)
         brew_install_workflows(binary, base, env)
         apt_install_workflows(binary, base, env)
+        tool_outcome_workflows(binary, base, env)
         tools_reconciliation_workflows(binary, base, env)
         tool_declaration_workflows(binary, base, env)
 
@@ -1091,15 +1220,15 @@ def run():
             session.send(b'\x1b')
             session.wait(b'Ignore discovery path')
             session.send(b'\r')
-            session.wait(b'Submit to execute')
+            session.wait(b'Confirm reviewed changes')
             session.send(b'ye\x1bOP')
             session.wait(b'Help: Confirmation')
             session.send(b's\r')
             session.settle()
             assert not ignore_store.exists(), 'Help submitted confirmation input'
             session.send(b'\x1b')
-            session.wait(b'Submit to execute')
-            session.send(b's')  # retained ye becomes yes, without submitting
+            session.wait(b'Confirm reviewed changes')
+            session.send(b's')  # Printable text alone cannot approve.
             session.send(b'\x1bOP')
             session.wait(b'Help: Confirmation')
             session.resize((13,47))
@@ -1109,8 +1238,8 @@ def run():
             session.send(b'\x1b')  # Help closes to preview; fresh confirmation required
             session.wait(b'Ignore discovery path')
             session.send(b'\r')
-            session.wait(b'Submit to execute')
-            session.send(b'yes\r')
+            session.wait(b'Confirm reviewed changes')
+            session.send(b'\r')
             session.wait(b'Discovery loaded')
             session.send(b'q')
             session.finish()
@@ -1186,11 +1315,11 @@ def run():
             session.wait(b"Checks | Diagnostics")
             session.send(b"m")
             session.wait(b"Checks | Standalone manifest")
-            session.send(b"v\t\r")  # retained Check button -> Profiles
+            session.send(b"v\x10")  # Open Profiles directly without a footer focus stop.
             session.wait(b"Profiles | standalone manifest")
-            session.send(b"\x1b[B\r\x1b[B\r")  # dev toggle, Apply
+            session.send(b"\x1b[B \r")  # Toggle dev explicitly, then apply from that row.
             session.wait(b"Standalone profile additions validated")
-            session.send(b"\x1b[Z\r")  # previous field: Check
+            session.send(b"\r")  # Validate directly from the retained path field.
             session.wait(b"Declarations validated")
             session.send(b"q")
             session.finish()
@@ -1202,27 +1331,25 @@ def run():
             session.send(b"p")
             session.wait(b"REPOSITORY")
             session.wait(b"CHOICE")
+            session.send(b"\x1bOR")  # F3 opens explicit scrollable choice metadata.
             session.wait(b"The exact root becomes")
-            session.send(b"\x1b[6~")
-            session.settle()
-            assert b"REPOSITORY" in session.screen.text(), "Paging replaced repository controls"
-            session.send(b"\x1b[H")
+            session.send(b"\x1b[6~\x1b[H")
+            session.wait(b"The exact root becomes")
+            session.send(b"\x1b")
             session.wait(b"REPOSITORY")
-            session.send(b"\x1b[B\x1b[B")  # no roots: active, Create/attach
-            session.wait(b"> [Create/attach")
-            session.send(b"\r")
+            session.send(b"\x1bOQ")  # F2 is direct Create/attach; no footer focus.
             session.wait("Path · Focus".encode())
             session.send(b"\x1b")
             session.settle()
             session.send(b"v")
             session.wait("Manifest path · Focus".encode())
-            session.send(os.fsencode(standalone) + b"\r\t\r")
+            session.send(os.fsencode(standalone) + b"\x10")
             session.wait(b"PROFILE")
             session.wait(b"Mandatory")
+            session.send(b"\x1bOR")
             session.wait(b"Temporary profiles | Never persisted")
             session.send(b"\x1b[6~")
             session.settle()
-            assert b"PROFILE" in session.screen.text(), "Paging replaced profile controls"
             reached = False
             for _ in range(40):
                 if b"Effective union" in session.screen.text():
@@ -1232,8 +1359,10 @@ def run():
                 session.settle()
             assert reached, "Compact picker contributors were not keyboard reachable"
             session.send(b"\x1b[H")
+            session.wait(b"Temporary profiles | Never persisted")
+            session.send(b"\x1b")
             session.wait(b"PROFILE")
-            session.send(b"\x1b[B \x1b[B\r")  # dev toggle, real Apply button
+            session.send(b"\x1b[B \r")  # Toggle dev, then apply without a footer focus stop.
             session.wait(b"Standalone profile additions validated")
             session.send(b"\x1b")
             session.settle()
@@ -1262,10 +1391,11 @@ def run():
             session.destination("Recovery")
             session.send(b";rollback\r")  # disabled Enter in its relevant view
             session.wait(b"Rollback unavailable")
+            session.send(b"\x1bOR")  # Full metadata/reasons are an explicit dialog subview.
             session.wait(b"Action details")
             session.send(b"\x1b[6~")
             session.settle()
-            assert b"SCOPE" in session.screen.text(), "Paging replaced Actions controls"
+            assert b"Action details" in session.screen.text(), "Paging replaced the metadata subview"
             reached = False
             for _ in range(30):
                 if b"transaction." in session.screen.text(): # final wrapped reason row
@@ -1275,8 +1405,8 @@ def run():
                 session.settle()
             assert reached, "Compact Actions prerequisites were not keyboard reachable"
             session.send(b"\x1b[H")
-            session.wait(b"SCOPE")
-            session.send(b"\x1b")  # input -> results
+            session.wait(b"Action details")
+            session.send(b"\x1b")  # metadata -> choices
             session.settle()
             session.send(b"\x1b")  # close, restoring Recovery
             session.settle()
@@ -1290,7 +1420,7 @@ def run():
             session.send(b"\x1b")
             session.settle()
             session.navigate("Session", "About")
-            session.wait(b"| About")
+            session.wait(b"About")
             session.send(b"\x1b")
             session.settle()
             session.send(b"q")
@@ -1307,7 +1437,7 @@ def run():
             session.wait(b"Read-only Diagnostics loaded")
             session.settle()  # identical refresh result may still be the prior frame
             session.navigate("Session", "About")
-            session.wait(b"| About")
+            session.wait(b"About")
             session.wait(b"Experimental guarded local workflows")
             session.send(b"\x1b")
             session.wait(b"Diagnostics | Dort")
@@ -1860,8 +1990,7 @@ def run():
             session.wait(b"loaded.")
             session.send(b"o")
             session.wait("TARGET · Focus".encode())
-            session.send(b"~/.q?config\rconfig\rfiles/config\r")
-            session.send(b"\r")  # Review button, not an ordinary field
+            session.send(b"~/.q?config\tconfig\tfiles/config\r")  # Fields only; Enter previews.
             session.wait("Review ·".encode())
             session.send(b"\x1b")
             session.settle()
@@ -1945,15 +2074,19 @@ def run():
             session.wait(b'All editable defaults')
             session.wait(b'Review all')
             session.settle()
-            assert b'Files / Discover' not in session.screen.text(), 'Batch editor leaked Discover underneath'
-            session.send(b'\x1b[6~')
+            assert b'ADOPTION' not in session.screen.text(), 'Batch editor leaked the Discover table underneath'
+            assert b'ordinary settings' not in session.screen.text(), 'Batch editor leaked selected-file content'
+            session.send(b'\x1bOQ')  # F2 opens scrollable full selected-item paths.
+            session.wait(b'Selected draft metadata')
             session.wait(b'files/.config/bundle/only-a')
-            session.send(b'\x1b[H')
+            session.send(b'\x1b[H\x1b')
+            session.settle()
+            session.wait(b'All editable defaults')
             session.send(b'je')  # Select only-b and open a separate item form.
             session.wait(b'Edit item')
-            session.send(b'\r\x15edited-b\r\r\r')  # TARGET -> ID -> SOURCE -> Done -> batch.
+            session.send(b'\t\x15edited-b\r')  # TARGET -> ID; Enter retains edits and returns to the list.
             session.wait(b'Review all')
-            session.send(b'e\r')
+            session.send(b'e')
             session.wait(b'edited-b')
             session.click_label('Done')  # Return only; never review/adopt an individual item.
             session.wait(b'Review all')

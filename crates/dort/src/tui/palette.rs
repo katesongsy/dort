@@ -53,13 +53,50 @@ pub fn draw(
     selected: usize,
     searching: bool,
 ) {
+    use super::input::Target;
     let rows = matches(entries, query);
+    let content = ui::action_bar(
+        frame,
+        area,
+        &app.hits,
+        ui::FormActions {
+            buttons: &[ui::ActionButton {
+                label: if app.shell.picker_details {
+                    "Actions"
+                } else {
+                    "Metadata"
+                },
+                key: "F3",
+                target: Target::PickerDetails,
+            }],
+            hint: if app.shell.picker_details {
+                "F3/Esc: actions · PgUp/PgDn: full metadata/reasons"
+            } else {
+                "Up/Down: action · Enter: open · /: filter · F3: metadata"
+            },
+        },
+    );
+    if app.shell.picker_details {
+        app.shell
+            .page_rows
+            .set(content.height.saturating_sub(2).max(1));
+        ui::report(
+            frame,
+            content,
+            "Action details",
+            details(app, &rows, query, selected),
+            app.shell.scroll,
+            false,
+        );
+        return;
+    }
+    let detail_height = if content.height >= 14 { 6 } else { 0 };
     let parts = Layout::vertical([
         Constraint::Length(3),
-        Constraint::Min(4),
-        Constraint::Length(if area.height >= 14 { 6 } else { 3 }),
+        Constraint::Min(1),
+        Constraint::Length(detail_height),
     ])
-    .split(area);
+    .split(content);
     ui::input(
         frame,
         parts[0],
@@ -69,75 +106,84 @@ pub fn draw(
             "Actions · / to search"
         },
         query,
-        searching,
+        searching && app.hits.input_focus_allowed(),
     );
-    let items: Vec<_> = rows
+    let mut items: Vec<_> = rows
         .iter()
         .enumerate()
         .map(|(i, entry)| {
-            let group = entry.scope.short();
             let unavailable = app.action_reason(entry.action).is_some();
-            let style = if i == selected {
+            Row::new([
+                entry.scope.short().to_owned(),
+                format!(
+                    "{}{} [{}]",
+                    if unavailable { "x " } else { "" },
+                    entry.action.label(),
+                    entry.effect.label()
+                ),
+            ])
+            .style(if i == selected {
                 ui::selected()
             } else if unavailable {
                 ui::muted()
             } else {
                 ratatui::style::Style::default()
-            };
-            Row::new([
-                group.to_owned(),
-                format!(
-                    "{}{} [{}]",
-                    if unavailable { "x " } else { "" },
-                    ui::inline(entry.action.label()),
-                    entry.effect.label()
-                ),
-            ])
-            .style(style)
+            })
         })
         .collect();
-    let table = Table::new(items, [Constraint::Length(10), Constraint::Min(8)])
+    if items.is_empty() {
+        items.push(Row::new(["", "No matching actions. Ctrl-U clears."]).style(ui::muted()));
+    }
+    let framed = parts[1].height >= 7;
+    app.shell.page_rows.set(
+        parts[1]
+            .height
+            .saturating_sub(if framed { 3 } else { 1 })
+            .max(1),
+    );
+    let mut table = Table::new(items, [Constraint::Length(8), Constraint::Min(8)])
         .header(Row::new(["SCOPE", "ACTION / EFFECT"]).style(ui::muted()))
-        .block(ui::pane(
+        .highlight_symbol("> ")
+        .row_highlight_style(ui::selected());
+    if framed {
+        table = table.block(ui::pane(
             if rows.is_empty() {
                 "No matching actions"
             } else {
                 "Context actions · Enter choose"
             },
             !searching,
-        ))
-        .highlight_symbol("> ")
-        .row_highlight_style(ui::selected());
+        ));
+    }
     let mut state = TableState::default().with_selected((!rows.is_empty()).then_some(selected));
     frame.render_stateful_widget(table, parts[1], &mut state);
-    app.hits
-        .click(parts[0], super::input::Target::PaletteSearch);
+    app.hits.click(parts[0], Target::PaletteSearch);
     app.hits.wheel(parts[1], super::input::Wheel::Choices);
+    let inset = u16::from(framed);
     for (y, entry) in rows
         .iter()
         .skip(state.offset())
-        .take(usize::from(parts[1].height.saturating_sub(3)))
+        .take(usize::from(parts[1].height.saturating_sub(1 + inset * 2)))
         .enumerate()
     {
         app.hits.click(
             Rect::new(
-                parts[1].x + 1,
-                parts[1].y + 2 + y as u16,
-                parts[1].width.saturating_sub(2),
+                parts[1].x + inset,
+                parts[1].y + 1 + inset + y as u16,
+                parts[1].width.saturating_sub(inset * 2),
                 1,
             ),
-            super::input::Target::Palette(entry.action),
+            Target::Palette(entry.action),
         );
     }
-    app.shell
-        .page_rows
-        .set(parts[2].height.saturating_sub(2).max(1));
-    ui::report(
-        frame,
-        parts[2],
-        "Action details",
-        details(app, &rows, query, selected),
-        app.shell.scroll,
-        false,
-    );
+    if detail_height > 0 {
+        ui::report(
+            frame,
+            parts[2],
+            "Action details · F3 expands",
+            details(app, &rows, query, selected),
+            app.shell.scroll,
+            false,
+        );
+    }
 }

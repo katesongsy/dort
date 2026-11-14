@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     text::{Line, Text},
-    widgets::{Paragraph, Row, Table, TableState},
+    widgets::{Row, Table, TableState},
 };
 
 fn field(label: &str, value: &str) -> Line<'static> {
@@ -189,6 +189,7 @@ fn choices_hits(app: &App, area: Rect, count: usize, offset: usize, toggle: bool
     }
 }
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
+    use super::input::Target;
     let (title, details) = match overlay {
         Overlay::Profiles(picker) => (
             if picker.standalone {
@@ -204,30 +205,90 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
         ),
         _ => unreachable!("only typed pickers use this renderer"),
     };
-    let parts = Layout::vertical([
-        Constraint::Length(0),
-        Constraint::Min(4),
-        Constraint::Length(1),
-        Constraint::Length(0),
-        Constraint::Length(if area.height >= 14 { 6 } else { 4 }),
-    ])
-    .split(area);
+    let mut actions = vec![];
+    if app.shell.picker_details {
+        actions.push(ui::ActionButton {
+            label: "Choices",
+            key: "F3",
+            target: Target::PickerDetails,
+        });
+    } else {
+        match overlay {
+            Overlay::Profiles(picker) => actions.push(ui::ActionButton {
+                label: "Apply additions",
+                key: "Enter",
+                target: Target::Picker(picker.report.choices.known.len(), true),
+            }),
+            Overlay::Repositories { selected } => {
+                let count = app.data.as_ref().map_or(0, |d| d.known_roots.len()) + 2;
+                actions.push(ui::ActionButton {
+                    label: "Select",
+                    key: "Enter",
+                    target: Target::Picker((*selected).min(count - 1), true),
+                });
+                actions.push(ui::ActionButton {
+                    label: "Create/attach",
+                    key: "F2",
+                    target: Target::Picker(count, true),
+                });
+            }
+            _ => unreachable!(),
+        }
+        actions.push(ui::ActionButton {
+            label: "Metadata",
+            key: "F3",
+            target: Target::PickerDetails,
+        });
+    }
+    let content = ui::action_bar(
+        frame,
+        area,
+        &app.hits,
+        ui::FormActions {
+            buttons: &actions,
+            hint: if app.shell.picker_details {
+                "F3/Esc: choices · PgUp/PgDn: inspect metadata"
+            } else if matches!(overlay, Overlay::Profiles(_)) {
+                "Up/Down: profile · Space: toggle · Enter: apply"
+            } else {
+                "Up/Down: repository · Enter: select"
+            },
+        },
+    );
+    if app.shell.picker_details {
+        app.shell
+            .page_rows
+            .set(content.height.saturating_sub(2).max(1));
+        ui::report(
+            frame,
+            content,
+            "Selection metadata",
+            details,
+            app.shell.scroll,
+            false,
+        );
+        return;
+    }
+    let detail_height = if content.height >= 12 { 6 } else { 0 };
+    let parts =
+        Layout::vertical([Constraint::Min(4), Constraint::Length(detail_height)]).split(content);
     app.shell
         .page_rows
-        .set(parts[4].height.saturating_sub(2).max(1));
-    ui::report(
-        frame,
-        parts[4],
-        "Selection details",
-        details,
-        app.shell.scroll,
-        false,
-    );
+        .set(parts[0].height.saturating_sub(3).max(1));
+    if detail_height > 0 {
+        ui::report(
+            frame,
+            parts[1],
+            "Selection metadata · F3 expands",
+            details,
+            app.shell.scroll,
+            false,
+        );
+    }
     match overlay {
         Overlay::Profiles(picker) => {
             let choices = &picker.report.choices;
             let count = choices.known.len();
-            let apply = picker.selected == count;
             let rows = choices
                 .known
                 .iter()
@@ -239,7 +300,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
                         } else {
                             "[ ]".into()
                         },
-                        ui::clip(name, parts[1].width.saturating_sub(22)),
+                        ui::clip(name, parts[0].width.saturating_sub(22)),
                         if mandatory {
                             "Mandatory".into()
                         } else {
@@ -250,7 +311,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
                 .collect();
             let offset = table(
                 frame,
-                parts[1],
+                parts[0],
                 title,
                 rows,
                 Row::new(["ON", "PROFILE", "MEMBERSHIP"]),
@@ -259,24 +320,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
                     Constraint::Min(8),
                     Constraint::Length(10),
                 ],
-                (!apply).then_some(picker.selected),
+                (count > 0).then_some(picker.selected.min(count.saturating_sub(1))),
             );
-            choices_hits(app, parts[1], count, offset, true);
-            app.hits.click(
-                Rect::new(
-                    parts[2].x,
-                    parts[2].y,
-                    parts[2]
-                        .width
-                        .min(ui::button("Apply additions", "Enter", apply).width() as u16),
-                    1,
-                ),
-                super::input::Target::Picker(count, true),
-            );
-            frame.render_widget(
-                Paragraph::new(Line::from(ui::button("Apply additions", "Enter", apply))),
-                parts[2],
-            );
+            choices_hits(app, parts[0], count, offset, true);
         }
         Overlay::Repositories { selected } => {
             let roots = app
@@ -284,7 +330,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
                 .as_ref()
                 .map(|d| d.known_roots.as_slice())
                 .unwrap_or_default();
-            let create = *selected == roots.len() + 2;
             let mut rows = vec![
                 Row::new(["Enter exact repository path", "Path"]),
                 Row::new(["Use registered active repository", "Active"]),
@@ -293,36 +338,21 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
                 Row::new([
                     ui::clip(
                         p.to_str().unwrap_or("Unavailable"),
-                        parts[1].width.saturating_sub(12),
+                        parts[0].width.saturating_sub(12),
                     ),
                     "Known".into(),
                 ])
             }));
             let offset = table(
                 frame,
-                parts[1],
-                "Repository selector",
+                parts[0],
+                title,
                 rows,
                 Row::new(["REPOSITORY", "CHOICE"]),
                 &[Constraint::Min(12), Constraint::Length(6)],
-                (!create).then_some(*selected),
+                Some((*selected).min(roots.len() + 1)),
             );
-            choices_hits(app, parts[1], roots.len() + 2, offset, false);
-            app.hits.click(
-                Rect::new(
-                    parts[2].x,
-                    parts[2].y,
-                    parts[2]
-                        .width
-                        .min(ui::button("Create/attach", "Enter", create).width() as u16),
-                    1,
-                ),
-                super::input::Target::Picker(roots.len() + 2, true),
-            );
-            frame.render_widget(
-                Paragraph::new(Line::from(ui::button("Create/attach", "Enter", create))),
-                parts[2],
-            );
+            choices_hits(app, parts[0], roots.len() + 2, offset, false);
         }
         _ => unreachable!(),
     }

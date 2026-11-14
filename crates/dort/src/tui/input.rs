@@ -10,21 +10,26 @@ pub enum Target {
     TreeMark(usize),
     BatchControl(usize, bool),
     BatchEdit,
+    BatchDetails,
     DiscoverFocus(bool),
     Action(Action),
     MenuOpen,
+    NavigationBlocked,
     MenuGroup(usize),
     MenuItem(usize),
     Row(usize),
     Filter,
     FormControl(usize, bool),
+    FormAction(super::forms::Command),
     ProviderConfirm,
     PatchConfirm,
     ConfirmAction,
     CancelConfirmation,
     ToolInstallSelected,
     ToolInstallCollect,
+    ToolInstallFreshReview,
     ToolInstallControl(usize, bool),
+    ToolInstallProvider,
     ToolAttemptRow(usize),
     ToolAttemptClose,
     ToolsDefault(usize, bool),
@@ -33,6 +38,7 @@ pub enum Target {
     ToolsReconControl(usize, bool),
     ToolDeclarationControl(usize, bool),
     Picker(usize, bool),
+    PickerDetails,
     Palette(Action),
     PaletteSearch,
     Back,
@@ -61,11 +67,19 @@ struct Region {
 pub struct Hits {
     regions: RefCell<Vec<Region>>,
     size: Cell<(u16, u16)>,
+    input_focus: Cell<bool>,
 }
 impl Hits {
     pub fn begin(&self, area: Rect) {
         self.clear();
         self.size.set((area.width, area.height));
+        self.input_focus.set(true);
+    }
+    pub fn input_focus_allowed(&self) -> bool {
+        self.input_focus.get()
+    }
+    pub fn input_focus(&self, allowed: bool) {
+        self.input_focus.set(allowed);
     }
     pub fn size(&self) -> (u16, u16) {
         self.size.get()

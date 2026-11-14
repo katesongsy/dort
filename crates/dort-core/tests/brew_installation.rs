@@ -677,6 +677,41 @@ fn mixed_schema_one_two_three_history_is_read_without_reencoding_legacy_artifact
     install::execute(&apt_host, &f.lock, preview.approve(), |_| {}).unwrap();
     let a = install::diagnose(&f.home.host).unwrap();
     assert_eq!(a.len(), 4);
+    for attempt in &a {
+        let s = attempt.summary();
+        let current = attempt
+            .scope
+            .as_ref()
+            .is_some_and(|s| s.brew.is_some() || s.apt.is_some());
+        assert_eq!(
+            s.status,
+            if current {
+                install::Status::CurrentReported
+            } else {
+                install::Status::ExactReported
+            }
+        );
+        assert!(!s.readiness_verified);
+        let json = serde_json::to_value(attempt).unwrap();
+        assert_eq!(
+            json["summary"]["status"],
+            if current {
+                "current_reported"
+            } else {
+                "exact_reported"
+            }
+        );
+        assert!(
+            !String::from_utf8(bytes(&attempt.id, "intent.json"))
+                .unwrap()
+                .contains("summary")
+        );
+        assert!(
+            !String::from_utf8(bytes(&attempt.id, "outcome.json"))
+                .unwrap()
+                .contains("summary")
+        );
+    }
     assert_eq!(brew_intent, bytes(&brew_id, "intent.json"));
     assert_eq!(brew_outcome, bytes(&brew_id, "outcome.json"));
     assert!(a.iter().all(|a| !a.unresolved));

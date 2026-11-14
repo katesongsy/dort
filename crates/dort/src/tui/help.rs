@@ -6,7 +6,6 @@ use super::{
 };
 use ratatui::{
     Frame,
-    layout::Rect,
     text::{Line, Text},
 };
 
@@ -67,10 +66,10 @@ impl Topic {
     fn instructions(self) -> &'static str {
         match self {
             Self::Tools => {
-                "Tools finds inspection defaults without running commands. Review the selected inventories, then activate Inspect installed tools once. Up/Down selects a manager; Space toggles it. e opens Advanced for the selected manager; d shows exact scopes; r refreshes suggestions without executing. Unavailable npm defaults need a declared Node runtime and matching Node/CLI/prefix scope; Enter on that row opens the missing detail. c starts a fresh default review. Advanced retains per-provider overrides; Tab moves fields and Enter advances to Review. Activate Run query to run a manual scope once. Configuration/plugins may execute code and caches may change. Preview-only and small layouts cannot execute. Results are session snapshots (s1, s2...), not ownership. / searches metadata; d shows full scope; r prepares a fresh review, never replays approval. s browses snapshots; x there forgets only session metadata. p loads a manifest, separate explicit tool-search dirs and profiles without a provider query. Space explicitly binds each tool to a snapshot; unbound stays not observed. d inspects the chosen binding. Reconcile reads binary metadata without executing candidates; results are package proposals/no-ops, never tool readiness or installation authority. a opens an add-only tool declaration form for the selected registered repository. Review, then Confirm; this edits only dort.toml, not installed packages. Esc retains drafts. An eligible missing exact mise/npm package or canonical Homebrew core formula offers i / Review install. Review is process-free; one Enter/click approves fresh inspection, conditional installation and post-inspection. The install has a 10-minute deadline; quit waits and partial effects have no rollback. Mise stays inactive. npm native bin/man links may expose commands. Homebrew selects provider-current versions; build/dependency code can execute, dependencies may upgrade and native links may expose commands. Its help/layout/formula/catalog probes are included in approval; a opens Advanced prefix. APT offers a separate root-risk review for one missing literal Ubuntu package: root hooks/scripts, dependency upgrades, services and system/config/data effects are possible. a opens retained apt-cache/apt-get/sudo inputs. sudo -n refuses prompts and -T 600 needs policy permission; no password handling or weaker fallback. An overdue supervisor keeps waiting joined; no proof all root descendants terminated. APT closure needs only fresh complete dpkg inventory. Tools > Installation attempts (i outside comparison) inspects durable metadata; c reviews a fresh query and closure of an unresolved attempt. Missing original scope opens retained provider fields. Closure never replays or repairs a package."
+                "Tools finds inspection defaults without running commands. Review the selected inventories, then activate Inspect installed tools once. Up/Down selects a manager; Space toggles it. e opens Advanced for the selected manager; d shows exact scopes; r refreshes suggestions without executing. Unavailable npm defaults need a declared Node runtime and matching Node/CLI/prefix scope; e opens the missing detail. Enter on any manager row inspects the explicitly selected inventories. c starts a fresh default review. Advanced retains per-provider overrides; Tab moves fields only and Enter requests Review from any field. Activate Run query to run a manual scope once. Configuration/plugins may execute code and caches may change. Preview-only and small layouts cannot execute. Results are session snapshots (s1, s2...), not ownership. / searches metadata; d shows full scope; r prepares a fresh review, never replays approval. s browses snapshots; x there forgets only session metadata. p loads a manifest, separate explicit tool-search dirs and profiles without a provider query. Space explicitly binds each tool to a snapshot; unbound stays not observed. d inspects the chosen binding. Reconcile reads binary metadata without executing candidates; results are package proposals/no-ops, never tool readiness or installation authority. a opens an add-only tool declaration form for the selected registered repository. Review, then Confirm; this edits only dort.toml, not installed packages. Esc retains drafts. An eligible missing exact mise/npm package or canonical Homebrew core formula offers i / Review install. Review is process-free; one Enter/click approves fresh inspection, conditional installation and post-inspection. The install has a 10-minute deadline; quit waits and partial effects have no rollback. Mise stays inactive. npm native bin/man links may expose commands. Homebrew selects provider-current versions; build/dependency code can execute, dependencies may upgrade and native links may expose commands. Its help/layout/formula/catalog probes are included in approval; a opens Advanced prefix. APT offers a separate root-risk review for one missing literal Ubuntu package: root hooks/scripts, dependency upgrades, services and system/config/data effects are possible. a opens retained apt-cache/apt-get/sudo inputs. sudo -n refuses prompts and -T 600 needs policy permission; no password handling or weaker fallback. An overdue supervisor keeps waiting joined; no proof all root descendants terminated. APT closure needs only fresh complete dpkg inventory. Tools > Installation attempts (i outside comparison) distinguishes exact/current package reports, failed processes even with a present package, absent/conflicting/unavailable observations, unresolved metadata and historical closure; d shows independent process/package/binary facts, not readiness or ownership. Results/attempts/details offer f / Start fresh review: navigation to inventory review only, with retained drafts, no query, replay or automatic binding. Separately approve fresh inventories, p compares declarations, explicitly bind new IDs, then approve a new install review. Unresolved guards remain; c reviews a fresh query and closure of an unresolved attempt. Missing original scope opens retained provider fields. Closure never replays or repairs a package."
             }
             Self::Menu => {
-                "Menus organize navigation and session commands. Left/Right selects a menu; Up/Down chooses an item; Enter opens it, or press its labeled shortcut. In compact layouts choose a group first; Left returns to groups. Esc closes. Unavailable entries show the requirement to continue. Operation and patch commands open their respective review screens."
+                "Menus organize navigation and session commands. Pages keep menus available, including while editing fields. Opening and dismissing a menu retains the draft and focus; choosing a destination discards its pending approval. Framed dialogs and running work pause navigation and explain why. Left/Right selects a menu; Up/Down chooses an item; Enter opens it, or press its labeled shortcut. In compact layouts choose a group first; Left returns to groups. Esc closes. Unavailable entries show the requirement to continue. Operation and patch commands open their respective review screens."
             }
             Self::Overview => {
                 "Overview summarizes repository, profiles and file state. Session selects a repository or creates/attaches one. Files offers discovery and managed mappings; Checks validates declarations; Recovery inspects retained transactions; Git shows status and diffs; Tools separately reviews and approves provider queries."
@@ -100,10 +99,10 @@ impl Topic {
                 "A patch may expose secrets. Activate View patch to disclose the requested comparison once. Headers and hunks are emphasized; + marks additions and - marks removals. PgUp/PgDn scrolls vertically; Left/Right scrolls horizontally. Esc releases the view. Help hides the retained view; shrinking below the layout floor releases it. Released bytes may remain in memory."
             }
             Self::Actions => {
-                "Actions contains operations for the current view, selection and marked set. Menus organize navigation and session controls. Type a label to search; Up/Down selects; Enter requests. / refocuses search. Esc leaves search, then closes. Selected action details stay below the list. PgUp/PgDn scroll that pane; Home goes to its top. Execution scope comes from the operation's review."
+                "Actions contains operations for the current view, selection and marked set. Menus organize navigation and session controls. Type a label to search; Up/Down selects; Enter requests. / refocuses search. Esc closes Actions directly. F3 opens full action metadata, including unavailable reasons; Esc returns to choices. PgUp/PgDn scroll metadata; Home goes to its top. Execution scope comes from the operation's review."
             }
             Self::Form(Form::Adopt) => {
-                "Enter advances TARGET, ID and SOURCE, then requests a review. Tab moves controls. SOURCE is repository-relative. Inspect contents privately before adoption. Esc retains the draft. Explicit Adopt all on the combined preview approves adoption."
+                "Tab/Shift-Tab moves among TARGET, ID and SOURCE only. Enter requests a review from any field. Footer actions are direct buttons, not focus stops. Ctrl-R chooses a repository, Ctrl-N opens create/attach, and Ctrl-D resets. F2 shows full metadata. SOURCE is repository-relative. Inspect contents privately before adoption. Esc retains the draft. Explicit Adopt all on the combined preview approves adoption."
             }
             Self::Form(Form::KeepId | Form::RemoveId) => {
                 "Enter an exact mapping ID and request its preview. Keep materializes an ordinary file; Delete removes the managed link. Both retain the repository source. Confirmation shows and binds the exact selected mapping without a typing challenge."
@@ -118,7 +117,7 @@ impl Topic {
                 "Enter a repository path and ID. An absent destination creates a repository; an existing valid Git repository with dort.toml attaches it. Review effects, then activate Confirm to approve registration and selection. Failed preparation retains private artifacts for Recovery."
             }
             Self::Picker => {
-                "Up/Down selects a repository or profile; Enter activates it. Repository choices update session scope. Profile additions join mandatory contributors. Esc returns with your previous draft intact."
+                "Up/Down or Tab selects rows. Enter selects a repository or applies profile additions from any row; Space or a checkbox click toggles optional profiles, never mandatory contributors. F2 opens Create/attach in repository choices. F3 shows full metadata; Esc returns to choices, then closes the dialog. Previous drafts stay intact."
             }
             Self::Ignored => {
                 "Saved HOME-relative exclusions prune matching paths and descendants from discovery. Select a path and request Unignore to review removal of that exclusion. Activate Confirm to save the preference. Live files remain in place. Esc returns."
@@ -127,10 +126,10 @@ impl Topic {
                 "About summarizes Dort's local workflows, host support and license. Diagnostics provides host and path metadata."
             }
             Self::Batch => {
-                "Up/Down selects a marked file; e opens its TARGET, ID and SOURCE form. Review all is initially focused: Enter reviews the complete marked set. Tab moves controls. Selected-item paths remain inline; PgUp/PgDn scrolls them and Home goes to their top. Esc retains drafts and marks."
+                "Up/Down selects a marked file; e opens its TARGET, ID and SOURCE form. Enter on any row reviews the complete marked set. Tab moves rows only. F2 opens full selected-item metadata; PgUp/PgDn scrolls it and Home goes to its top. Esc retains drafts and marks."
             }
             Self::BatchItem => {
-                "Enter advances TARGET, ID and SOURCE; Done returns to the marked set. Tab moves fields. Esc retains edits. Review all requests the combined preview."
+                "Tab/Shift-Tab moves TARGET, ID and SOURCE fields only. Enter/Done or Esc returns to the marked set with edits retained; it does not review an individual item. Esc retains edits. Review all requests the combined preview."
             }
             Self::Preview => {
                 "Review outcome, paths, ordered effects and blockers. File reviews pair a summary table with numbered change details; i opens the full report. Up/Down selects a file; PgDn scrolls details. Enter continues to approval. Adopt all explicitly approves adoption. Esc returns."
@@ -229,8 +228,7 @@ pub fn text_input(app: &App) -> bool {
     app.text_entry()
 }
 pub fn draw(frame: &mut Frame, app: &App, help: &State) {
-    let area = frame.area();
-    app.hits.clear();
+    let area = super::surface::dialog(frame, app, "Help", false);
     let mut lines = vec![
         Line::styled(
             format!("Dort | Help: {}", help.topic.title()),
@@ -282,9 +280,9 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
         }
     }
     lines.push(Line::raw(""));
-    lines.push(Line::raw("F1 opens contextual Help. Fields accept printable keys literally; Ctrl-U clears a field. F10 opens navigation menus."));
+    lines.push(Line::raw("F1 opens contextual Help. Fields accept printable keys literally; Ctrl-U clears a field. F10 opens navigation menus on pages, even while typing. Dialogs and running work explain paused navigation; Esc or the explicit Close/Cancel control dismisses a dialog. Outside clicks do not cancel or approve."));
     lines.push(Line::raw("Writes require explicit reviewed approval and fresh revalidation. Recovery is deliberate. Private backups are stored unencrypted."));
-    let body = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
+    let body = area;
     ui::report(
         frame,
         body,
@@ -294,7 +292,4 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
         true,
     );
     app.hits.wheel(body, super::input::Wheel::Overlay);
-    let back = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
-    ui::prose(frame, back, " [Esc Back] ", ui::accent());
-    app.hits.click(back, super::input::Target::Back);
 }

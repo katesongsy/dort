@@ -229,16 +229,12 @@ fn damaged_brew_closure_requests_only_executable_path_and_prefix_with_retained_d
             }
         }
     }
-    app.tools_view.installation.focus = 4;
-    key(&mut app, KeyCode::Enter); // apt
-    app.tools_view.installation.focus = 3;
-    key(&mut app, KeyCode::Enter); // mise
-    app.tools_view.installation.focus = 3;
-    key(&mut app, KeyCode::Enter); // npm
-    app.tools_view.installation.focus = 5;
-    key(&mut app, KeyCode::Enter); // brew
+    key(&mut app, KeyCode::F(2)); // apt
+    key(&mut app, KeyCode::F(2)); // mise
+    key(&mut app, KeyCode::F(2)); // npm
+    key(&mut app, KeyCode::F(2)); // brew
     assert_eq!(expected, app.tools_view.installation.fields);
-    app.tools_view.installation.focus = 3;
+    app.tools_view.installation.focus = 0;
     let calls = f.calls();
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.run(&mut app, task);

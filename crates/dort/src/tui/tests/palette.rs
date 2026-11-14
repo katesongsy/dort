@@ -139,7 +139,7 @@ fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {
         terminal.draw(|f| views::draw(f, &app)).unwrap();
         let b = terminal.backend().buffer();
         let screen = render(&app, w, h);
-        for label in ["Search by label", "SCOPE", "ACTION", "Item"] {
+        for label in ["Search by label", "SCOPE", "ACTION", "Metadata"] {
             assert!(screen.contains(label));
         }
         let arrow = b.content.iter().position(|c| c.symbol() == ">").unwrap();
@@ -151,7 +151,7 @@ fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {
         );
         assert_eq!(
             terminal.get_cursor_position().unwrap().x,
-            (w - w.min(88)) / 2 + 1
+            (w - w.saturating_sub(2).min(94)) / 2 + 2
         );
     }
     text(&mut app, "q?/");
@@ -159,7 +159,7 @@ fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {
     assert!(!app.quit && app.tab == Tab::Files);
     assert!(render(&app, 48, 14).contains("No matching actions"));
     assert!(key(&mut app, KeyCode::Enter).is_none());
-    key(&mut app, KeyCode::Esc); // leave input, retain literal query
+    key(&mut app, KeyCode::Down); // Move to rows without discarding the literal query.
     assert!(!current(&app).2 && current(&app).0 == "q?/");
     key(&mut app, KeyCode::Char('/'));
     assert!(current(&app).2);
@@ -173,9 +173,10 @@ fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {
     let selected = current(&app).1;
     assert!(!current(&app).2 && selected == 1);
     key(&mut app, KeyCode::Char('/')); // search focus without changing row
+    key(&mut app, KeyCode::F(3)); // Explicit read-only metadata view.
     key(&mut app, KeyCode::PageDown);
     assert_eq!(current(&app).1, selected);
-    assert_eq!(app.shell.scroll, 1);
+    assert_eq!(app.shell.scroll, 2);
     key(&mut app, KeyCode::Home);
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Esc);
@@ -192,6 +193,8 @@ fn disabled_actions_stay_open_and_full_reasons_are_keyboard_reachable_without_di
     assert!(matches!(app.shell.overlay, Some(Overlay::Actions { .. })));
     assert_eq!(app.status, reason);
     assert!(app.preview.is_none() && app.confirmation.is_none() && !app.git_view.sensitive());
+    assert!(render(&app, 48, 14).contains("Metadata"));
+    key(&mut app, KeyCode::F(3));
     assert!(render(&app, 48, 14).contains("Action details"));
     assert_eq!(app.shell.scroll, 0);
     let mut joined = String::new();
@@ -200,8 +203,7 @@ fn disabled_actions_stay_open_and_full_reasons_are_keyboard_reachable_without_di
         terminal.draw(|f| views::draw(f, &app)).unwrap();
         let b = terminal.backend().buffer();
         let mut viewport = String::new();
-        assert!(render(&app, 48, 14).contains("Search by label"));
-        assert!(render(&app, 48, 14).contains("ACTION"));
+        assert!(render(&app, 48, 14).contains("Dialog · Actions"));
         let detail = (0..14)
             .find(|y| {
                 (0..48)
@@ -210,8 +212,16 @@ fn disabled_actions_stay_open_and_full_reasons_are_keyboard_reachable_without_di
                     .contains("Action details")
             })
             .unwrap();
-        for y in detail + 1..detail + 2 {
-            for x in 1..47 {
+        let left = (0..48).find(|x| b[(*x, detail)].symbol() == "┌").unwrap();
+        let right = (left..48)
+            .rev()
+            .find(|x| b[(*x, detail)].symbol() == "┐")
+            .unwrap();
+        for y in detail + 1..14 {
+            if b[(left, y)].symbol() == "└" {
+                break;
+            }
+            for x in left + 1..right {
                 viewport.push_str(b[(x, y)].symbol());
             }
         }
@@ -227,6 +237,7 @@ fn disabled_actions_stay_open_and_full_reasons_are_keyboard_reachable_without_di
     assert!(joined.contains(Action::GitPatch.label()));
     key(&mut app, KeyCode::PageUp);
     key(&mut app, KeyCode::Home);
+    key(&mut app, KeyCode::Esc); // Return from explicit metadata to action rows.
     assert!(render(&app, 48, 14).contains("ACTION"));
     assert_eq!(current(&app).0, "View patch content");
     assert!(key(&mut app, KeyCode::Enter).is_none());
@@ -254,7 +265,6 @@ fn filtered_entry_identity_dispatches_a_draft_not_a_filtered_file_or_approval() 
         Some(Overlay::Form(Form::KeepId))
     ));
     text(&mut app, "raw-q?");
-    assert!(key(&mut app, KeyCode::Enter).is_none());
     let Some(Task::Files(dort_core::planner::Request::Unmanage { id, mode })) =
         key(&mut app, KeyCode::Enter)
     else {

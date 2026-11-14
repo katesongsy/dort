@@ -249,7 +249,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         ])),
         sections[1],
     );
-    if search.editing && !app.busy {
+    if search.editing && app.hits.input_focus_allowed() && !app.busy {
         let x =
             (sections[1].x + 10 + query.len() as u16).min(sections[1].right().saturating_sub(1));
         frame.set_cursor_position((x, sections[1].y));

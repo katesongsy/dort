@@ -412,7 +412,7 @@ fn panel(
     area: Rect,
     app: &App,
     title: &str,
-    banner: &str,
+    banner: &'static str,
     danger: bool,
     lines: Vec<Line<'static>>,
 ) {
@@ -420,7 +420,7 @@ fn panel(
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(
-        Paragraph::new(ui::clip(banner, inner.width)).style(if danger {
+        Paragraph::new(ui::chrome_clip(banner, inner.width)).style(if danger {
             ui::danger()
         } else {
             ui::heading()
@@ -491,9 +491,6 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
         area.height,
     );
     let actions = Rect::new(area.x, actions.y, width, actions.height);
-    if app.error.is_some() {
-        app.hits.clear();
-    }
     if let Some(error) = &app.error {
         let mut lines = vec![Line::from(Span::styled("Cause", ui::heading()))];
         let cause = app

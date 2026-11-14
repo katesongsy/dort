@@ -36,14 +36,15 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
         keys.extend([
             (
                 "Enter",
-                if editor.item_form && editor.focused.saturating_sub(editor.item * 3) >= 3 {
+                if editor.details {
+                    "Back"
+                } else if editor.item_form {
                     "Done"
-                } else if editor.item_form || editor.focused < editor.drafts.len() * 3 {
-                    "Next"
                 } else {
                     "Review all"
                 },
             ),
+            ("F2", "Metadata"),
             ("Esc", "Back"),
         ]);
     } else if let Some(overlay) = &app.shell.overlay {
@@ -54,17 +55,27 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
                 }
                 keys.push(("Esc", "Back"));
             }
-            Overlay::Actions { searching, .. } => {
-                keys.extend([
-                    ("Enter", "Choose"),
-                    ("Esc", if *searching { "Results" } else { "Back" }),
-                ]);
+            Overlay::Actions { .. } if app.shell.picker_details => {
+                keys.extend([("F3", "Actions"), ("PgDn", "Page"), ("Esc", "Actions")])
             }
-            Overlay::Repositories { .. } => keys.extend([("Enter", "Select"), ("Esc", "Back")]),
+            Overlay::Actions { .. } => {
+                keys.extend([("Enter", "Choose"), ("F3", "Metadata"), ("Esc", "Close")])
+            }
+            Overlay::Repositories { .. } if app.shell.picker_details => {
+                keys.extend([("F3", "Choices"), ("PgDn", "Page"), ("Esc", "Choices")])
+            }
+            Overlay::Repositories { .. } => keys.extend([
+                ("Enter", "Select"),
+                ("F2", "Create"),
+                ("F3", "Metadata"),
+                ("Esc", "Close"),
+            ]),
+            Overlay::Profiles(_) if app.shell.picker_details => {
+                keys.extend([("F3", "Choices"), ("PgDn", "Page"), ("Esc", "Choices")])
+            }
             Overlay::Profiles(picker) => {
-                if picker.selected == picker.report.choices.known.len() {
-                    keys.push(("Enter", "Apply"));
-                } else if picker
+                keys.push(("Enter", "Apply"));
+                if picker
                     .report
                     .choices
                     .known
@@ -74,7 +85,10 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
                 {
                     keys.push(("Space", "Toggle"));
                 }
-                keys.push(("Esc", "Back"));
+                keys.extend([("F3", "Metadata"), ("Esc", "Close")]);
+            }
+            Overlay::Form(_) if app.shell.form_details => {
+                keys.extend([("F2", "Fields"), ("PgDn", "Page"), ("Esc", "Fields")])
             }
             Overlay::Form(form) => keys.extend([
                 ("Enter", super::forms::enter_hint(app, *form)),
@@ -100,6 +114,12 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
             use super::tools_install::Mode;
             if app.tools_view.installation.details {
                 keys.extend([("d/Esc", "Back"), ("PgDn", "Page")]);
+                if matches!(
+                    app.tools_view.installation.mode,
+                    Mode::Result | Mode::Attempts
+                ) {
+                    keys.push(("f", "Fresh review"));
+                }
             } else {
                 match app.tools_view.installation.mode {
                     Mode::Review | Mode::CloseReview => {
@@ -110,18 +130,23 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
                                 .installation
                                 .scope
                                 .as_ref()
-                                .is_some_and(|s| s.brew.is_some())
+                                .is_some_and(|s| s.brew.is_some() || s.apt.is_some())
                         {
-                            keys.push(("a", "Prefix"));
+                            keys.push(("a", "Advanced"));
                         }
                     }
-                    Mode::CloseInputs | Mode::PrefixInputs => keys.extend([
-                        ("Tab", "Field"),
-                        ("Enter", "Next / Review"),
+                    Mode::CloseInputs | Mode::PrefixInputs | Mode::AptInputs => {
+                        keys.extend([("Tab", "Field"), ("Enter", "Review"), ("Esc", "Back")])
+                    }
+                    Mode::Result => keys.extend([
+                        ("f", "Fresh review"),
+                        ("d", "Outcome"),
+                        ("i", "Attempts"),
                         ("Esc", "Back"),
                     ]),
                     Mode::Attempts => keys.extend([
                         ("Enter", "Details"),
+                        ("f", "Fresh review"),
                         ("c", "Close review"),
                         ("r", "Refresh"),
                         ("Esc", "Back"),
@@ -132,7 +157,7 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
         } else if app.tools_view.recon_open {
             match app.tools_view.reconciliation.mode {
                 super::tools_reconcile::Mode::Inputs => {
-                    keys.extend([("Tab", "Field"), ("Enter", "Next / Load"), ("Esc", "Back")])
+                    keys.extend([("Tab", "Field"), ("Enter", "Load"), ("Esc", "Back")])
                 }
                 super::tools_reconcile::Mode::Bindings => keys.extend([
                     ("Space", "Snapshot"),
@@ -166,11 +191,7 @@ pub fn keys(app: &App) -> Vec<(&'static str, &'static str)> {
                 ("PgDn", "Query details"),
             ]);
         } else if app.tools_view.configuring {
-            keys.extend([
-                ("Tab", "Field"),
-                ("Enter", "Next / Review"),
-                ("Esc", "Back"),
-            ]);
+            keys.extend([("Tab", "Field"), ("Enter", "Review"), ("Esc", "Back")]);
         } else {
             keys.extend([
                 ("F10", "Menu"),

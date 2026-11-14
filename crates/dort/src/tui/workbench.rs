@@ -9,7 +9,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     text::{Line, Span, Text},
-    widgets::{Clear, Paragraph},
+    widgets::Paragraph,
 };
 
 fn short(action: Action) -> &'static str {
@@ -125,10 +125,8 @@ pub fn wide_details(area: Rect, header_rows: u16) -> bool {
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
     app.hits.begin(area);
-    if let Some(help) = &app.help {
-        super::help::draw(frame, app, help);
-        return;
-    }
+    app.hits
+        .input_focus(app.dialog_title().is_none() && app.navigation.menu.is_none());
     if area.width < 48 || area.height < 14 {
         ui::prose(
             frame,
@@ -136,6 +134,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
             "Dort: terminal too small\nResize to 48x14; approval disabled.\nq: exit (waits for worker)",
             ui::warning(),
         );
+        if let Some(help) = &app.help {
+            super::help::draw(frame, app, help);
+        }
         return;
     }
     let top = 2;
@@ -180,7 +181,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
     ]);
     frame.render_widget(Paragraph::new(header), sections[0]);
     tabs(frame, sections[1], app);
-    let body = sections[2];
+    let body = if let Some(title) = app.page_title() {
+        super::surface::page(frame, sections[2], app, title)
+    } else {
+        sections[2]
+    };
     let toolbar = app.preview.is_some()
         || app.error.is_some()
         || app.show_result
@@ -199,9 +204,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
         && app.preview.is_none()
         && app.shell.overlay.is_none()
         && !app.batch_editor.as_ref().is_some_and(|e| e.open)
+        && app.help.is_none()
     {
         match app.tab {
             Tab::Files => super::files::draw(frame, content[0], app),
+            Tab::Git if app.git_view.disclosure_pending() => (),
             Tab::Git => app.git_view.draw(frame, content[0], app.busy, &app.hits),
             Tab::Tools => app
                 .tools_view
@@ -221,8 +228,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
         // Task controls above are exclusive.
     } else if app.show_result && app.preview.is_none() {
         // A returned form stays retained but inactive until the result is dismissed.
+    } else if app.help.is_some() {
+        // Help owns the foreground. Withhold underlying forms and private
+        // content, including their caret, rather than painting them underneath.
     } else if let Some(preview) = &app.preview {
-        app.hits.clear();
         app.hits.wheel(content[0], super::input::Wheel::Preview);
         let continue_label = if preview.pending.adoption() {
             "Adopt all"
@@ -295,16 +304,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
     } else if let Some(editor) = app.batch_editor.as_ref().filter(|e| e.open) {
         super::batch_ui::draw(frame, body, app, editor);
     } else if let Some(overlay) = &app.shell.overlay {
-        app.hits.clear();
-        // Bounded dialogs; do not stretch long prose across a very wide terminal.
-        let width = body.width.min(88);
-        let modal = Rect::new(
-            body.x + (body.width - width) / 2,
-            body.y,
-            width,
-            body.height,
-        );
-        frame.render_widget(Clear, modal);
+        let modal = if matches!(overlay, Overlay::Form(_) | Overlay::Ignored { .. }) {
+            body
+        } else {
+            super::surface::dialog(
+                frame,
+                app,
+                app.dialog_title().unwrap_or("Session choice"),
+                false,
+            )
+        };
         app.hits.wheel(modal, super::input::Wheel::Overlay);
         match overlay {
             Overlay::Ignored { paths, selected } => {
@@ -314,23 +323,43 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 super::pickers::draw(frame, modal, app, overlay)
             }
             Overlay::Form(form) => {
-                let parts = Layout::vertical([
-                    Constraint::Min(4),
-                    Constraint::Length(if modal.height >= 14 { 6 } else { 3 }),
-                ])
-                .split(modal);
-                super::forms::draw(frame, parts[0], app, *form);
-                app.shell
-                    .page_rows
-                    .set(parts[1].height.saturating_sub(2).max(1));
-                ui::report(
-                    frame,
-                    parts[1],
-                    "Draft details",
-                    legacy_document(views::overlay_text(app, overlay, modal.height, modal.width)),
-                    app.shell.scroll,
-                    false,
-                );
+                if app.shell.form_details {
+                    ui::report(
+                        frame,
+                        modal,
+                        "Draft details · F2/Esc fields",
+                        legacy_document(views::overlay_text(
+                            app,
+                            overlay,
+                            modal.height,
+                            modal.width,
+                        )),
+                        app.shell.scroll,
+                        true,
+                    );
+                } else if modal.height >= 18 {
+                    let parts =
+                        Layout::vertical([Constraint::Min(8), Constraint::Length(6)]).split(modal);
+                    super::forms::draw(frame, parts[0], app, *form);
+                    app.shell
+                        .page_rows
+                        .set(parts[1].height.saturating_sub(2).max(1));
+                    ui::report(
+                        frame,
+                        parts[1],
+                        "Draft details · F2 full details",
+                        legacy_document(views::overlay_text(
+                            app,
+                            overlay,
+                            modal.height,
+                            modal.width,
+                        )),
+                        app.shell.scroll,
+                        false,
+                    );
+                } else {
+                    super::forms::draw(frame, modal, app, *form);
+                }
             }
             Overlay::Actions {
                 query,
@@ -364,10 +393,10 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let status = if earlier_failure {
         "Earlier write failed: Possible partial effects"
     } else {
-        &app.status
+        app.status.as_str()
     }; // Includes real metadata-only boundaries and deferred-exit feedback.
     frame.render_widget(
-        Paragraph::new(ui::clip(status, sections[3].width)).style(status_style),
+        Paragraph::new(ui::chrome_clip(status, sections[3].width)).style(status_style),
         sections[3],
     );
     let keys = super::hints::keys(app);
@@ -398,16 +427,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         super::navigation::popup(frame, app, menu);
     }
     if let Some(confirmation) = &app.confirmation {
-        app.hits.clear();
-        let width = area.width.saturating_sub(4).min(76);
-        let height = area.height.saturating_sub(4).min(13);
-        let modal = Rect::new(
-            area.x + (area.width - width) / 2,
-            area.y + (area.height - height) / 2,
-            width,
-            height,
-        );
-        frame.render_widget(Clear, modal);
+        let modal = super::surface::dialog(frame, app, "Confirm reviewed changes", true);
         app.hits.wheel(modal, super::input::Wheel::Confirmation);
         let removal = app.preview.as_ref().and_then(|p| p.pending.removal_id());
         let batch_ids = app.batch_removal_ids();
@@ -429,14 +449,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
             "Proceed with the reviewed changes?".into()
         };
         // Approval uses the real preview/IDs, never reconstructed display text.
-        frame.render_widget(ui::pane("Confirm · Submit to execute", true), modal);
-        let inner = Rect::new(
-            modal.x + 1,
-            modal.y + 1,
-            modal.width.saturating_sub(2),
-            modal.height.saturating_sub(2),
-        );
-        let prompt_height = inner.height.saturating_sub(4);
+        let inner = modal;
+        let prompt_height = inner.height.saturating_sub(1);
         ui::text_view(
             frame,
             Rect::new(inner.x, inner.y, inner.width, prompt_height),
@@ -449,17 +463,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
             button,
         );
         app.hits.click(button, super::input::Target::ConfirmAction);
-        let cancel = Rect::new(inner.x, inner.y + prompt_height + 1, inner.width, 1);
-        frame.render_widget(Paragraph::new("Cancel · Esc"), cancel);
-        app.hits
-            .click(cancel, super::input::Target::CancelConfirmation);
-        frame.render_widget(
-            Paragraph::new(ui::keys(&[
-                ("Enter", "Submit"),
-                ("PgDn", "Scroll"),
-                ("Esc", "Cancel"),
-            ])),
-            Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
-        );
+    }
+    if app.tab == Tab::Git
+        && app.git_view.disclosure_pending()
+        && app.confirmation.is_none()
+        && app.help.is_none()
+    {
+        let modal = super::surface::dialog(frame, app, "View Git patch content", true);
+        app.git_view.draw(frame, modal, app.busy, &app.hits);
+    }
+    if let Some(help) = &app.help {
+        super::help::draw(frame, app, help);
     }
 }

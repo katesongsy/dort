@@ -242,7 +242,14 @@ fn fresh_satisfaction_is_noop_and_fresh_conflict_or_unmanaged_binary_refuses() {
         }
         let result = install::execute(&f.home.host, &f.lock, p.approve(), |_| {});
         if state == "installed" {
-            assert!(result.unwrap().no_op);
+            let result = result.unwrap();
+            assert!(result.no_op);
+            assert_eq!(result.summary().status, install::Status::NoOp);
+            assert_eq!(result.summary().binary, None);
+            assert_eq!(
+                serde_json::to_value(&result).unwrap()["summary"]["status"],
+                "no_op"
+            );
         } else {
             assert!(result.is_err());
         }

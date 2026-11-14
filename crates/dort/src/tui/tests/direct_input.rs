@@ -404,6 +404,7 @@ fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_ta
         size,
     );
     assert!(app.tab == Tab::Files && matches!(app.shell.overlay, Some(Overlay::Form(Form::Init))));
+    assert!(app.navigation.menu.is_some()); // A page permits menus; opening does not navigate.
     press(&mut app, KeyCode::Esc, size);
     press(&mut app, KeyCode::Char(';'), size);
     // Recovery commands now stay in Recovery, rather than the Files action list.
@@ -428,7 +429,12 @@ fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_ta
     assert!(render(&app, size.0, size.1).contains("Rollback unavailable"));
     press(&mut app, KeyCode::Esc, size); // clicked results, no hidden input focus
     app.start(false);
-    let (x, y) = at(&app, "Checks ▾", size);
+    render(&app, size.0, size.1);
+    let (x, y) = (0, 1); // Visibly paused navigation, not a hidden live menu.
+    assert!(matches!(
+        app.hits.target(x, y),
+        Some(super::input::Target::NavigationBlocked)
+    ));
     assert!(
         mouse(
             &mut app,

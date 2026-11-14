@@ -1,190 +1,116 @@
-//! Visible field/button controls backed by the existing retained draft state.
-use super::{app::App, components as ui, shell::Form};
-use ratatui::{
-    Frame,
-    layout::Rect,
-    text::{Line, Span},
-    widgets::Paragraph,
-};
-
-enum Control<'a> {
-    Field(&'a str, &'a str),
-    Button(&'a str),
+//! Workflow pages: field-only traversal and direct, explicitly labelled actions.
+use super::{app::App, components as ui, input::Target, shell::Form};
+use ratatui::{Frame, layout::Rect};
+#[derive(Clone, Copy)]
+pub enum Command {
+    Submit,
+    Choose,
+    Create,
+    Profiles,
+    Discard,
+    Details,
 }
-impl Control<'_> {
-    fn height(&self) -> u16 {
-        if matches!(self, Self::Field(..)) {
-            3
-        } else {
-            1
-        }
-    }
-}
-pub fn enter_hint(app: &App, form: Form) -> &'static str {
-    let shell = &app.shell;
+pub fn enter_hint(_app: &App, form: Form) -> &'static str {
     match form {
-        Form::Adopt => match shell.adoption.focused {
-            0..=2 => "Next",
-            3 => "Review",
-            4 => "Choose",
-            5 => "Create/attach",
-            _ => "Discard",
-        },
-        Form::Check => match shell.manifest_focused {
-            0 => "Next",
-            1 => "Check",
-            2 => "Profiles",
-            _ => "Discard",
-        },
-        Form::KeepId | Form::RemoveId => {
-            if shell.unmanage_focused == 0 {
-                "Next"
-            } else {
-                "Review"
-            }
-        }
-        Form::Choose | Form::Init => match shell.path_focused {
-            0 => "Next",
-            1 => {
-                if form == Form::Choose {
-                    "Select"
-                } else {
-                    "Review"
-                }
-            }
-            _ => "Back",
-        },
+        Form::Choose => "Select",
+        Form::Check => "Check",
+        _ => "Review",
     }
 }
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
-    let shell = &app.shell;
-    let (title, focused, controls, help): (&str, usize, Vec<Control<'_>>, &str) = match form {
+    let s = &app.shell;
+    let (fields, focus, primary): (Vec<(&str, &str)>, usize, &'static str) = match form {
         Form::Adopt => (
-            "Adopt file · 1 Details > 2 Review > 3 Confirm",
-            shell.adoption.focused,
             vec![
-                Control::Field("TARGET", &shell.adoption.target),
-                Control::Field("ID", &shell.adoption.id),
-                Control::Field("SOURCE", &shell.adoption.source),
-                Control::Button("Review read-only preview"),
-                Control::Button("Choose repository"),
-                Control::Button("Create/attach local repository"),
-                Control::Button("Discard adoption draft"),
+                ("TARGET", &s.adoption.target),
+                ("ID", &s.adoption.id),
+                ("SOURCE", &s.adoption.source),
             ],
-            "SOURCE is repository-relative; mapping belongs to base. Review privately before adoption.",
+            s.adoption.focused,
+            "Review read-only preview",
         ),
         Form::Check => (
-            "Check standalone manifest",
-            shell.manifest_focused,
-            vec![
-                Control::Field("Manifest path", &shell.manifest_draft),
-                Control::Button("Check manifest"),
-                Control::Button("Temporary profiles"),
-                Control::Button("Discard standalone draft and additions"),
-            ],
-            "Validate manifest declarations and effective profiles using an independent path.",
+            vec![("Manifest path", &s.manifest_draft)],
+            0,
+            "Check manifest",
         ),
         Form::KeepId | Form::RemoveId => (
-            if form == Form::KeepId {
-                "Keep local file"
-            } else {
-                "Delete managed link"
-            },
-            shell.unmanage_focused,
-            vec![
-                Control::Field("Exact ID", &shell.unmanage_id),
-                Control::Button("Review read-only preview"),
-            ],
-            "Both modes retain the source. Review the selected mapping, then Confirm.",
+            vec![("Exact ID", &s.unmanage_id)],
+            0,
+            "Review read-only preview",
         ),
         Form::Choose | Form::Init => (
+            vec![("Path", s.draft(form))],
+            0,
             if form == Form::Choose {
-                "Choose exact root · Session only"
+                "Select repository"
             } else {
-                "Create/attach local repository"
+                "Review read-only preview"
             },
-            shell.path_focused,
-            vec![
-                Control::Field("Path", shell.draft(form)),
-                Control::Button(if form == Form::Choose {
-                    "Select repository"
-                } else {
-                    "Review read-only preview"
-                }),
-                Control::Button("Back"),
-            ],
-            "Exact path; relative to launch directory. Enter literal paths. Enter advances to the action.",
         ),
     };
-    let block = ui::pane(title, true);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    if inner.height == 0 {
-        return;
-    }
-    let total_height: u16 = controls.iter().map(Control::height).sum();
-    let budget = inner.height.saturating_sub(2).max(3);
-    let mut start = 0;
-    if total_height > budget {
-        let mut needed = 0;
-        for i in (0..=focused.min(controls.len() - 1)).rev() {
-            if needed + controls[i].height() > budget {
-                break;
-            }
-            needed += controls[i].height();
-            start = i;
+    let mut actions = vec![ui::ActionButton {
+        label: primary,
+        key: "Enter",
+        target: Target::FormAction(Command::Submit),
+    }];
+    match form {
+        Form::Adopt => {
+            actions.push(ui::ActionButton {
+                label: "Repo",
+                key: "Ctrl-R",
+                target: Target::FormAction(Command::Choose),
+            });
+            actions.push(ui::ActionButton {
+                label: "New",
+                key: "Ctrl-N",
+                target: Target::FormAction(Command::Create),
+            });
+            actions.push(ui::ActionButton {
+                label: "Reset",
+                key: "Ctrl-D",
+                target: Target::FormAction(Command::Discard),
+            });
         }
-    }
-    let mut y = inner.y;
-    for (i, control) in controls.iter().enumerate().skip(start) {
-        let h = control.height();
-        if y + h > inner.bottom().saturating_sub(1) {
-            break;
+        Form::Check => {
+            actions.push(ui::ActionButton {
+                label: "Profiles",
+                key: "Ctrl-P",
+                target: Target::FormAction(Command::Profiles),
+            });
+            actions.push(ui::ActionButton {
+                label: "Reset",
+                key: "Ctrl-D",
+                target: Target::FormAction(Command::Discard),
+            });
         }
-        let r = Rect::new(inner.x, y, inner.width, h);
-        let hit = match control {
-            Control::Button(label) => Rect::new(
-                r.x,
-                r.y,
-                r.width
-                    .min(ui::button(label, "", focused == i).width() as u16),
-                r.height,
-            ),
-            Control::Field(..) => r,
-        };
-        app.hits.click(
-            hit,
-            super::input::Target::FormControl(i, matches!(control, Control::Button(_))),
-        );
-        match control {
-            Control::Field(label, value) => {
-                ui::input(frame, r, label, value, focused == i && !app.busy)
-            }
-            Control::Button(label) => frame.render_widget(
-                Paragraph::new(Line::from(ui::button(label, "", focused == i))),
-                r,
-            ),
-        }
-        y += h;
+        Form::Choose => actions.push(ui::ActionButton {
+            label: "New",
+            key: "Ctrl-N",
+            target: Target::FormAction(Command::Create),
+        }),
+        Form::Init => actions.push(ui::ActionButton {
+            label: "Repo",
+            key: "Ctrl-R",
+            target: Target::FormAction(Command::Choose),
+        }),
+        _ => (),
     }
-    if y < inner.bottom().saturating_sub(1) {
-        ui::prose(
-            frame,
-            Rect::new(
-                inner.x,
-                y,
-                inner.width,
-                inner.bottom().saturating_sub(y + 1),
-            ),
-            help,
-            ui::muted(),
-        );
-    }
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![Span::styled(
-            format!(" Control {}/{}  ", focused + 1, controls.len()),
-            ui::muted(),
-        )])),
-        Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
+    actions.push(ui::ActionButton {
+        label: "Details",
+        key: "F2",
+        target: Target::FormAction(Command::Details),
+    });
+    ui::field_page(
+        frame,
+        area,
+        &fields,
+        focus,
+        &app.hits,
+        |i| Target::FormControl(i, false),
+        ui::FormActions {
+            buttons: &actions,
+            hint: "Tab: fields · Enter: primary action · Esc: Back (draft retained)",
+        },
     );
 }

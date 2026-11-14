@@ -62,17 +62,19 @@ fn menu_labels_have_unique_working_local_shortcuts_and_keep_guards() {
     }
 }
 #[test]
-fn form_pages_keep_controls_draft_focus_and_inline_details_at_all_sizes() {
+fn form_pages_keep_controls_draft_focus_and_explicit_metadata_at_all_sizes() {
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let mut app = App::new(false);
         app.shell.overlay = Some(Overlay::Form(Form::Adopt));
         app.shell.adoption.target = format!("~/{}", "long-segment/".repeat(35));
         let before = app.shell.adoption.target.clone();
         let screen = render(&app, w, h);
-        assert!(screen.contains("TARGET") && screen.contains("Draft details"));
+        assert!(screen.contains("TARGET") && screen.contains("Page ·"));
+        key(&mut app, KeyCode::F(2), w, h);
+        assert!(app.shell.form_details);
         for code in [KeyCode::PageDown, KeyCode::PageDown, KeyCode::PageUp] {
             let old = app.shell.scroll;
-            let rows = app.shell.page_rows.get();
+            let rows = 2; // Read-only metadata detail scrolling, never field traversal.
             assert!(key(&mut app, code, w, h).is_none());
             assert_eq!(
                 app.shell.scroll,
@@ -83,7 +85,7 @@ fn form_pages_keep_controls_draft_focus_and_inline_details_at_all_sizes() {
                 }
             );
             let screen = render(&app, w, h);
-            assert!(screen.contains("TARGET") && screen.contains("Draft details"));
+            assert!(screen.contains("Draft details"));
             assert_eq!(app.shell.adoption.target, before);
             assert_eq!(app.shell.adoption.focused, 0);
             assert!(app.preview.is_none() && app.confirmation.is_none());
@@ -91,6 +93,8 @@ fn form_pages_keep_controls_draft_focus_and_inline_details_at_all_sizes() {
         key(&mut app, KeyCode::Home, w, h);
         assert_eq!(app.shell.scroll, 0);
         assert_eq!(app.shell.adoption.target, before);
+        key(&mut app, KeyCode::Esc, w, h);
+        assert!(!app.shell.form_details && app.shell.adoption.focused == 0);
     }
 }
 #[test]
@@ -240,5 +244,7 @@ fn workspace_toolbar_has_one_row_and_overlay_uses_reclaimed_space() {
     key(&mut app, KeyCode::Char(';'), 48, 14);
     let screen = render(&app, 48, 14);
     assert!(screen.lines().nth(2).unwrap().contains("Search by label"));
-    assert!(screen.contains("Action details"));
+    assert!(screen.contains("Metadata"));
+    key(&mut app, KeyCode::F(3), 48, 14);
+    assert!(render(&app, 48, 14).contains("Action details"));
 }

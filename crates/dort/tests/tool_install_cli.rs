@@ -1,3 +1,5 @@
+#[path = "support/tool_outcomes.rs"]
+mod outcomes;
 use assert_cmd::Command;
 use dort_core::{
     context::HostContext,
@@ -39,12 +41,16 @@ impl Fixture {
         let executable = root.join("mise");
         let behavior = match mode {
             "fail" => "exit 9",
+            "present-fail" => "printf installed > \"$HOME/installed\"; exit 9",
+            "absent" => "exit 0",
+            "unavailable" => "printf flag > \"$HOME/unavailable\"; exit 0",
+            "conflict" => "printf flag > \"$HOME/conflict\"; exit 0",
             "collision" => {
                 "for d in \"$HOME\"/.local/state/dort/tools-attempts/*; do printf malformed > \"$d/outcome.json\"; done; exit 9"
             }
             _ => "printf installed > \"$HOME/installed\"",
         };
-        fs::write(&executable, format!("#!/bin/sh\nif [ \"$1\" = ls ]; then\n printf Q >> \"$HOME/calls\"\n if [ -f \"$HOME/installed\" ]; then printf '{{\"demo\":[{{\"version\":\"1.2.3\",\"installed\":true}}]}}'; else printf '{{}}'; fi\n exit 0\nfi\nprintf I >> \"$HOME/calls\"\nprintf '%s\\n' \"$@\" > \"$HOME/argv\"\nprintf PRIVATE_OUTPUT; printf PRIVATE_ERROR >&2\n{behavior}\n")).unwrap();
+        fs::write(&executable, format!("#!/bin/sh\nif [ \"$1\" = ls ]; then\n printf Q >> \"$HOME/calls\"\n if [ -f \"$HOME/unavailable\" ]; then printf PRIVATE_QUERY; exit 4; fi\n if [ -f \"$HOME/conflict\" ]; then printf '{{\"demo\":[{{\"version\":\"2.0.0\",\"installed\":true}}]}}'; exit 0; fi\n if [ -f \"$HOME/installed\" ]; then printf '{{\"demo\":[{{\"version\":\"1.2.3\",\"installed\":true}}]}}'; else printf '{{}}'; fi\n exit 0\nfi\nprintf I >> \"$HOME/calls\"\nprintf '%s\\n' \"$@\" > \"$HOME/argv\"\nprintf PRIVATE_OUTPUT; printf PRIVATE_ERROR >&2\n{behavior}\n")).unwrap();
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
         Self {
             _temp: temp,
@@ -128,6 +134,8 @@ fn dry_run_and_nonterminal_refusal_never_query_and_exact_install_has_private_att
     let report: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(report["outcome"]["package"], "exact_present");
     assert_eq!(report["readiness_verified"], false);
+    assert_eq!(report["summary"]["status"], "exact_reported");
+    assert_eq!(report["summary"]["binary"], "missing");
     assert_eq!(f.calls(), "QQIQ"); // Collection, fresh inspection, installer, post-inspection.
     assert_eq!(
         fs::read_to_string(f.host.home.join("argv")).unwrap(),
@@ -172,6 +180,7 @@ fn failed_install_reports_observed_failure_without_claiming_readiness() {
     assert_eq!(report["possible_partial_effects"], true);
     assert_eq!(f.calls(), "QQIQ");
     assert_eq!(f.attempts()[0]["unresolved"], false);
+    assert_eq!(f.attempts()[0]["summary"]["status"], "process_failed");
 }
 #[test]
 fn unresolved_attempt_blocks_only_installs_and_closes_only_after_fresh_confirmation() {
@@ -179,6 +188,7 @@ fn unresolved_attempt_blocks_only_installs_and_closes_only_after_fresh_confirmat
     f.install().arg("--yes").assert().failure();
     let id = f.attempts()[0]["id"].as_str().unwrap().to_owned();
     assert_eq!(f.attempts()[0]["unresolved"], true);
+    assert_eq!(f.attempts()[0]["summary"]["status"], "unresolved");
     let before = f.calls();
     f.cmd()
         .args(["--json", "--dry-run", "tools", "close-attempt", &id])
@@ -199,4 +209,5 @@ fn unresolved_attempt_blocks_only_installs_and_closes_only_after_fresh_confirmat
     assert_eq!(f.calls(), format!("{before}QQ"));
     assert_eq!(f.attempts()[0]["unresolved"], false);
     assert_eq!(f.attempts()[0]["explicitly_closed"], true);
+    assert_eq!(f.attempts()[0]["summary"]["status"], "explicitly_closed");
 }

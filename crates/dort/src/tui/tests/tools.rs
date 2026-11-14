@@ -450,7 +450,7 @@ fn incomplete_npm_opens_at_the_missing_detail_with_node_and_path_prefilled() {
     fs::copy(&f.executable, f.home.join("bin/node")).unwrap();
     detect(&f, &mut app);
     app.tools_view.default_focus = 3;
-    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Char('e'));
     assert!(app.tools_view.configuring);
     assert_eq!(app.tools_view.query, 3);
     assert_eq!(app.tools_view.focus, 3); // Manifest is the first missing detail.

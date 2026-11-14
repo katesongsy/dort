@@ -57,6 +57,7 @@ pub struct State {
 }
 pub enum Outcome {
     Back,
+    FreshReview,
     Task(Box<Task>),
 }
 impl Outcome {
@@ -150,25 +151,26 @@ impl State {
         self.summary = if s.apt.is_some() {
             format!(
                 "APT · ROOT RISK · {} · current, not pinned\nRoot scripts/hooks/dependency code CAN EXECUTE.\nDependencies upgrade; services start/restart.\nSystem/config/data/live links may change.\nNo sandbox or rollback; native root policy.\nsudo -n -T 600: denied policy fails, no prompt.\nOverdue supervisor: keep waiting joined.\na: Advanced · d: full scope · q waits",
-                s.package
+                ui::inline(&s.package)
             )
         } else if let Some(brew) = &s.brew {
             format!(
                 "Homebrew · provider-current · 10m deadline\nBuild/dependency code CAN EXECUTE.\nDependencies may upgrade; native links may\nexpose commands on PATH. No rollback.\n{} · Prefix: {}\nFresh help/layout/formula/catalog probes.\na: Advanced prefix · d: full scope · q waits",
-                s.package,
+                ui::inline(&s.package),
                 ui::inline(&brew.prefix.display().to_string())
             )
         } else if let Some(npm) = &s.npm {
             format!(
                 "npm install · scripts off · 10m deadline\nDependencies + bin/man links may expose\ncommands on PATH. No rollback. q waits.\nFresh target/runtime/prerequisite queries.\n{}@{}\nPrefix: {}\nd: full scope and query details",
-                s.package,
-                s.version,
+                ui::inline(&s.package),
+                ui::inline(&s.version),
                 ui::inline(&npm.binding.prefix.display().to_string())
             )
         } else {
             format!(
-                "Install {}@{} with mise\nFresh inspection, install only if still missing, then inspect again.\n10-minute install deadline; q/Ctrl-C waits. No activation.\nProvider/package code and downloads may change data; no rollback.",
-                s.package, s.version
+                "mise · exact install · 10m deadline\nProvider/backend/package code CAN EXECUTE.\nDownloads can change data/caches; no rollback.\nNo activation; readiness is not verified.\nq/Ctrl-C waits for completion.\nFresh inspection, conditional install, re-inspect.\n{}@{}\nd: full scope and arguments",
+                ui::inline(&s.package),
+                ui::inline(&s.version)
             )
         };
         self.metadata =
@@ -184,25 +186,33 @@ impl State {
         self.error = None;
         match report {
             Ok(report) => {
-                self.summary = if report.no_op {
-                    "Matching package already reported; no installer ran."
+                let summary = report.summary();
+                let caption = if report.no_op {
+                    "No installer ran; matching package reported."
                 } else if installation::succeeded(&report) {
                     if report.scope.apt.is_some() {
-                        "APT provider-current package reported present, not exact-pinned. Root/system/service effects possible; no readiness, termination or rollback guarantee."
+                        "APT current package, not exact-pinned (root risk)."
                     } else if report.scope.brew.is_some() {
-                        "Homebrew provider-current formula reported present, not exact-pinned. Native links may expose commands on PATH."
+                        "Homebrew current package, not exact-pinned."
                     } else if report.scope.npm.is_some() {
-                        "Exact npm package reported installed; native links may expose commands on PATH."
-                    } else { "Exact version reported installed. Inactive mise versions are normal." }
+                        "Exact npm package reported installed."
+                    } else {
+                        "Exact version reported installed (inactive)."
+                    }
                 } else {
-                    "Installation incomplete or unverified; partial effects may remain."
-                }
-                .into();
-                self.summary.push_str("\nBinary readiness and ownership are not verified.\nEsc, then c: collect fresh inventory before another install.\ni: inspect installation attempts · d: full outcome");
+                    summary.status.label()
+                };
+                self.summary = format!(
+                    "{caption}\n{} · {}\n{}\n{}\nNo readiness/ownership/termination proof.\nNo rollback; effects may be partial/ongoing.\nd: full outcome · i: attempts",
+                    summary.status.label(),
+                    summary.process_label(),
+                    summary.package_note(),
+                    summary.binary_label()
+                );
                 self.metadata = serde_json::to_string_pretty(&report).expect("metadata serializes");
             }
             Err(error) => {
-                self.summary = "Installation stopped; partial effects may remain.\ni: inspect unresolved attempts; nothing is replayed or rolled back.\nEsc, then c: collect fresh inventory before another install.".into();
+                self.summary = "Outcome unavailable; effects may be partial/ongoing.\ni: inspect unresolved attempts before another install.\nNo approval is retained or replayed; no rollback.\nf: start fresh review (navigation only).".into();
                 self.error = Some(error);
                 self.metadata.clear();
             }
@@ -355,7 +365,7 @@ impl State {
             None
         }
     }
-    fn close_field_count(&self) -> usize {
+    pub(super) fn close_field_count(&self) -> usize {
         if self.close_npm {
             4
         } else if self.close_brew {
@@ -409,13 +419,13 @@ impl State {
             self.fields = self.close_npm_draft.clone();
             self.close_npm = true;
         }
-        self.focus = self.close_field_count() + 1;
+        self.focus = 0;
     }
     pub fn close_reviewed(&mut self, preview: install::ClosePreview) {
         self.metadata =
             serde_json::to_string_pretty(&preview.review()).expect("metadata serializes");
         self.summary = format!(
-            "Close unresolved attempt {}\nFreshly inspect its provider scope, then close unchanged metadata.\nNo proof of root termination, replay, repair, readiness or rollback.\nConfig/plugins may execute code and caches may change.",
+            "Close unresolved attempt {}\nFresh provider query; close unchanged metadata.\nNo replay, repair, readiness or rollback.\nNo root-termination or install-success proof.\nConfig/plugins may run code; caches may change.\nd: full scope and query details",
             preview.review().attempt_id
         );
         self.close_preview = Some(preview);
@@ -474,18 +484,20 @@ impl State {
                     None
                 }
                 KeyCode::Tab | KeyCode::Down => {
-                    self.focus = (self.focus + 1) % 4;
+                    self.focus = (self.focus + 1) % 3;
                     None
                 }
                 KeyCode::BackTab | KeyCode::Up => {
-                    self.focus = (self.focus + 3) % 4;
-                    None
-                }
-                KeyCode::Enter if self.focus < 3 => {
-                    self.focus += 1;
+                    self.focus = (self.focus + 2) % 3;
                     None
                 }
                 KeyCode::Enter => {
+                    if let Some(i) = self.apt_fields.iter().position(String::is_empty) {
+                        self.focus = i;
+                        self.error =
+                            Some("Select all three trusted program paths before review.".into());
+                        return None;
+                    }
                     self.retain_apt_draft();
                     self.mode = Mode::LoadingInstall;
                     self.error = None;
@@ -509,14 +521,16 @@ impl State {
                     None
                 }
                 KeyCode::Tab | KeyCode::BackTab | KeyCode::Up | KeyCode::Down => {
-                    self.focus = 1 - self.focus.min(1);
-                    None
-                }
-                KeyCode::Enter if self.focus == 0 => {
-                    self.focus = 1;
+                    self.focus = 0;
                     None
                 }
                 KeyCode::Enter => {
+                    if self.brew_prefix.is_empty() {
+                        self.focus = 0;
+                        self.error =
+                            Some("Select the expected physical prefix before review.".into());
+                        return None;
+                    }
                     self.retain_prefix_draft();
                     let request = self.request.as_mut()?;
                     self.mode = Mode::LoadingInstall;
@@ -539,18 +553,24 @@ impl State {
                     None
                 }
                 KeyCode::Tab | KeyCode::Down => {
-                    self.focus = (self.focus + 1) % (count + 2);
+                    self.focus = (self.focus + 1) % count;
                     None
                 }
                 KeyCode::BackTab | KeyCode::Up => {
-                    self.focus = (self.focus + count + 1) % (count + 2);
+                    self.focus = (self.focus + count - 1) % count;
                     None
                 }
-                KeyCode::Enter if self.focus == count + 1 => {
+                KeyCode::F(2) => {
                     self.toggle_close_provider();
                     None
                 }
-                KeyCode::Enter if self.focus == count => {
+                KeyCode::Enter => {
+                    if let Some(i) = self.fields[..count].iter().position(String::is_empty) {
+                        self.focus = i;
+                        self.error =
+                            Some("Complete the displayed provider fields before review.".into());
+                        return None;
+                    }
                     self.retain_close_draft();
                     let request = self.close_request.as_mut()?;
                     request.executable = Some(PathBuf::from(&self.fields[0]));
@@ -568,10 +588,6 @@ impl State {
                     self.mode = Mode::LoadingClose;
                     Some(Outcome::task(Task::ToolClosePrepare(request.clone())))
                 }
-                KeyCode::Enter => {
-                    self.focus = (self.focus + 1) % (count + 2);
-                    None
-                }
                 _ if self.focus < count => {
                     edit_text(&mut self.fields[self.focus], key);
                     None
@@ -582,6 +598,10 @@ impl State {
         if self.details {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('d') => self.details = false,
+                KeyCode::Char('f') if matches!(self.mode, Mode::Result | Mode::Attempts) => {
+                    self.clear_approvals();
+                    return Some(Outcome::FreshReview);
+                }
                 KeyCode::Home => self.scroll = 0,
                 KeyCode::PageDown | KeyCode::Down => self.scroll = self.scroll.saturating_add(3),
                 KeyCode::PageUp | KeyCode::Up => self.scroll = self.scroll.saturating_sub(3),
@@ -610,9 +630,9 @@ impl State {
                     self.apt_fields
                         .iter()
                         .position(String::is_empty)
-                        .unwrap_or(3)
+                        .unwrap_or(0)
                 } else {
-                    usize::from(!self.brew_prefix.is_empty())
+                    0
                 };
                 self.error = None;
             }
@@ -628,6 +648,10 @@ impl State {
                 if matches!(self.mode, Mode::LoadingInstall | Mode::LoadingClose) =>
             {
                 return self.retry_preview().map(Outcome::task);
+            }
+            KeyCode::Char('f') if matches!(self.mode, Mode::Result | Mode::Attempts) => {
+                self.clear_approvals();
+                return Some(Outcome::FreshReview);
             }
             KeyCode::Char('i') => return Some(Outcome::task(self.open_attempts(snapshots))),
             KeyCode::Char('d') | KeyCode::Enter if self.mode == Mode::Attempts => {
@@ -667,147 +691,126 @@ impl State {
         }
         None
     }
+    fn fresh_button(&self, frame: &mut Frame, area: Rect, hits: &super::input::Hits) {
+        let button = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
+        frame.render_widget(
+            Paragraph::new(Line::from(ui::button("Start fresh review", "f", true))),
+            button,
+        );
+        hits.click(button, Target::ToolInstallFreshReview);
+    }
     pub fn draw(&self, frame: &mut Frame, area: Rect, dry_run: bool, hits: &super::input::Hits) {
         if self.details {
             ui::report(
                 frame,
                 area,
-                "Tools installation details · d/Esc back",
+                if matches!(self.mode, Mode::Result | Mode::Attempts) {
+                    "Tools installation details · d/Esc back · f fresh review"
+                } else {
+                    "Tools installation details · d/Esc back"
+                },
                 ui::review_text(&self.metadata),
                 self.scroll,
                 false,
             );
             return;
         }
-        if self.mode == Mode::AptInputs {
-            let first = if area.height < 11 { self.focus } else { 0 };
-            let mut y = area.y;
-            for i in first..4 {
-                let h = if i < 3 { 3 } else { 1 };
-                if y + h > area.bottom() {
-                    break;
-                }
-                let rect = Rect::new(area.x, y, area.width, h);
-                hits.click(rect, Target::ToolInstallControl(i, i == 3));
-                if i < 3 {
-                    ui::input(
-                        frame,
-                        rect,
-                        [
-                            "Trusted apt-cache · absolute",
-                            "Trusted apt-get · absolute",
-                            "Trusted sudo · absolute",
-                        ][i],
-                        &self.apt_fields[i],
-                        self.focus == i,
-                    );
-                } else {
-                    frame.render_widget(
-                        Paragraph::new(Line::from(ui::button(
-                            "Review root-risk installation",
-                            "Enter",
-                            self.focus == i,
-                        ))),
-                        rect,
-                    );
-                }
-                y += h;
-            }
-            return;
-        }
-        if self.mode == Mode::PrefixInputs {
-            let rect = Rect::new(area.x, area.y, area.width, 3.min(area.height));
-            hits.click(rect, Target::ToolInstallControl(0, false));
-            ui::input(
-                frame,
-                rect,
-                "Expected physical Homebrew prefix · absolute",
-                &self.brew_prefix,
-                self.focus == 0,
-            );
-            if area.height > 3 {
-                let rect = Rect::new(area.x, area.y + 3, area.width, 1);
-                hits.click(rect, Target::ToolInstallControl(1, true));
-                frame.render_widget(
-                    Paragraph::new(Line::from(ui::button(
-                        "Review installation",
-                        "Enter",
-                        self.focus == 1,
-                    ))),
-                    rect,
-                );
-            }
-            return;
-        }
-        if self.mode == Mode::CloseInputs {
-            let count = self.close_field_count();
-            let budget = area.height.saturating_sub(1);
-            let first = if usize::from(budget) < count * 3 + 2 {
-                self.focus.min(count)
-            } else {
-                0
+        if matches!(
+            self.mode,
+            Mode::PrefixInputs | Mode::AptInputs | Mode::CloseInputs
+        ) {
+            let fields: Vec<(&str, &str)> = match self.mode {
+                Mode::PrefixInputs => vec![(
+                    "Expected physical Homebrew prefix · absolute",
+                    &self.brew_prefix,
+                )],
+                Mode::AptInputs => [
+                    "Trusted apt-cache · absolute",
+                    "Trusted apt-get · absolute",
+                    "Trusted sudo · absolute",
+                ]
+                .into_iter()
+                .zip(self.apt_fields.iter().map(String::as_str))
+                .collect(),
+                _ => (0..self.close_field_count())
+                    .map(|i| {
+                        let label = match i {
+                            0 if self.close_apt => "Trusted dpkg-query · absolute",
+                            0 if self.close_brew => "Trusted Homebrew executable · absolute",
+                            0 if self.close_npm => "Trusted Node executable · absolute",
+                            0 => "Trusted mise executable · absolute",
+                            1 => "Trusted child PATH · colon-separated",
+                            2 if self.close_brew => "Original Homebrew prefix · absolute",
+                            2 => "Trusted npm CLI script · absolute",
+                            _ => "Original npm global prefix · absolute",
+                        };
+                        (label, self.fields[i].as_str())
+                    })
+                    .collect(),
             };
-            let mut y = area.y;
-            for i in first..count + 2 {
-                let h = if i < count { 3 } else { 1 };
-                if y + h > area.bottom().saturating_sub(1) {
-                    break;
-                }
-                let rect = Rect::new(area.x, y, area.width, h);
-                hits.click(rect, Target::ToolInstallControl(i, i >= count));
-                if i < count {
-                    let title = match i {
-                        0 if self.close_apt => "Trusted dpkg-query · absolute",
-                        0 if self.close_brew => "Trusted Homebrew executable · absolute",
-                        0 if self.close_npm => "Trusted Node executable · absolute",
-                        0 => "Trusted mise executable · absolute",
-                        1 => "Trusted child PATH · colon-separated",
-                        2 if self.close_brew => "Original Homebrew prefix · absolute",
-                        2 => "Trusted npm CLI script · absolute",
-                        _ => "Original npm global prefix · absolute",
-                    };
-                    ui::input(frame, rect, title, &self.fields[i], self.focus == i);
+            let mut actions = vec![ui::ActionButton {
+                label: if self.mode == Mode::CloseInputs {
+                    "Review closure"
                 } else {
-                    let label = if i == count {
-                        "Review closure"
-                    } else if self.close_apt {
-                        "Provider: apt · change to mise"
+                    "Review installation"
+                },
+                key: "Enter",
+                target: Target::ToolInstallControl(fields.len(), true),
+            }];
+            if self.mode == Mode::CloseInputs {
+                actions.push(ui::ActionButton {
+                    label: if self.close_apt {
+                        "Provider: apt"
                     } else if self.close_brew {
-                        "Provider: brew · change to apt"
+                        "Provider: brew"
                     } else if self.close_npm {
-                        "Provider: npm · change to brew"
+                        "Provider: npm"
                     } else {
-                        "Provider: mise · change to npm"
-                    };
-                    frame.render_widget(
-                        Paragraph::new(Line::from(ui::button(label, "Enter", self.focus == i))),
-                        rect,
-                    );
-                }
-                y += h;
+                        "Provider: mise"
+                    },
+                    key: "F2",
+                    target: Target::ToolInstallProvider,
+                });
             }
-            ui::prose(
+            let hint = self
+                .error
+                .as_ref()
+                .map(|e| ui::inline(e))
+                .unwrap_or_else(|| {
+                    "Tab: fields · Enter: fresh review · Esc: Back (draft retained)".into()
+                });
+            ui::field_page(
                 frame,
-                Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1),
-                "Missing provider scope · Tab moves · Esc back",
-                ui::muted(),
+                area,
+                &fields,
+                self.focus,
+                hits,
+                |i| Target::ToolInstallControl(i, false),
+                ui::FormActions {
+                    buttons: &actions,
+                    hint: &hint,
+                },
             );
             return;
         }
         if self.mode == Mode::Attempts {
             if let Some(error) = &self.error {
-                ui::prose(
+                ui::chrome_prose(
                     frame,
                     area,
-                    &format!("Attempts unavailable: {error}\nr refreshes · Esc back"),
+                    &format!(
+                        "Attempts unavailable: {}\nr refreshes · f fresh review · Esc back",
+                        ui::inline(error)
+                    ),
                     ui::warning(),
                 );
+                self.fresh_button(frame, area, hits);
                 return;
             }
-            let capacity = usize::from(area.height.saturating_sub(3)).max(1);
+            let capacity = usize::from(area.height.saturating_sub(5)).max(1);
             let offset = self.selected.saturating_sub(capacity - 1);
             let mut lines = vec![Line::styled(
-                "Installation attempts · Enter details · c close · r refresh",
+                "Installation attempts · Enter details · c close · f fresh review",
                 ui::heading(),
             )];
             for (i, attempt) in self.attempts.iter().enumerate().skip(offset).take(capacity) {
@@ -815,13 +818,7 @@ impl State {
                     ui::clip(
                         &format!(
                             "{} | {} | {}",
-                            if attempt.unresolved {
-                                "UNRESOLVED"
-                            } else if attempt.explicitly_closed {
-                                "Explicitly closed"
-                            } else {
-                                "Observed outcome"
-                            },
+                            attempt.summary().status.label(),
                             attempt.id,
                             attempt
                                 .scope
@@ -849,13 +846,36 @@ impl State {
             if self.attempts.is_empty() {
                 lines.push(Line::raw("No installation attempts recorded."));
             }
+            if let Some(attempt) = self.attempts.get(self.selected) {
+                let summary = attempt.summary();
+                lines.push(Line::styled(
+                    ui::clip(summary.package_note(), area.width),
+                    ui::muted(),
+                ));
+                lines.push(Line::styled(
+                    ui::clip(
+                        if attempt.unresolved {
+                            "Unresolved: review closure before another install."
+                        } else if attempt.explicitly_closed {
+                            "Closed metadata, not install success or repair."
+                        } else if !attempt.outcome.is_some_and(install::Outcome::succeeded) {
+                            "Effects may be partial/ongoing; f: fresh review."
+                        } else {
+                            "Historical only; fresh inventories + explicit binding."
+                        },
+                        area.width,
+                    ),
+                    ui::muted(),
+                ));
+            }
             frame.render_widget(Paragraph::new(lines), area);
+            self.fresh_button(frame, area, hits);
             if self
                 .attempts
                 .get(self.selected)
                 .is_some_and(|a| a.unresolved)
             {
-                let button = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
+                let button = Rect::new(area.x, area.bottom().saturating_sub(2), area.width, 1);
                 frame.render_widget(
                     Paragraph::new(Line::from(ui::button("Review closure", "c", true))),
                     button,
@@ -865,16 +885,30 @@ impl State {
             return;
         }
         let message = if let Some(error) = &self.error {
-            format!("{}\n{}", self.summary, error)
+            format!("{}\n{}", self.summary, ui::inline(error))
         } else {
             self.summary.clone()
         };
-        ui::prose(
+        // Metadata must not wrap an unbounded package/prefix ahead of the
+        // mandatory compact warning. Full identities remain in d / scope.
+        let message = if matches!(self.mode, Mode::Review | Mode::CloseReview) {
+            message
+                .lines()
+                .map(|line| ui::chrome_clip(line, area.width))
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            message
+        };
+        ui::chrome_prose(
             frame,
             Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1)),
             &message,
             ui::muted(),
         );
+        if self.mode == Mode::Result {
+            self.fresh_button(frame, area, hits);
+        }
         if matches!(self.mode, Mode::Review | Mode::CloseReview) {
             let button = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
             frame.render_widget(

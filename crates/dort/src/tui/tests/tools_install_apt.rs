@@ -1,6 +1,6 @@
 use super::*;
 impl Fixture {
-    fn new_apt() -> Self {
+    pub(super) fn new_apt() -> Self {
         let mut f = Self::new();
         fs::write(f.repo.join("dort.toml"), "schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nubuntu={provider='apt',package='demo'}\n").unwrap();
         let programs = f.host.home.join("programs");
@@ -45,13 +45,25 @@ fn explicitly_empty_apt_closure_draft_is_not_rebound_from_snapshot_hints() {
     state.open_attempts(&app.tools_view.snapshots);
     assert!(state.fields[0].is_empty() && state.close_apt);
     state.mode = Mode::CloseInputs;
-    for focus in [3, 3, 5, 4] {
-        state.focus = focus;
+    for expected in ["mise", "npm", "brew", "apt"] {
         state.key(
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE),
             false,
             &app.tools_view.snapshots,
         );
+        assert_eq!(
+            if state.close_apt {
+                "apt"
+            } else if state.close_brew {
+                "brew"
+            } else if state.close_npm {
+                "npm"
+            } else {
+                "mise"
+            },
+            expected
+        );
+        assert_eq!(state.focus, 0);
     }
     assert!(state.close_apt && state.fields[0].is_empty());
 }
@@ -126,7 +138,6 @@ fn apt_advanced_retains_three_missing_inputs_and_compact_caret_without_processes
     fs::remove_file(f.executable.parent().unwrap().join("sudo")).unwrap();
     key(&mut app, KeyCode::Char('a'));
     app.tools_view.installation.focus = 2;
-    key(&mut app, KeyCode::Enter);
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.run(&mut app, task);
     assert!(app.tools_view.installation.preview.is_none());

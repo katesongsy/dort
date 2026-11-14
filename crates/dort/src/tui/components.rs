@@ -7,6 +7,45 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 
+/// Status messages distinguish controlled UI decoration from runtime metadata.
+/// Owned strings are escaped by default; explicit chrome composition must escape
+/// each dynamic metadata fragment first. No global unescape is performed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StatusText(String);
+impl StatusText {
+    pub fn chrome(text: String) -> Self {
+        Self(text)
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+impl From<String> for StatusText {
+    fn from(text: String) -> Self {
+        Self(super::views::safe(&text))
+    }
+}
+impl From<&'static str> for StatusText {
+    fn from(text: &'static str) -> Self {
+        Self(text.into())
+    }
+}
+impl std::ops::Deref for StatusText {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+impl PartialEq<&str> for StatusText {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+impl std::fmt::Display for StatusText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 pub fn accent() -> Style {
     Style::default()
         .fg(Color::Cyan)
@@ -53,21 +92,37 @@ pub fn inline(value: &str) -> String {
     super::views::safe(value).replace('\n', "\\n")
 }
 pub fn clip(value: &str, width: u16) -> String {
-    let value = inline(value);
-    if value.len() <= usize::from(width) {
-        value
-    } else if width < 4 {
-        value.chars().take(usize::from(width)).collect()
-    } else {
-        format!("{}...", &value[..usize::from(width) - 3])
-    }
+    chrome_clip(&inline(value), width)
 }
-pub fn button(label: &str, key: &str, focused: bool) -> Span<'static> {
+/// Trusted decoration plus already-escaped metadata only. Never pass raw paths,
+/// provider output or user input here. Clip by terminal cells, not UTF-8 bytes.
+pub fn chrome_clip(value: &str, width: u16) -> String {
+    let max = usize::from(width);
+    if Line::raw(value).width() <= max {
+        return value.to_owned();
+    }
+    let budget = max.saturating_sub(if max >= 4 { 3 } else { 0 });
+    let mut out = String::new();
+    let mut used = 0;
+    for c in value.chars() {
+        let w = Span::raw(c.to_string()).width();
+        if used + w > budget {
+            break;
+        }
+        out.push(c);
+        used += w;
+    }
+    if max >= 4 {
+        out.push_str("...");
+    }
+    out
+}
+pub fn button(label: &'static str, key: &'static str, focused: bool) -> Span<'static> {
     Span::styled(
         format!(
             " {}[{}{}] ",
             if focused { "> " } else { "" },
-            super::views::safe(label),
+            label,
             if key.is_empty() {
                 String::new()
             } else {
@@ -76,6 +131,95 @@ pub fn button(label: &str, key: &str, focused: bool) -> Span<'static> {
         ),
         if focused { selected() } else { accent() },
     )
+}
+pub struct ActionButton {
+    pub label: &'static str,
+    pub key: &'static str,
+    pub target: super::input::Target,
+}
+pub struct FormActions<'a> {
+    pub buttons: &'a [ActionButton],
+    pub hint: &'a str,
+}
+/// Shared page-form layout: only fields have focus. Actions are direct keys or
+/// clicks, never additional traversal stops. Every raw field value is escaped.
+pub fn field_page(
+    frame: &mut Frame,
+    area: Rect,
+    fields: &[(&str, &str)],
+    focus: usize,
+    hits: &super::input::Hits,
+    field_target: impl Fn(usize) -> super::input::Target,
+    controls: FormActions<'_>,
+) {
+    let fields_area = action_bar(frame, area, hits, controls);
+    let count = usize::from(fields_area.height / 3);
+    let focus = focus.min(fields.len().saturating_sub(1));
+    let start = focus.saturating_sub(count.saturating_sub(1));
+    for i in (start..fields.len()).take(count) {
+        let rect = Rect::new(
+            fields_area.x,
+            fields_area.y + (i - start) as u16 * 3,
+            fields_area.width,
+            3,
+        );
+        input(
+            frame,
+            rect,
+            fields[i].0,
+            fields[i].1,
+            i == focus && hits.input_focus_allowed(),
+        );
+        hits.click(rect, field_target(i));
+    }
+}
+/// Direct-action buttons wrap independently of row/field focus. Returns the
+/// remaining content area; hints must contain trusted chrome/escaped metadata.
+pub fn action_bar(
+    frame: &mut Frame,
+    area: Rect,
+    hits: &super::input::Hits,
+    controls: FormActions<'_>,
+) -> Rect {
+    let FormActions {
+        buttons: actions,
+        hint,
+    } = controls;
+    let mut rows = vec![Vec::<(usize, u16)>::new()];
+    let mut used = 0;
+    for (i, action) in actions.iter().enumerate() {
+        let width = (button(action.label, action.key, false).width() as u16).min(area.width);
+        if used > 0 && used + width > area.width {
+            rows.push(vec![]);
+            used = 0;
+        }
+        rows.last_mut().expect("action row").push((i, width));
+        used += width;
+    }
+    let action_height = rows.len() as u16;
+    let content_height = area.height.saturating_sub(action_height + 1);
+    let top = area.y + content_height;
+    for (row, buttons) in rows.iter().enumerate() {
+        let mut x = area.x;
+        for &(i, width) in buttons {
+            let rect = Rect::new(x, top + row as u16, width, 1);
+            if rect.y < area.bottom() {
+                frame.render_widget(
+                    Paragraph::new(Line::from(button(actions[i].label, actions[i].key, false))),
+                    rect,
+                );
+                hits.click(rect, actions[i].target);
+            }
+            x += width;
+        }
+    }
+    chrome_prose(
+        frame,
+        Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1),
+        &chrome_clip(hint, area.width),
+        muted(),
+    );
+    Rect::new(area.x, area.y, area.width, content_height)
 }
 pub fn keys(items: &[(&str, &str)]) -> Line<'static> {
     let mut spans = vec![];
@@ -184,6 +328,13 @@ pub fn input(frame: &mut Frame, area: Rect, label: &str, value: &str, focused: b
     if focused && inner.width > 0 && inner.height > 0 {
         frame.set_cursor_position((cursor, inner.y));
     }
+}
+/// Trusted UI prose composed only with escaped metadata at dynamic boundaries.
+pub fn chrome_prose(frame: &mut Frame, area: Rect, text: &str, style: Style) {
+    frame.render_widget(
+        Paragraph::new(text).style(style).wrap(Wrap { trim: false }),
+        area,
+    );
 }
 pub fn prose(frame: &mut Frame, area: Rect, text: &str, style: Style) {
     frame.render_widget(
