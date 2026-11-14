@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tui:** unify workbench interactions and fresh-review outcomes ([2f8fac1](https://github.com/katesongsy/dort/commit/2f8fac1a306649c00098c0f7a2dff9057a2f662f))
+
 - **tools:** install missing Ubuntu packages noninteractively ([c8f4999](https://github.com/katesongsy/dort/commit/c8f49999cdbb801c465ef2a7b1f75b69257160ca))
 
 - **tools:** install missing Homebrew core formulae ([1ccf308](https://github.com/katesongsy/dort/commit/1ccf308260ac0acc82ea5392ab9d9edcf2d134b7))
