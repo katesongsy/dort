@@ -7,11 +7,15 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Documentation
 
+- streamline agent instructions ([68e3060](https://github.com/katesongsy/dort/commit/68e30605c64540ea9ffc48c1e404288eba2c6235))
+
 - add Homebrew and mise installation channels ([94d6fcd](https://github.com/katesongsy/dort/commit/94d6fcd34fd17f692040ccfaa899c0eab66c55e1))
 
 - document crates.io installation and publication ([81550f7](https://github.com/katesongsy/dort/commit/81550f7355ad4347a8f9ee361bc6d87110a914af))
 
 ### Features
+
+- **tui:** refine navigation and seed tool declarations from inventory ([7f01069](https://github.com/katesongsy/dort/commit/7f010691a5286605e686c7e1f566e8a37638e902))
 
 - **tui:** migrate workbench to calm navigation ([578a7ca](https://github.com/katesongsy/dort/commit/578a7ca95a781c893d040fce081fc6191b04f501))
 
