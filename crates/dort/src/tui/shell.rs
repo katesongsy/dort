@@ -219,7 +219,9 @@ pub struct Shell {
     pub init_draft: String,
     pub path_focused: usize,
     pub form_details: bool,
+    pub form_feedback: Option<(Form, &'static str)>,
     pub picker_details: bool,
+    pub global_commands: bool,
     pub choose_draft: String,
     pub adoption: AdoptionDraft,
     pub return_to_adopt: bool,
@@ -249,7 +251,9 @@ impl Shell {
             init_draft: String::new(),
             path_focused: 0,
             form_details: false,
+            form_feedback: None,
             picker_details: false,
+            global_commands: false,
             choose_draft: String::new(),
             adoption: AdoptionDraft::new(),
             return_to_adopt: false,
@@ -261,6 +265,7 @@ impl Shell {
         }
     }
     pub fn open_actions(&mut self, entries: Vec<super::palette::Entry>) {
+        self.global_commands = false;
         self.scroll = 0;
         self.overlay = Some(Overlay::Actions {
             query: String::new(),
@@ -349,9 +354,23 @@ impl Shell {
         }
     }
     pub fn key(&mut self, key: KeyEvent, known_count: usize) -> Option<Intent> {
+        if !self.form_details
+            && matches!(self.overlay, Some(Overlay::Form(_)))
+            && matches!(
+                key.code,
+                KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete
+            )
+        {
+            self.form_feedback = None;
+        }
         if matches!(
             self.overlay,
-            Some(Overlay::Profiles(_) | Overlay::Repositories { .. } | Overlay::Actions { .. })
+            Some(
+                Overlay::Profiles(_)
+                    | Overlay::Repositories { .. }
+                    | Overlay::Actions { .. }
+                    | Overlay::Ignored { .. }
+            )
         ) {
             if key.code == KeyCode::F(3) {
                 self.picker_details = !self.picker_details;
@@ -368,7 +387,7 @@ impl Shell {
             }
         }
         if matches!(self.overlay, Some(Overlay::Form(_))) {
-            if key.code == KeyCode::F(2) {
+            if key.code == KeyCode::F(3) {
                 return self.form_action(super::forms::Command::Details);
             }
             if self.form_details {
@@ -539,7 +558,7 @@ impl Shell {
                     self.overlay = Some(Overlay::Form(Form::Choose))
                 }
                 KeyCode::Enter if *selected == 1 => return Some(Intent::Active),
-                KeyCode::F(2) => {
+                KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     return Some(Intent::Action(Action::Init));
                 }
                 KeyCode::Enter => return Some(Intent::Known(*selected - 2)),

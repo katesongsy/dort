@@ -39,6 +39,138 @@ fn terminal_cleanup_probe() {
     }
 }
 
+pub(super) fn menu_action(
+    app: &mut App,
+    action: super::shell::Action,
+    width: u16,
+    height: u16,
+) -> Option<super::actions::Task> {
+    use super::navigation::{self, Item};
+    let (group, index) = (0..navigation::GROUPS.len())
+        .find_map(|group| {
+            navigation::entries(group)
+                .iter()
+                .position(|e| e.item == Item::Action(action))
+                .map(|index| (group, index))
+        })
+        .expect("Task has a Places destination");
+    app.open_menu(group, width);
+    assert!(app.key(key(KeyCode::Enter), width, height).is_none());
+    assert!(app.navigation.menu.as_ref().is_some_and(|m| m.expanded));
+    for _ in 0..index {
+        assert!(app.key(key(KeyCode::Down), width, height).is_none());
+    }
+    app.key(key(KeyCode::Enter), width, height)
+}
+pub(super) fn target_position(
+    app: &App,
+    width: u16,
+    height: u16,
+    target: impl Fn(super::input::Target) -> bool,
+) -> (u16, u16) {
+    (0..height)
+        .flat_map(|y| (0..width).map(move |x| (x, y)))
+        .find(|(x, y)| app.hits.target(*x, *y).is_some_and(&target))
+        .expect("Actual foreground must expose the typed hit target")
+}
+pub(super) fn has_action(app: &App, label: &str) -> bool {
+    render(app, 80, 24);
+    super::workbench::actions(app)
+        .iter()
+        .any(|a| a.label == label)
+}
+pub(super) fn more_target(
+    app: &mut App,
+    target: impl Fn(super::input::Target) -> bool,
+) -> Option<super::actions::Task> {
+    render(app, 80, 24);
+    assert!(app.key(key(KeyCode::F(2)), 80, 24).is_none());
+    let menu = app.more.as_ref().expect("More is a real foreground");
+    assert!(menu.items.iter().all(|item| !matches!(
+        item.action.target,
+        super::input::Target::ConfirmAction
+            | super::input::Target::Continue
+            | super::input::Target::ProviderConfirm
+            | super::input::Target::PatchConfirm
+            | super::input::Target::ToolInstallControl(_, true)
+    )));
+    let index = menu
+        .items
+        .iter()
+        .position(|item| target(item.action.target) && item.reason.is_none())
+        .expect("Enabled contextual task must be discoverable in More");
+    for _ in 0..index {
+        assert!(app.key(key(KeyCode::Down), 80, 24).is_none());
+    }
+    app.key(key(KeyCode::Enter), 80, 24)
+}
+pub(super) fn assert_text_focus(
+    terminal: &Terminal<TestBackend>,
+    size: (u16, u16),
+    cursor: ratatui::layout::Position,
+) {
+    use ratatui::style::Modifier;
+    assert!(
+        cursor.x < size.0 && cursor.y > 0 && cursor.y < size.1 - 1,
+        "{size:?}: {cursor:?}"
+    );
+    let buffer = terminal.backend().buffer();
+    assert!(
+        (0..size.0).any(|x| {
+            let cell = &buffer[(x, cursor.y)];
+            cell.symbol() == "[" && cell.modifier.contains(Modifier::BOLD)
+        }),
+        "Focused input boundary missing at {cursor:?}"
+    );
+    assert!(
+        (0..size.0).any(|x| {
+            let cell = &buffer[(x, cursor.y - 1)];
+            cell.symbol() != " " && cell.modifier.contains(Modifier::BOLD)
+        }),
+        "Focused field label missing"
+    );
+}
+pub(super) fn assert_primary_action(terminal: &Terminal<TestBackend>) {
+    use ratatui::style::{Color, Modifier};
+    assert!(
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .any(|c| c.fg == Color::Cyan
+                && c.bg == Color::Black
+                && c.modifier.contains(Modifier::BOLD | Modifier::REVERSED)),
+        "Missing explicit primary action role"
+    );
+}
+pub(super) fn cycle_closure_provider(app: &mut App) {
+    let previous = app.tools_view.installation.closure_provider();
+    assert!(app.key(key(KeyCode::F(4)), 80, 24).is_none());
+    assert!(app.choice.is_some());
+    assert!(
+        app.key(
+            key(if previous == 3 {
+                KeyCode::Home
+            } else {
+                KeyCode::Down
+            }),
+            80,
+            24
+        )
+        .is_none()
+    );
+    assert!(app.key(key(KeyCode::Enter), 80, 24).is_none());
+    assert!(app.choice.is_none());
+    assert_eq!(
+        app.tools_view.installation.closure_provider(),
+        (previous + 1) % 4
+    );
+    assert!(
+        app.tools_view.installation.preview.is_none()
+            && app.tools_view.installation.close_preview.is_none()
+    );
+}
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
@@ -78,7 +210,7 @@ fn compact_forms_and_profile_picker_always_show_focused_control() {
         app.shell.adoption.focused = i;
         let screen = render(&app, 48, 14);
         assert!(
-            screen.contains(&format!("{prefix} · Focus")) && screen.contains("Review"),
+            screen.contains(prefix) && screen.contains("Review") && screen.contains("F1 Help"),
             "focused control {i} not visible: {screen}"
         );
     }
@@ -93,11 +225,16 @@ fn compact_forms_and_profile_picker_always_show_focused_control() {
         app.key(key(KeyCode::Tab), 48, 14);
         assert_eq!(app.shell.manifest_focused, 0);
         let text = render(&app, 48, 14);
-        assert!(text.contains("Manifest path · Focus") && text.contains("Check manifest"));
+        assert!(
+            text.contains("Manifest path")
+                && text.contains("Standalone manifest")
+                && text.contains("Enter Check")
+                && text.contains("F1 Help")
+        );
     }
     app.shell.overlay = Some(Overlay::Form(Form::RemoveId));
     app.shell.unmanage_focused = 0;
-    assert!(render(&app, 48, 14).contains("Exact ID · Focus"));
+    assert!(render(&app, 48, 14).contains("Exact ID"));
     assert!(render(&app, 48, 14).contains("Review"));
     app.shell.overlay = None;
     app.tab = Tab::Overview;
@@ -124,7 +261,7 @@ fn compact_navigation_and_report_home_are_readable_without_color() {
     let mut app = App::new(true);
     for (width, height) in [(48, 14), (80, 24), (140, 40)] {
         let screen = render(&app, width, height);
-        for label in ["F10", "Overview", "Actions", "DRY RUN", ";"] {
+        for label in ["Places", "Overview", "More", "Help", "DRY RUN"] {
             assert!(
                 screen.contains(label),
                 "missing textual {label} at {width}x{height}"
@@ -137,7 +274,7 @@ fn compact_navigation_and_report_home_are_readable_without_color() {
     }
     app.key(key(KeyCode::Home), 48, 14);
     assert_eq!(app.shell.scroll, 0);
-    assert!(render(&app, 48, 14).contains("Help: Overview"));
+    assert!(render(&app, 48, 14).contains("Overview") && app.help.is_some());
     assert_eq!(app.help.as_ref().unwrap().scroll, 0);
     app.key(key(KeyCode::Esc), 48, 14);
     app.complete(Err("long report\n".repeat(100)));
@@ -172,14 +309,14 @@ fn long_lists_keep_selection_visible_through_resize_and_form_back() {
     }
     for (width, height) in [(48, 14), (80, 24), (140, 40), (48, 14)] {
         app.resize(width, height);
-        assert!(render(&app, width, height).contains("> [ ] file-120"));
+        assert!(render(&app, width, height).contains("› [ ] file-120"));
         assert_eq!(app.selected, 120);
     }
     app.key(key(KeyCode::Char('p')), 48, 14);
     for _ in 0..201 {
         app.key(key(KeyCode::Down), 48, 14);
     }
-    assert!(render(&app, 48, 14).contains("> /repository-199"));
+    assert!(render(&app, 48, 14).contains("› /repository-199"));
     app.key(key(KeyCode::Esc), 48, 14);
     assert_eq!(app.selected, 120);
     app.key(key(KeyCode::Char('o')), 48, 14);
@@ -187,13 +324,17 @@ fn long_lists_keep_selection_visible_through_resize_and_form_back() {
     app.key(key(KeyCode::PageDown), 48, 14);
     app.key(key(KeyCode::Tab), 48, 14);
     assert_eq!(app.shell.scroll, 0);
-    assert!(render(&app, 48, 14).contains("ID · Focus"));
+    let mut terminal = Terminal::new(TestBackend::new(48, 14)).unwrap();
+    terminal.draw(|frame| views::draw(frame, &app)).unwrap();
+    let cursor = terminal.get_cursor_position().unwrap();
+    assert_text_focus(&terminal, (48, 14), cursor);
+    assert!(render(&app, 48, 14).contains("ID"));
     app.resize(40, 10);
     app.resize(48, 14);
     assert_eq!(app.shell.adoption.target, "q?/".repeat(100));
     assert!(matches!(app.shell.overlay, Some(Overlay::Form(_))));
     app.key(key(KeyCode::Esc), 48, 14);
-    assert!(render(&app, 48, 14).contains("> [ ] file-120"));
+    assert!(render(&app, 48, 14).contains("› [ ] file-120"));
 }
 
 #[test]
@@ -228,8 +369,12 @@ fn navigation_and_metadata_escaping() {
         history: vec![],
         history_error: None,
     })));
-    app.details_scroll = 12;
-    let screen = render(&app, 80, 24);
+    app.key(key(KeyCode::F(3)), 80, 24);
+    let mut screen = String::new();
+    for _ in 0..30 {
+        screen.push_str(&render(&app, 80, 24));
+        app.key(key(KeyCode::PageDown), 80, 24);
+    }
     assert!(screen.contains("DRY RUN"));
     assert!(screen.contains("\\u{1b}[31m\\u{202e}"));
     app.data.as_mut().unwrap().files_error = None;
@@ -255,7 +400,7 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     app.key(key(KeyCode::Esc), 80, 24); // Close the explicit dialog in one action.
     app.details_scroll = 3;
     app.key(key(KeyCode::Char('?')), 80, 24);
-    assert!(render(&app, 100, 40).contains("Dialog · Help"));
+    assert!(render(&app, 100, 40).contains("Help") && app.dialog_title() == Some("Help"));
     app.key(key(KeyCode::PageDown), 80, 24);
     assert_eq!(app.help.as_ref().unwrap().scroll, 2);
     app.key(key(KeyCode::Esc), 80, 24);
@@ -313,7 +458,7 @@ fn busy_shell_cannot_change_scope_or_toggle_mode_or_start_another_job() {
     }
     assert!(app.shell.overlay.is_none() && app.repository.is_none());
     app.key(key(KeyCode::Char('?')), 80, 24);
-    assert!(render(&app, 80, 40).contains("| Help"));
+    assert!(render(&app, 80, 40).contains("Help") && app.help.is_some());
     app.key(key(KeyCode::Esc), 80, 24);
     assert!(app.shell.overlay.is_none());
     assert!(!app.dry_run);

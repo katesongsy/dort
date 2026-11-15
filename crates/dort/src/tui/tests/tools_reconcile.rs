@@ -14,7 +14,6 @@ use ratatui::{
     Terminal,
     backend::TestBackend,
     crossterm::event::{KeyCode, KeyEvent, KeyModifiers},
-    style::{Color, Modifier},
 };
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
 struct Fixture {
@@ -90,13 +89,13 @@ impl Fixture {
         assert!(app.tools_view.recon_open);
         app.tools_view.reconciliation.fields[0] = self.manifest.to_str().unwrap().into();
         app.tools_view.reconciliation.fields[1] = self.bin.to_str().unwrap().into();
-        app.tools_view.reconciliation.focus = 3;
+        app.tools_view.reconciliation.focus = 0;
         let task = key(app, KeyCode::Enter).unwrap();
         assert!(matches!(task, Task::ToolsReconcilePrepare(_)));
         self.run(app, task);
     }
     fn calculate(&self, app: &mut App) {
-        app.tools_view.reconciliation.focus = 2;
+        app.tools_view.reconciliation.focus = 0;
         let task = key(app, KeyCode::Enter).unwrap();
         assert!(matches!(task, Task::ToolsReconcile { .. }));
         self.run(app, task);
@@ -107,6 +106,18 @@ impl Fixture {
 }
 fn key(app: &mut App, code: KeyCode) -> Option<Task> {
     app.key(KeyEvent::new(code, KeyModifiers::NONE), 80, 24)
+}
+fn bind(app: &mut App, index: usize) {
+    let before = app.tools_view.reconciliation.bindings.clone();
+    key(app, KeyCode::Char(' '));
+    assert!(app.choice.is_some());
+    assert_eq!(app.tools_view.reconciliation.bindings, before);
+    key(app, KeyCode::Home);
+    for _ in 0..index {
+        key(app, KeyCode::Down);
+    }
+    assert!(key(app, KeyCode::Enter).is_none());
+    assert!(app.choice.is_none());
 }
 const NODE: &str =
     r#"printf '{"node":[{"version":"22.1.0","installed":true,"source":{"path":"PRIVATE"}}]}'"#;
@@ -176,14 +187,15 @@ fn explicit_bindings_reconcile_multiple_scopes_without_merging_or_executing_cand
     f.load(&mut app);
     assert!(app.tools_view.reconciliation.bindings.is_empty());
     assert!(app.tools_view.reconciliation.mode == Mode::Bindings);
-    assert!(super::hints::keys(&app).contains(&("Enter", "Reconcile")));
-    assert!(super::hints::keys(&app).contains(&("Tab", "Tool")));
-    key(&mut app, KeyCode::Char(' '));
+    assert!(super::hints::keys(&app).contains(&("Enter", "Compare metadata")));
+    bind(&mut app, 1);
     assert_eq!(app.tools_view.reconciliation.bindings["node"], "s1");
     key(&mut app, KeyCode::Char('d'));
-    assert!(render(&app, 80, 24).contains("snapshot"));
+    let first = render(&app, 48, 14);
+    assert!(first.contains("Snapshot") && first.contains("s1"));
+    key(&mut app, KeyCode::PageDown);
+    assert_ne!(first, render(&app, 48, 14));
     let hints = super::hints::keys(&app);
-    assert!(hints.contains(&("PgDn", "Scroll")));
     assert!(
         !hints
             .iter()
@@ -193,8 +205,7 @@ fn explicit_bindings_reconcile_multiple_scopes_without_merging_or_executing_cand
     assert!(app.tools_view.reconciliation.binding_metadata());
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Tab);
-    key(&mut app, KeyCode::Char(' '));
-    key(&mut app, KeyCode::Char(' '));
+    bind(&mut app, 2);
     assert_eq!(app.tools_view.reconciliation.bindings["rg"], "s2");
     f.calculate(&mut app);
     let result = app.tools_view.reconciliation.result.as_ref().unwrap();
@@ -273,6 +284,8 @@ fn small_dry_run_and_late_load_preserve_read_only_scope_and_never_execute() {
     let task = key(&mut app, KeyCode::Enter).unwrap();
     app.start(false);
     key(&mut app, KeyCode::Left);
+    assert!(app.tab == Tab::Tools && app.interaction_notice.is_some());
+    app.go_tab(Tab::Git); // Exercise late data after an actual scope change.
     assert!(app.tab == Tab::Git);
     let out = actions::perform_scoped(task, &f.host, None, &[], |_| Ok(()))
         .map_err(|e| actions::diagnostic(&e));
@@ -372,7 +385,7 @@ fn missing_package_details_show_non_executable_commands_without_an_install_actio
     );
     f.collect(&mut app, &executable);
     f.load(&mut app);
-    key(&mut app, KeyCode::Char(' '));
+    bind(&mut app, 1);
     f.calculate(&mut app);
     let row = &app
         .tools_view
@@ -407,58 +420,42 @@ fn compact_forms_bindings_and_results_keep_focus_caret_and_semantic_selection() 
     f.collect(&mut app, &f.provider("first", NODE));
     key(&mut app, KeyCode::Char('p'));
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
-        for focus in 0..5 {
+        for focus in 0..3 {
             app.tools_view.reconciliation.focus = focus;
             let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
             terminal.draw(|fr| views::draw(fr, &app)).unwrap();
-            if focus < 3 {
-                let cursor = terminal.get_cursor_position().unwrap();
-                assert!(cursor.x < w && cursor.y >= 2 && cursor.y < h - 2);
-            } else {
-                assert!(
-                    terminal
-                        .backend()
-                        .buffer()
-                        .content
-                        .iter()
-                        .any(|c| c.bg == Color::Cyan
-                            && c.modifier.contains(Modifier::REVERSED | Modifier::BOLD))
-                );
-            }
+            let cursor = terminal.get_cursor_position().unwrap();
+            super::tests::assert_text_focus(&terminal, (w, h), cursor);
+            super::tests::assert_primary_action(&terminal);
         }
+        app.tools_view.reconciliation.focus = 0;
+        for _ in 0..3 {
+            key(&mut app, KeyCode::Tab);
+        }
+        assert_eq!(app.tools_view.reconciliation.focus, 0);
     }
     f.load(&mut app);
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
-        for focus in 0..4 {
+        for focus in 0..2 {
             app.tools_view.reconciliation.focus = focus;
             let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
             terminal.draw(|fr| views::draw(fr, &app)).unwrap();
-            if focus < 2 {
-                let cursor = terminal.get_cursor_position().unwrap();
-                assert!(cursor.x < w && cursor.y >= 2 && cursor.y < h - 2);
-                assert_eq!(
-                    terminal.backend().buffer()[(0, cursor.y - 1)].fg,
-                    Color::Cyan
-                );
-            } else {
-                assert!(
-                    terminal
-                        .backend()
-                        .buffer()
-                        .content
-                        .iter()
-                        .any(|c| c.bg == Color::Cyan
-                            && c.modifier.contains(Modifier::REVERSED | Modifier::BOLD))
-                );
-            }
+            super::tests::assert_primary_action(&terminal);
+            let before = app.tools_view.reconciliation.bindings.clone();
+            key(&mut app, KeyCode::Char(' '));
+            assert!(app.choice.is_some());
+            assert_eq!(app.tools_view.reconciliation.bindings, before);
+            key(&mut app, KeyCode::Esc);
+            assert_eq!(app.tools_view.reconciliation.focus, focus);
         }
+        app.tools_view.reconciliation.focus = 0;
+        for _ in 0..2 {
+            key(&mut app, KeyCode::Tab);
+        }
+        assert_eq!(app.tools_view.reconciliation.focus, 0);
     }
     f.calculate(&mut app);
     let mut terminal = Terminal::new(TestBackend::new(48, 14)).unwrap();
     terminal.draw(|fr| views::draw(fr, &app)).unwrap();
-    assert!(
-        terminal.backend().buffer().content.iter().any(
-            |c| c.bg == Color::Cyan && c.modifier.contains(Modifier::REVERSED | Modifier::BOLD)
-        )
-    );
+    super::tests::assert_primary_action(&terminal);
 }

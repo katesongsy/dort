@@ -5,11 +5,7 @@ use super::{
     input::Target,
     shell::Action,
 };
-use ratatui::{
-    Frame,
-    layout::Rect,
-    widgets::{Clear, Paragraph},
-};
+use ratatui::{Frame, layout::Rect};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Item {
@@ -177,7 +173,7 @@ impl App {
     pub(super) fn menus_available(&self) -> bool {
         self.navigation_block().is_none()
     }
-    pub(super) fn open_menu(&mut self, selected_group: usize, width: u16) {
+    pub(super) fn open_menu(&mut self, selected_group: usize, _width: u16) {
         if let Some(reason) = self.navigation_block() {
             self.interaction_notice = Some(reason);
             self.status = reason.into();
@@ -195,8 +191,7 @@ impl App {
         self.navigation.menu = Some(Menu {
             group: selected_group.min(GROUPS.len() - 1),
             selected: 0,
-            expanded: width >= 80
-                && !(self.tab == Tab::Tools && self.tools_view.browsing_inventory()),
+            expanded: false,
             content_focus,
             content_scroll,
         });
@@ -223,7 +218,7 @@ impl App {
     pub(super) fn menu_key(
         &mut self,
         key: ratatui::crossterm::event::KeyCode,
-        width: u16,
+        _width: u16,
     ) -> Option<super::actions::Task> {
         use ratatui::crossterm::event::KeyCode;
         let menu = self.navigation.menu?;
@@ -237,7 +232,7 @@ impl App {
         let menu = self.navigation.menu.as_mut()?;
         match key {
             KeyCode::Esc | KeyCode::F(10) => self.navigation.menu = None,
-            KeyCode::Left if width < 80 && menu.expanded => {
+            KeyCode::Left if menu.expanded => {
                 menu.expanded = false;
                 menu.selected = 0;
             }
@@ -274,169 +269,104 @@ impl App {
         None
     }
 }
-pub fn bar(frame: &mut Frame, area: Rect, app: &App) {
-    if let Some(reason) = app.navigation_block() {
-        ui::chrome_prose(
-            frame,
-            area,
-            &ui::chrome_clip(reason, area.width),
-            ui::muted(),
-        );
-        app.hits.click(area, Target::NavigationBlocked);
-        return;
-    }
-    if area.width < 80 {
-        let label = if app.menus_available() {
-            format!(" [Menu]  {}", location(app))
-        } else {
-            " [Menu available after this interaction]".into()
-        };
-        ui::chrome_prose(
-            frame,
-            Rect::new(area.x, area.y, area.width, 1),
-            &label,
-            ui::accent(),
-        );
-        if app.menus_available() {
-            app.hits.click(
-                Rect::new(area.x, area.y, 8.min(area.width), 1),
-                Target::MenuOpen,
-            );
-        }
-        return;
-    }
-    let mut x = area.x;
-    for (i, name) in GROUPS.iter().enumerate() {
-        let label = format!(" {name} {} ", ui::glyphs::MENU);
-        let width = label.chars().count() as u16;
-        let rect = Rect::new(x, area.y, width.min(area.right().saturating_sub(x)), 1);
-        let selected = app.navigation.menu.is_some_and(|m| m.group == i)
-            || (app.navigation.menu.is_none() && group(app) == i);
-        frame.render_widget(
-            Paragraph::new(label).style(if selected {
-                ui::selected()
-            } else {
-                ui::muted()
-            }),
-            rect,
-        );
-        if app.menus_available() {
-            app.hits.click(rect, Target::MenuGroup(i));
-        }
-        x += width;
-    }
-}
 pub fn popup(frame: &mut Frame, app: &App, menu: Menu) {
-    let area = frame.area();
-    app.hits.clear();
-    let bar_area = Rect::new(area.x, area.y + 1, area.width, 1);
-    bar(frame, bar_area, app);
-    let compact = area.width < 80;
+    let area = ui::design::choice_dialog(frame, "Places", &app.hits);
     let items = entries(menu.group);
-    let footer_reason = if menu.expanded {
-        match items[menu.selected].item {
-            Item::Action(a) => app.action_reason(a),
+    let reason = if menu.expanded {
+        items.get(menu.selected).and_then(|entry| match entry.item {
+            Item::Action(action) => app.action_reason(action),
             Item::Manifest => None,
-        }
+        })
     } else {
         None
+    }
+    .or(app.interaction_notice);
+    let extra = if reason.is_some() { 2 } else { 0 };
+    let body = Rect::new(
+        area.x,
+        area.y,
+        area.width,
+        area.height.saturating_sub(extra),
+    );
+    let selected = if menu.expanded {
+        menu.selected
+    } else {
+        menu.group
     };
-    let labels: Vec<String> = if menu.expanded {
+    let capacity = ui::design::pair_capacity(body).max(1);
+    let offset = selected.saturating_sub(capacity - 1);
+    let labels: Vec<_> = if menu.expanded {
         items
             .iter()
-            .map(|e| {
-                if e.item == Item::Action(Action::PreviewOnly) {
-                    format!("{}: {}", e.label, if app.dry_run { "ON" } else { "OFF" })
-                } else {
-                    e.label.to_owned()
-                }
+            .enumerate()
+            .map(|(id, entry)| {
+                let label = entry
+                    .label
+                    .split(" [")
+                    .next()
+                    .unwrap_or(entry.label)
+                    .to_owned();
+                let key = match shortcut(entry.item) {
+                    ratatui::crossterm::event::KeyCode::Char(c) => c.to_string(),
+                    ratatui::crossterm::event::KeyCode::F(n) => format!("F{n}"),
+                    _ => String::new(),
+                };
+                (id, label, key)
             })
             .collect()
     } else {
-        GROUPS.iter().map(|g| format!("{g} >")).collect()
+        GROUPS
+            .iter()
+            .enumerate()
+            .map(|(id, label)| (id, (*label).to_owned(), String::new()))
+            .collect()
     };
-    let width = (labels.iter().map(|l| l.chars().count()).max().unwrap_or(0) as u16 + 4)
-        .max(28)
-        .min(area.width);
-    let x = if compact {
-        area.x
-    } else {
-        area.x
-            + GROUPS[..menu.group]
-                .iter()
-                .map(|s| s.len() as u16 + 5)
-                .sum::<u16>()
-    }
-    .min(area.right().saturating_sub(width));
-    let rect = Rect::new(
-        x,
-        area.y + 2,
-        width,
-        (labels.len() as u16 + 2 + u16::from(footer_reason.is_some()))
-            .min(area.height.saturating_sub(2)),
-    );
-    frame.render_widget(Clear, rect);
-    let title = if menu.expanded {
-        GROUPS[menu.group]
-    } else {
-        "Navigation"
-    };
-    let block = ui::pane(title, true);
-    let inner = block.inner(rect);
-    frame.render_widget(block, rect);
-    for (i, label) in labels.iter().enumerate().take(
-        inner
-            .height
-            .saturating_sub(u16::from(footer_reason.is_some())) as usize,
-    ) {
-        let selected = if menu.expanded {
-            menu.selected == i
-        } else {
-            menu.group == i
-        };
-        let row = Rect::new(inner.x, inner.y + i as u16, inner.width, 1);
-        let reason = if menu.expanded {
-            match items[i].item {
-                Item::Action(a) => app.action_reason(a),
-                Item::Manifest => None,
-            }
-        } else {
-            None
-        };
-        let style = if selected {
-            ui::selected()
-        } else if reason.is_some() {
-            ui::muted()
-        } else {
-            ui::accent()
-        };
-        frame.render_widget(
-            Paragraph::new(ui::chrome_clip(
-                &format!("{}{}", if selected { "> " } else { "  " }, label),
-                inner.width,
-            ))
-            .style(style),
-            row,
-        );
-        if selected {
-            frame.set_cursor_position((row.x, row.y));
-        }
-        app.hits.click(
-            row,
+    let rows: Vec<_> = labels
+        .iter()
+        .skip(offset)
+        .take(capacity)
+        .map(|(identity, label, key)| ui::design::PairRow {
+            identity: *identity,
+            values: [label, key],
+        })
+        .collect();
+    ui::design::pairs_with_disclosure(
+        frame,
+        body,
+        ui::design::PairTable {
+            headers: [
+                if menu.expanded {
+                    GROUPS[menu.group]
+                } else {
+                    "PLACE"
+                },
+                "KEY",
+            ],
+            rows: &rows,
+            selected,
+        },
+        &app.hits,
+        |index| {
             if menu.expanded {
-                Target::MenuItem(i)
+                Target::MenuItem(index)
             } else {
-                Target::MenuGroup(i)
-            },
-        );
-    }
-    if let Some(reason) = footer_reason {
-        let footer = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
-        ui::chrome_prose(
+                Target::MenuGroup(index)
+            }
+        },
+        !menu.expanded,
+    );
+    if let Some(reason) = reason {
+        ui::design::notice(
             frame,
-            footer,
-            &ui::chrome_clip(reason, inner.width),
-            ui::warning(),
+            Rect::new(
+                area.x,
+                area.bottom().saturating_sub(extra),
+                area.width,
+                extra,
+            ),
+            "Unavailable",
+            reason,
+            ui::design::Tone::Attention,
         );
     }
 }

@@ -191,7 +191,8 @@ fn workflow_pages_allow_menus_and_keep_field_text_focus_until_actual_navigation(
             app.shell.overlay = Some(Overlay::Form(form));
             app.shell.init_draft = "retained".into();
             assert!(app.menus_available() && app.dialog_title().is_none());
-            assert!(render(&app, size.0, size.1).contains("Page ·"));
+            assert!(render(&app, size.0, size.1).starts_with("Dort /"));
+            assert!(app.page_title().is_some());
             key(&mut app, KeyCode::Char('q'), size.0, size.1);
             assert!(!app.quit);
             let path = app.shell.init_draft.clone();
@@ -286,7 +287,7 @@ fn real_dialogs_dim_capture_and_explain_disabled_navigation_without_outside_canc
                     .modifier
                     .contains(Modifier::DIM)
             );
-            assert!(render(&app, size.0, size.1).contains("Dialog ·"));
+            assert!(render(&app, size.0, size.1).contains(app.dialog_title().unwrap()));
             key(&mut app, KeyCode::F(10), size.0, size.1);
             assert!(
                 app.navigation.menu.is_none()

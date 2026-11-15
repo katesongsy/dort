@@ -15,6 +15,12 @@ pub enum Target {
     Action(Action),
     MenuOpen,
     NavigationBlocked,
+    Key(ratatui::crossterm::event::KeyEvent),
+    More,
+    MoreRow(usize),
+    ChoiceRow(usize),
+    Commands,
+    Destination(super::app::Tab),
     MenuGroup(usize),
     MenuItem(usize),
     Row(usize),
@@ -36,7 +42,6 @@ pub enum Target {
     ToolsControl(usize, bool),
     ToolsRow(usize),
     InventoryKey(ratatui::crossterm::event::KeyCode),
-    InventoryChoice(usize),
     ToolsReconControl(usize, bool),
     ToolDeclarationControl(usize, bool),
     Picker(usize, bool),
@@ -70,6 +75,7 @@ pub struct Hits {
     regions: RefCell<Vec<Region>>,
     size: Cell<(u16, u16)>,
     input_focus: Cell<bool>,
+    actions: RefCell<Vec<super::components::ActionButton>>,
 }
 impl Hits {
     pub fn begin(&self, area: Rect) {
@@ -88,6 +94,20 @@ impl Hits {
     }
     pub fn clear(&self) {
         self.regions.borrow_mut().clear();
+        self.actions.borrow_mut().clear();
+    }
+    pub fn present(&self, action: super::components::ActionButton) {
+        if !self
+            .actions
+            .borrow()
+            .iter()
+            .any(|a| a.label == action.label && a.key == action.key)
+        {
+            self.actions.borrow_mut().push(action);
+        }
+    }
+    pub fn actions(&self) -> Vec<super::components::ActionButton> {
+        self.actions.borrow().clone()
     }
     pub fn click(&self, area: Rect, target: Target) {
         self.regions.borrow_mut().push(Region {
@@ -121,10 +141,10 @@ impl Hits {
     }
     pub fn rows(&self, area: Rect, visible: &[usize], offset: usize) {
         let rows = Rect::new(
-            area.x + 1,
+            area.x,
             area.y + 2,
-            area.width.saturating_sub(2),
-            area.height.saturating_sub(3),
+            area.width,
+            area.height.saturating_sub(2),
         );
         self.wheel(area, Wheel::Rows);
         for (y, &index) in visible

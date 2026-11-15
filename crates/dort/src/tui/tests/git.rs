@@ -246,6 +246,7 @@ fn git_menu_comparisons_are_read_only_and_never_bypass_or_restore_disclosure() {
         (2, super::git::Comparison::Staged),
     ] {
         app.open_menu(5, 100);
+        assert!(key(&mut app, KeyCode::Enter).is_none());
         app.navigation.menu.as_mut().unwrap().selected = selected;
         let task = key(&mut app, KeyCode::Enter).unwrap();
         f.run(&mut app, task);
@@ -316,7 +317,9 @@ fn patch_disclosure_is_once_isolated_and_dropped_on_close_scope_resize_or_exit()
     key(&mut app, KeyCode::Esc);
     let task = patch_task(&mut app);
     app.start(false);
-    key(&mut app, KeyCode::Right); // safe navigation while worker is active discards pending disclosure
+    key(&mut app, KeyCode::Right);
+    assert!(app.tab == Tab::Git && app.interaction_notice.is_some()); // Refused navigation is not cancellation.
+    app.go_tab(Tab::Overview); // Inject an actual scope change to test late-result rejection independently.
     let output = actions::perform(task, &f.host, None, |_| Ok(())).unwrap();
     app.complete(Ok(output));
     app.tab = Tab::Git;
@@ -389,6 +392,7 @@ fn git_root_default_and_independent_selection_do_not_require_healthy_file_observ
     assert_eq!(app.repository.as_ref(), Some(&other));
     assert_eq!(app.git_view.root.as_ref(), Some(&f.root));
     app.open_menu(5, 100);
+    assert!(key(&mut app, KeyCode::Enter).is_none());
     key(&mut app, KeyCode::End);
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.run(&mut app, task);
@@ -433,10 +437,10 @@ fn git_selection_uses_raw_identity_across_refresh_and_compact_search_is_visible(
             && screen.contains("Original path: Some(\"old\\nname\")")
     );
     key(&mut app, KeyCode::Esc);
-    assert!(render(&app, 48, 14).contains("> second\\u{202e}"));
+    assert!(render(&app, 48, 14).contains("› second\\u{202e}"));
     key(&mut app, KeyCode::Char('/'));
     text(&mut app, "q?/");
-    assert!(render(&app, 48, 14).contains("Filter > q?/"));
+    assert!(render(&app, 48, 14).contains("[q?/"));
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Delete);
     app.git_view.accept(summary(&[]), true);
@@ -448,7 +452,7 @@ fn compact_git_drafts_and_confirmation_remain_visible_and_small_cannot_disclose(
     app.tab = Tab::Git;
     app.git_view.editing_root = true;
     app.git_view.draft = "q?".repeat(2000);
-    assert!(render(&app, 48, 14).contains("Path > ..."));
+    assert!(render(&app, 48, 14).contains("Exact Git root"));
     key(&mut app, KeyCode::Esc);
     app.git_view.choose(super::git::Comparison::Unstaged);
     app.git_view.metadata = Some(super::git::Metadata::Diff(dort_core::git::Diff {

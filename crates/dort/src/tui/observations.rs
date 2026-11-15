@@ -1,22 +1,25 @@
 //! Typed read-only dashboards. Presentation never derives identity or policy from prose.
-use super::{app::App, components as ui};
+use super::{app::App, components as ui, input::Target, shell::Action};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
+    layout::Rect,
     style::Style,
     text::{Line, Span, Text},
-    widgets::Paragraph,
 };
 
-struct Metric {
-    label: &'static str,
-    value: String,
-    style: Style,
-}
+use ui::dashboard::Metric;
 fn metric(label: &'static str, value: impl ToString, style: Style) -> Metric {
+    let value = value.to_string();
+    let compact = match label {
+        "Repository" | "Manifest" => value.clone(),
+        "History blockers" | "Blockers" => format!("Blocks: {value}"),
+        _ => format!("{label} {value}"),
+    };
     Metric {
         label,
-        value: value.to_string(),
+        value,
+        compact,
         style,
     }
 }
@@ -43,48 +46,13 @@ fn dashboard(
     metrics: Vec<Metric>,
     lines: Vec<Line<'static>>,
 ) {
-    // Short layouts retain a compact summary strip and a scrollable detail pane.
-    let cards = area.height >= 11;
-    let rows = Layout::vertical([
-        Constraint::Length(if cards { 3 } else { 1 }),
-        Constraint::Min(3),
-    ])
-    .split(area);
-    let columns = Layout::horizontal(vec![
-        Constraint::Ratio(1, metrics.len() as u32);
-        metrics.len()
-    ])
-    .split(rows[0]);
-    for (area, metric) in columns.iter().zip(metrics) {
-        if cards {
-            frame.render_widget(
-                Paragraph::new(ui::clip(&metric.value, area.width.saturating_sub(2)))
-                    .style(metric.style)
-                    .block(ui::pane(metric.label, false)),
-                *area,
-            );
-        } else {
-            frame.render_widget(
-                Paragraph::new(ui::clip(
-                    &match metric.label {
-                        "Repository" | "Manifest" => metric.value,
-                        "History blockers" | "Blockers" => format!("Blocks: {}", metric.value),
-                        label => format!("{label} {}", metric.value),
-                    },
-                    area.width,
-                ))
-                .style(metric.style),
-                *area,
-            );
-        }
-    }
-    ui::report(
+    ui::dashboard::draw(
         frame,
-        rows[1],
+        area,
         title,
+        &metrics,
         Text::from(lines),
         app.details_scroll,
-        true,
     );
 }
 fn count(value: Option<usize>) -> String {
@@ -94,11 +62,36 @@ fn count(value: Option<usize>) -> String {
 }
 
 pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
+    if !app.overview_details {
+        let action = app.overview_primary();
+        app.presented(
+            if action == Action::Apply {
+                "Review changes"
+            } else {
+                "Create or attach"
+            },
+            "Enter",
+            Target::Action(action),
+        );
+    }
+    app.presented(
+        if app.overview_details {
+            "Summary"
+        } else {
+            "Overview details"
+        },
+        "F3",
+        Target::Key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE)),
+    );
+    if app.overview_details {
+        app.presented("Back", "Esc", Target::Back);
+    }
     let Some(data) = &app.data else {
+        app.presented("Choose repository", "p", Target::Action(Action::Choose));
         ui::report(
             frame,
             area,
-            "Overview",
+            "Repository observations",
             Text::raw("Loading read-only observations..."),
             0,
             true,
@@ -123,7 +116,7 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
             "Repository",
             registration,
             if observation.and_then(|o| o.registered) == Some(true) {
-                ui::accent()
+                ui::design::Tone::Information.style()
             } else {
                 ui::warning()
             },
@@ -143,22 +136,36 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
             if blockers == Some(0) {
                 ui::heading()
             } else {
-                ui::danger()
+                ui::warning()
             },
         ),
     ];
     let mut lines = vec![];
     if let Some(result) = &app.result {
         section(&mut lines, "Last result");
-        lines.extend(result.lines().map(|line| note(line, ui::accent())));
+        lines.extend(
+            result
+                .lines()
+                .map(|line| note(line, ui::design::Tone::Information.style())),
+        );
     }
     if root.is_none() {
-        section(&mut lines, "Welcome | manage local files with previews");
+        app.presented("Choose repository", "p", Target::Action(Action::Choose));
+        app.presented("Discover files", "f", Target::Action(Action::Discover));
+        app.presented(
+            "Standalone check",
+            "v",
+            Target::Action(Action::CheckStandalone),
+        );
+        section(&mut lines, "Welcome");
         lines.push(note(
-            "Session: Create/attach / Choose repository",
-            ui::accent(),
+            "Choose a repository or create a local one to manage files.",
+            ui::muted(),
         ));
-        lines.push(note("Files: Discover | Checks: manifest", ui::accent()));
+        lines.push(note(
+            "Discovery and standalone manifest checks need no registered repository.",
+            ui::muted(),
+        ));
         lines.push(note(
             "Recovery and Diagnostics are available independently of repository selection.",
             Style::default(),
@@ -174,7 +181,7 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
     lines.push(field("Registration", registration));
     if observation.and_then(|o| o.registered) == Some(false) {
         lines.push(note(
-            "Attach before writing. n: Create/attach this repository.",
+            "Attach this repository before writing.",
             ui::warning(),
         ));
     }
@@ -204,7 +211,7 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
         lines.push(field("Blocked mappings", files.blocked));
         lines.push(field("Plan blockers", files.plan_blocked));
         lines.push(note(
-            "2 Files: inspect full source/target metadata. Apply uses the full active scope.",
+            "Files contains full source/target metadata. Apply uses the full active scope.",
             Style::default(),
         ));
     } else {
@@ -237,28 +244,85 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
         ));
     }
     lines.push(note(
-        "Use your preferred tools for providers, templates, secrets and Git writes.",
+        "Unsupported templates, secret execution, synchronization and Git writes need separate tools.",
         ui::muted(),
     ));
     lines.push(note(
         "Execution requires explicit approval of a fresh preview. Failed writes may retain partial effects.",
         ui::warning(),
     ));
-    dashboard(
-        frame,
-        area,
-        app,
-        if root.is_none() {
-            "Welcome"
+    if !app.overview_details {
+        let mut summary = Vec::new();
+        if let Some(root) = root {
+            summary.push(Line::styled(
+                ui::short_field(
+                    "Repository",
+                    root.to_str().unwrap_or("Unavailable non-UTF-8 root"),
+                    area.width,
+                ),
+                ui::heading(),
+            ));
+            summary.push(field("Profiles", data.profiles.join(", ")));
+            if let Some(files) = files {
+                summary.push(field(
+                    "Files",
+                    format!(
+                        "{} linked / {} changes / {} blocked",
+                        files.linked, files.changes, files.blocked
+                    ),
+                ));
+            } else {
+                summary.push(field("Files", "Unknown observation"));
+            }
+            if observation.and_then(|o| o.registered) == Some(false) {
+                summary.push(note(
+                    "Registration is required before writing.",
+                    ui::warning(),
+                ));
+            }
         } else {
-            "Overview"
-        },
-        metrics,
-        lines,
-    );
+            summary.push(Line::styled("Welcome", ui::heading()));
+            summary.push(note(
+                "Choose a repository or create a local one to manage files.",
+                ui::muted(),
+            ));
+            summary.push(note(
+                "Discovery, standalone checks and Recovery are independently available.",
+                ui::muted(),
+            ));
+        }
+        if let Some(error) = observation.and_then(|o| o.configuration_error.as_ref()) {
+            summary.push(field("Registry unavailable", error));
+        }
+        if let Some(error) = &data.history_error {
+            summary.push(field("History unavailable", error));
+        }
+        if let Some(result) = &app.result {
+            summary.push(Line::styled("Last result", ui::heading()));
+            summary.extend(
+                result
+                    .lines()
+                    .take(2)
+                    .map(|line| note(line, ui::design::Tone::Information.style())),
+            );
+        }
+        lines = summary;
+    }
+    dashboard(frame, area, app, "Repository observations", metrics, lines);
 }
 
 pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
+    let action = app.checks_primary();
+    app.presented(
+        match action {
+            Action::Diagnostics => "Refresh diagnostics",
+            Action::Refresh => "Check again",
+            Action::CheckCurrent => "Check repository",
+            _ => "Choose manifest",
+        },
+        "Enter",
+        Target::Action(action),
+    );
     if app.showing_diagnostics {
         diagnostics(frame, area, app);
         return;
@@ -267,7 +331,7 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
     let metrics;
     if let Some((report, standalone)) = &app.check {
         metrics = vec![
-            metric("Manifest", "Valid", ui::accent()),
+            metric("Manifest", "Valid", ui::success()),
             metric("Files", report.selected_files, ui::heading()),
             metric("Tools", report.selected_tools, ui::heading()),
         ];
@@ -329,10 +393,16 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
             metric("Tools", "Unknown", ui::muted()),
         ];
         section(&mut lines, "Check a manifest");
-        lines.push(ui::keys(&[
-            ("c", "Current repository"),
-            ("v", "Standalone manifest"),
-        ]));
+        app.presented(
+            "Check repository",
+            "c",
+            Target::Action(Action::CheckCurrent),
+        );
+        app.presented(
+            "Standalone check",
+            "v",
+            Target::Action(Action::CheckStandalone),
+        );
         lines.push(note(
             "Standalone needs no repository, registration or Git.",
             Style::default(),
@@ -342,16 +412,19 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
             ui::warning(),
         ));
     }
-    section(&mut lines, "Read-only actions");
-    lines.push(ui::keys(&[("r", "Recheck this scope")]));
+    app.presented(
+        "Recheck scope",
+        "r",
+        Target::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)),
+    );
     dashboard(
         frame,
         area,
         app,
         match &app.check {
-            Some((_, true)) => "Checks | Standalone manifest",
-            Some((_, false)) => "Checks | Repository manifest",
-            None => "Checks | Manifest result",
+            Some((_, true)) => "Standalone manifest",
+            Some((_, false)) => "Repository manifest",
+            None => "Manifest observations",
         },
         metrics,
         lines,
@@ -364,7 +437,7 @@ fn diagnostics(frame: &mut Frame, area: Rect, app: &App) {
             frame,
             area,
             "Diagnostics",
-            Text::raw("Diagnostics not loaded. j: read host, paths and registry metadata"),
+            Text::raw("Host, path and registry diagnostics not loaded."),
             0,
             true,
         );
@@ -471,11 +544,18 @@ fn diagnostics(frame: &mut Frame, area: Rect, app: &App) {
     ));
     lines.push(note("Supported: guarded local file workflows and recovery; structural checks; hardened read-only Git.", Style::default()));
     lines.push(note(
-        "Unavailable: providers, templates, secrets, cloning/sync, network and Git writes.",
+        "Unsupported: templates, secret execution, cloning/sync, Git writes and broader package installation.",
         ui::muted(),
     ));
     lines.push(note("Git requires separately installed trusted Git; other workflows remain available when Git is missing.", Style::default()));
-    lines.push(note("Configuration errors: correct configuration privately, then r to retry. Recovery remains independent.", Style::default()));
-    lines.push(ui::keys(&[("r", "Refresh Diagnostics")]));
-    dashboard(frame, area, app, "Checks | Diagnostics", metrics, lines);
+    lines.push(note(
+        "Correct configuration errors privately before refreshing. Recovery remains independent.",
+        Style::default(),
+    ));
+    app.presented(
+        "Refresh Diagnostics",
+        "r",
+        Target::Action(Action::Diagnostics),
+    );
+    dashboard(frame, area, app, "Host observations", metrics, lines);
 }

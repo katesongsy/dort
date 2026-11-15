@@ -166,7 +166,7 @@ fn table(
         .header(headers.style(ui::muted()))
         .block(ui::pane(title, selected.is_some()))
         .row_highlight_style(ui::selected())
-        .highlight_symbol("> ");
+        .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
     let mut state = TableState::default().with_selected(selected);
     frame.render_stateful_widget(table, area, &mut state);
     state.offset()
@@ -174,16 +174,11 @@ fn table(
 fn choices_hits(app: &App, area: Rect, count: usize, offset: usize, toggle: bool) {
     app.hits.wheel(area, super::input::Wheel::Choices);
     for (y, index) in (offset..count)
-        .take(usize::from(area.height.saturating_sub(3)))
+        .take(usize::from(area.height.saturating_sub(2)))
         .enumerate()
     {
         app.hits.click(
-            Rect::new(
-                area.x + 1,
-                area.y + 2 + y as u16,
-                area.width.saturating_sub(2),
-                1,
-            ),
+            Rect::new(area.x, area.y + 2 + y as u16, area.width, 1),
             super::input::Target::Picker(index, toggle),
         );
     }
@@ -228,7 +223,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
                 });
                 actions.push(ui::ActionButton {
                     label: "Create/attach",
-                    key: "F2",
+                    key: "Ctrl-N",
                     target: Target::Picker(count, true),
                 });
             }
@@ -245,14 +240,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
         area,
         &app.hits,
         ui::FormActions {
+            choices: &[],
             buttons: &actions,
-            hint: if app.shell.picker_details {
-                "F3/Esc: choices · PgUp/PgDn: inspect metadata"
-            } else if matches!(overlay, Overlay::Profiles(_)) {
-                "Up/Down: profile · Space: toggle · Enter: apply"
-            } else {
-                "Up/Down: repository · Enter: select"
-            },
+            feedback: None,
         },
     );
     if app.shell.picker_details {
@@ -274,12 +264,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
         Layout::vertical([Constraint::Min(4), Constraint::Length(detail_height)]).split(content);
     app.shell
         .page_rows
-        .set(parts[0].height.saturating_sub(3).max(1));
+        .set(parts[0].height.saturating_sub(2).max(1));
     if detail_height > 0 {
         ui::report(
             frame,
             parts[1],
-            "Selection metadata · F3 expands",
+            "Selection metadata",
             details,
             app.shell.scroll,
             false,

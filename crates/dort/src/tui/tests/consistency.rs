@@ -27,6 +27,7 @@ fn menu_labels_have_unique_working_local_shortcuts_and_keep_guards() {
             let mut app = App::new(false);
             let blocked = matches!(entry.item, navigation::Item::Action(action) if app.action_reason(action).is_some());
             app.open_menu(group, 80);
+            key(&mut app, KeyCode::Enter, 80, 24);
             let _ = key(&mut app, code, 80, 24);
             assert!(app.preview.is_none() && app.confirmation.is_none());
             if code == KeyCode::F(1) {
@@ -69,8 +70,8 @@ fn form_pages_keep_controls_draft_focus_and_explicit_metadata_at_all_sizes() {
         app.shell.adoption.target = format!("~/{}", "long-segment/".repeat(35));
         let before = app.shell.adoption.target.clone();
         let screen = render(&app, w, h);
-        assert!(screen.contains("TARGET") && screen.contains("Page ·"));
-        key(&mut app, KeyCode::F(2), w, h);
+        assert!(screen.contains("TARGET") && screen.starts_with("Dort /"));
+        key(&mut app, KeyCode::F(3), w, h);
         assert!(app.shell.form_details);
         for code in [KeyCode::PageDown, KeyCode::PageDown, KeyCode::PageUp] {
             let old = app.shell.scroll;
@@ -149,8 +150,8 @@ fn marked_editor_pages_keep_table_review_controls_and_drafts_inline() {
             let screen = render(&app, w, h);
             assert!(
                 screen.contains("TARGET")
-                    && screen.contains("Review all")
-                    && screen.contains("Edit item")
+                    && super::tests::has_action(&app, "Review all")
+                    && super::tests::has_action(&app, "Edit item")
             );
             assert!(key(&mut app, code, w, h).is_none());
             let editor = app.batch_editor.as_ref().unwrap();
@@ -238,13 +239,22 @@ fn workspace_toolbar_has_one_row_and_overlay_uses_reclaimed_space() {
     })));
     let screen = render(&app, 80, 24);
     let rows: Vec<_> = screen.lines().collect();
-    let apply = rows.iter().position(|row| row.contains("[Apply")).unwrap();
-    assert_eq!(apply, rows.len() - 3); // one action row, status, global hints
+    assert!(rows.last().unwrap().contains("F2 More"));
+    assert_eq!(screen.matches("F2").count(), 1);
+    assert_eq!(screen.matches("F1").count(), 1);
+    assert!(super::workbench::actions(&app).iter().any(|a| matches!(
+        a.target,
+        super::input::Target::Action(super::shell::Action::Apply)
+    )));
     assert!(!screen.contains("[Inspect"));
     key(&mut app, KeyCode::Char(';'), 48, 14);
     let screen = render(&app, 48, 14);
-    assert!(screen.lines().nth(2).unwrap().contains("Search by label"));
-    assert!(screen.contains("Metadata"));
+    assert!(screen.lines().nth(2).unwrap().contains("Find an action"));
+    assert!(
+        super::workbench::actions(&app)
+            .iter()
+            .any(|a| matches!(a.target, super::input::Target::PickerDetails))
+    );
     key(&mut app, KeyCode::F(3), 48, 14);
     assert!(render(&app, 48, 14).contains("Action details"));
 }

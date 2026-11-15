@@ -64,19 +64,12 @@ fn all_provider_failures_keep_presence_separate_and_fresh_entry_is_navigation_on
             assert!(
                 screen.contains("Process failed")
                     && screen.contains("reported present")
-                    && screen.contains("Start fresh review"),
+                    && super::tests::has_action(&app, "Start fresh review"),
                 "{screen}"
             );
             let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
             terminal.draw(|frame| views::draw(frame, &app)).unwrap();
-            assert!(
-                terminal
-                    .backend()
-                    .buffer()
-                    .content
-                    .iter()
-                    .any(|c| c.bg == Color::Cyan)
-            );
+            super::tests::assert_primary_action(&terminal);
         }
         key(&mut app, KeyCode::Char('d'));
         assert!(key(&mut app, KeyCode::Enter).is_none());
@@ -202,7 +195,7 @@ fn fresh_query_still_needs_approval_new_binding_and_new_install_review() {
     app.tools_view.reconciliation.completed(Ok(old));
     app.tools_view.recon_open = true;
     assert!(key(&mut app, KeyCode::Char('i')).is_none());
-    assert!(render(&app, 48, 14).contains("Collect fresh inventory"));
+    assert!(super::tests::has_action(&app, "Collect fresh inventory"));
     let fresh = request
         .prepare(&f.host)
         .unwrap()
@@ -250,8 +243,8 @@ fn unresolved_and_closed_attempt_details_never_offer_replay_or_implied_success()
         let text = render(&app, size.0, size.1);
         assert!(
             text.contains("UNRESOLVED")
-                && text.contains("Review closure")
-                && text.contains("Start fresh review"),
+                && super::tests::has_action(&app, "Review closure")
+                && super::tests::has_action(&app, "Start fresh review"),
             "{text}"
         );
     }

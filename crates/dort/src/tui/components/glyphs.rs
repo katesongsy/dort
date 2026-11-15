@@ -17,7 +17,7 @@ pub fn ascii(symbol: &str) -> Option<&'static str> {
         "─" => Some("-"),
         "│" | "·" => Some("|"),
         "▾" => Some("v"),
-        "▸" | "›" => Some(">"),
+        symbol if symbol == EXPAND || symbol == SELECTED => Some(">"),
         "✓" => Some("+"),
         "×" => Some("x"),
         "█" => Some("#"),

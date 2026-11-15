@@ -31,7 +31,7 @@ const INVENTORY_ACTIONS: [(&str, KeyCode, &str); 8] = [
     ("Installation attempts", KeyCode::Char('i'), "Metadata"),
 ];
 const LABELS: [&str; 7] = [
-    "Provider · Space cycles brew/apt/mise/npm",
+    "Provider",
     "Trusted executable (Node for npm) · absolute",
     "Trusted search directories · colon-separated",
     "Manifest · absolute (npm)",
@@ -43,6 +43,7 @@ pub struct State {
     pub query: usize,
     pub fields: [String; 6],
     pub configuring: bool,
+    pub config_details: bool,
     pub setup: bool,
     pub defaults: Option<crate::services::inspection_defaults::Defaults>,
     pub default_focus: usize,
@@ -69,7 +70,6 @@ pub struct State {
     pub search: String,
     pub searching: bool,
     pub details: bool,
-    pub inventory_more: Option<usize>,
     pub selected: usize,
     pub scroll: u16,
     matching: Vec<usize>,
@@ -81,6 +81,7 @@ impl Default for State {
             query: 0,
             fields: Default::default(),
             configuring: false,
+            config_details: false,
             setup: false,
             defaults: None,
             default_focus: 0,
@@ -107,7 +108,6 @@ impl Default for State {
             search: String::new(),
             searching: false,
             details: false,
-            inventory_more: None,
             selected: 0,
             scroll: 0,
             matching: vec![],
@@ -124,10 +124,9 @@ impl State {
         }
     }
     pub fn text_entry(&self) -> bool {
-        self.declaration_open
+        (self.declaration_open && !self.declaration.details)
             || (self.install_open && self.installation.text_entry())
-            || self.configuring
-            || self.preview.is_some()
+            || (self.configuring && !self.config_details)
             || self.searching
             || (self.recon_open && self.reconciliation.text_entry())
     }
@@ -160,6 +159,7 @@ impl State {
         self.notice = None;
         self.setup = false;
         self.configuring = true;
+        self.config_details = false;
         self.focus = 0;
     }
     pub fn defaults_ready(&mut self, defaults: crate::services::inspection_defaults::Defaults) {
@@ -297,7 +297,7 @@ impl State {
             && !self.details
     }
     pub fn leave(&mut self) {
-        self.inventory_more = None;
+        self.config_details = false;
         self.fresh_review = false;
         self.preview = None;
         self.defaults = None;
@@ -315,7 +315,6 @@ impl State {
         self.declaration_open = true;
     }
     pub fn shrink(&mut self) {
-        self.inventory_more = None;
         self.installation.clear_approvals();
         if self.setup {
             self.defaults = None;
@@ -431,33 +430,6 @@ impl State {
     }
     /// Some means locally handled, including printable text that must not become shortcuts.
     pub fn key(&mut self, key: KeyEvent, dry_run: bool) -> Option<Option<Task>> {
-        if let Some(selected) = self.inventory_more.as_mut() {
-            match key.code {
-                KeyCode::Esc | KeyCode::F(2) => self.inventory_more = None,
-                KeyCode::Down | KeyCode::Tab => {
-                    *selected = (*selected + 1) % INVENTORY_ACTIONS.len()
-                }
-                KeyCode::Up | KeyCode::BackTab => {
-                    *selected = (*selected + INVENTORY_ACTIONS.len() - 1) % INVENTORY_ACTIONS.len()
-                }
-                KeyCode::PageDown => *selected = (*selected + 3).min(INVENTORY_ACTIONS.len() - 1),
-                KeyCode::PageUp => *selected = selected.saturating_sub(3),
-                KeyCode::Home => *selected = 0,
-                KeyCode::End => *selected = INVENTORY_ACTIONS.len() - 1,
-                KeyCode::Enter => {
-                    let code = INVENTORY_ACTIONS[*selected].1;
-                    self.inventory_more = None;
-                    self.searching = false;
-                    return self.key(KeyEvent::new(code, KeyModifiers::NONE), dry_run);
-                }
-                _ => (),
-            }
-            return Some(None);
-        }
-        if key.code == KeyCode::F(2) && self.browsing_inventory() {
-            self.inventory_more = Some(0);
-            return Some(None);
-        }
         if self.install_open {
             return Some(match self.installation.key(key, dry_run, &self.snapshots) {
                 Some(super::tools_install::Outcome::Back) => {
@@ -480,7 +452,7 @@ impl State {
             });
         }
         if self.declaration_open {
-            if key.code == KeyCode::Esc {
+            if key.code == KeyCode::Esc && !self.declaration.details {
                 self.declaration_open = false;
                 return Some(None);
             }
@@ -546,7 +518,7 @@ impl State {
         }
         if self.setup && self.details {
             match key.code {
-                KeyCode::Char('d') | KeyCode::Esc => self.details = false,
+                KeyCode::Char('d') | KeyCode::F(3) | KeyCode::Esc => self.details = false,
                 KeyCode::PageDown => self.scroll = self.scroll.saturating_add(3),
                 KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(3),
                 KeyCode::Home => self.scroll = 0,
@@ -596,7 +568,7 @@ impl State {
                         self.default_feedback = None;
                     } else {
                         self.default_feedback = Some(
-                            "Inventory unavailable. Press e to enter the missing trusted scope.",
+                            "Inventory unavailable. Advanced settings contain the missing trusted scope.",
                         );
                     }
                 }
@@ -607,7 +579,7 @@ impl State {
                 KeyCode::Char('r') => {
                     return Some(Some(self.configure()));
                 }
-                KeyCode::Char('d') => self.details = !self.details,
+                KeyCode::Char('d') | KeyCode::F(3) => self.details = !self.details,
                 KeyCode::PageDown => self.scroll = self.scroll.saturating_add(3),
                 KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(3),
                 _ => (),
@@ -635,7 +607,22 @@ impl State {
             }
             return Some(None);
         }
+        if self.configuring && self.config_details {
+            match key.code {
+                KeyCode::Esc | KeyCode::F(3) => self.config_details = false,
+                KeyCode::Down | KeyCode::PageDown => self.scroll = self.scroll.saturating_add(2),
+                KeyCode::Up | KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(2),
+                KeyCode::Home => self.scroll = 0,
+                _ => (),
+            }
+            return Some(None);
+        }
         if self.configuring {
+            if key.code == KeyCode::F(3) {
+                self.config_details = true;
+                self.scroll = 0;
+                return Some(None);
+            }
             let controls = self.controls();
             let pos = controls.iter().position(|i| *i == self.focus).unwrap_or(0);
             match key.code {
@@ -673,6 +660,12 @@ impl State {
             }
             return Some(None);
         }
+        if key.code == KeyCode::F(3) && self.report.is_some() {
+            self.details = !self.details;
+            self.searching = false;
+            self.scroll = 0;
+            return Some(None);
+        }
         if self.searching {
             match key.code {
                 KeyCode::Enter | KeyCode::Esc => self.searching = false,
@@ -707,6 +700,7 @@ impl State {
                 }));
             }
             KeyCode::Char('/') => self.searching = true,
+            KeyCode::Enter if self.report.is_none() => return Some(Some(self.configure())),
             KeyCode::Char('d') | KeyCode::Enter if self.report.is_some() => {
                 self.details = !self.details;
                 self.scroll = 0;
@@ -765,10 +759,19 @@ impl State {
             return;
         }
         if self.catalog_browser {
-            let mut lines = vec![Line::styled(
-                "Session snapshots · Enter selects · x forgets metadata · Esc back",
-                ui::heading(),
-            )];
+            if !self.snapshots.is_empty() {
+                hits.present(ui::ActionButton {
+                    label: "Forget inspection metadata",
+                    key: "x",
+                    target: Target::Key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+                });
+                hits.present(ui::ActionButton {
+                    label: "Select inspection",
+                    key: "Enter",
+                    target: Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+                });
+            }
+            let mut lines = vec![Line::styled("Previous inspections", ui::heading())];
             let capacity = usize::from(area.height.saturating_sub(2)).max(1);
             let offset = self.current.saturating_sub(capacity - 1);
             for (i, snapshot) in self
@@ -802,9 +805,7 @@ impl State {
                 ));
             }
             if self.snapshots.is_empty() {
-                lines.push(Line::raw(
-                    "No snapshots collected. Esc then c finds inspection defaults.",
-                ));
+                lines.push(Line::raw("No inspections collected."));
             }
             frame.render_widget(Paragraph::new(lines), area);
             return;
@@ -818,50 +819,101 @@ impl State {
             return;
         }
         if self.configuring {
+            if self.config_details {
+                let text = serde_json::to_string_pretty(&serde_json::json!({"provider":format!("{:?}", QUERIES[self.query]), "program":self.fields[0], "search_directories":self.fields[1], "manifest":self.fields[2], "runtime_tool":self.fields[3], "npm_cli":self.fields[4], "prefix":self.fields[5]})).expect("draft metadata serializes");
+                ui::report(
+                    frame,
+                    area,
+                    "Draft scope (not an approved review)",
+                    ui::review_text(&text),
+                    self.scroll,
+                    false,
+                );
+                hits.present(ui::ActionButton {
+                    label: "Fields",
+                    key: "Esc",
+                    target: Target::Back,
+                });
+                return;
+            }
             self.form(frame, area, hits);
             return;
         }
         if self.preview.is_some() {
-            let warning = "Risk: config/plugins may execute code; caches/logs may change. Not a sandbox. Esc returns to draft. PgUp/PgDn scroll exact query.";
+            let warning = if dry_run {
+                "Preview only: execution disabled. Config/plugins may execute code; caches/logs may change. Not a sandbox."
+            } else {
+                "Risk: config/plugins may execute code; caches/logs may change. Not a sandbox."
+            };
+            let warning_height = if dry_run { 3 } else { 2 };
             ui::prose(
                 frame,
-                Rect::new(area.x, area.y, area.width, 2),
+                Rect::new(area.x, area.y, area.width, warning_height),
                 warning,
                 ui::warning(),
             );
-            let height = area.height.saturating_sub(5);
+            let height = area.height.saturating_sub(warning_height);
             ui::report(
                 frame,
-                Rect::new(area.x, area.y + 2, area.width, height),
+                Rect::new(area.x, area.y + warning_height, area.width, height),
                 "Exact provider query · no installation",
                 ui::review_text(&self.scope),
                 self.scroll,
                 false,
             );
-            let button = Rect::new(area.x, area.bottom().saturating_sub(2), area.width, 1);
-            frame.render_widget(
-                Paragraph::new(Line::from(ui::button(
-                    if dry_run {
-                        "Preview only · execution disabled"
-                    } else {
-                        "Run query · Enter"
-                    },
-                    "",
-                    !dry_run,
-                ))),
-                button,
-            );
             if !dry_run {
-                hits.click(button, Target::ProviderConfirm);
+                hits.present(ui::ActionButton {
+                    label: "Run query",
+                    key: "Enter",
+                    target: Target::ProviderConfirm,
+                });
             }
             return;
         }
         let Some(report) = &self.report else {
+            hits.present(ui::ActionButton {
+                label: "Find inspection sources",
+                key: "Enter",
+                target: Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            });
+            for (label, key, action) in [
+                (
+                    "Inspect installed tools",
+                    "c",
+                    super::shell::Action::ToolsConfigure,
+                ),
+                (
+                    "Add declaration",
+                    "a",
+                    super::shell::Action::ToolDeclaration,
+                ),
+                (
+                    "Compare declared tools",
+                    "p",
+                    super::shell::Action::ToolsReconcile,
+                ),
+                (
+                    "Previous inspections",
+                    "s",
+                    super::shell::Action::ToolsSnapshots,
+                ),
+                (
+                    "Installation attempts",
+                    "i",
+                    super::shell::Action::ToolAttempts,
+                ),
+            ] {
+                hits.present(ui::ActionButton {
+                    label,
+                    key,
+                    target: Target::Action(action),
+                });
+            }
             if self.next_id > 1 {
                 ui::prose(
                     frame,
                     area,
-                    "No snapshots retained. Earlier inspections may have run; forgetting metadata does not undo provider side effects.\n\nc finds inspection defaults; s browses snapshots; p compares declarations without provider queries.",
+                    "No inspections retained. Forgetting metadata does not undo earlier provider side effects.",
                     ui::muted(),
                 );
                 return;
@@ -869,26 +921,57 @@ impl State {
             ui::prose(
                 frame,
                 area,
-                "Inspect installed tools\n\nc: find defaults and review installed package/version inventories. Nothing runs until you confirm. No packages are installed.\n\na: add a desired tool declaration; s: browse inspection results; p: compare declarations with selected snapshots.\n\ne: Advanced manual inspection settings.",
+                "No inspection collected yet. Review installed package inventories, declare a desired tool, or compare declarations with explicitly selected inspections. Nothing runs until you approve its review.",
                 ui::muted(),
             );
             return;
         };
+        hits.present(ui::ActionButton {
+            label: if self.details {
+                "Packages"
+            } else {
+                "Inspection details"
+            },
+            key: "F3",
+            target: Target::Key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE)),
+        });
         if self.details {
-            let selected = match &report.provider.observation {
-                Observation::Complete { installations } => self.matching.get(self.selected).map(|i| format!("Selected provider claim (not binary ownership):\nPackage: {}\nVersion: {}\n\n", installations[*i].package, installations[*i].version)).unwrap_or_default(),
-                _ => String::new(),
-            };
+            hits.present(ui::ActionButton {
+                label: "Back",
+                key: "Enter",
+                target: Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            });
+            let mut lines = vec![];
+            if let Observation::Complete { installations } = &report.provider.observation
+                && let Some(selected) = self
+                    .matching
+                    .get(self.selected)
+                    .and_then(|i| installations.get(*i))
+            {
+                lines.push(Line::styled(
+                    "Selected provider claim (not binary ownership)",
+                    ui::heading(),
+                ));
+                lines.push(ui::metadata("Package", &selected.package));
+                lines.push(ui::metadata("Version", &selected.version));
+                lines.push(Line::default());
+            }
+            lines.extend(ui::review_text(&self.scope).lines);
             ui::report(
                 frame,
                 area,
-                "Inspection scope · Esc/Enter returns · PgUp/PgDn scroll",
-                ui::review_text(&format!("{selected}{}", self.scope)),
+                "Inspection scope",
+                lines.into(),
                 self.scroll,
                 false,
             );
             return;
         }
+        hits.present(ui::ActionButton {
+            label: if self.searching { "Done" } else { "Details" },
+            key: "Enter",
+            target: Target::InventoryKey(KeyCode::Enter),
+        });
         let provider = match report.provider.description.query {
             Query::BrewFormulae => "Homebrew",
             Query::DpkgPackages => "APT",
@@ -924,7 +1007,7 @@ impl State {
             Rect::new(area.x, area.y + 1, area.width, 1),
             "Filter packages",
             &self.search,
-            self.searching && self.inventory_more.is_none() && hits.input_focus_allowed(),
+            self.searching && hits.input_focus_allowed(),
         );
         hits.click(filter, Target::InventoryKey(KeyCode::Char('/')));
         let rows = Rect::new(
@@ -993,56 +1076,28 @@ impl State {
             }
         }
     }
-    pub fn draw_inventory_more(
-        &self,
-        frame: &mut Frame,
-        hits: &super::input::Hits,
-        notice: Option<&'static str>,
-    ) {
-        let Some(selected) = self.inventory_more else {
-            return;
-        };
-        let area = ui::design::choice_dialog(frame, "More actions", hits);
-        let body = Rect::new(
-            area.x,
-            area.y,
-            area.width,
-            area.height.saturating_sub(u16::from(notice.is_some())),
-        );
-        let capacity = ui::design::pair_capacity(body).max(1);
-        let offset = selected.saturating_sub(capacity - 1);
-        let rows: Vec<_> = INVENTORY_ACTIONS
+    pub fn browse_actions(&self) -> Vec<ui::ActionButton> {
+        INVENTORY_ACTIONS
             .iter()
-            .enumerate()
-            .skip(offset)
-            .take(capacity)
-            .map(|(identity, (label, _, effect))| ui::design::PairRow {
-                identity,
-                values: [label, effect],
+            .map(|(label, code, _)| ui::ActionButton {
+                label,
+                key: match code {
+                    KeyCode::Char(_) if self.searching => "", // More owns this explicit action; printable keys still edit the filter.
+                    KeyCode::Char('d') => "d",
+                    KeyCode::Char('r') => "r",
+                    KeyCode::Char('e') => "e",
+                    KeyCode::Char('/') => "/",
+                    KeyCode::Char('p') => "p",
+                    KeyCode::Char('a') => "a",
+                    KeyCode::Char('s') => "s",
+                    _ => "i",
+                },
+                target: Target::InventoryKey(*code),
             })
-            .collect();
-        ui::design::pairs(
-            frame,
-            body,
-            ui::design::PairTable {
-                headers: ["ACTION", "EFFECT"],
-                rows: &rows,
-                selected,
-            },
-            hits,
-            Target::InventoryChoice,
-        );
-        if let Some(notice) = notice {
-            ui::chrome_prose(
-                frame,
-                Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1),
-                notice,
-                ui::warning(),
-            );
-        }
+            .collect()
     }
     fn form(&self, frame: &mut Frame, area: Rect, hits: &super::input::Hits) {
-        let provider = format!("{:?}", QUERIES[self.query]);
+        let provider = ["Homebrew", "APT", "mise", "npm"][self.query].to_owned();
         let mut fields = vec![(LABELS[0], provider.as_str())];
         for (i, label) in LABELS
             .iter()
@@ -1060,12 +1115,20 @@ impl State {
             hits,
             |i| Target::ToolsControl(i, false),
             ui::FormActions {
-                buttons: &[ui::ActionButton {
-                    label: "Review exact query",
-                    key: "Enter",
-                    target: Target::ToolsControl(7, true),
-                }],
-                hint: "Tab: fields · Enter: review query · Esc: Back · Ctrl-U clears",
+                choices: &[0],
+                buttons: &[
+                    ui::ActionButton {
+                        label: "Review exact query",
+                        key: "Enter",
+                        target: Target::ToolsControl(7, true),
+                    },
+                    ui::ActionButton {
+                        label: "Draft metadata",
+                        key: "F3",
+                        target: Target::Key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE)),
+                    },
+                ],
+                feedback: None,
             },
         );
     }

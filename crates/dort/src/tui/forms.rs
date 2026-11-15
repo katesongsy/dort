@@ -10,13 +10,6 @@ pub enum Command {
     Discard,
     Details,
 }
-pub fn enter_hint(_app: &App, form: Form) -> &'static str {
-    match form {
-        Form::Choose => "Select",
-        Form::Check => "Check",
-        _ => "Review",
-    }
-}
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
     let s = &app.shell;
     let (fields, focus, primary): (Vec<(&str, &str)>, usize, &'static str) = match form {
@@ -98,7 +91,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
     }
     actions.push(ui::ActionButton {
         label: "Details",
-        key: "F2",
+        key: "F3",
         target: Target::FormAction(Command::Details),
     });
     ui::field_page(
@@ -109,8 +102,15 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
         &app.hits,
         |i| Target::FormControl(i, false),
         ui::FormActions {
+            choices: &[],
             buttons: &actions,
-            hint: "Tab: fields · Enter: primary action · Esc: Back (draft retained)",
+            feedback: s
+                .form_feedback
+                .filter(|(owner, _)| *owner == form)
+                .map(|(_, text)| ui::Feedback {
+                    text,
+                    tone: ui::design::Tone::Attention,
+                }),
         },
     );
 }

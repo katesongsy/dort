@@ -94,19 +94,23 @@ mod tests {
         let mut app = App::new(false);
         app.start(true);
         app.key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), 80, 24);
-        assert!(app.tab == Tab::Files);
+        let navigation_paused = app.tab == Tab::Overview && app.interaction_notice.is_some();
         app.key(
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
             80,
             24,
         );
-        assert!(app.exit_requested && !app.quit);
-        assert!(!worker.finished());
+        let joined_exit_requested = app.exit_requested && !app.quit;
+        let was_waiting = !worker.finished();
         // Simulate rendering/input failure: dropping the owned worker must join it.
         let cleanup = thread::spawn(move || drop(worker));
-        assert!(completed.try_recv().is_err());
+        let cleanup_waited = completed.try_recv().is_err();
+        // Release and join before asserting, so a failed input assertion cannot
+        // deadlock the test while Worker::drop correctly waits for this channel.
         release.send(()).unwrap();
         cleanup.join().unwrap();
         completed.recv().unwrap();
+        assert!(navigation_paused);
+        assert!(joined_exit_requested && was_waiting && cleanup_waited);
     }
 }

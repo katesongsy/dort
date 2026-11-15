@@ -133,7 +133,8 @@ pub fn filter(
     let width = usize::from(input.width - 2);
     let escaped = ui::inline(value);
     // Escaping produces ASCII, so a tail cannot split an untrusted terminal cell.
-    let visible = &escaped[escaped.len().saturating_sub(width)..];
+    let value_width = width.saturating_sub(usize::from(focused));
+    let visible = &escaped[escaped.len().saturating_sub(value_width)..];
     let boundary = if focused { ui::accent() } else { ui::muted() };
     let line = Line::from(vec![
         Span::styled("[", boundary),
@@ -142,12 +143,29 @@ pub fn filter(
     ]);
     frame.render_widget(Paragraph::new(line), input);
     if focused {
-        frame.set_cursor_position((
-            input.x + 1 + visible.len().min(width.saturating_sub(1)) as u16,
-            input.y,
-        ));
+        frame.set_cursor_position((input.x + 1 + visible.len() as u16, input.y));
     }
     input
+}
+
+/// A choice control is visibly editable but never owns a text caret.
+pub fn choice(frame: &mut Frame, area: Rect, value: &str, focused: bool) {
+    if area.width < 5 || area.height == 0 {
+        return;
+    }
+    let width = usize::from(area.width - 4);
+    let escaped = ui::inline(value);
+    let visible = &escaped[escaped.len().saturating_sub(width)..];
+    let boundary = if focused { ui::accent() } else { ui::muted() };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("[", boundary),
+            Span::raw(format!("{visible:width$} ")),
+            Span::styled(glyphs::MENU, boundary),
+            Span::styled("]", boundary),
+        ])),
+        Rect::new(area.x, area.y, area.width, 1),
+    );
 }
 
 pub struct PairRow<'a> {
@@ -169,6 +187,18 @@ pub fn pairs(
     hits: &Hits,
     target: impl Fn(usize) -> Target,
 ) {
+    pairs_with_disclosure(frame, area, table, hits, target, false);
+}
+
+/// Metadata stays escaped; the optional disclosure glyph is trusted decoration.
+pub fn pairs_with_disclosure(
+    frame: &mut Frame,
+    area: Rect,
+    table: PairTable<'_>,
+    hits: &Hits,
+    target: impl Fn(usize) -> Target,
+    disclosure: bool,
+) {
     if area.height < 2 {
         return;
     }
@@ -187,7 +217,17 @@ pub fn pairs(
             let current = row.identity == table.selected;
             Row::new([
                 Cell::from(if current { glyphs::SELECTED } else { " " }).style(ui::accent()),
-                Cell::from(ui::clip(row.values[0], left)),
+                Cell::from(Line::from(vec![
+                    Span::raw(ui::clip(
+                        row.values[0],
+                        left.saturating_sub(if disclosure { 2 } else { 0 }),
+                    )),
+                    Span::raw(if disclosure {
+                        format!(" {}", glyphs::EXPAND)
+                    } else {
+                        String::new()
+                    }),
+                ])),
                 Cell::from(ui::clip(row.values[1], right)),
             ])
             .style(if current {

@@ -4,10 +4,7 @@ use super::{
     components as ui,
     shell::{Form, Overlay},
 };
-use ratatui::{
-    Frame,
-    text::{Line, Text},
-};
+use ratatui::Frame;
 
 #[derive(Clone, Copy)]
 pub enum Topic {
@@ -23,6 +20,8 @@ pub enum Topic {
     Tools,
     Actions,
     Menu,
+    More,
+    Choice,
     Form(Form),
     Picker,
     Ignored,
@@ -49,7 +48,9 @@ impl Topic {
             Self::Tools => "Explicit provider inspection",
             Self::GitContent => "Git content disclosure",
             Self::Actions => "Actions",
-            Self::Menu => "Navigation menus",
+            Self::Menu => "Places",
+            Self::More => "More actions",
+            Self::Choice => "Choose a value",
             Self::Form(_) => "Form",
             Self::Picker => "Session picker",
             Self::Ignored => "Ignored paths / Unignore",
@@ -65,87 +66,209 @@ impl Topic {
     }
     fn instructions(self) -> &'static str {
         match self {
-            Self::Tools => {
-                "Tools finds inspection defaults without running commands. Review the selected inventories, then activate Inspect installed tools once. Up/Down selects a manager; Space toggles it. e opens Advanced for the selected manager; d shows exact scopes; r refreshes suggestions without executing. Unavailable npm defaults need a declared Node runtime and matching Node/CLI/prefix scope; e opens the missing detail. Enter on any manager row inspects the explicitly selected inventories. c starts a fresh default review. Advanced retains per-provider overrides; Tab moves fields only and Enter requests Review from any field. Activate Run query to run a manual scope once. Configuration/plugins may execute code and caches may change. Preview-only and small layouts cannot execute. Results are session snapshots (s1, s2...), not ownership. / searches metadata; d shows full scope; r prepares a fresh review, never replays approval. s browses snapshots; x there forgets only session metadata. p loads a manifest, separate explicit tool-search dirs and profiles without a provider query. Space explicitly binds each tool to a snapshot; unbound stays not observed. d inspects the chosen binding. Reconcile reads binary metadata without executing candidates; results are package proposals/no-ops, never tool readiness or installation authority. a opens an add-only tool declaration form for the selected registered repository. Review, then Confirm; this edits only dort.toml, not installed packages. Esc retains drafts. An eligible missing exact mise/npm package or canonical Homebrew core formula offers i / Review install. Review is process-free; one Enter/click approves fresh inspection, conditional installation and post-inspection. The install has a 10-minute deadline; quit waits and partial effects have no rollback. Mise stays inactive. npm native bin/man links may expose commands. Homebrew selects provider-current versions; build/dependency code can execute, dependencies may upgrade and native links may expose commands. Its help/layout/formula/catalog probes are included in approval; a opens Advanced prefix. APT offers a separate root-risk review for one missing literal Ubuntu package: root hooks/scripts, dependency upgrades, services and system/config/data effects are possible. a opens retained apt-cache/apt-get/sudo inputs. sudo -n refuses prompts and -T 600 needs policy permission; no password handling or weaker fallback. An overdue supervisor keeps waiting joined; no proof all root descendants terminated. APT closure needs only fresh complete dpkg inventory. Tools > Installation attempts (i outside comparison) distinguishes exact/current package reports, failed processes even with a present package, absent/conflicting/unavailable observations, unresolved metadata and historical closure; d shows independent process/package/binary facts, not readiness or ownership. Results/attempts/details offer f / Start fresh review: navigation to inventory review only, with retained drafts, no query, replay or automatic binding. Separately approve fresh inventories, p compares declarations, explicitly bind new IDs, then approve a new install review. Unresolved guards remain; c reviews a fresh query and closure of an unresolved attempt. Missing original scope opens retained provider fields. Closure never replays or repairs a package."
-            }
-            Self::Menu => {
-                "Menus organize navigation and session commands. Pages keep menus available, including while editing fields. Opening and dismissing a menu retains the draft and focus; choosing a destination discards its pending approval. Framed dialogs and running work pause navigation and explain why. Left/Right selects a menu; Up/Down chooses an item; Enter opens it, or press its labeled shortcut. In compact layouts choose a group first; Left returns to groups. Esc closes. Unavailable entries show the requirement to continue. Operation and patch commands open their respective review screens."
-            }
             Self::Overview => {
-                "Overview summarizes repository, profiles and file state. Session selects a repository or creates/attaches one. Files offers discovery and managed mappings; Checks validates declarations; Recovery inspects retained transactions; Git shows status and diffs; Tools separately reviews and approves provider queries."
+                "Start with a repository, inspect observations, then review exact changes."
             }
             Self::Discover => {
-                "Up/Down selects a path; h/l folds directories. Space marks eligible files, including matching folded descendants. Enter inspects metadata. Adopt selected edits target, ID and source; E reviews marked adoption. I reviews Ignore selected; Files > Ignored paths manages saved exclusions. / filters the list."
+                "Inspect a selected file first. Adoption is a separate, reviewed action."
             }
             Self::Content => {
-                "Tab switches the file list and content pane. Up/Down scrolls the focused pane; Ctrl-F/B pages and gg/G moves to the ends. Line numbers identify source lines; continuation rows share a gutter. Configuration keys are emphasized. Content reads are bounded; sensitive/binary files are withheld. Help and menus release content; returning rereads the selected eligible file."
+                "Only the selected eligible file is read; the preview is bounded and ephemeral."
             }
             Self::Managed => {
-                "Up/Down selects; h/l folds; gg/G moves to the ends. Space marks an item or group, including folded descendants. Enter inspects. u reviews Keep for the selected mapping. Apply uses the full active-profile scope; A/K/D review marked apply/keep/delete. Keep materializes an ordinary local file; Delete removes the managed link. Repository sources remain. / filters the display."
+                "Inspect linked-file observations. Filters never narrow a later whole-scope apply."
             }
             Self::Recovery => {
-                "Recovery lists transactions across repositories. Select one to inspect history, integrity and eligibility. Rollback, Resume and Abandon each request a fresh core preview. Review exact paths and effects before approval. Later edits may block execution. Abandon retains published repositories, registration and private artifacts."
+                "Inspect all-repository transaction metadata before requesting guarded recovery."
             }
             Self::Checks => {
-                "Manifest checks inspect declarations and effective profiles. Check current validates the selected repository; Check manifest accepts an independent path. Profiles adds session contributors to the mandatory profile union. Diagnostics shows host, paths and registry observations."
+                "Structural checks validate declarations, not live files or installed-tool readiness."
             }
             Self::Diagnostics => {
-                "Diagnostics summarizes the host, capabilities, resolved paths and registry metadata. Unavailable observations carry their cause. Refresh diagnostics retries the read. Live file inspection belongs in Files; installed tool readiness requires your own verification."
+                "Content-free host, path, registry and history availability facts."
             }
             Self::Git => {
-                "Choose Status, Unstaged or Staged in the Git menu. Choose Git scope selects an independent root; Follow selected repository restores repository scope. / searches metadata; Enter inspects; View patch opens a content warning. Manage commits, branches and synchronization with your preferred Git tool."
+                "Read-only status and comparison metadata. Patch content has its own disclosure gate."
             }
             Self::GitContent => {
-                "A patch may expose secrets. Activate View patch to disclose the requested comparison once. Headers and hunks are emphasized; + marks additions and - marks removals. PgUp/PgDn scrolls vertically; Left/Right scrolls horizontally. Esc releases the view. Help hides the retained view; shrinking below the layout floor releases it. Released bytes may remain in memory."
+                "Patches may contain secrets. Each new view requires deliberate disclosure."
             }
-            Self::Actions => {
-                "Actions contains operations for the current view, selection and marked set. Menus organize navigation and session controls. Type a label to search; Up/Down selects; Enter requests. / refocuses search. Esc closes Actions directly. F3 opens full action metadata, including unavailable reasons; Esc returns to choices. PgUp/PgDn scroll metadata; Home goes to its top. Execution scope comes from the operation's review."
+            Self::Tools => {
+                "Provider queries and installations require their own real, single-use reviews."
+            }
+            Self::Actions => "Find a task by name. Unavailable tasks explain their prerequisites.",
+            Self::Menu => {
+                "Choose a destination group, then a place or task. Opening/dismissing retains drafts."
+            }
+            Self::More => {
+                "Choose a contextual action. This menu never grants an execution approval."
+            }
+            Self::Choice => {
+                "Select a draft value or explicit snapshot binding; no provider executes."
             }
             Self::Form(Form::Adopt) => {
-                "Tab/Shift-Tab moves among TARGET, ID and SOURCE only. Enter requests a review from any field. Footer actions are direct buttons, not focus stops. Ctrl-R chooses a repository, Ctrl-N opens create/attach, and Ctrl-D resets. F2 shows full metadata. SOURCE is repository-relative. Inspect contents privately before adoption. Esc retains the draft. Explicit Adopt all on the combined preview approves adoption."
-            }
-            Self::Form(Form::KeepId | Form::RemoveId) => {
-                "Enter an exact mapping ID and request its preview. Keep materializes an ordinary file; Delete removes the managed link. Both retain the repository source. Confirmation shows and binds the exact selected mapping without a typing challenge."
+                "Declare one ordinary file mapping, then review the real adoption effects."
             }
             Self::Form(Form::Check) => {
-                "Enter a manifest path and optional profile additions. Relative paths resolve from the launch directory. Enter requests a structural check. Local profiles contribute to the effective union. Esc retains the draft."
+                "Check an independent manifest with explicit temporary profile additions."
             }
             Self::Form(Form::Choose) => {
-                "Enter an exact repository root. Selection stays in this session. Relative paths resolve from the launch directory; enter literal paths. Esc retains the draft."
+                "Select an exact repository root for this session without persisting registration."
             }
             Self::Form(Form::Init) => {
-                "Enter a repository path and ID. An absent destination creates a repository; an existing valid Git repository with dort.toml attaches it. Review effects, then activate Confirm to approve registration and selection. Failed preparation retains private artifacts for Recovery."
+                "Prepare local creation or attachment. Only the later approval persists changes."
+            }
+            Self::Form(Form::KeepId | Form::RemoveId) => {
+                "Use the exact mapping ID; the repository source is retained."
             }
             Self::Picker => {
-                "Up/Down or Tab selects rows. Enter selects a repository or applies profile additions from any row; Space or a checkbox click toggles optional profiles, never mandatory contributors. F2 opens Create/attach in repository choices. F3 shows full metadata; Esc returns to choices, then closes the dialog. Previous drafts stay intact."
+                "Choose a repository or session profile additions; selection is not write approval."
             }
             Self::Ignored => {
-                "Saved HOME-relative exclusions prune matching paths and descendants from discovery. Select a path and request Unignore to review removal of that exclusion. Activate Confirm to save the preference. Live files remain in place. Esc returns."
+                "Inspect an ignored path, then review removal of its discovery preference."
             }
-            Self::About => {
-                "About summarizes Dort's local workflows, host support and license. Diagnostics provides host and path metadata."
-            }
+            Self::About => "Current capabilities, limitations, privacy and supervision facts.",
             Self::Batch => {
-                "Up/Down selects a marked file; e opens its TARGET, ID and SOURCE form. Enter on any row reviews the complete marked set. Tab moves rows only. F2 opens full selected-item metadata; PgUp/PgDn scrolls it and Home goes to its top. Esc retains drafts and marks."
+                "Review the complete marked adoption set; editing an item never adopts it individually."
             }
-            Self::BatchItem => {
-                "Tab/Shift-Tab moves TARGET, ID and SOURCE fields only. Enter/Done or Esc returns to the marked set with edits retained; it does not review an individual item. Esc retains edits. Review all requests the combined preview."
-            }
+            Self::BatchItem => "Edit TARGET, ID and SOURCE. Done returns to the combined draft.",
             Self::Preview => {
-                "Review outcome, paths, ordered effects and blockers. File reviews pair a summary table with numbered change details; i opens the full report. Up/Down selects a file; PgDn scrolls details. Enter continues to approval. Adopt all explicitly approves adoption. Esc returns."
+                "Review all effects, warnings and guards. Blocked or preview-only layouts cannot approve."
             }
             Self::Confirmation => {
-                "Activate Confirm (Enter or click) to proceed with the reviewed operation. Deletion confirmation displays the exact mapping IDs. Esc returns to review. Shrinking below the layout floor dismisses confirmation; execution always revalidates the real preview."
+                "The displayed scope binds the real approval internally. No typed phrase is required."
             }
             Self::Task => {
-                "The active task keeps its original scope while observations remain on screen. Progress describes metadata and stages. q requests exit after the joined worker finishes. Approved writes run to completion; inspect their result and Recovery if a write fails."
+                "Progress describes observed metadata, not an invented percentage or completion claim."
             }
             Self::Error => {
-                "The error shows its cause and retained scope. Retry repeats a read or requests a fresh preview. Failed writes may have partial effects: inspect Recovery before another write. Back returns to retained input."
+                "Read retry is separate from execution. Failed writes may have partial or ongoing effects."
             }
             Self::Result => {
-                "Completion records a transaction ID or an up-to-date outcome. Refresh rereads observations; Recovery inspects history; Back returns. Future recovery obtains a fresh preview against current live state."
+                "Inspect the observed result. A fresh attempt always needs a new review."
             }
+        }
+    }
+    fn keys(self, app: &App) -> &'static [(&'static str, &'static str)] {
+        match self {
+            Self::More | Self::Choice => &[
+                ("Up/Down", "Move between choices"),
+                ("Enter", "Choose"),
+                ("F3", "Inspect choice details"),
+                ("Esc", "Return without choosing"),
+            ],
+            Self::Menu => &[
+                ("Left/Right", "Choose a group"),
+                ("Up/Down", "Choose a destination"),
+                ("Enter", "Open group or destination"),
+                ("Esc", "Back one level"),
+            ],
+            Self::Form(_) | Self::BatchItem => &[
+                ("Tab / Shift-Tab", "Traverse fields only"),
+                ("Enter", "Validate/review, or Done for a batch item"),
+                ("F3", "Full draft metadata"),
+                ("Ctrl-U", "Clear current field"),
+                ("Esc", "Back, retaining draft"),
+            ],
+            Self::Tools if app.tools_view.declaration_open => &[
+                ("Tab", "Traverse visible declaration controls"),
+                ("Space", "Choose a platform provider"),
+                ("Enter", "Prepare declaration review"),
+                ("F3", "Draft metadata"),
+                ("F4", "Show/hide optional dependencies"),
+            ],
+            Self::Tools if app.tools_view.configuring => &[
+                ("Tab", "Traverse relevant scope controls"),
+                ("Space", "Choose provider from its field"),
+                ("Enter", "Prepare exact query review"),
+                ("F3", "Full draft scope"),
+                ("Esc", "Back, retaining input"),
+            ],
+            Self::Tools if app.tools_view.setup => &[
+                ("Up/Down", "Select manager"),
+                ("Space", "Toggle an eligible inventory"),
+                ("Enter", "Inspect selected reviewed scopes"),
+                ("F3", "Exact prepared scopes"),
+                ("F2", "Advanced settings and refresh"),
+            ],
+            Self::Tools if app.tools_view.recon_open => &[
+                ("Tab", "Traverse fields/tool bindings"),
+                ("Space", "Choose an explicit compatible snapshot"),
+                ("Enter", "Load declarations, calculate, or inspect a result"),
+                ("F3", "Full metadata"),
+                ("F2", "Eligible installation review or fresh inventory"),
+            ],
+            Self::Tools => &[
+                ("Enter", "Contextual primary shown in the action strip"),
+                ("F2", "Inspection, installation and closure review actions"),
+                ("F3", "Full metadata when offered"),
+                ("Esc", "Back; never replay an old approval"),
+            ],
+            Self::Actions => &[
+                ("Type", "Search task names"),
+                ("Up/Down", "Choose a task"),
+                ("Enter", "Open the selected available task"),
+                ("F3", "Task scope and prerequisites"),
+                ("Esc", "Close directly"),
+            ],
+            Self::Picker => &[
+                ("Up/Down", "Traverse choices"),
+                ("Space", "Toggle optional profile membership"),
+                ("Enter", "Validate/apply selection"),
+                ("F3", "Full selected metadata"),
+                ("Ctrl-N", "Create/attach from repository picker"),
+            ],
+            Self::Preview => &[
+                ("PgUp/PgDown", "Read all review rows"),
+                ("F3", "Full report"),
+                ("Enter", "Contextual review/approval step"),
+                ("Esc", "Back without execution"),
+            ],
+            Self::Confirmation => &[
+                ("Enter", "Explicitly confirm the displayed scope"),
+                ("Esc", "Cancel"),
+            ],
+            Self::Task => &[
+                ("q / Ctrl-C", "Request exit; wait joined for owned work"),
+                ("F1", "Metadata-only Help"),
+            ],
+            Self::Error => &[
+                (
+                    "Enter",
+                    "Retry a read, or open Recovery after a failed write",
+                ),
+                ("F2", "Other guarded recovery/refresh actions"),
+                ("Esc", "Back; retained failure warning remains"),
+            ],
+            Self::Result => &[
+                ("Enter", "Done, or fresh-review navigation for Tools"),
+                ("PgUp/PgDown", "Read result metadata"),
+                ("F2", "Recovery or fresh observations"),
+            ],
+            Self::Content => &[
+                ("Up/Down", "Scroll selected content"),
+                ("PgUp/PgDown", "Page selected content"),
+                ("Alt-PgUp/PgDown", "Read selected metadata"),
+                ("Esc", "Return to list"),
+            ],
+            Self::Discover
+            | Self::Managed
+            | Self::Recovery
+            | Self::Git
+            | Self::Ignored
+            | Self::Batch => &[
+                ("Up/Down", "Traverse displayed rows"),
+                ("Enter", "Inspect, or the named primary action"),
+                ("Space", "Toggle optional membership where offered"),
+                ("F2", "Contextual actions with scope/reasons"),
+                ("F3", "Metadata when offered"),
+            ],
+            _ => &[
+                ("Enter", "Contextual primary shown in the action strip"),
+                ("F2", "More actions"),
+                ("F3", "Full metadata when offered"),
+                ("PgUp/PgDown", "Read the visible document"),
+            ],
         }
     }
 }
@@ -156,6 +279,12 @@ pub struct State {
     pub content_scroll: u16,
 }
 pub fn topic(app: &App) -> Topic {
+    if app.choice.is_some() {
+        return Topic::Choice;
+    }
+    if app.more.is_some() {
+        return Topic::More;
+    }
     if app.navigation.menu.is_some() {
         return Topic::Menu;
     }
@@ -205,7 +334,7 @@ pub fn topic(app: &App) -> Topic {
 }
 /// Text focus is surface-specific; background retained forms do not steal task/error Help.
 pub fn text_input(app: &App) -> bool {
-    if app.navigation.menu.is_some() {
+    if app.navigation.menu.is_some() || app.more.is_some() || app.choice.is_some() {
         return false;
     }
     if app.busy
@@ -228,33 +357,38 @@ pub fn text_input(app: &App) -> bool {
     app.text_entry()
 }
 pub fn draw(frame: &mut Frame, app: &App, help: &State) {
-    let area = super::surface::dialog(frame, app, "Help", false);
-    let mut lines = vec![
-        Line::styled(
-            format!("Dort | Help: {}", help.topic.title()),
-            ui::heading(),
-        ),
-        Line::raw("Esc: return | PgUp/PgDn: scroll | Home: top"),
-        Line::raw(""),
-    ];
-    lines.extend(
-        help.topic
-            .instructions()
-            .split('\n')
-            .map(|s| Line::raw(s.to_owned())),
-    );
-    lines.push(Line::raw(""));
+    let mut area = ui::design::choice_dialog(frame, "Help", &app.hits);
+    if let Some(notice) = app.interaction_notice {
+        let height = (1 + notice.len().div_ceil(usize::from(area.width).max(1)) as u16)
+            .min(3)
+            .min(area.height);
+        ui::design::notice(
+            frame,
+            ratatui::layout::Rect::new(area.x, area.y, area.width, height),
+            "Navigation paused",
+            notice,
+            ui::design::Tone::Attention,
+        );
+        area.y += height;
+        area.height = area.height.saturating_sub(height);
+    }
+    let mut sections = vec![("Workbench", "F10: Places; Ctrl-K: searchable task launcher; F2: contextual More; F1: Help. Esc returns one meaningful level. Fields accept printable keys literally; footer buttons never join field traversal.".to_owned())];
+    if matches!(help.topic, Topic::Tools) {
+        sections.insert(0, ("Tools boundaries", "Discovery is metadata-only. Prepare selected real scopes before the single inspection confirmation. Snapshots are session claims, not ownership/readiness or execution authority. Bind each declared tool explicitly; changed npm declarations need fresh inspection. Declaration is manifest-only. Installs and historical closure have separate reviews; fresh-review entry never queries, binds or replays automatically. Closure is neither success nor repair.".to_owned()));
+    }
     if matches!(help.topic, Topic::Menu)
         && let Some(menu) = app.navigation.menu
         && menu.expanded
         && let Some(entry) = super::navigation::entries(menu.group).get(menu.selected)
     {
-        lines.push(Line::raw(format!("Selected: {}", entry.label)));
+        let mut detail = entry.label.to_owned();
         if let super::navigation::Item::Action(action) = entry.item
             && let Some(reason) = app.action_reason(action)
         {
-            lines.push(Line::raw(super::views::safe(reason)));
+            detail.push_str(": ");
+            detail.push_str(reason);
         }
+        sections.insert(0, ("Selected destination", detail));
     }
     if matches!(
         help.topic,
@@ -266,30 +400,35 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
             | Topic::Diagnostics
             | Topic::Git
     ) {
-        lines.push(Line::styled("Context commands (; Actions)", ui::heading()));
-        for e in super::context::entries(app).into_iter() {
-            lines.push(Line::raw(format!(
-                "{}: {} [{}]{}",
-                e.scope.short(),
-                e.action.label(),
-                e.effect.label(),
-                app.action_reason(e.action)
-                    .map(|r| format!(" - {r}"))
-                    .unwrap_or_default()
-            )));
-        }
+        let related = super::context::entries(app)
+            .into_iter()
+            .map(|e| {
+                format!(
+                    "{}: {} [{}]{}",
+                    e.scope.short(),
+                    e.action.label(),
+                    e.effect.label(),
+                    app.action_reason(e.action)
+                        .map(|r| format!(" — {r}"))
+                        .unwrap_or_default()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        sections.push(("Related tasks", related));
     }
-    lines.push(Line::raw(""));
-    lines.push(Line::raw("F1 opens contextual Help. Fields accept printable keys literally; Ctrl-U clears a field. F10 opens navigation menus on pages, even while typing. Dialogs and running work explain paused navigation; Esc or the explicit Close/Cancel control dismisses a dialog. Outside clicks do not cancel or approve."));
-    lines.push(Line::raw("Writes require explicit reviewed approval and fresh revalidation. Recovery is deliberate. Private backups are stored unencrypted."));
-    let body = area;
-    ui::report(
+    sections.push(("Reading Help", "Up/Down or PgUp/PgDown scroll; Home returns to the top. Esc or F1 closes Help. Only this foreground owns input; underlying task keys do not act.".to_owned()));
+    sections.push(("Approval and privacy", "Writes require a fresh real review and independent revalidation. Dialogs/busy work explain paused navigation; outside clicks never cancel or approve. q/Ctrl-C waits for owned work. Private backups are unencrypted. Selected-file and Git content stays outside Help, metadata reports and diagnostics; heuristics are not proof of secrecy.".to_owned()));
+    ui::text_view(
         frame,
-        body,
-        "Context Help",
-        Text::from(lines),
+        area,
+        ui::help::document(
+            help.topic.title(),
+            help.topic.instructions(),
+            help.topic.keys(app),
+            &sections,
+        ),
         help.scroll,
-        true,
     );
-    app.hits.wheel(body, super::input::Wheel::Overlay);
+    app.hits.wheel(area, super::input::Wheel::Overlay);
 }

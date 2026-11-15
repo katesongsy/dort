@@ -1,0 +1,141 @@
+//! Foreground action selection. Only static labels and original typed targets are retained.
+use super::{
+    actions::Task,
+    app::App,
+    components::{self as ui, menu::Item},
+    input::Target,
+};
+use ratatui::crossterm::event::KeyCode;
+
+pub struct More {
+    pub title: &'static str,
+    pub items: Vec<Item>,
+    pub selected: usize,
+    pub details: bool,
+    pub feedback: Option<&'static str>,
+}
+impl More {
+    pub fn new(title: &'static str, items: Vec<Item>) -> Self {
+        Self {
+            title,
+            items,
+            selected: 0,
+            details: false,
+            feedback: None,
+        }
+    }
+}
+impl App {
+    pub(super) fn open_commands(&mut self) -> Option<Task> {
+        if let Some(reason) = self.navigation_block() {
+            self.interaction_notice = Some(reason);
+            self.status = reason.into();
+            return None;
+        }
+        let mut entries = Vec::new();
+        for group in 0..super::navigation::GROUPS.len() {
+            for entry in super::navigation::entries(group) {
+                let action = match entry.item {
+                    super::navigation::Item::Action(action) => action,
+                    super::navigation::Item::Manifest => {
+                        super::shell::Action::Destination(super::app::Tab::Checks)
+                    }
+                };
+                if !entries
+                    .iter()
+                    .any(|entry: &super::context::Entry| entry.action == action)
+                {
+                    entries.push(super::context::entry(action, None));
+                }
+            }
+        }
+        for entry in super::context::entries(self) {
+            if !entries
+                .iter()
+                .any(|existing| existing.action == entry.action)
+            {
+                entries.push(entry);
+            }
+        }
+        self.git_view.discard_patch();
+        self.shell.open_actions(entries);
+        self.shell.global_commands = true;
+        None
+    }
+    pub(super) fn open_more(&mut self, mut actions: Vec<ui::ActionButton>) {
+        if self.busy {
+            self.interaction_notice = self.navigation_block();
+            return;
+        }
+        actions.retain(|action| {
+            !matches!(action.key, "Enter" | "Esc")
+                && !(matches!(action.target, Target::ToolInstallControl(_, true))
+                    && self.tools_view.install_open
+                    && matches!(
+                        self.tools_view.installation.mode,
+                        super::tools_install::Mode::Review
+                            | super::tools_install::Mode::CloseReview
+                    ))
+                && !matches!(
+                    action.target,
+                    Target::Continue
+                        | Target::ConfirmAction
+                        | Target::ProviderConfirm
+                        | Target::PatchConfirm
+                )
+        });
+        let mut items = Vec::new();
+        for action in actions {
+            if items
+                .iter()
+                .any(|item: &Item| item.action.label == action.label)
+            {
+                continue;
+            }
+            let reason = if let Target::Action(action) = action.target {
+                self.action_reason(action)
+            } else {
+                None
+            };
+            items.push(Item { action, reason });
+        }
+        self.git_view.discard_patch();
+        self.more = Some(More::new("More actions", items));
+    }
+    pub(super) fn more_key(&mut self, code: KeyCode, width: u16, height: u16) -> Option<Task> {
+        let menu = self.more.as_mut()?;
+        menu.feedback = None;
+        if menu.details {
+            if matches!(code, KeyCode::Esc | KeyCode::F(3)) {
+                menu.details = false;
+            }
+            return None;
+        }
+        let count = menu.items.len().max(1);
+        match code {
+            KeyCode::Esc | KeyCode::F(2) => self.more = None,
+            KeyCode::Down | KeyCode::Tab => menu.selected = (menu.selected + 1) % count,
+            KeyCode::Up | KeyCode::BackTab => menu.selected = (menu.selected + count - 1) % count,
+            KeyCode::PageDown => menu.selected = (menu.selected + 3).min(count - 1),
+            KeyCode::PageUp => menu.selected = menu.selected.saturating_sub(3),
+            KeyCode::Home => menu.selected = 0,
+            KeyCode::End => menu.selected = count - 1,
+            KeyCode::F(3) => menu.details = true,
+            KeyCode::Enter => {
+                let item = *menu.items.get(menu.selected)?;
+                if let Some(reason) = item.reason {
+                    menu.feedback = Some(reason);
+                    return None;
+                }
+                self.more = None;
+                self.hits.clear();
+                return self.activate_target(item.action.target, width, height);
+            }
+            _ => (),
+        }
+        None
+    }
+    pub(super) fn presented(&self, label: &'static str, key: &'static str, target: Target) {
+        self.hits.present(ui::ActionButton { label, key, target });
+    }
+}

@@ -1,5 +1,6 @@
 use super::{
     actions::{Data, Output, Pending, Task},
+    input::Target,
     shell::{Action, Form, Intent, Overlay, ProfilePicker, Shell},
 };
 use dort_core::{
@@ -73,6 +74,9 @@ struct RowClick {
 }
 pub struct App {
     pub appearance: super::appearance::Appearance,
+    pub overview_details: bool,
+    pub more: Option<super::more::More>,
+    pub choice: Option<super::choice::Choice>,
     pub motion: super::components::motion::Indicator,
     pub reduced_motion: bool,
     pub tab: Tab,
@@ -127,9 +131,42 @@ pub struct App {
     pub failed_write: bool,
 }
 impl App {
+    pub(super) fn overview_primary(&self) -> Action {
+        if self
+            .data
+            .as_ref()
+            .and_then(|d| d.overview.as_ref())
+            .and_then(|o| o.registered)
+            == Some(true)
+        {
+            Action::Apply
+        } else {
+            Action::Init
+        }
+    }
+    pub(super) fn checks_primary(&self) -> Action {
+        if self.showing_diagnostics {
+            Action::Diagnostics
+        } else if self.check.is_some() {
+            Action::Refresh
+        } else if self
+            .data
+            .as_ref()
+            .and_then(|d| d.repository.as_ref())
+            .or(self.repository.as_ref())
+            .is_some()
+        {
+            Action::CheckCurrent
+        } else {
+            Action::CheckStandalone
+        }
+    }
     pub fn new(dry_run: bool) -> Self {
         Self {
             appearance: Default::default(),
+            overview_details: false,
+            more: None,
+            choice: None,
             motion: Default::default(),
             reduced_motion: false,
             tab: Tab::Overview,
@@ -315,7 +352,7 @@ impl App {
                         == super::tools_install::Mode::LoadingInstall
                 {
                     self.tools_view.installation.reviewed(*preview);
-                    self.status = "Review one package install. Enter confirms; d shows scope, probes and argv. No queries ran for this review.".into();
+                    self.status = "Review one package install. Scope, probes and argv are available in Details. No queries ran for this review.".into();
                 }
             }
             Ok(Output::ToolInstalled(result)) => {
@@ -333,7 +370,7 @@ impl App {
             Ok(Output::ToolAttempts(result)) => {
                 if self.tab == Tab::Tools && self.tools_view.install_open && !self.quit {
                     self.tools_view.installation.attempts_ready(result);
-                    self.status = "Installation attempts · metadata only. c reviews fresh inspection and closure of an unresolved attempt.".into();
+                    self.status = "Installation attempts · metadata only. Unresolved attempts require fresh inspection before metadata closure.".into();
                 }
             }
             Ok(Output::ToolClosePreview(preview)) => {
@@ -343,7 +380,7 @@ impl App {
                     && self.tools_view.installation.mode == super::tools_install::Mode::LoadingClose
                 {
                     self.tools_view.installation.close_reviewed(*preview);
-                    self.status = "Review fresh inspection and metadata closure. Enter confirms once; d shows exact scope.".into();
+                    self.status = "Review fresh inspection and metadata closure. Approval applies once to this exact scope.".into();
                 }
             }
             Ok(Output::ToolClosed(result)) => {
@@ -353,7 +390,7 @@ impl App {
             Ok(Output::ToolsDefaults(defaults)) => {
                 if self.tab == Tab::Tools && self.tools_view.setup && !self.quit {
                     self.tools_view.defaults_ready(defaults);
-                    self.status = "Review selected inspections. Enter inspects; e opens Advanced; d shows exact scopes.".into();
+                    self.status = "Review selected inspections and their exact scopes. No provider has executed yet.".into();
                 }
             }
             Ok(Output::ToolsReports(reports)) => {
@@ -365,7 +402,7 @@ impl App {
                 }
                 self.tools_view.collection_result = true;
                 self.status = super::components::StatusText::chrome(format!(
-                    "Inspected {count} scopes · {stored} snapshots retained · {unavailable} unavailable. s browses results; p compares declarations."
+                    "Inspected {count} scopes · {stored} snapshots retained · {unavailable} unavailable."
                 ));
             }
             Ok(Output::ToolsPreview(preview)) => {
@@ -387,6 +424,8 @@ impl App {
                         && !self.quit
                         && self.shell.overlay.is_none()
                         && self.help.is_none()
+                        && self.more.is_none()
+                        && self.choice.is_none()
                         && self.navigation.menu.is_none(),
                 );
                 self.status = "Git read completed. Summaries are metadata-only; patch viewing requires a new confirmation.".into();
@@ -513,7 +552,9 @@ impl App {
             Ok(Output::IgnoredPaths(paths)) => {
                 self.shell.overlay = Some(Overlay::Ignored { paths, selected: 0 });
                 self.shell.scroll = 0;
-                self.status = "Select an exact ignored path; Enter previews Unignore, Esc returns. Ancestor rules still apply.".into();
+                self.status =
+                    "Select an exact ignored path to review Unignore. Ancestor rules still apply."
+                        .into();
             }
             Ok(Output::Preview(Pending::ToolDeclaration(_)))
                 if self.tab != Tab::Tools || !self.tools_view.declaration_open || self.quit => {}
@@ -531,9 +572,9 @@ impl App {
                         effect_scroll: 0,
                     });
                     self.status = if self.preview.as_ref().is_some_and(|p| p.pending.adoption()) {
-                        "Review all mappings; Adopt all approves once. Esc returns to the draft."
+                        "Review all mappings; Adopt all approves this exact set once."
                     } else {
-                        "Review effects; Enter opens confirmation, Esc dismisses."
+                        "Review effects before confirming this exact change."
                     }
                     .into();
                 }
@@ -683,8 +724,11 @@ impl App {
             if event.kind == MouseEventKind::Down(MouseButton::Left) {
                 match target {
                     Some(Target::MenuGroup(group)) => {
-                        self.open_menu(group, width);
+                        // This is traversal inside the owned Places dialog, not
+                        // an attempt to open navigation through another dialog.
                         if let Some(menu) = &mut self.navigation.menu {
+                            menu.group = group.min(super::navigation::GROUPS.len() - 1);
+                            menu.selected = 0;
                             menu.expanded = true;
                         }
                     }
@@ -774,6 +818,12 @@ impl App {
             return self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height);
         }
         let target = self.hits.target(event.column, event.row)?;
+        if matches!(target, Target::More) {
+            let actions = super::workbench::actions(self);
+            self.hits.clear();
+            self.open_more(actions);
+            return None;
+        }
         if self.tab == Tab::Files
             && matches!(
                 target,
@@ -812,10 +862,44 @@ impl App {
                 row: event.row,
             });
         }
-        if self.busy {
+        self.activate_target(target, width, height)
+    }
+    pub(super) fn activate_target(
+        &mut self,
+        target: Target,
+        width: u16,
+        height: u16,
+    ) -> Option<Task> {
+        if self.busy
+            && !matches!(
+                target,
+                Target::NavigationBlocked | Target::Action(Action::Help)
+            )
+        {
             return None;
         }
         match target {
+            Target::Key(key) => self.key(key, width, height),
+            Target::ChoiceRow(index) => {
+                if let Some(choice) = &mut self.choice {
+                    choice.select(index);
+                }
+                None
+            }
+            Target::More => {
+                self.open_more(super::workbench::actions(self));
+                None
+            }
+            Target::MoreRow(index) => {
+                if let Some(menu) = self.more.as_mut() {
+                    menu.selected = index.min(menu.items.len().saturating_sub(1));
+                }
+                None
+            }
+            Target::Commands => self.open_commands(),
+            Target::Destination(tab) => {
+                self.menu_item(super::navigation::Item::Action(Action::Destination(tab)))
+            }
             Target::NavigationBlocked => {
                 let reason = self
                     .navigation_block()
@@ -866,7 +950,7 @@ impl App {
                 .batch_editor
                 .as_mut()
                 .filter(|e| e.open)?
-                .key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE)),
+                .key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE)),
             Target::BatchEdit => {
                 self.batch_editor.as_mut().filter(|e| e.open)?.edit_item();
                 None
@@ -1038,7 +1122,7 @@ impl App {
                     return None;
                 }
                 self.key(
-                    KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE),
+                    KeyEvent::new(KeyCode::F(4), KeyModifiers::NONE),
                     width,
                     height,
                 )
@@ -1098,18 +1182,13 @@ impl App {
                     && self.error.is_none()
                     && !self.show_result
                 {
+                    if code != KeyCode::Char('/') {
+                        self.tools_view.searching = false;
+                    }
                     self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height)
                 } else {
                     None
                 }
-            }
-            Target::InventoryChoice(index) => {
-                if self.tab == Tab::Tools
-                    && let Some(selected) = self.tools_view.inventory_more.as_mut()
-                {
-                    *selected = index.min(7);
-                }
-                None
             }
             Target::ToolsControl(index, activate) => {
                 if self.tab != Tab::Tools || !self.tools_view.configuring {
@@ -1178,11 +1257,13 @@ impl App {
             }
             Target::Picker(index, activate) => {
                 let mut key = KeyCode::Enter;
+                let mut modifiers = KeyModifiers::NONE;
                 match &mut self.shell.overlay {
                     Some(Overlay::Repositories { selected }) => {
                         let count = self.data.as_ref().map_or(0, |d| d.known_roots.len()) + 2;
                         if index >= count {
-                            key = KeyCode::F(2);
+                            key = KeyCode::Char('n');
+                            modifiers = KeyModifiers::CONTROL;
                         } else {
                             *selected = index;
                         }
@@ -1200,7 +1281,7 @@ impl App {
                     _ => return None,
                 }
                 if activate {
-                    self.key(KeyEvent::new(key, KeyModifiers::NONE), width, height)
+                    self.key(KeyEvent::new(key, modifiers), width, height)
                 } else {
                     None
                 }
@@ -1272,6 +1353,7 @@ impl App {
         }
     }
     pub fn key(&mut self, key: KeyEvent, width: u16, height: u16) -> Option<Task> {
+        let more_actions = (key.code == KeyCode::F(2)).then(|| super::workbench::actions(self));
         self.hits.clear();
         self.last_click = None;
         if key.code != KeyCode::Char('g')
@@ -1293,7 +1375,7 @@ impl App {
                     .menu
                     .map(|m| (m.content_focus, m.content_scroll))
             });
-        let task = self.key_inner(key, width, height);
+        let task = self.key_inner(key, width, height, more_actions);
         super::discover_content::sync(self, width, height);
         if self.help.is_none()
             && self.navigation.menu.is_none()
@@ -1308,11 +1390,19 @@ impl App {
         }
         task
     }
-    fn key_inner(&mut self, key: KeyEvent, width: u16, height: u16) -> Option<Task> {
+    fn key_inner(
+        &mut self,
+        key: KeyEvent,
+        width: u16,
+        height: u16,
+        more_actions: Option<Vec<super::components::ActionButton>>,
+    ) -> Option<Task> {
         let interrupt =
             key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
         if interrupt
             || (key.code == KeyCode::Char('q')
+                && self.more.is_none()
+                && self.choice.is_none()
                 && (self.help.is_some()
                     || self.navigation.menu.is_some()
                     || self.confirmation.is_none()
@@ -1332,6 +1422,12 @@ impl App {
             return None;
         }
         self.resize(width, height);
+        if self.help.is_none()
+            && self.navigation.menu.is_some()
+            && !matches!(key.code, KeyCode::F(1) | KeyCode::Char('?'))
+        {
+            return self.menu_key(key.code, width);
+        }
         if key.code == KeyCode::F(10)
             && self.navigation.menu.is_none()
             && width >= 48
@@ -1396,27 +1492,89 @@ impl App {
             self.status = "Resize to at least 48x14 to review and approve.".into();
             return None;
         }
+        if self.choice.is_some() {
+            self.choice_key(key.code);
+            return None;
+        }
+        if key.code == KeyCode::Char('k') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return self.open_commands();
+        }
+        if self.more.is_some() {
+            return self.more_key(key.code, width, height);
+        }
+        if key.code == KeyCode::F(2) {
+            self.open_more(more_actions.unwrap_or_default());
+            return None;
+        }
+        if key.code == KeyCode::F(3)
+            && self.preview.is_some()
+            && self.confirmation.is_none()
+            && !self.busy
+        {
+            return self.key(
+                KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
+                width,
+                height,
+            );
+        }
         if self.navigation.menu.is_some() {
             return self.menu_key(key.code, width);
+        }
+        if self.tab == Tab::Overview
+            && self.batch_editor.as_ref().is_none_or(|e| !e.open)
+            && self.shell.overlay.is_none()
+            && !self.busy
+            && self.error.is_none()
+            && !self.show_result
+            && self.preview.is_none()
+            && self.confirmation.is_none()
+        {
+            match key.code {
+                KeyCode::Enter if !self.overview_details => {
+                    return self.activate(self.overview_primary());
+                }
+                KeyCode::F(3) => {
+                    self.overview_details = !self.overview_details;
+                    self.details_scroll = 0;
+                    return None;
+                }
+                KeyCode::Esc if self.overview_details => {
+                    self.overview_details = false;
+                    self.details_scroll = 0;
+                    return None;
+                }
+                KeyCode::Down | KeyCode::PageDown if self.overview_details => {
+                    self.details_scroll = self.details_scroll.saturating_add(2);
+                    return None;
+                }
+                KeyCode::Up | KeyCode::PageUp if self.overview_details => {
+                    self.details_scroll = self.details_scroll.saturating_sub(2);
+                    return None;
+                }
+                KeyCode::Home if self.overview_details => {
+                    self.details_scroll = 0;
+                    return None;
+                }
+                _ => (),
+            }
         }
         if key.code == KeyCode::F(10) && self.menus_available() {
             self.open_menu(super::navigation::group(self), width);
             return None;
         }
         if self.busy {
-            if key.code == KeyCode::Esc {
-                self.shell.overlay = None;
-            }
-            let destination = match key.code {
-                KeyCode::Left => Some(self.tab.previous()),
-                KeyCode::Right => Some(self.tab.next()),
-                _ => None,
-            };
-            if let Some(tab) = destination {
-                self.tools_view.leave();
-                self.tab = tab;
-                self.selected = 0;
-                self.git_view.discard_patch();
+            if matches!(
+                key.code,
+                KeyCode::Esc
+                    | KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Tab
+                    | KeyCode::BackTab
+                    | KeyCode::Char('p' | 'n' | 'f' | ';' | '/')
+            ) {
+                let reason = "Navigation paused while owned work completes; q/Ctrl-C waits joined, not cancellation.";
+                self.interaction_notice = Some(reason);
+                self.status = reason.into();
             }
             match key.code {
                 KeyCode::Home => self.details_scroll = 0,
@@ -1428,6 +1586,17 @@ impl App {
         }
         if self.error.is_some() {
             match key.code {
+                KeyCode::Enter => {
+                    return self.feedback(
+                        if self.failed_write {
+                            super::task_surfaces::Control::Recovery
+                        } else {
+                            super::task_surfaces::Control::Retry
+                        },
+                        width,
+                        height,
+                    );
+                }
                 KeyCode::Char('h') => {
                     self.error = None;
                     self.preview = None;
@@ -1485,7 +1654,7 @@ impl App {
             let control = match key.code {
                 KeyCode::Char('r') => Some(Control::Retry),
                 KeyCode::Char('h') => Some(Control::Recovery),
-                KeyCode::Esc => Some(Control::Back),
+                KeyCode::Enter | KeyCode::Esc => Some(Control::Back),
                 KeyCode::Home | KeyCode::PageDown | KeyCode::PageUp => {
                     super::shell::scroll_details(&mut self.details_scroll, key.code);
                     return None;
@@ -1625,17 +1794,16 @@ impl App {
             }
             return None;
         }
+        if self.open_control_choice(key.code) {
+            return None;
+        }
         if self.tab == Tab::Tools
             && let Some(task) = self.tools_view.key(key, self.dry_run)
         {
             return task;
         }
-        // Only Discover offers region focus; forms and disclosures retain local routing.
+        // Tab traverses fields only; explicit readers retain their owned viewport.
         if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) && !self.text_entry() {
-            if self.tab == Tab::Files && self.discovering && self.content.available() {
-                self.content.focused = !self.content.focused;
-                self.inventory.details = false;
-            }
             return None;
         }
         if self.tab == Tab::Files && self.discovering && self.content.focused && !self.text_entry()
@@ -1689,19 +1857,56 @@ impl App {
             };
             return self.activate(Action::Destination(tab));
         }
-        let content_area = ratatui::layout::Rect::new(
-            0,
-            2,
-            self.viewport.0,
-            self.viewport
-                .1
-                .saturating_sub(4 + u16::from(!self.page_actions().is_empty())),
-        );
-        let split_details = if self.tab == Tab::Git {
-            self.git_view.wide_metadata(content_area)
-        } else {
-            super::workbench::wide_details(content_area, 2)
-        };
+        if self.tab == Tab::Recovery && self.history_details && !self.history_search.editing {
+            match key.code {
+                KeyCode::Down | KeyCode::PageDown | KeyCode::Char('j') => {
+                    self.details_scroll = self.details_scroll.saturating_add(2);
+                    return None;
+                }
+                KeyCode::Up | KeyCode::PageUp | KeyCode::Char('k') => {
+                    self.details_scroll = self.details_scroll.saturating_sub(2);
+                    return None;
+                }
+                KeyCode::Home => {
+                    self.details_scroll = 0;
+                    return None;
+                }
+                KeyCode::Esc => {
+                    self.history_details = false;
+                    self.details_scroll = 0;
+                    return None;
+                }
+                KeyCode::Enter => return None,
+                _ => (),
+            }
+        }
+        if self.tab == Tab::Files
+            && self.inventory.details
+            && !self.content.focused
+            && !self.text_entry()
+        {
+            match key.code {
+                KeyCode::Down | KeyCode::PageDown | KeyCode::Char('j') => {
+                    self.details_scroll = self.details_scroll.saturating_add(2);
+                    return None;
+                }
+                KeyCode::Up | KeyCode::PageUp | KeyCode::Char('k') => {
+                    self.details_scroll = self.details_scroll.saturating_sub(2);
+                    return None;
+                }
+                KeyCode::Home => {
+                    self.details_scroll = 0;
+                    return None;
+                }
+                KeyCode::Esc => {
+                    self.inventory.details = false;
+                    self.details_scroll = 0;
+                    return None;
+                }
+                KeyCode::Enter => return None,
+                _ => (),
+            }
+        }
         if self.tab == Tab::Files
             && self.discovering
             && !self.text_entry()
@@ -1711,7 +1916,7 @@ impl App {
                 KeyCode::PageDown | KeyCode::PageUp | KeyCode::Home
             )
         {
-            if !self.inventory.details && !split_details {
+            if !self.inventory.details && !self.content.focused {
                 let backwards = key.code != KeyCode::PageDown;
                 let count = if key.code == KeyCode::Home {
                     usize::MAX
@@ -1733,7 +1938,6 @@ impl App {
                 key.code,
                 KeyCode::PageDown | KeyCode::PageUp | KeyCode::Home
             )
-            && !split_details
         {
             let backwards = key.code != KeyCode::PageDown;
             let count = if key.code == KeyCode::Home {
@@ -1766,6 +1970,7 @@ impl App {
         }
         if self.tab == Tab::Git {
             if self.git_view.editing_root
+                && !self.git_view.root_metadata()
                 && key.code == KeyCode::Enter
                 && let Err(error) = &self.git
             {
@@ -1939,6 +2144,9 @@ impl App {
             KeyCode::Char('r') => return self.activate(Action::Refresh),
             KeyCode::Char('f') => return self.activate(Action::Discover),
             KeyCode::Char('o') => return self.activate(Action::Adopt),
+            KeyCode::Enter if self.tab == Tab::Checks => {
+                return self.activate(self.checks_primary());
+            }
             KeyCode::Enter if self.tab == Tab::Files && self.discovering => {
                 self.inventory.details = true;
                 self.details_scroll = 0;
@@ -1979,6 +2187,8 @@ impl App {
         }
         self.viewport = (width, height);
         if width < 48 || height < 14 {
+            self.more = None;
+            self.choice = None;
             self.navigation.menu = None;
             self.confirmation = None;
             self.git_view.resize();
@@ -2031,6 +2241,9 @@ impl App {
         self.clamp_history_selection();
     }
     fn intent(&mut self, intent: Intent) -> Option<Task> {
+        if matches!(&intent, Intent::Submit(_)) {
+            self.shell.form_feedback = None;
+        }
         match intent {
             Intent::Unignore(path) => Some(Task::Ignore(path, false)),
             Intent::Action(action) => {
@@ -2040,6 +2253,11 @@ impl App {
                     self.interaction_notice = Some(reason);
                     self.status = reason.into();
                     return None;
+                }
+                if self.shell.global_commands
+                    && matches!(self.shell.overlay, Some(Overlay::Actions { .. }))
+                {
+                    self.leave_page_for_navigation();
                 }
                 self.activate(action)
             }
@@ -2055,8 +2273,9 @@ impl App {
             Intent::Submit(Form::Check) => self.check_task(true, false),
             Intent::Submit(form @ (Form::KeepId | Form::RemoveId)) => {
                 if self.shell.unmanage_id.is_empty() {
-                    self.status =
-                        "Enter an exact mapping ID; the preview uses this exact ID.".into();
+                    self.shell.form_feedback =
+                        Some((form, "Enter the exact mapping ID to review."));
+                    self.status = "Exact mapping ID required.".into();
                     return None;
                 }
                 Some(Task::Files(Request::Unmanage {
@@ -2081,8 +2300,11 @@ impl App {
                     .position(|s| s.is_empty())
                 {
                     self.shell.adoption.focused = i;
-                    self.status =
-                        "Enter TARGET, ID and repository-relative SOURCE; draft retained.".into();
+                    self.shell.form_feedback = Some((
+                        Form::Adopt,
+                        "Complete TARGET, ID and repository-relative SOURCE.",
+                    ));
+                    self.status = "Adoption fields are incomplete; draft retained.".into();
                     return None;
                 }
                 // The core owns all path/kind/sensitivity/mapping policy.
@@ -2095,7 +2317,9 @@ impl App {
             Intent::Submit(form) => {
                 let draft = self.shell.draft(form);
                 if draft.is_empty() {
-                    self.status = "Enter an exact path; input is retained in memory only.".into();
+                    self.shell.form_feedback =
+                        Some((form, "Enter an exact path. Input stays in memory only."));
+                    self.status = "Exact path required.".into();
                     return None;
                 }
                 let root = crate::services::resolve_root(
@@ -2499,7 +2723,9 @@ impl App {
         let manifest = if standalone {
             if self.shell.manifest_draft.is_empty() {
                 self.shell.overlay = Some(Overlay::Form(Form::Check));
-                self.status = "Enter a standalone manifest path; draft retained.".into();
+                self.shell.form_feedback =
+                    Some((Form::Check, "Enter the standalone manifest path."));
+                self.status = "Manifest path required; draft retained.".into();
                 return None;
             }
             Some(crate::services::resolve_root(
@@ -2588,7 +2814,7 @@ impl App {
             .and_then(|d| d.report.candidates.get(self.candidate_selected))
         {
             if !candidate.supported_for_adoption {
-                self.status = "Not eligible for adoption: select an owned, single-link regular file. Directories cannot be adopted; use Enter for details or o for a manual draft.".into();
+                self.status = "Not eligible for adoption: select an owned, single-link regular file. Directories cannot be adopted; a manual draft is available.".into();
                 return;
             }
             let home = &self.discovery.as_ref().expect("selected discovery").home;
@@ -2744,6 +2970,7 @@ impl App {
             _ => None,
         }
     }
+    #[cfg(test)]
     pub fn page_actions(&self) -> Vec<Action> {
         super::context::page_actions(self)
     }
@@ -2788,8 +3015,14 @@ impl App {
         match approval {
             Ok(a) => Some(Task::Execute(super::actions::Approved::Batch(Box::new(a)))),
             Err(error) => {
-                self.status =
-                    format!("Approval refused: {}", super::actions::diagnostic(&error)).into();
+                self.error = Some(format!(
+                    "Approval refused: {}",
+                    super::actions::diagnostic(&error)
+                ));
+                self.retry = None;
+                self.failure = None;
+                self.failed_write = false;
+                self.status = "Approval refused; a fresh review is required.".into();
                 None
             }
         }
@@ -2817,9 +3050,14 @@ impl App {
                 match pending.approve(ack.as_deref()) {
                     Ok(approval) => return Some(Task::Execute(approval)),
                     Err(error) => {
-                        self.status =
-                            format!("Approval refused: {}", super::actions::diagnostic(&error))
-                                .into()
+                        self.error = Some(format!(
+                            "Approval refused: {}",
+                            super::actions::diagnostic(&error)
+                        ));
+                        self.retry = None;
+                        self.failure = None;
+                        self.failed_write = false;
+                        self.status = "Approval refused; a fresh review is required.".into();
                     }
                 }
             }

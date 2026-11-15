@@ -139,20 +139,25 @@ fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {
         terminal.draw(|f| views::draw(f, &app)).unwrap();
         let b = terminal.backend().buffer();
         let screen = render(&app, w, h);
-        for label in ["Search by label", "SCOPE", "ACTION", "Metadata"] {
+        for label in ["Find an action", "SCOPE", "ACTION"] {
             assert!(screen.contains(label));
         }
-        let arrow = b.content.iter().position(|c| c.symbol() == ">").unwrap();
-        assert_eq!(b.content[arrow].bg, Color::Cyan);
+        assert!(
+            super::workbench::actions(&app)
+                .iter()
+                .any(|a| matches!(a.target, super::input::Target::PickerDetails))
+        );
+        let arrow = b.content.iter().position(|c| c.symbol() == "›").unwrap();
+        assert_eq!(b.content[arrow].bg, Color::Reset);
         assert!(
             b.content[arrow]
                 .modifier
                 .contains(Modifier::BOLD | Modifier::REVERSED)
         );
-        assert_eq!(
-            terminal.get_cursor_position().unwrap().x,
-            (w - w.saturating_sub(2).min(94)) / 2 + 2
-        );
+        let cursor = terminal.backend().cursor_position();
+        let boundary = &b[(cursor.x - 1, cursor.y)];
+        assert_eq!(boundary.symbol(), "[");
+        assert!(boundary.modifier.contains(Modifier::BOLD));
     }
     text(&mut app, "q?/");
     assert_eq!(current(&app).0, "q?/");
@@ -193,7 +198,12 @@ fn disabled_actions_stay_open_and_full_reasons_are_keyboard_reachable_without_di
     assert!(matches!(app.shell.overlay, Some(Overlay::Actions { .. })));
     assert_eq!(app.status, reason);
     assert!(app.preview.is_none() && app.confirmation.is_none() && !app.git_view.sensitive());
-    assert!(render(&app, 48, 14).contains("Metadata"));
+    render(&app, 48, 14);
+    assert!(
+        super::workbench::actions(&app)
+            .iter()
+            .any(|a| matches!(a.target, super::input::Target::PickerDetails))
+    );
     key(&mut app, KeyCode::F(3));
     assert!(render(&app, 48, 14).contains("Action details"));
     assert_eq!(app.shell.scroll, 0);
@@ -203,7 +213,8 @@ fn disabled_actions_stay_open_and_full_reasons_are_keyboard_reachable_without_di
         terminal.draw(|f| views::draw(f, &app)).unwrap();
         let b = terminal.backend().buffer();
         let mut viewport = String::new();
-        assert!(render(&app, 48, 14).contains("Dialog · Actions"));
+        assert!(render(&app, 48, 14).contains("Actions"));
+        assert_eq!(app.dialog_title(), Some("Actions"));
         let detail = (0..14)
             .find(|y| {
                 (0..48)
@@ -212,10 +223,10 @@ fn disabled_actions_stay_open_and_full_reasons_are_keyboard_reachable_without_di
                     .contains("Action details")
             })
             .unwrap();
-        let left = (0..48).find(|x| b[(*x, detail)].symbol() == "┌").unwrap();
+        let left = (0..48).find(|x| b[(*x, detail)].symbol() == "│").unwrap();
         let right = (left..48)
             .rev()
-            .find(|x| b[(*x, detail)].symbol() == "┐")
+            .find(|x| b[(*x, detail)].symbol() == "│")
             .unwrap();
         for y in detail + 1..14 {
             if b[(left, y)].symbol() == "└" {

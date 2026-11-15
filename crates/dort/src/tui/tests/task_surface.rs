@@ -15,15 +15,28 @@ fn key(app: &mut App, code: KeyCode) -> Option<Task> {
     app.key(KeyEvent::new(code, KeyModifiers::NONE), 48, 14)
 }
 fn click(app: &mut App, label: &str) -> Option<Task> {
-    let view = render(app, 48, 14);
-    let (x, y) = view
-        .lines()
-        .enumerate()
-        .find_map(|(y, row)| {
-            row.find(label)
-                .map(|x| (row[..x].chars().count() as u16, y as u16))
-        })
-        .expect("visible typed feedback button");
+    use super::{input::Target, task_surfaces::Control};
+    let wanted = match label {
+        "[Retry read" | "[Refresh" => Control::Retry,
+        "[Recovery" => Control::Recovery,
+        "[Back" => Control::Back,
+        _ => panic!("unknown feedback action"),
+    };
+    let matches = |target| {
+        matches!(
+            (target, wanted),
+            (Target::Feedback(Control::Retry), Control::Retry)
+                | (Target::Feedback(Control::Recovery), Control::Recovery)
+                | (Target::Feedback(Control::Back), Control::Back)
+        )
+    };
+    render(app, 48, 14);
+    let position = (0..14)
+        .flat_map(|y| (0..48).map(move |x| (x, y)))
+        .find(|(x, y)| app.hits.target(*x, *y).is_some_and(matches));
+    let Some((x, y)) = position else {
+        return super::tests::more_target(app, matches);
+    };
     app.mouse(
         MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
@@ -40,16 +53,19 @@ fn task_cells(app: &mut App) -> String {
     for _ in 0..45 {
         let view = render(app, 48, 14);
         let rows = view.lines().collect::<Vec<_>>();
-        let top = rows.iter().position(|row| row.starts_with('┌')).unwrap();
+        let top = rows
+            .iter()
+            .position(|row| row.contains('─'))
+            .expect("top-only task pane");
         let viewport = rows
             .iter()
             .skip(top + 2)
-            .take_while(|row| !row.starts_with('└'))
-            .flat_map(|row| row.chars().skip(1).take(46))
+            .take(13usize.saturating_sub(top + 2))
+            .flat_map(|row| row.chars())
             .collect::<String>();
         let overlap = (0..=viewport.len().min(joined.len()))
             .rev()
-            .find(|n| joined.ends_with(&viewport[..*n]))
+            .find(|n| viewport.is_char_boundary(*n) && joined.ends_with(&viewport[..*n]))
             .unwrap();
         joined.push_str(&viewport[overlap..]);
         assert!(key(app, KeyCode::PageDown).is_none());
@@ -76,7 +92,8 @@ fn activity_keeps_scope_and_real_boundary_through_navigation_and_quit_waits() {
     let first = render(&app, 48, 14);
     assert!(first.contains("Approved execution") && first.contains("quit waits"));
     assert!(key(&mut app, KeyCode::Right).is_none());
-    assert!(app.tab == Tab::Files);
+    assert!(app.tab == Tab::Overview);
+    assert!(app.interaction_notice.is_some());
     for code in [
         KeyCode::Char('a'),
         KeyCode::Char('r'),
@@ -255,7 +272,7 @@ fn receipt_preserves_raw_transaction_scope_and_noop_through_refresh_without_time
         assert_eq!(app.receipt.as_ref().unwrap().transaction_id, transaction);
         for (width, height) in [(48, 14), (80, 24), (120, 30)] {
             let cells = render(&app, width, height);
-            assert!(cells.contains("Operation result") && cells.contains("[Back"));
+            assert!(cells.contains("Operation result") && cells.contains("Esc Back"));
         }
         if let Some(id) = &transaction {
             assert!(task_cells(&mut app).contains(id));

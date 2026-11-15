@@ -440,46 +440,29 @@ fn panel(
     );
     app.hits.wheel(area, Wheel::Preview);
 }
-fn controls(frame: &mut Frame, area: Rect, app: &App, failed_write: bool) {
+fn controls(_frame: &mut Frame, _area: Rect, app: &App, failed_write: bool) {
     let choices = if failed_write {
         vec![
+            ("Recovery", "Enter", Control::Recovery),
+            ("Refresh observations", "r", Control::Retry),
+            ("Back", "Esc", Control::Back),
+        ]
+    } else if app.error.is_some() {
+        vec![
+            ("Retry read", "Enter", Control::Retry),
             ("Recovery", "h", Control::Recovery),
-            ("Refresh", "r", Control::Retry),
             ("Back", "Esc", Control::Back),
         ]
     } else {
         vec![
-            (
-                if app.error.is_some() {
-                    "Retry read"
-                } else {
-                    "Refresh"
-                },
-                "r",
-                Control::Retry,
-            ),
+            ("Done", "Enter", Control::Back),
+            ("Refresh observations", "r", Control::Retry),
             ("Recovery", "h", Control::Recovery),
             ("Back", "Esc", Control::Back),
         ]
     };
-    let (mut x, mut y) = (area.x, area.y);
     for (label, key, control) in choices {
-        let button = ui::button(label, key, false);
-        let width = button.width() as u16;
-        if x + width > area.right() {
-            x = area.x;
-            y += 1;
-        }
-        if y >= area.bottom() {
-            break;
-        }
-        app.hits
-            .click(Rect::new(x, y, width, 1), Target::Feedback(control));
-        frame.render_widget(
-            Paragraph::new(Line::from(button)),
-            Rect::new(x, y, width, 1),
-        );
-        x += width;
+        app.presented(label, key, Target::Feedback(control));
     }
 }
 pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
@@ -604,9 +587,13 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
             app.writing,
             lines,
         );
-        frame.render_widget(
-            Paragraph::new(ui::keys(&[("q", "Quit waits"), ("PgDn", "Scroll")])),
-            actions,
+        app.presented(
+            "Quit after finish",
+            "q",
+            super::input::Target::Key(ratatui::crossterm::event::KeyEvent::new(
+                ratatui::crossterm::event::KeyCode::Char('q'),
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            )),
         );
     }
 }

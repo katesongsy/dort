@@ -2,6 +2,8 @@
 mod apt;
 #[path = "tools_install_brew.rs"]
 mod brew;
+#[path = "calm_controls.rs"]
+mod calm;
 #[path = "tools_outcomes.rs"]
 mod outcomes;
 use super::{
@@ -15,6 +17,7 @@ use crate::services::{
     reconciliation::{self, Snapshot},
     tools,
 };
+use crate::tui::tests;
 use dort_core::{
     context::HostContext,
     local::RepositoryRegistry,
@@ -225,7 +228,10 @@ esac
         assert!(app.complete(result).is_none());
     }
     fn review(&self, app: &mut App) {
-        let task = key(app, KeyCode::Char('i')).unwrap();
+        let task = super::tests::more_target(app, |target| {
+            matches!(target, crate::tui::input::Target::ToolInstallSelected)
+        })
+        .unwrap();
         assert!(matches!(task, Task::ToolInstallPrepare(_)));
         self.run(app, task);
     }
@@ -253,7 +259,7 @@ fn long_package_metadata_cannot_push_compact_install_risks_below_the_action() {
         s.contains("CAN EXECUTE")
             && s.contains("no rollback")
             && s.contains("No activation")
-            && s.contains("Install exact version"),
+            && super::tests::has_action(&app, "Install exact version"),
         "{s}"
     );
     assert_eq!(calls, f.calls());
@@ -263,22 +269,18 @@ fn long_package_metadata_cannot_push_compact_install_risks_below_the_action() {
 fn one_activation_consumes_the_real_install_preview_and_preserves_old_snapshots() {
     let f = Fixture::new();
     let mut app = f.app(false);
-    assert!(render(&app, 80, 24).contains("Review exact mise install"));
+    assert!(super::tests::has_action(&app, "Review exact mise install"));
     f.review(&mut app);
     assert_eq!(f.calls(), "Q");
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let text = render(&app, w, h);
-        assert!(text.contains("Install exact version"), "{text}");
+        assert!(
+            super::tests::has_action(&app, "Install exact version"),
+            "{text}"
+        );
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal.draw(|frame| views::draw(frame, &app)).unwrap();
-        assert!(
-            terminal
-                .backend()
-                .buffer()
-                .content
-                .iter()
-                .any(|c| c.bg == Color::Cyan)
-        );
+        super::tests::assert_primary_action(&terminal);
     }
     key(&mut app, KeyCode::Char('d'));
     assert!(key(&mut app, KeyCode::Enter).is_none());
@@ -297,9 +299,16 @@ fn one_activation_consumes_the_real_install_preview_and_preserves_old_snapshots(
     assert!(
         matches!(old,dort_core::tools::inspection::Observation::Complete{installations} if installations.is_empty())
     );
-    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(matches!(
+        key(&mut app, KeyCode::Enter),
+        Some(Task::ToolsDetect(_))
+    ));
+    assert!(app.tools_view.fresh_review);
+    assert_eq!(f.calls(), "QQIQ");
     assert!(!render(&app, 80, 24).contains("PRIVATE"));
-    let task = key(&mut app, KeyCode::Char('i')).unwrap();
+    let task = app
+        .activate(crate::tui::shell::Action::ToolAttempts)
+        .unwrap();
     f.run(&mut app, task);
     assert!(render(&app, 80, 24).contains("Exact package reported"));
 }
@@ -315,7 +324,12 @@ fn dry_run_shrink_navigation_and_late_preparation_cannot_approve_installation() 
         app.resize(47, 13);
         assert!(app.tools_view.installation.preview.is_none());
         app.resize(80, 24);
-        assert!(key(&mut app, KeyCode::Enter).is_none());
+        assert!(matches!(
+            key(&mut app, KeyCode::Enter),
+            Some(Task::ToolsDetect(_))
+        ));
+        assert!(app.tools_view.installation.preview.is_none());
+        assert!(app.tools_view.fresh_review);
         assert_eq!(f.calls(), "Q");
     }
     let f = Fixture::new();
@@ -389,7 +403,7 @@ fn recomputing_with_old_snapshots_cannot_skip_explicit_fresh_inventory_after_ins
     .unwrap();
     app.tools_view.reconciliation.completed(Ok(report));
     app.tools_view.recon_open = true;
-    assert!(render(&app, 48, 14).contains("Collect fresh inventory"));
+    assert!(super::tests::has_action(&app, "Collect fresh inventory"));
     assert!(key(&mut app, KeyCode::Char('i')).is_none());
     assert_eq!(f.calls(), "QQIQ");
     assert!(matches!(
@@ -422,7 +436,7 @@ fn stale_approval_returns_owned_failure_without_replay_or_file_recovery_receipt(
 fn npm_one_activation_discloses_native_effects_and_marks_all_catalogs_stale() {
     let f = Fixture::new_npm();
     let mut app = f.npm_app(false);
-    assert!(render(&app, 80, 24).contains("Review exact npm install"));
+    assert!(super::tests::has_action(&app, "Review exact npm install"));
     let historical = serde_json::to_string(&app.tools_view.snapshots).unwrap();
     f.review(&mut app);
     assert_eq!(f.calls(), "MN");
@@ -470,7 +484,7 @@ fn npm_old_manifest_runtime_snapshot_dry_run_and_shrink_never_authorize_install(
         .reconciliation
         .stale_for_install
         .insert("runtime".into());
-    assert!(render(&app, 80, 24).contains("Collect fresh inventory"));
+    assert!(super::tests::has_action(&app, "Collect fresh inventory"));
     assert!(key(&mut app, KeyCode::Char('i')).is_none());
     app.tools_view.reconciliation.stale_for_install.clear();
     let manifest = fs::read_to_string(f.repo.join("dort.toml")).unwrap();
@@ -502,7 +516,7 @@ fn damaged_npm_closure_has_retained_provider_drafts_and_compact_focus_caret() {
     key(&mut app, KeyCode::Char('c'));
     assert!(app.tools_view.installation.mode == Mode::CloseInputs);
     // Existing mise metadata is the initial fallback; switch deliberately to npm.
-    key(&mut app, KeyCode::F(2));
+    super::tests::cycle_closure_provider(&mut app);
     assert!(app.tools_view.installation.close_npm);
     assert_eq!(
         app.tools_view.installation.fields[0],
@@ -516,10 +530,7 @@ fn damaged_npm_closure_has_retained_provider_drafts_and_compact_focus_caret() {
             if focus < 4 {
                 let cursor = terminal.get_cursor_position().unwrap();
                 assert!(cursor.x < size.0 && cursor.y < size.1 - 2);
-                assert_eq!(
-                    terminal.backend().buffer()[(cursor.x, cursor.y - 1)].fg,
-                    Color::Cyan
-                );
+                super::tests::assert_text_focus(&terminal, size, cursor);
             } else {
                 let label = if focus == 4 {
                     "Review closure"
@@ -542,14 +553,14 @@ fn damaged_npm_closure_has_retained_provider_drafts_and_compact_focus_caret() {
             }
         }
     }
-    key(&mut app, KeyCode::F(2));
+    super::tests::cycle_closure_provider(&mut app);
     assert!(!app.tools_view.installation.close_npm);
     assert!(app.tools_view.installation.close_brew);
-    key(&mut app, KeyCode::F(2));
+    super::tests::cycle_closure_provider(&mut app);
     assert!(!app.tools_view.installation.close_brew);
     assert!(app.tools_view.installation.close_apt);
-    key(&mut app, KeyCode::F(2)); // mise
-    key(&mut app, KeyCode::F(2)); // npm
+    super::tests::cycle_closure_provider(&mut app); // mise
+    super::tests::cycle_closure_provider(&mut app); // npm
     assert!(app.tools_view.installation.close_npm);
     assert_eq!(
         app.tools_view.installation.fields[2],
@@ -576,7 +587,7 @@ fn unavailable_attempt_storage_is_not_a_healthy_empty_list() {
     let screen = render(&app, 80, 24);
     assert!(screen.contains("Attempts unavailable"));
     assert!(!screen.contains("No installation attempts"));
-    assert!(screen.contains("Start fresh review"));
+    assert!(super::tests::has_action(&app, "Start fresh review"));
     assert!(matches!(
         key(&mut app, KeyCode::Char('f')),
         Some(Task::ToolsDetect(_))

@@ -42,7 +42,7 @@ fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
         ui::report(
             frame,
             area,
-            "Selected item · Esc list",
+            "Selected item",
             details(app),
             app.details_scroll,
             true,
@@ -76,7 +76,7 @@ fn details(app: &App) -> Text<'static> {
                 "Full path",
                 node.path.to_str().unwrap_or("unavailable"),
             ));
-            lines.push(Line::raw("h/l folds/unfolds. Space marks/unmarks matching descendants, including folded rows; adoption uses eligible regular files. Marks survive filters and folding."));
+            lines.push(Line::raw("Group marks include matching descendants. Adoption uses eligible regular files; marks survive filtering and folding."));
         }
     } else if app.discovering {
         if let Some(candidate) = app
@@ -194,12 +194,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         nodes.iter().filter(|n| super::tree::marked(app, n)).count()
     };
     let title = format!(
-        "Files / {} · {} marked ({} hidden)",
-        if app.discovering {
-            "Discover"
-        } else {
-            "Managed"
-        },
+        "{} marked ({} hidden)",
         marked,
         marked.saturating_sub(shown_marks)
     );
@@ -229,30 +224,31 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         sections[0],
     );
     let search = app.inventory.search(app.discovering);
-    let query = safe(&search.query);
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                if search.editing {
-                    " Search > "
-                } else {
-                    " / Search "
-                },
-                ui::accent(),
-            ),
-            Span::raw(if query.is_empty() {
-                "[type / to filter]".into()
-            } else {
-                query.clone()
-            }),
-            Span::styled("  · Display only", ui::muted()),
-        ])),
+    ui::design::filter(
+        frame,
         sections[1],
+        "Filter files",
+        &search.query,
+        search.editing && app.hits.input_focus_allowed() && !app.busy,
     );
-    if search.editing && app.hits.input_focus_allowed() && !app.busy {
-        let x =
-            (sections[1].x + 10 + query.len() as u16).min(sections[1].right().saturating_sub(1));
-        frame.set_cursor_position((x, sections[1].y));
+    if search.editing {
+        app.presented(
+            "Done",
+            "Enter",
+            super::input::Target::Key(ratatui::crossterm::event::KeyEvent::new(
+                ratatui::crossterm::event::KeyCode::Enter,
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            )),
+        );
+    } else if !nodes.is_empty() && !app.inventory.details && !app.content.focused {
+        app.presented(
+            "Details",
+            "Enter",
+            super::input::Target::Action(super::shell::Action::Inspect),
+        );
+    }
+    if app.inventory.details || app.content.focused {
+        app.presented("Back", "Esc", super::input::Target::Back);
     }
     app.hits.click(sections[1], super::input::Target::Filter);
     let content = sections[2];
@@ -263,10 +259,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         Layout::vertical([Constraint::Percentage(100)]).split(content)
     };
     let focused = !app.discovering || !app.content.focused;
-    if !wide
-        && (app.inventory.details
-            || app.content.focused
-            || (app.result.is_some() && app.receipt.is_none()))
+    if app.inventory.details
+        || app.content.focused
+        || (!wide && app.result.is_some() && app.receipt.is_none())
     {
         draw_selected(frame, content, app);
         return;
@@ -277,7 +272,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         app.hits
             .click(list_area, super::input::Target::DiscoverFocus(false));
     }
-    let capacity = list_area.height.saturating_sub(3) as usize;
+    let capacity = list_area.height.saturating_sub(2) as usize;
     app.inventory.page_capacity.set(capacity);
     let offset = if app.discovering {
         &app.inventory.candidate_offset
@@ -296,7 +291,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         app.data.as_ref().map_or(0, |d| d.files.len())
     };
     let title = format!(
-        "{} / {} shown | Space mark h/l fold",
+        "{} / {} shown",
         if app.discovering {
             super::discovery_tree::snapshot(app).matching.len()
         } else {
@@ -440,7 +435,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             .header(header)
             .block(block)
             .row_highlight_style(ui::selected())
-            .highlight_symbol("> ");
+            .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
         let mut state = TableState::default().with_selected(
             selected
                 .and_then(|i| i.checked_sub(first))
@@ -450,7 +445,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         app.hits.rows(list_area, &visible, 0);
         // Register only actual rendered rows, after the generic row hit regions.
         for (line, node) in window.iter().enumerate() {
-            let x = list_area.x + 3 + (node.depth.min(12) * 2) as u16;
+            let x = list_area.x + 2 + (node.depth.min(12) * 2) as u16;
             if x + 3 < list_area.right() {
                 app.hits.click(
                     Rect::new(x, list_area.y + 2 + line as u16, 3, 1),

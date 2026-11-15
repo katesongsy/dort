@@ -89,7 +89,7 @@ fn recovery_search_preserves_raw_identity_and_never_hides_global_blockers() {
         app.selected, 1,
         "returning to filtered history selects a displayed row"
     );
-    assert!(render(&app, 100, 30).contains("Blockers: 2"));
+    assert!(render(&app, 100, 30).contains("Global blockers: 2"));
     key(&mut app, KeyCode::Enter);
     let text = render(&app, 140, 45);
     assert!(text.contains(&"b".repeat(64)));
@@ -144,15 +144,15 @@ fn compact_long_history_keeps_selected_row_and_global_blockers_visible() {
     for (width, height) in [(48, 14), (80, 24), (140, 40), (48, 14)] {
         app.resize(width, height);
         let screen = render(&app, width, height);
-        assert!(screen.contains("> 00000078"));
+        assert!(screen.contains("› 00000078"));
         assert_eq!(app.selected, 120);
     }
     let screen = render(&app, 48, 14);
-    assert!(screen.contains("All repositories: 129 | Blockers: 1"));
+    assert!(screen.contains("/129 shown") && screen.contains("Global blockers: 1"));
     assert!(screen.contains("Completed") && screen.contains("Terminal"));
     assert!(screen.contains("SCM") && screen.contains("PHASE") && screen.contains("STATE"));
     app.history_search.query = "00000078".into();
-    assert!(render(&app, 48, 14).contains("Blockers: 1"));
+    assert!(render(&app, 48, 14).contains("Global blockers: 1"));
     assert!(
         matches!(key(&mut app, KeyCode::Char('b')), Some(Task::Rollback(_, t)) if t.starts_with("00000078"))
     );
@@ -207,7 +207,7 @@ fn preparing_table_enter_inspects_then_the_visible_action_uses_raw_identity() {
     assert!(app.history_details && app.preview.is_none() && app.confirmation.is_none());
     assert!(app.page_actions() == vec![Action::Abandon]);
     key(&mut app, KeyCode::Tab); // no region focus cycle
-    assert!(render(&app, 80, 24).contains("[Review abandon · x]"));
+    assert!(super::tests::has_action(&app, "Review abandon"));
     assert!(
         matches!(key(&mut app, KeyCode::Char('x')), Some(Task::Bootstrap(r,t,dort_core::bootstrap::RecoveryAction::Abandon)) if r == "b".repeat(64) && t == "b".repeat(64))
     );
@@ -275,9 +275,15 @@ fn about_reports_build_version_and_returns_to_prior_focus_and_details() {
     app.tab = Tab::Recovery;
     app.details_scroll = 8;
     app.shell.overlay = Some(Overlay::About);
-    let text = render(&app, 120, 45);
+    let mut text = render(&app, 120, 45);
     assert!(text.contains(env!("CARGO_PKG_VERSION")));
+    for _ in 0..40 {
+        assert!(key(&mut app, KeyCode::PageDown).is_none());
+        text.push_str(&render(&app, 120, 45));
+    }
     assert!(text.contains("Other package installations"));
+    assert!(text.contains("APT privilege:"));
+    assert!(text.contains("noninteractive sudo -n -T 600"));
     key(&mut app, KeyCode::Esc);
     assert!(app.tab == Tab::Recovery);
     assert_eq!(app.details_scroll, 8);

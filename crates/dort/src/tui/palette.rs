@@ -60,6 +60,7 @@ pub fn draw(
         area,
         &app.hits,
         ui::FormActions {
+            choices: &[],
             buttons: &[ui::ActionButton {
                 label: if app.shell.picker_details {
                     "Actions"
@@ -69,11 +70,7 @@ pub fn draw(
                 key: "F3",
                 target: Target::PickerDetails,
             }],
-            hint: if app.shell.picker_details {
-                "F3/Esc: actions · PgUp/PgDn: full metadata/reasons"
-            } else {
-                "Up/Down: action · Enter: open · /: filter · F3: metadata"
-            },
+            feedback: None,
         },
     );
     if app.shell.picker_details {
@@ -92,22 +89,35 @@ pub fn draw(
     }
     let detail_height = if content.height >= 14 { 6 } else { 0 };
     let parts = Layout::vertical([
-        Constraint::Length(3),
+        Constraint::Length(1),
         Constraint::Min(1),
         Constraint::Length(detail_height),
     ])
     .split(content);
-    ui::input(
+    ui::design::filter(
         frame,
         parts[0],
-        if searching {
-            "Actions · Search by label"
+        if app.shell.global_commands {
+            "Find a task"
         } else {
-            "Actions · / to search"
+            "Find an action"
         },
         query,
         searching && app.hits.input_focus_allowed(),
     );
+    if rows
+        .get(selected)
+        .is_some_and(|entry| app.action_reason(entry.action).is_none())
+    {
+        app.presented(
+            "Open",
+            "Enter",
+            Target::Key(ratatui::crossterm::event::KeyEvent::new(
+                ratatui::crossterm::event::KeyCode::Enter,
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            )),
+        );
+    }
     let mut items: Vec<_> = rows
         .iter()
         .enumerate()
@@ -132,25 +142,25 @@ pub fn draw(
         })
         .collect();
     if items.is_empty() {
-        items.push(Row::new(["", "No matching actions. Ctrl-U clears."]).style(ui::muted()));
+        items.push(Row::new(["", "No matching actions."]).style(ui::muted()));
     }
     let framed = parts[1].height >= 7;
     app.shell.page_rows.set(
         parts[1]
             .height
-            .saturating_sub(if framed { 3 } else { 1 })
+            .saturating_sub(if framed { 2 } else { 1 })
             .max(1),
     );
     let mut table = Table::new(items, [Constraint::Length(8), Constraint::Min(8)])
         .header(Row::new(["SCOPE", "ACTION / EFFECT"]).style(ui::muted()))
-        .highlight_symbol("> ")
+        .highlight_symbol(format!("{} ", ui::glyphs::SELECTED))
         .row_highlight_style(ui::selected());
     if framed {
         table = table.block(ui::pane(
             if rows.is_empty() {
                 "No matching actions"
             } else {
-                "Context actions · Enter choose"
+                "Available actions"
             },
             !searching,
         ));
@@ -163,14 +173,14 @@ pub fn draw(
     for (y, entry) in rows
         .iter()
         .skip(state.offset())
-        .take(usize::from(parts[1].height.saturating_sub(1 + inset * 2)))
+        .take(usize::from(parts[1].height.saturating_sub(1 + inset)))
         .enumerate()
     {
         app.hits.click(
             Rect::new(
-                parts[1].x + inset,
+                parts[1].x,
                 parts[1].y + 1 + inset + y as u16,
-                parts[1].width.saturating_sub(inset * 2),
+                parts[1].width,
                 1,
             ),
             Target::Palette(entry.action),
@@ -180,7 +190,7 @@ pub fn draw(
         ui::report(
             frame,
             parts[2],
-            "Action details · F3 expands",
+            "Action details",
             details(app, &rows, query, selected),
             app.shell.scroll,
             false,

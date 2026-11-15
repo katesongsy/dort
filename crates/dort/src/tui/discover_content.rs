@@ -32,7 +32,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &Sta
         text::{Line, Span, Text},
         widgets::Paragraph,
     };
-    let block = super::components::pane("Content · Tab focus · Esc list", state.focused);
+    let block = super::components::pane("Selected content", state.focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let gutter = usize::from(inner.width.min(7));
@@ -142,6 +142,8 @@ pub fn sync(app: &mut App, width: u16, height: u16) {
         && !app.show_result
         && app.preview.is_none()
         && app.help.is_none()
+        && app.more.is_none()
+        && app.choice.is_none()
         && app.shell.overlay.is_none()
         && app.navigation.menu.is_none()
         && !app.batch_editor.as_ref().is_some_and(|e| e.open)
@@ -172,7 +174,6 @@ pub fn sync(app: &mut App, width: u16, height: u16) {
     }
     if app.content.available()
         && app.inventory.details
-        && (width < 110 || height < 22)
         && !app.inventory.search(app.discovering).editing
     {
         app.content.focused = true;

@@ -112,6 +112,33 @@ impl State {
     pub fn text_entry(&self) -> bool {
         self.mode != Mode::Results
     }
+    pub(super) fn selected_binding_tool(
+        &self,
+    ) -> Option<(&str, Option<dort_core::model::Provider>)> {
+        if self.mode != Mode::Bindings || self.binding_details {
+            return None;
+        }
+        self.prepared
+            .as_ref()?
+            .tools
+            .get(self.focus)
+            .map(|tool| (tool.id.as_str(), tool.provider))
+    }
+    pub(super) fn choose_binding(&mut self, tool: &str, snapshot: Option<&str>) {
+        if self.mode != Mode::Bindings
+            || !self
+                .prepared
+                .as_ref()
+                .is_some_and(|p| p.tools.iter().any(|t| t.id == tool))
+        {
+            return;
+        }
+        if let Some(snapshot) = snapshot {
+            self.bindings.insert(tool.into(), snapshot.into());
+        } else {
+            self.bindings.remove(tool);
+        }
+    }
     pub(super) fn binding_metadata(&self) -> bool {
         self.binding_details
     }
@@ -173,7 +200,7 @@ impl State {
     pub fn key(&mut self, key: KeyEvent, snapshots: &[Snapshot]) -> Option<Outcome> {
         if self.binding_details {
             match key.code {
-                KeyCode::Esc | KeyCode::Char('d') => self.binding_details = false,
+                KeyCode::Esc | KeyCode::F(3) | KeyCode::Char('d') => self.binding_details = false,
                 KeyCode::Home => self.scroll = 0,
                 KeyCode::End => self.scroll = usize::MAX,
                 KeyCode::PageDown | KeyCode::Down => {
@@ -188,6 +215,11 @@ impl State {
         }
         if self.mode == Mode::Inputs {
             match key.code {
+                KeyCode::F(3) => {
+                    self.detail = serde_json::to_string_pretty(&serde_json::json!({"manifest":self.fields[0], "tool_search_directories":self.fields[1], "temporary_profiles":self.fields[2]})).expect("draft metadata serializes");
+                    self.binding_details = true;
+                    self.scroll = 0;
+                }
                 KeyCode::Esc => return Some(Outcome::Back),
                 KeyCode::Tab | KeyCode::Down => self.focus = (self.focus + 1) % 3,
                 KeyCode::BackTab | KeyCode::Up => self.focus = (self.focus + 2) % 3,
@@ -236,14 +268,14 @@ impl State {
                         self.bindings.insert(tool.id.clone(), ids[next - 1].clone());
                     }
                 }
-                KeyCode::Char('d') if self.focus < count => {
+                KeyCode::Char('d') | KeyCode::F(3) if self.focus < count => {
                     let tool = &prepared.tools[self.focus];
                     if let Some(snapshot) = self
                         .bindings
                         .get(&tool.id)
                         .and_then(|id| snapshots.iter().find(|s| &s.id == id))
                     {
-                        self.detail = super::views::safe(&serde_json::to_string_pretty(&serde_json::json!({"snapshot":&snapshot.id,"review":crate::services::tools::Review {manifest:snapshot.report.manifest.as_deref(),provider:&snapshot.report.provider.description}})).expect("metadata serializes"));
+                        self.detail = serde_json::to_string_pretty(&serde_json::json!({"snapshot":&snapshot.id,"review":crate::services::tools::Review {manifest:snapshot.report.manifest.as_deref(),provider:&snapshot.report.provider.description}})).expect("metadata serializes");
                         self.binding_details = true;
                         self.scroll = 0;
                     }
@@ -285,7 +317,7 @@ impl State {
                     return Some(Outcome::Install(row.id.clone()));
                 }
             }
-            KeyCode::Char('d') | KeyCode::Enter if count > 0 => {
+            KeyCode::Char('d') | KeyCode::F(3) | KeyCode::Enter if count > 0 => {
                 self.details = !self.details;
                 self.scroll = 0;
                 self.cache_detail();
@@ -326,10 +358,10 @@ impl State {
         let Some(row) = report.plan.rows.get(self.selected) else {
             return;
         };
-        self.detail = super::views::safe(&serde_json::to_string_pretty(&serde_json::json!({
+        self.detail = serde_json::to_string_pretty(&serde_json::json!({
             "analysis_scope": &report.scope, "snapshot": report.bindings.get(&row.id), "package_plan": row,
             "binary_metadata": report.binaries.tools.get(&row.id), "authority": "Snapshot claims only; not tool readiness, ownership or execution authorization"
-        })).expect("metadata serializes"));
+        })).expect("metadata serializes");
     }
     pub fn draw(
         &self,
@@ -338,6 +370,33 @@ impl State {
         snapshots: &[Snapshot],
         hits: &super::input::Hits,
     ) {
+        if self.binding_details
+            || self.details
+            || self.mode == Mode::Inputs
+            || self.mode == Mode::Results
+                && self
+                    .result
+                    .as_ref()
+                    .is_some_and(|r| !r.plan.rows.is_empty())
+            || self.selected_binding_tool().is_some_and(|(tool, _)| {
+                self.bindings
+                    .get(tool)
+                    .is_some_and(|id| snapshots.iter().any(|s| &s.id == id))
+            })
+        {
+            hits.present(ui::ActionButton {
+                label: if self.binding_details || self.details {
+                    "Comparison"
+                } else {
+                    "Full metadata"
+                },
+                key: "F3",
+                target: Target::Key(ratatui::crossterm::event::KeyEvent::new(
+                    KeyCode::F(3),
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                )),
+            });
+        }
         if self.binding_details {
             self.draw_detail(frame, area);
             return;
@@ -354,11 +413,21 @@ impl State {
             ui::prose(
                 frame,
                 area,
-                "Reconciliation metadata unavailable. Esc returns to retained inputs.",
+                "Reconciliation metadata unavailable. Inputs are retained.",
                 ui::warning(),
             );
             return;
         };
+        if !report.plan.rows.is_empty() {
+            hits.present(ui::ActionButton {
+                label: "Details",
+                key: "Enter",
+                target: Target::Key(ratatui::crossterm::event::KeyEvent::new(
+                    KeyCode::Enter,
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                )),
+            });
+        }
         let header = if !report.binaries.available() {
             "Binary metadata incomplete"
         } else if report.plan.has_blockers() {
@@ -369,9 +438,7 @@ impl State {
         ui::chrome_prose(
             frame,
             Rect::new(area.x, area.y, area.width, 2),
-            &format!(
-                "{header} · no install authority\nEnter/d details · Esc inputs · claims are not tool readiness"
-            ),
+            &format!("{header}\nClaims are not tool readiness or ownership."),
             ui::heading(),
         );
         let eligible = report
@@ -380,12 +447,7 @@ impl State {
             .get(self.selected)
             .is_some_and(|r| self.may_install(r));
         let needs_inventory = self.needs_inventory();
-        let capacity = usize::from(area.height.saturating_sub(if eligible || needs_inventory {
-            4
-        } else {
-            3
-        }))
-        .max(1);
+        let capacity = usize::from(area.height.saturating_sub(3)).max(1);
         self.capacity.set(capacity);
         let offset = self.selected.saturating_sub(capacity - 1);
         let mut lines = vec![Line::styled(
@@ -428,50 +490,30 @@ impl State {
             ));
         }
         if needs_inventory {
-            let button = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
-            frame.render_widget(
-                Paragraph::new(Line::from(ui::button("Collect fresh inventory", "c", true))),
-                button,
-            );
-            hits.click(button, Target::ToolInstallCollect);
+            hits.present(ui::ActionButton {
+                label: "Collect fresh inventory",
+                key: "c",
+                target: Target::ToolInstallCollect,
+            });
         }
         if eligible {
-            let button = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
-            frame.render_widget(
-                Paragraph::new(Line::from(ui::button(
-                    if report
-                        .plan
-                        .rows
-                        .get(self.selected)
-                        .and_then(|r| r.declaration.as_ref())
-                        .is_some_and(|d| d.provider == dort_core::model::Provider::Npm)
-                    {
-                        "Review exact npm install"
-                    } else if report
-                        .plan
-                        .rows
-                        .get(self.selected)
-                        .and_then(|r| r.declaration.as_ref())
-                        .is_some_and(|d| d.provider == dort_core::model::Provider::Brew)
-                    {
-                        "Review core formula install"
-                    } else if report
-                        .plan
-                        .rows
-                        .get(self.selected)
-                        .and_then(|r| r.declaration.as_ref())
-                        .is_some_and(|d| d.provider == dort_core::model::Provider::Apt)
-                    {
-                        "Review root-risk APT install"
-                    } else {
-                        "Review exact mise install"
-                    },
-                    "i",
-                    true,
-                ))),
-                button,
-            );
-            hits.click(button, Target::ToolInstallSelected);
+            let label = match report
+                .plan
+                .rows
+                .get(self.selected)
+                .and_then(|r| r.declaration.as_ref())
+                .map(|d| &d.provider)
+            {
+                Some(dort_core::model::Provider::Npm) => "Review exact npm install",
+                Some(dort_core::model::Provider::Brew) => "Review core formula install",
+                Some(dort_core::model::Provider::Apt) => "Review root-risk APT install",
+                _ => "Review exact mise install",
+            };
+            hits.present(ui::ActionButton {
+                label,
+                key: "i",
+                target: Target::ToolInstallSelected,
+            });
         }
         if report.plan.rows.is_empty() {
             lines.push(Line::raw(
@@ -484,8 +526,7 @@ impl State {
                 area.x,
                 area.y + 2,
                 area.width,
-                area.height
-                    .saturating_sub(if eligible || needs_inventory { 3 } else { 2 }),
+                area.height.saturating_sub(2),
             ),
         );
     }
@@ -527,8 +568,16 @@ impl State {
                             };
                             (
                                 format!(
-                                    "{} ({}) · {:?} · Space chooses",
-                                    t.id, t.binary, t.provider
+                                    "{} ({}) / {}",
+                                    t.id,
+                                    t.binary,
+                                    match t.provider {
+                                        Some(dort_core::model::Provider::Brew) => "Homebrew",
+                                        Some(dort_core::model::Provider::Apt) => "APT",
+                                        Some(dort_core::model::Provider::Mise) => "mise",
+                                        Some(dort_core::model::Provider::Npm) => "npm",
+                                        None => "Unsupported",
+                                    }
                                 ),
                                 value,
                             )
@@ -538,6 +587,11 @@ impl State {
                 .unwrap_or_default()
         };
         let count = fields.len();
+        let choices: Vec<_> = if self.mode == Mode::Bindings {
+            (0..count).collect()
+        } else {
+            Vec::new()
+        };
         let values: Vec<_> = fields
             .iter()
             .map(|(label, value)| (label.as_str(), value.as_str()))
@@ -545,19 +599,8 @@ impl State {
         let primary = if self.mode == Mode::Inputs {
             "Load declarations"
         } else {
-            "Reconcile metadata"
+            "Compare metadata"
         };
-        let hint = self
-            .failure
-            .as_ref()
-            .map(|e| ui::inline(e))
-            .unwrap_or_else(|| {
-                if self.mode == Mode::Inputs {
-                    "Tab: fields · Enter: load · Esc: Back".into()
-                } else {
-                    "Up/Down: tool · Space: choose snapshot · Enter: reconcile".into()
-                }
-            });
         ui::field_page(
             frame,
             area,
@@ -566,6 +609,7 @@ impl State {
             hits,
             |i| Target::ToolsReconControl(i, false),
             ui::FormActions {
+                choices: &choices,
                 buttons: &[
                     ui::ActionButton {
                         label: primary,
@@ -578,41 +622,37 @@ impl State {
                         target: Target::Back,
                     },
                 ],
-                hint: &hint,
+                feedback: self.failure.as_deref().map(|text| ui::Feedback {
+                    text,
+                    tone: ui::design::Tone::Attention,
+                }),
             },
         );
     }
     fn draw_detail(&self, frame: &mut Frame, area: Rect) {
-        let block = ui::pane("Full metadata · PgUp/PgDn · Home/End · Esc", false);
+        let block = ui::pane("Full metadata", false);
         let inner = block.inner(area);
         frame.render_widget(block, area);
-        let width = usize::from(inner.width).max(1);
-        let height = usize::from(inner.height);
-        if height == 0 {
-            return;
+        self.capacity
+            .set(usize::from(inner.height).saturating_sub(1).max(1));
+        let mut body = ui::review_text(&self.detail);
+        if self.mode == Mode::Bindings
+            && let Some(tool) = self.prepared.as_ref().and_then(|p| p.tools.get(self.focus))
+        {
+            let mut scope = vec![
+                ui::metadata("Tool", &tool.id),
+                ui::metadata(
+                    "Snapshot",
+                    self.bindings
+                        .get(&tool.id)
+                        .map(String::as_str)
+                        .unwrap_or("Not inspected"),
+                ),
+                Line::default(),
+            ];
+            scope.append(&mut body.lines);
+            body.lines = scope;
         }
-        self.capacity.set(height.max(1));
-        let total: usize = self
-            .detail
-            .lines()
-            .map(|l| l.len().div_ceil(width).max(1))
-            .sum();
-        let start = self.scroll.min(total.saturating_sub(height));
-        let mut position = 0;
-        let mut visible = vec![];
-        'lines: for line in self.detail.lines() {
-            for chunk in 0..line.len().div_ceil(width).max(1) {
-                if position >= start {
-                    let begin = (chunk * width).min(line.len());
-                    let end = (begin + width).min(line.len());
-                    visible.push(Line::raw(line[begin..end].to_owned()));
-                    if visible.len() == height {
-                        break 'lines;
-                    }
-                }
-                position += 1;
-            }
-        }
-        frame.render_widget(Paragraph::new(visible), inner);
+        ui::text_view_at(frame, inner, body, self.scroll);
     }
 }

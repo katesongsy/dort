@@ -52,7 +52,7 @@ pub struct Entry {
     pub effect: Effect,
     pub primary: Option<usize>,
 }
-fn entry(action: Action, primary: Option<usize>) -> Entry {
+pub(super) fn entry(action: Action, primary: Option<usize>) -> Entry {
     use Action::*;
     let scope = match action {
         Inspect | AdoptSelected | Keep | Remove | IgnoreSelected | Rollback | Resume | Abandon
@@ -142,9 +142,11 @@ pub fn entries(app: &App) -> Vec<Entry> {
         !super::navigation::owns(e.action)
             || (e.action == Diagnostics && app.tab == Tab::Checks && app.showing_diagnostics)
     });
-    rows.sort_by_key(|e| e.scope);
+    // Related task order is not the foreground primary; only an explicit Enter control is.
+    rows.sort_by_key(|e| (e.scope, e.primary.unwrap_or(usize::MAX)));
     rows
 }
+#[cfg(test)]
 pub fn page_actions(app: &App) -> Vec<Action> {
     // Primary ordering is deliberately independent of the palette's scope sections.
     let mut rows: Vec<_> = entries(app)

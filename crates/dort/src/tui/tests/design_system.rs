@@ -113,6 +113,110 @@ fn gallery(width: u16, height: u16, ascii: bool, mono: bool) -> Buffer {
     .apply(&mut buffer);
     buffer
 }
+fn workflow_gallery(kind: &str, width: u16, height: u16, ascii: bool, mono: bool) -> Buffer {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    let hits = Hits::default();
+    terminal.draw(|frame| {
+        hits.begin(frame.area());
+        let areas = ui::chrome::shell(frame, "Fixture", super::app::Tab::Tools, false, false, &hits);
+        match kind {
+            "Help" => {
+                let area = design::choice_dialog(frame, "Help", &hits);
+                ui::report(frame, area, "", ui::help::document(
+                    "Tools", "Inspect metadata before choosing a change.",
+                    &[("Enter", "Current primary action"), ("Esc", "Return with drafts retained")],
+                    &[("Privacy", "No provider runs merely by opening this dialog.".into())],
+                ), 0, false);
+            }
+            "Choices" => ui::choice::draw(frame, &hits, ui::choice::View {
+                title: "Choose snapshot", rows: &[("s1 / mise", "available"), ("s2 / npm", "unavailable")],
+                selected: 1, details: false, scroll: 0, feedback: None,
+            }),
+            "More" => ui::menu::draw(frame, "More", &[
+                ui::menu::Item { action: ui::ActionButton { label: "Metadata", key: "F3", target: Target::Back }, reason: None },
+                ui::menu::Item { action: ui::ActionButton { label: "Dependencies", key: "F4", target: Target::Back }, reason: None },
+            ], 0, false, None, &hits),
+            "Dashboard" => ui::dashboard::draw(frame, areas.body, "Scope facts", &[
+                ui::dashboard::Metric { label: "Linked", value: "4 linked".into(), compact: "4 linked".into(), style: ui::success() },
+                ui::dashboard::Metric { label: "Unavailable", value: "1 unavailable".into(), compact: "1 unavailable".into(), style: ui::warning() },
+            ], ui::review_text("Repository: /fixture/repository\nProfiles: default\nUnavailable is not an empty observation."), 0),
+            "Reader" => ui::report(frame, areas.body, "Journal facts", ui::review_text(
+                "Repository: /fixture/repository\nTransaction: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nState: unresolved\nClosure records observations; it does not repair or roll back effects."
+            ), 0, true),
+            "Result" => {
+                let lines = vec![
+                    design::badge("Installer failed", Tone::Error),
+                    ui::metadata("Process", "failed"),
+                    ui::metadata("Package", "reported present"),
+                    ui::metadata("Binary", "unavailable"),
+                    ui::metadata("Readiness", "not verified"),
+                ];
+                ui::report(frame, areas.body, "Installation outcome", ratatui::text::Text::from(lines), 0, true);
+            }
+            _ => unreachable!(),
+        }
+        let dialog = matches!(kind, "Help" | "Choices" | "More");
+        let primary = match kind { "Choices" => "Choose", "More" => "Open", "Result" => "Fresh review", "Dashboard" => "Apply", _ => "Back" };
+        let mut actions = vec![StripAction { key: if primary == "Back" { "Esc" } else { "Enter" }, label: primary, target: Target::Back, primary: primary != "Back" }];
+        if !dialog {
+            actions.extend([
+                StripAction { key: "F2", label: "More", target: Target::More, primary: false },
+                StripAction { key: "F1", label: "Help", target: Target::Action(Action::Help), primary: false },
+            ]);
+        }
+        design::action_strip(frame, areas.footer, &actions, &hits);
+    }).unwrap();
+    let mut buffer = terminal.backend().buffer().clone();
+    Appearance::classify(
+        Some("xterm-256color"),
+        None,
+        None,
+        Some(if ascii { "C" } else { "C.UTF-8" }),
+        if mono { Some("1") } else { None },
+    )
+    .apply(&mut buffer);
+    buffer
+}
+
+#[test]
+fn workflow_components_render_at_every_supported_gallery_size() {
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        for (ascii, mono) in [(false, false), (true, true)] {
+            for kind in ["Help", "Choices", "More", "Dashboard", "Reader", "Result"] {
+                let buffer = workflow_gallery(kind, w, h, ascii, mono);
+                let rendered = text(&buffer);
+                assert!(rendered.contains("Dort / Fixture"), "{kind} {w}");
+                let footer: String = (0..w).map(|x| buffer[(x, h - 1)].symbol()).collect();
+                assert!(!footer.trim().is_empty(), "{kind} {w}");
+                if kind == "Result" {
+                    for fact in [
+                        "Installer failed",
+                        "reported present",
+                        "unavailable",
+                        "not verified",
+                    ] {
+                        assert!(rendered.contains(fact), "{w}: {fact}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn compact_shell_keeps_dry_run_and_tools_help_visible() {
+    let mut app = super::app::App::new(true);
+    app.tab = super::app::Tab::Tools;
+    let rendered = super::tests::render(&app, 48, 14);
+    let lines: Vec<_> = rendered.lines().collect();
+    assert!(lines[0].contains("[DRY RUN]"));
+    assert!(lines.last().unwrap().contains("F1 Help"));
+    app.tools_view.configuring = true;
+    app.tools_view.config_details = true;
+    let rendered = super::tests::render(&app, 48, 14);
+    assert!(rendered.lines().next().unwrap().contains("[DRY RUN]"));
+}
+
 fn dialog_gallery(width: u16, height: u16, ascii: bool, mono: bool) -> Buffer {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     let hits = Hits::default();
@@ -144,7 +248,7 @@ fn dialog_gallery(width: u16, height: u16, ascii: bool, mono: bool) -> Buffer {
                     selected: 0,
                 },
                 &hits,
-                Target::InventoryChoice,
+                Target::MoreRow,
             );
             design::action_strip(
                 frame,
@@ -383,6 +487,10 @@ fn component_gallery_export_probe() {
             output.push_str(&html(&gallery(w, h, ascii, mono)));
             output.push_str("<h2>Foreground choice / same action-strip location</h2>");
             output.push_str(&html(&dialog_gallery(w, h, ascii, mono)));
+            for kind in ["Help", "Choices", "More", "Dashboard", "Reader", "Result"] {
+                output.push_str(&format!("<h2>{kind} / actual shared components</h2>"));
+                output.push_str(&html(&workflow_gallery(kind, w, h, ascii, mono)));
+            }
         }
     }
     use std::io::Write;

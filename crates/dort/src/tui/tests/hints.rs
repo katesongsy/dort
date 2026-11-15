@@ -24,14 +24,15 @@ fn declaration_footer_describes_fields_and_review_not_underlying_tools_shortcuts
     }
     assert_eq!(app.tools_view.declaration.fields[0], "cspqr");
     let keys = hints::keys(&app);
-    assert!(keys.contains(&("Tab", "Field")));
-    assert!(keys.contains(&("Enter", "Review")));
+    assert!(keys.contains(&("Enter", "Review declaration")));
+    assert!(keys.contains(&("F3", "Metadata")));
+    assert!(!keys.iter().any(|(k, _)| *k == "Tab"));
     assert!(!keys.iter().any(|(k, _)| ["c", "s", "p", "r"].contains(k)));
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let screen = render(&app, w, h);
         let footer = screen.lines().last().unwrap();
         assert!(
-            footer.contains("Field") && footer.contains("Review"),
+            footer.contains("Review") && footer.contains("More") && footer.contains("Help"),
             "{screen}"
         );
         assert!(!footer.contains("Inspect tools") && !footer.contains("Snapshots"));
@@ -56,24 +57,20 @@ fn help_footer_precedes_retained_forms_menus_errors_and_running_work() {
         }
         key(&mut app, KeyCode::F(1));
         assert!(app.help.is_some());
-        assert_eq!(
-            hints::keys(&app),
-            [
-                ("F1", "Back"),
-                ("Esc", "Back"),
-                ("PgDn", "Scroll"),
-                ("Home", "Top")
-            ]
-        );
+        assert_eq!(hints::keys(&app), [("Esc", "Back")]);
         for (w, h) in [(48, 14), (80, 24), (140, 40)] {
             let screen = render(&app, w, h);
             let footer = screen.lines().last().unwrap();
             assert!(
-                footer.contains("Back") && footer.contains("Scroll"),
+                footer.contains("Back") && !footer.contains("More"),
                 "{screen}"
             );
             assert!(!footer.contains("Review") && !footer.contains("Retry"));
         }
+        key(&mut app, KeyCode::PageDown);
+        assert!(app.help.as_ref().unwrap().scroll > 0);
+        key(&mut app, KeyCode::Home);
+        assert_eq!(app.help.as_ref().unwrap().scroll, 0);
         key(&mut app, KeyCode::Enter);
         assert_eq!(app.tools_view.declaration.fields[0], "retained draft");
         assert!(app.help.is_some());
@@ -91,8 +88,11 @@ fn batch_metadata_does_not_advertise_an_inert_enter_or_hidden_review() {
     app.batch_editor.as_mut().unwrap().details = true;
     let keys = hints::keys(&app);
     assert!(!keys.iter().any(|(k, _)| *k == "Enter"));
-    assert!(keys.contains(&("F2", "Draft")));
-    assert!(keys.contains(&("PgDn", "Scroll")));
+    assert!(keys.contains(&("F3", "Back to draft")));
+    key(&mut app, KeyCode::PageDown);
+    assert!(app.batch_editor.as_ref().unwrap().scroll > 0);
+    key(&mut app, KeyCode::Home);
+    assert_eq!(app.batch_editor.as_ref().unwrap().scroll, 0);
     let before = app.batch_editor.as_ref().unwrap().drafts[0].id.clone();
     key(&mut app, KeyCode::Enter);
     assert!(app.batch_editor.as_ref().unwrap().details);

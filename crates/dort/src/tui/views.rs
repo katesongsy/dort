@@ -18,156 +18,55 @@ pub fn draw(frame: &mut ratatui::Frame, app: &App) {
     super::workbench::draw(frame, app);
     app.appearance.apply(frame.buffer_mut());
 }
-pub(super) fn short_field(label: &str, value: &str, width: u16) -> String {
-    let escaped = safe(&format!("{value:?}"));
-    let available = usize::from(width.saturating_sub(6))
-        .saturating_sub(label.len())
-        .max(4);
-    let shown = if escaped.len() > available {
-        format!("...{}", &escaped[escaped.len() - available + 3..])
-    } else {
-        escaped
-    };
-    format!("{label} > {shown}")
-}
-
-fn window_rows(title: &str, rows: &[String], selected: usize, height: u16, width: u16) -> String {
-    let width = usize::from(width.saturating_sub(4));
-    let mut text = format!(
-        "{}\nItem {}/{}\n",
-        safe(title).chars().take(width).collect::<String>(),
-        selected + 1,
-        rows.len()
-    );
-    let count = usize::from(height.saturating_sub(5)).max(1);
-    for (i, row) in rows
-        .iter()
-        .enumerate()
-        .skip(selected.saturating_sub(count / 2))
-        .take(count)
-    {
-        text.push_str(&format!(
-            "{} {}\n",
-            if i == selected { ">" } else { " " },
-            safe(row).chars().take(width).collect::<String>()
-        ));
-    }
-    if let Some(row) = rows.get(selected) {
-        text.push_str(&format!("Selected (full): {row}\n"));
-    } else {
-        text.push_str("No matching entries.\n");
-    }
-    text
-}
-
-fn adoption_text(app: &App, height: u16, width: u16) -> String {
-    let draft = &app.shell.adoption;
-    let rows = [
-        short_field("TARGET", &draft.target, width),
-        short_field("ID", &draft.id, width),
-        short_field("SOURCE", &draft.source, width),
-        "Review read-only preview".into(),
-        "Choose repository (session only)".into(),
-        "Create/attach local repository".into(),
-        "Discard adoption draft".into(),
-    ];
-    let mut text = window_rows(
-        "Adopt ordinary file | base-profile link",
-        &rows,
-        draft.focused,
-        height,
-        width,
-    );
-    text.push_str(&format!(
-        "\nFull TARGET: {:?}\nFull ID: {:?}\nFull SOURCE: {:?}\n",
-        draft.target, draft.id, draft.source
-    ));
-    text.push_str(&format!(
-        "\nSelected repository: {:?}\nEffective profiles: {:?}\n",
-        app.data
-            .as_ref()
-            .and_then(|d| d.repository.as_ref())
-            .or(app.repository.as_ref()),
-        app.data.as_ref().map(|d| &d.profiles)
-    ));
-    text.push_str("Tab/Shift-Tab: fields only | Enter: request read-only preview\nEsc: back, retaining draft | Ctrl-U: clear current field\nCtrl-R: choose repository | Ctrl-N: create/attach | Ctrl-D: reset draft\nF2: inspect metadata or return to fields. Missing repository? Choose or Create, then return to this draft.\nSOURCE is repository-relative. Review content privately before adoption.\nOnly owned, single-link ordinary files; core refusals are authoritative.\nDiscover previews selected content; Adopt all explicitly approves a fresh review.");
-    text
-}
-
-pub(super) fn overlay_text(app: &App, overlay: &Overlay, height: u16, width: u16) -> String {
+/// Metadata-only reading views. Controls and instructions belong to the shared strip/Help.
+pub(super) fn overlay_text(app: &App, overlay: &Overlay, _height: u16, _width: u16) -> String {
     match overlay {
-        // These overlays have dedicated typed controls/details, never a legacy report.
         Overlay::Ignored { .. }
         | Overlay::Profiles(_)
         | Overlay::Repositories { .. }
-        | Overlay::Actions { .. } => {
-            unreachable!("typed overlay renderer")
-        }
-        Overlay::Form(form @ (Form::KeepId | Form::RemoveId)) => {
-            let rows = [
-                short_field("Exact ID", &app.shell.unmanage_id, width),
-                "Review read-only preview".into(),
-            ];
-            let mut text = window_rows(
-                if *form == Form::KeepId {
-                    "Keep local file | enter mapping ID"
-                } else {
-                    "Delete managed link | enter mapping ID"
-                },
-                &rows,
-                app.shell.unmanage_focused,
-                height,
-                width,
-            );
-            text.push_str(&format!("\nFull ID: {:?}\nTab: field only | Enter: request read-only review\nThe preview uses this exact ID. Core validates exact ID and scope.\nBoth modes retain source. Keep materializes an ordinary file; delete removes the link.\nConfirmation identifies the exact mapping selected for deletion.\nEsc returns to the retained draft.\n", app.shell.unmanage_id));
-            text
-        }
-        Overlay::Form(Form::Check) => {
-            let rows = [
-                short_field("Manifest path", &app.shell.manifest_draft, width),
-                "Check manifest (read-only)".into(),
-                "Temporary profiles for this manifest".into(),
-                "Discard standalone draft and additions".into(),
-            ];
-            let mut text = window_rows(
-                "Check standalone manifest",
-                &rows,
-                app.shell.manifest_focused,
-                height,
-                width,
-            );
-            text.push_str(&format!("\nFull path: {:?}\nRequested additions: {:?}\nRelative path base: {:?}\nTab/Shift-Tab: field only; Enter checks the manifest\nCtrl-P: temporary profiles | Ctrl-D: reset | F2: metadata/fields\nEsc back, retaining draft | Ctrl-U clear path\nAn independent manifest path is accepted. Local profiles still contribute.\nValidates declarations, dependencies and capabilities. Files inspects live state; verify installed tools separately.", app.shell.manifest_draft, app.shell.check_profiles, app.launch_directory));
-            text
-        }
-        Overlay::About => format!(
-            "Dort {} | About\nGit-native developer environment manager\nExperimental guarded local workflows. MIT license.\n\nSupported hosts: macOS and Ubuntu, ARM64 / x86_64.\nLocal create/attach, discovery/adoption, link apply/unmanage, guarded recovery, structural checks, explicit Tools inspection/snapshot reconciliation, one missing exact mise/npm package or provider-current Homebrew core/Ubuntu APT package with honest attempt outcomes and guarded closure, and read-only Git.\nProvider/backend/package code and downloads may change data and caches. Unprivileged installs have a 10-minute deadline; no rollback. APT requests trusted noninteractive sudo supervision (-n -T 600); policy may refuse, with no password handling or untimed fallback. If overdue, Dort waits joined; root scripts/dependencies/services and system/config/data effects are possible, without proof every privileged descendant terminated. Mise stays inactive; npm/Homebrew native links can expose commands. Homebrew build/dependency code can execute; dependencies may upgrade.\n\nOther package installations, templates, secrets, synchronization and Git writes are not supported.\nExecution requires reviewed, explicit approval. Failed writes may retain partial/ongoing effects. Inspect Tools attempts for installs; Recovery for file/bootstrap changes.\nGit patches may expose secrets; each view requires deliberate disclosure.\nBackups are private and unencrypted. Keep independent backups for hardware or power failures.\n\nEsc: return to prior destination and focus",
-            env!("CARGO_PKG_VERSION")
+        | Overlay::Actions { .. } => unreachable!("typed overlay renderer"),
+        Overlay::Form(Form::Adopt) => format!(
+            "Desired base-profile link\n\nTARGET: {:?}\nID: {:?}\nSOURCE: {:?}\nRepository: {:?}\nEffective profiles: {:?}\n\nSOURCE is repository-relative. Only owned, single-link ordinary files are supported. Core path, kind, sensitivity and collision refusals remain authoritative. The draft is not approval; the real review defines the exact effects.",
+            app.shell.adoption.target,
+            app.shell.adoption.id,
+            app.shell.adoption.source,
+            app.data
+                .as_ref()
+                .and_then(|d| d.repository.as_ref())
+                .or(app.repository.as_ref()),
+            app.data.as_ref().map(|d| &d.profiles)
         ),
-        Overlay::Form(Form::Adopt) => adoption_text(app, height, width),
+        Overlay::Form(form @ (Form::KeepId | Form::RemoveId)) => format!(
+            "Exact mapping ID: {:?}\nOperation: {}\n\nThe preview uses this exact identity, not the display filter. Both modes retain the repository source. Keep materializes an ordinary file; deletion removes the managed link. Any deletion acknowledgement binds the exact selected ID internally.",
+            app.shell.unmanage_id,
+            if *form == Form::KeepId {
+                "Keep local file"
+            } else {
+                "Delete managed link"
+            }
+        ),
+        Overlay::Form(Form::Check) => format!(
+            "Manifest path: {:?}\nRequested profile additions: {:?}\nRelative path base: {:?}\n\nThe independent manifest path needs no registration or Git. Mandatory/local profiles still contribute. Structural checks validate declarations, dependencies and capabilities; live files and installed-tool readiness are separate observations.",
+            app.shell.manifest_draft, app.shell.check_profiles, app.launch_directory
+        ),
         Overlay::Form(form) => {
             let draft = app.shell.draft(*form);
-            let root =
-                crate::services::resolve_root(std::path::Path::new(draft), &app.launch_directory);
+            let root = (!draft.is_empty()).then(|| {
+                crate::services::resolve_root(std::path::Path::new(draft), &app.launch_directory)
+            });
             format!(
-                "{}\n{}\n\nFull draft: {draft:?}\nResolved path: {root:?}\nLaunch directory: {:?}\nEnter: {} from the path field | Esc: back, retaining draft\nCtrl-U: discard draft\n{}",
-                match form {
-                    Form::Choose => "Choose exact root (session only)",
-                    Form::Init => "Create/attach local repository",
-                    Form::Adopt | Form::Check | Form::KeepId | Form::RemoveId => unreachable!(),
-                },
-                short_field("Path", draft, width),
+                "Full path draft: {draft:?}\nResolved path: {root:?}\nLaunch directory: {:?}\n\n{}",
                 app.launch_directory,
                 if *form == Form::Choose {
-                    "select (read-only)"
+                    "The exact root changes only this session's selection; no registration is persisted."
                 } else {
-                    "prepare read-only preview"
-                },
-                if *form == Form::Choose {
-                    "The exact root becomes this session's selection."
-                } else {
-                    "Absent destination: create; existing valid Git+dort.toml: attach.\nExisting safe parent required. Enter literal paths.\nReview the preview, then activate Confirm."
+                    "An absent destination creates a repository; an existing valid Git repository with dort.toml attaches it. An existing safe parent is required. Relative literal paths resolve from the launch directory. Preparation is read-only; registration/selection requires the separately reviewed real approval."
                 }
             )
         }
+        Overlay::About => format!(
+            "Version: {}\nLicense: MIT\nSupported hosts: macOS and Ubuntu, ARM64 / x86_64\n\nLocal capabilities:\nGuarded create/attach, file discovery/adoption, apply/unmanage, recovery, structural checks and read-only Git. Tools supports explicit provider inspections, desired declarations, explicit snapshot comparison and bounded missing-package installation.\n\nProvider effects:\nProvider/backend/package code and downloads may change data and caches. Mise stays inactive; npm/Homebrew native links can expose commands. Homebrew build/dependency code can execute and dependencies may upgrade. Unprivileged installation has a requested ten-minute deadline; no rollback.\n\nAPT privilege:\nTrusted noninteractive sudo -n -T 600 supervision requires policy permission. No password handling or untimed fallback. Root scripts, dependencies, services and system/config/data effects are possible. Overdue supervision waits joined; there is no proof every privileged descendant terminated.\n\nApproval and recovery:\nExecution needs a reviewed real approval. Failed writes may have partial or ongoing effects. Tools attempts cover installation metadata; Recovery covers file/bootstrap changes. Closure is not installation success, repair or rollback.\n\nPrivacy and storage:\nGit patch viewing has a separate deliberate content-disclosure gate. Backups are private, not encrypted; keep independent hardware/power-failure backups.\n\nUnsupported operations:\nOther package installations, templates, secret execution, synchronization and Git writes.",
+            env!("CARGO_PKG_VERSION")
+        ),
     }
 }

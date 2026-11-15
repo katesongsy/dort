@@ -46,11 +46,7 @@ fn explicitly_empty_apt_closure_draft_is_not_rebound_from_snapshot_hints() {
     assert!(state.fields[0].is_empty() && state.close_apt);
     state.mode = Mode::CloseInputs;
     for expected in ["mise", "npm", "brew", "apt"] {
-        state.key(
-            KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE),
-            false,
-            &app.tools_view.snapshots,
-        );
+        state.choose_closure_provider((state.closure_provider() + 1) % 4);
         assert_eq!(
             if state.close_apt {
                 "apt"
@@ -80,10 +76,10 @@ fn apt_root_review_one_activation_and_immutable_stale_snapshots() {
         assert!(
             screen.contains("ROOT RISK")
                 && screen.contains("CAN EXECUTE")
-                && screen.contains("root risk"),
+                && super::tests::has_action(&app, "Install with root risk"),
             "{screen}"
         );
-        assert!(!screen.contains("Install exact version"));
+        assert!(!super::tests::has_action(&app, "Install exact version"));
     }
     key(&mut app, KeyCode::Char('d'));
     assert!(key(&mut app, KeyCode::Enter).is_none());
@@ -122,10 +118,7 @@ fn apt_advanced_retains_three_missing_inputs_and_compact_caret_without_processes
         terminal.draw(|frame| views::draw(frame, &app)).unwrap();
         let cursor = terminal.get_cursor_position().unwrap();
         assert!(cursor.x < size.0 && cursor.y < size.1 - 2);
-        assert_eq!(
-            terminal.backend().buffer()[(cursor.x, cursor.y - 1)].fg,
-            Color::Cyan
-        );
+        super::tests::assert_text_focus(&terminal, size, cursor);
     }
     key(&mut app, KeyCode::Char('q'));
     key(&mut app, KeyCode::Backspace);
@@ -158,7 +151,12 @@ fn apt_dry_floor_shrink_and_late_results_never_authorize() {
         app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 47, 13)
             .is_none()
     );
-    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(matches!(
+        key(&mut app, KeyCode::Enter),
+        Some(Task::ToolsDetect(_))
+    ));
+    assert!(app.tools_view.installation.preview.is_none());
+    assert!(app.tools_view.fresh_review);
     let mut app = f.app_query(false, Query::DpkgPackages);
     let task = key(&mut app, KeyCode::Char('i')).unwrap();
     key(&mut app, KeyCode::Esc);

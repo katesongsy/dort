@@ -1,3 +1,6 @@
+#[path = "declaration_choices.rs"]
+mod choices;
+
 use super::{
     actions::{self, Output, Task},
     app::{App, Tab},
@@ -15,7 +18,7 @@ use ratatui::{
     Terminal,
     backend::TestBackend,
     crossterm::event::{KeyCode, KeyEvent, KeyModifiers},
-    style::{Color, Modifier},
+    style::Modifier,
 };
 use std::{fs, path::PathBuf};
 struct Fixture {
@@ -60,7 +63,7 @@ impl Fixture {
         actions::perform_scoped(task, &self.host, None, &[], |_| Ok(()))
     }
     fn review(&self, app: &mut App) {
-        app.tools_view.declaration.focus = 12;
+        app.tools_view.declaration.focus = 0;
         let task = key(app, KeyCode::Enter).unwrap();
         assert!(matches!(task, Task::ToolDeclaration(_)));
         app.complete(self.output(task).map_err(|e| actions::diagnostic(&e)));
@@ -123,24 +126,13 @@ fn declaration_draft_focus_caret_and_buttons_survive_compact_wide_navigation() {
     let f = Fixture::new();
     let mut app = f.app(false);
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
-        for focus in 0..14 {
+        for focus in app.tools_view.declaration.controls() {
             app.tools_view.declaration.focus = focus;
             let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
             terminal.draw(|frame| views::draw(frame, &app)).unwrap();
-            if focus < 12 {
+            if ![4, 8].contains(&focus) {
                 let cursor = terminal.get_cursor_position().unwrap();
-                assert!(
-                    cursor.x < w && cursor.y >= 2 && cursor.y < h - 2,
-                    "{w}x{h} focus {focus}: {cursor:?}"
-                );
-                assert!(
-                    terminal
-                        .backend()
-                        .buffer()
-                        .content
-                        .iter()
-                        .any(|c| c.fg == Color::Cyan)
-                );
+                super::tests::assert_text_focus(&terminal, (w, h), cursor);
             } else {
                 assert!(
                     terminal
@@ -148,11 +140,27 @@ fn declaration_draft_focus_caret_and_buttons_survive_compact_wide_navigation() {
                         .buffer()
                         .content
                         .iter()
-                        .any(|c| c.bg == Color::Cyan
-                            && c.modifier.contains(Modifier::BOLD | Modifier::REVERSED))
+                        .any(|c| c.modifier.contains(Modifier::BOLD))
                 );
+                assert!(
+                    app.key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE), w, h)
+                        .is_none()
+                );
+                assert!(app.choice.is_some());
+                assert!(
+                    app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), w, h)
+                        .is_none()
+                );
+                assert_eq!(app.tools_view.declaration.focus, focus);
             }
+            super::tests::assert_primary_action(&terminal);
         }
+        app.tools_view.declaration.focus = 0;
+        let count = app.tools_view.declaration.controls().len();
+        for _ in 0..count {
+            key(&mut app, KeyCode::Tab);
+        }
+        assert_eq!(app.tools_view.declaration.focus, 0);
     }
     app.tools_view.declaration.focus = 0;
     for c in "q?;a".chars() {
@@ -186,6 +194,8 @@ fn dry_run_shrink_cancel_and_late_preparation_cannot_approve_declaration() {
     let task = key(&mut app, KeyCode::Enter).unwrap();
     app.start(false);
     key(&mut app, KeyCode::Left);
+    assert!(app.tab == Tab::Tools && app.interaction_notice.is_some());
+    app.go_tab(Tab::Git); // Actual navigation is separately guarded against late completion.
     assert!(app.tab != Tab::Tools);
     app.complete(f.output(task).map_err(|e| actions::diagnostic(&e)));
     assert!(app.preview.is_none());

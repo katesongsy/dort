@@ -1,4 +1,6 @@
 //! Menus own navigation; contextual operations and approvals remain separate.
+#[path = "places_traversal.rs"]
+mod traversal;
 use super::{
     actions::Task,
     app::{App, Tab},
@@ -38,22 +40,23 @@ fn navigation_hints_are_consolidated_and_numeric_destination_aliases_are_inert()
         let rows: Vec<_> = screen.lines().collect();
         assert!(!rows[..2].join(" ").contains("F10"));
         let footer = rows.last().unwrap();
-        for label in ["F10", "Menu", "F1", "Help", ";", "Actions"] {
+        assert!(rows[0].contains("Places"));
+        for label in ["F2", "More", "F1", "Help"] {
             assert!(footer.contains(label), "{label} at {w}");
         }
-        assert_eq!(screen.matches("F1").count(), 2); // F1 and F10, one each.
+        assert_eq!(screen.matches("F1").count(), 1);
+        assert_eq!(screen.matches("F2").count(), 1);
         for digit in '1'..='5' {
             assert!(key(&mut app, KeyCode::Char(digit), w, h).is_none());
             assert!(app.tab == Tab::Overview && app.shell.overlay.is_none());
         }
         key(&mut app, KeyCode::F(10), w, h);
-        if w < 80 {
-            key(&mut app, KeyCode::Enter, w, h);
-        }
+        key(&mut app, KeyCode::Enter, w, h);
         let screen = render(&app, w, h);
         assert!(!screen.contains("Arrows move"));
         assert!(!screen.contains("Esc close"));
-        assert!(!screen.contains("F1 Help"));
+        assert!(screen.lines().last().unwrap().contains("Help"));
+        assert!(!screen.lines().last().unwrap().contains("More"));
         assert!(!screen.contains("[1]"));
     }
 }
@@ -65,7 +68,7 @@ fn review_report_has_hierarchy_and_preserves_escaped_metadata() {
     );
     assert_eq!(text.lines[0].style, ui::heading());
     assert_eq!(text.lines[1].style, ui::heading());
-    assert_eq!(text.lines[2].spans[0].style, ui::accent());
+    assert_eq!(text.lines[2].spans[0].style, ui::muted());
     assert_eq!(text.lines[3].spans[0].style, ui::heading());
     assert!(text.lines[3].to_string().contains("\\u{1b}"));
     assert_eq!(text.lines[4].style, ui::danger());
@@ -76,20 +79,18 @@ fn menus_are_keyboard_and_mouse_accessible_at_every_supported_size() {
         let mut app = App::new(false);
         app.tab = Tab::Files;
         let screen = render(&app, w, h);
-        assert!(screen.contains("F10") && screen.contains("Files / Managed"));
+        assert!(screen.contains("Places") && screen.contains("Files / Managed"));
         key(&mut app, KeyCode::F(10), w, h);
         assert!(app.navigation.menu.is_some());
-        if w < 80 {
-            key(&mut app, KeyCode::Enter, w, h);
-        }
+        key(&mut app, KeyCode::Enter, w, h);
         let screen = render(&app, w, h);
-        for label in ["Managed", "Discover [f]", "Ignored paths [U]"] {
+        for label in ["Managed", "Discover", "Ignored paths"] {
             assert!(screen.contains(label), "{label} at {w}");
         }
         key(&mut app, KeyCode::Down, w, h);
         let before = app.navigation.menu.unwrap();
         key(&mut app, KeyCode::F(1), w, h);
-        assert_eq!(app.help.as_ref().unwrap().topic.title(), "Navigation menus");
+        assert_eq!(app.help.as_ref().unwrap().topic.title(), "Places");
         key(&mut app, KeyCode::Enter, w, h);
         assert!(app.help.is_some() && app.tab == Tab::Files);
         key(&mut app, KeyCode::Esc, w, h);
@@ -103,9 +104,7 @@ fn menus_are_keyboard_and_mouse_accessible_at_every_supported_size() {
         click(&mut app, w, h, |t| {
             matches!(t, Target::MenuOpen | Target::MenuGroup(2))
         });
-        if w < 80 {
-            click(&mut app, w, h, |t| matches!(t, Target::MenuGroup(2)));
-        }
+        click(&mut app, w, h, |t| matches!(t, Target::MenuGroup(2)));
         let task = click(&mut app, w, h, |t| matches!(t, Target::MenuItem(2)));
         assert!(matches!(task, Some(Task::IgnoredPaths)));
         assert!(app.navigation.menu.is_none());
@@ -119,7 +118,8 @@ fn every_menu_group_fits_at_floor_and_navigating_has_no_write_approval() {
         app.navigation.menu.as_mut().unwrap().expanded = true;
         let screen = render(&app, 48, 14);
         for entry in navigation::entries(group) {
-            assert!(screen.contains(entry.label), "{}", entry.label);
+            let label = entry.label.split(" [").next().unwrap();
+            assert!(screen.contains(label), "{label}");
         }
         assert!(app.preview.is_none() && app.confirmation.is_none());
     }
@@ -199,18 +199,21 @@ fn menu_focus_owns_help_quit_caret_and_outside_clicks_without_editing_search() {
         app.inventory.managed.query = "retained".into();
         app.inventory.managed.editing = true;
         key(&mut app, KeyCode::F(10), w, h);
-        if w < 80 {
-            key(&mut app, KeyCode::Enter, w, h);
-        }
+        key(&mut app, KeyCode::Enter, w, h);
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal.draw(|f| super::views::draw(f, &app)).unwrap();
-        let caret = terminal.get_cursor_position().unwrap();
-        let cell = &terminal.backend().buffer()[(caret.x, caret.y)];
-        assert_eq!(cell.symbol(), ">");
-        assert_eq!(cell.bg, Color::Cyan);
+        assert!(!terminal.backend().cursor_visible());
+        let cell = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .find(|c| c.symbol() == "›")
+            .expect("selected menu choice");
+        assert_eq!(cell.bg, Color::Reset);
         assert!(cell.modifier.contains(Modifier::REVERSED | Modifier::BOLD));
         key(&mut app, KeyCode::Char('?'), w, h);
-        assert_eq!(app.help.as_ref().unwrap().topic.title(), "Navigation menus");
+        assert_eq!(app.help.as_ref().unwrap().topic.title(), "Places");
         key(&mut app, KeyCode::Esc, w, h);
         assert!(app.navigation.menu.is_some());
         key(&mut app, KeyCode::Esc, w, h);
@@ -223,7 +226,7 @@ fn menu_focus_owns_help_quit_caret_and_outside_clicks_without_editing_search() {
         assert!(app.quit);
     }
     let mut app = App::new(false);
-    app.tab = Tab::Files;
+    app.tab = Tab::Overview;
     app.complete(Ok(super::actions::Output::Data(super::actions::Data {
         repository: Some("/synthetic/menu-repository".into()),
         ..Default::default()
@@ -231,7 +234,7 @@ fn menu_focus_owns_help_quit_caret_and_outside_clicks_without_editing_search() {
     render(&app, 80, 24);
     let (x, y) = (0..24)
         .flat_map(|y| (0..80).map(move |x| (x, y)))
-        .find(|&(x, y)| matches!(app.hits.target(x, y), Some(Target::Action(Action::Apply))))
+        .find(|&(x, y)| matches!(app.hits.target(x, y), Some(Target::Action(Action::Init))))
         .unwrap();
     app.open_menu(2, 80);
     render(&app, 80, 24);
@@ -248,7 +251,13 @@ fn menu_focus_owns_help_quit_caret_and_outside_clicks_without_editing_search() {
         )
         .is_none()
     );
-    assert!(app.navigation.menu.is_none() && app.preview.is_none() && app.confirmation.is_none());
+    assert!(
+        app.navigation.menu.is_none()
+            && app.shell.overlay.is_none()
+            && app.preview.is_none()
+            && app.confirmation.is_none()
+    );
+    assert!(app.tab == Tab::Overview);
 }
 #[test]
 fn pages_keep_menus_while_tasks_retain_the_joined_navigation_guard() {

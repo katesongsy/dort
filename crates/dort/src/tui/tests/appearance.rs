@@ -89,7 +89,7 @@ fn compatible_cells_preserve_geometry_raw_mouse_identity_and_textual_states() {
             app.appearance = appearance(ascii, mono);
             let compatible = draw(&app, w, h);
             check_cells(&compatible, ascii, mono);
-            for label in ["Files / Managed", "Blocked", "Review apply", "\\u{e9}"] {
+            for label in ["Files / Managed", "Blocked", "F2 More", "\\u{e9}"] {
                 assert_eq!(locate(&original, label), locate(&compatible, label));
             }
             let mut index = 0;
@@ -107,18 +107,21 @@ fn compatible_cells_preserve_geometry_raw_mouse_identity_and_textual_states() {
                     index += 1;
                 }
             }
-            let active = locate(&compatible, "Files / Managed");
             assert!(
-                compatible.backend().buffer()[active]
-                    .modifier
-                    .contains(Modifier::REVERSED | Modifier::BOLD)
+                (0..h).any(|y| (0..w).any(|x| {
+                    compatible.backend().buffer()[(x, y)]
+                        .modifier
+                        .contains(Modifier::REVERSED | Modifier::BOLD)
+                        && matches!(app.hits.target(x, y), Some(Target::Row(_)))
+                })),
+                "the selected row, not the location or inspector, owns inverse emphasis"
             );
-            let button = locate(&compatible, "Review apply");
+            let button = locate(&compatible, "F2 More");
             assert!(matches!(
                 app.hits.target(button.0, button.1),
-                Some(Target::Action(_))
+                Some(Target::More)
             ));
-            assert!(matches!(
+            assert!(
                 app.mouse(
                     MouseEvent {
                         kind: MouseEventKind::Down(MouseButton::Left),
@@ -128,7 +131,28 @@ fn compatible_cells_preserve_geometry_raw_mouse_identity_and_textual_states() {
                     },
                     w,
                     h
-                ),
+                )
+                .is_none()
+            );
+            let index = app
+                .more
+                .as_ref()
+                .unwrap()
+                .items
+                .iter()
+                .position(|item| {
+                    matches!(
+                        item.action.target,
+                        Target::Action(super::shell::Action::Apply)
+                    )
+                })
+                .expect("review action");
+            key(&mut app, KeyCode::Home, w, h);
+            for _ in 0..index {
+                key(&mut app, KeyCode::Down, w, h);
+            }
+            assert!(matches!(
+                key(&mut app, KeyCode::Enter, w, h),
                 Some(Task::Files(dort_core::planner::Request::Apply))
             ));
             // The displayed escaped ID must never replace the actual request ID.
@@ -158,7 +182,8 @@ fn compatible_forms_keep_caret_tab_and_mouse_controls_at_all_sizes() {
         let mut compatible = draw(&app, w, h);
         assert_eq!(compatible.get_cursor_position().unwrap(), caret);
         check_cells(&compatible, true, true);
-        locate(&compatible, "TARGET | Focus");
+        locate(&compatible, "TARGET");
+        assert!(compatible.backend().cursor_visible());
         if w == 48 {
             key(&mut app, KeyCode::Tab, w, h);
             compatible = draw(&app, w, h);
@@ -224,12 +249,14 @@ fn default_canvas_and_selected_pair_have_synthetic_light_dark_contrast() {
     use super::components;
     assert_eq!(components::muted(), ratatui::style::Style::default());
     let selected = components::selected();
-    assert_eq!(
-        (selected.fg, selected.bg),
-        (Some(Color::Black), Some(Color::Cyan))
+    assert_eq!((selected.fg, selected.bg), (None, None));
+    assert!(
+        selected
+            .add_modifier
+            .contains(Modifier::BOLD | Modifier::REVERSED)
     );
-    // Explicit xterm-like ANSI assumptions, not a claim about user-customized
-    // palettes. Reversal swaps the pair but does not change its contrast ratio.
+    // Explicit native foreground/background assumptions, not a claim about
+    // user-customized palettes. Inversion keeps their contrast ratio.
     fn luminance(rgb: [f64; 3]) -> f64 {
         let linear = rgb.map(|v| {
             if v <= 0.04045 {
@@ -247,7 +274,7 @@ fn default_canvas_and_selected_pair_have_synthetic_light_dark_contrast() {
     }
     for (fg, bg) in [([0.0; 3], [1.0; 3]), ([1.0; 3], [0.0; 3])] {
         assert!(contrast(fg, bg) >= 4.5);
-        assert!(contrast([0.0; 3], [0.0, 0.8, 0.8]) >= 4.5);
+        assert!(contrast(bg, fg) >= 4.5);
         let mut app = fixture();
         app.appearance = appearance(true, true);
         check_cells(&draw(&app, 80, 24), true, true);

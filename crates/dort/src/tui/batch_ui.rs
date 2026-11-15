@@ -82,7 +82,7 @@ impl Editor {
         }
     }
     pub fn key(&mut self, key: KeyEvent) -> Option<Task> {
-        if key.code == KeyCode::F(2) {
+        if key.code == KeyCode::F(3) {
             self.details = !self.details;
             self.scroll = 0;
             return None;
@@ -187,12 +187,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
             area,
             &app.hits,
             ui::FormActions {
+                choices: &[],
                 buttons: &[ui::ActionButton {
                     label: "Back to draft",
-                    key: "F2",
+                    key: "F3",
                     target: Target::BatchDetails,
                 }],
-                hint: "F2/Esc: back · PgUp/PgDn: inspect escaped metadata",
+                feedback: None,
             },
         );
         editor.page_rows.set(content.height.max(1));
@@ -216,6 +217,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
             &app.hits,
             |i| Target::BatchControl(editor.item * 3 + i, false),
             ui::FormActions {
+                choices: &[],
                 buttons: &[
                     ui::ActionButton {
                         label: "Done editing",
@@ -224,11 +226,11 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
                     },
                     ui::ActionButton {
                         label: "Metadata",
-                        key: "F2",
+                        key: "F3",
                         target: Target::BatchDetails,
                     },
                 ],
-                hint: "Tab: fields · Enter/Esc: retain and return · no write review",
+                feedback: None,
             },
         );
         return;
@@ -238,6 +240,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
         area,
         &app.hits,
         ui::FormActions {
+            choices: &[],
             buttons: &[
                 ui::ActionButton {
                     label: "Review all",
@@ -251,11 +254,11 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
                 },
                 ui::ActionButton {
                     label: "Metadata",
-                    key: "F2",
+                    key: "F3",
                     target: Target::BatchDetails,
                 },
             ],
-            hint: "Up/Down: draft · Enter: combined preview · e: edit · Esc: Back",
+            feedback: None,
         },
     );
     let sections = Layout::vertical([
@@ -288,9 +291,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
     editor.offset.set(state.offset());
     editor
         .page_rows
-        .set(sections[0].height.saturating_sub(3).max(1));
+        .set(sections[0].height.saturating_sub(2).max(1));
     for (line, index) in (state.offset()..editor.drafts.len())
-        .take(usize::from(sections[0].height.saturating_sub(3)))
+        .take(usize::from(sections[0].height.saturating_sub(2)))
         .enumerate()
     {
         app.hits.click(

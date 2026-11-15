@@ -111,33 +111,27 @@ fn direct_keys_select_rows_scroll_details_and_ignore_tab_without_region_focus() 
         let size = (110, 24);
         let mut app = fixture(tab);
         press(&mut app, KeyCode::Down, size);
+        press(&mut app, KeyCode::Enter, size);
         let first = render(&app, size.0, size.1);
         press(&mut app, KeyCode::PageDown, size);
         let scrolled = render(&app, size.0, size.1);
         assert_ne!(first, scrolled);
-        assert!(scrolled.contains(if tab == Tab::Recovery {
-            "> bbbbbbbb"
-        } else {
-            if tab == Tab::Files {
-                "> [ ] second"
-            } else {
-                "> second"
-            }
-        }));
+        assert!(app.page_title().is_some(), "explicit reader owns paging");
         press(&mut app, KeyCode::Tab, size);
         press(&mut app, KeyCode::BackTab, size);
         assert_eq!(scrolled, render(&app, size.0, size.1));
         press(&mut app, KeyCode::Home, size);
         assert_eq!(first, render(&app, size.0, size.1));
+        press(&mut app, KeyCode::Esc, size);
         press(&mut app, KeyCode::Up, size);
         assert!(
             render(&app, size.0, size.1).contains(if tab == Tab::Recovery {
-                "> aaaaaaaa"
+                "› aaaaaaaa"
             } else {
                 if tab == Tab::Files {
-                    "> [ ] first"
+                    "› [ ] first"
                 } else {
-                    "> first"
+                    "› first"
                 }
             })
         );
@@ -150,7 +144,7 @@ fn direct_keys_select_rows_scroll_details_and_ignore_tab_without_region_focus() 
 }
 #[test]
 fn clicks_and_wheels_use_hovered_rows_and_details_with_filtered_raw_identity() {
-    let size = (110, 24);
+    let size = (140, 24);
     for tab in [Tab::Files, Tab::Recovery, Tab::Git] {
         let mut app = fixture(tab);
         let needle = if tab == Tab::Recovery {
@@ -171,36 +165,40 @@ fn clicks_and_wheels_use_hovered_rows_and_details_with_filtered_raw_identity() {
         );
         assert!(
             render(&app, size.0, size.1).contains(if tab == Tab::Recovery {
-                "> bbbbbbbb"
+                "› bbbbbbbb"
             } else {
                 if tab == Tab::Files {
-                    "> [ ] second"
+                    "› [ ] second"
                 } else {
-                    "> second"
+                    "› second"
                 }
             })
         );
         let before = render(&app, size.0, size.1);
         assert!(mouse(&mut app, MouseEventKind::ScrollDown, 100, 10, size).is_none());
         assert_ne!(before, render(&app, size.0, size.1));
-        assert!(mouse(&mut app, MouseEventKind::ScrollUp, 10, y, size).is_none());
+        assert!(mouse(&mut app, MouseEventKind::ScrollUp, 20, y, size).is_none());
         assert!(
             render(&app, size.0, size.1).contains(if tab == Tab::Recovery {
-                "> aaaaaaaa"
+                "› aaaaaaaa"
             } else {
                 if tab == Tab::Files {
-                    "> [ ] first"
+                    "› [ ] first"
                 } else {
-                    "> first"
+                    "› first"
                 }
             })
         );
         let (x, y) = at(
             &app,
             if tab == Tab::Files {
-                "/ Search"
+                "Filter files"
             } else {
-                "/ Filter"
+                if tab == Tab::Recovery {
+                    "Filter history"
+                } else {
+                    "Filter changes"
+                }
             },
             size,
         );
@@ -226,7 +224,7 @@ fn clicks_and_wheels_use_hovered_rows_and_details_with_filtered_raw_identity() {
         if tab != Tab::Git {
             assert_eq!(app.selected, 1);
         }
-        let (x, y) = at(&app, "Checks ▾", size);
+        let (x, y) = at(&app, "Places", size);
         mouse(
             &mut app,
             MouseEventKind::Down(MouseButton::Left),
@@ -243,6 +241,17 @@ fn clicks_and_wheels_use_hovered_rows_and_details_with_filtered_raw_identity() {
             app.git_view.text_entry(),
             app.shell.overlay.is_some(),
             app.busy
+        );
+        render(&app, size.0, size.1);
+        let (x, y) = super::tests::target_position(&app, size.0, size.1, |t| {
+            matches!(t, super::input::Target::MenuGroup(4))
+        });
+        mouse(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            x,
+            y,
+            size,
         );
         let (x, y) = at(&app, "Manifest checks", size);
         mouse(
@@ -292,7 +301,8 @@ fn hit_rows_follow_rendered_table_offset_and_stale_geometry_is_inert() {
     assert_eq!(app.selected, 78);
     press(&mut app, KeyCode::Enter, (80, 24));
     app.resize(48, 14);
-    assert!(render(&app, 48, 14).contains("Esc list"));
+    assert!(render(&app, 48, 14).contains("Esc Back"));
+    assert!(app.inventory.details);
     press(&mut app, KeyCode::Esc, (48, 14));
     press(&mut app, KeyCode::Down, (48, 14));
     assert_eq!(app.selected, 79);
@@ -395,7 +405,7 @@ fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_ta
     );
     press(&mut app, KeyCode::Esc, size);
     press(&mut app, KeyCode::Char('n'), size);
-    let (x, y) = at(&app, "Git ▾", size);
+    let (x, y) = at(&app, "Places", size);
     mouse(
         &mut app,
         MouseEventKind::Down(MouseButton::Left),
@@ -430,7 +440,9 @@ fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_ta
     press(&mut app, KeyCode::Esc, size); // clicked results, no hidden input focus
     app.start(false);
     render(&app, size.0, size.1);
-    let (x, y) = (0, 1); // Visibly paused navigation, not a hidden live menu.
+    let (x, y) = super::tests::target_position(&app, size.0, size.1, |t| {
+        matches!(t, super::input::Target::NavigationBlocked)
+    }); // Visibly paused Places, not a hidden live menu.
     assert!(matches!(
         app.hits.target(x, y),
         Some(super::input::Target::NavigationBlocked)
@@ -446,8 +458,8 @@ fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_ta
         .is_none()
     );
     assert!(app.tab == Tab::Recovery && app.busy && app.navigation.menu.is_none());
-    press(&mut app, KeyCode::Right, size); // task-time destination navigation
-    assert!(app.tab == Tab::Checks && app.busy);
+    press(&mut app, KeyCode::Right, size); // Task-time navigation explains its pause.
+    assert!(app.tab == Tab::Recovery && app.busy && app.interaction_notice.is_some());
 }
 #[test]
 fn wide_full_paths_and_ids_are_reachable_in_cells_using_only_detail_page_keys() {
@@ -455,7 +467,7 @@ fn wide_full_paths_and_ids_are_reachable_in_cells_using_only_detail_page_keys() 
         let mut app = fixture(tab);
         let expected = if tab == Tab::Files {
             format!(
-                "{:<13}/synthetic/{}/source-end",
+                "{:<13} /synthetic/{}/source-end",
                 "Source",
                 long_path("source")
             )
@@ -476,16 +488,20 @@ fn wide_full_paths_and_ids_are_reachable_in_cells_using_only_detail_page_keys() 
             let top = rows
                 .iter()
                 .position(|line| {
-                    (line.contains("Selected item")
-                        || line.contains("Transaction details")
-                        || line.contains("Git details"))
-                        && line.contains('┌')
+                    line.contains("Selected item")
+                        || line.contains("Journal facts")
+                        || line.contains("Git details")
                 })
                 .unwrap();
-            let viewport: Vec<String> = rows[top + 1..]
+            let title = ["Selected item", "Journal facts", "Git details"]
+                .into_iter()
+                .find(|title| rows[top].contains(title))
+                .unwrap();
+            let index = rows[top].find(title).unwrap();
+            let left = rows[top][..index].chars().count() - 1; // Pane title's trusted leading space.
+            let viewport: Vec<String> = rows[top + 1..usize::from(size.1 - 1)]
                 .iter()
-                .take_while(|row| row.contains('│'))
-                .map(|row| row.split('│').nth(3).unwrap().to_owned())
+                .map(|row| row.chars().skip(left).collect())
                 .collect();
             // Stitch actual cell viewports, including the last clamped/overlapping page.
             let overlap = (0..=cells.len().min(viewport.len()))
@@ -497,7 +513,10 @@ fn wide_full_paths_and_ids_are_reachable_in_cells_using_only_detail_page_keys() 
         }
         assert!(
             cells.concat().contains(&expected),
-            "full escaped metadata must remain reachable at the wide threshold"
+            "full escaped metadata must remain reachable at the wide threshold: tab {} / prefix {:?} / expected {:?}",
+            tab as usize,
+            cells.concat().chars().take(180).collect::<String>(),
+            expected.chars().take(65).collect::<String>()
         );
         press(&mut app, KeyCode::Home, size);
         assert_eq!(app.details_scroll, 0);

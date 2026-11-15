@@ -1,8 +1,26 @@
 //! Shared visual vocabulary. Metadata is escaped before it reaches styled widgets.
+pub mod choice;
+pub mod chrome;
+pub mod dashboard;
 pub mod design;
 pub mod glyphs;
+pub mod help;
+pub mod menu;
 pub mod motion;
 pub(in crate::tui) mod surface;
+
+pub fn short_field(label: &str, value: &str, width: u16) -> String {
+    let escaped = inline(&format!("{value:?}"));
+    let available = usize::from(width.saturating_sub(6))
+        .saturating_sub(label.len())
+        .max(4);
+    let shown = if escaped.len() > available {
+        format!("...{}", &escaped[escaped.len() - available + 3..])
+    } else {
+        escaped
+    };
+    format!("{label}: {shown}")
+}
 
 use ratatui::{
     Frame,
@@ -60,10 +78,7 @@ pub fn muted() -> Style {
     Style::default()
 }
 pub fn selected() -> Style {
-    Style::default()
-        .fg(Color::Black)
-        .bg(Color::Cyan)
-        .add_modifier(Modifier::REVERSED | Modifier::BOLD)
+    design::selection().add_modifier(Modifier::BOLD)
 }
 pub fn heading() -> Style {
     Style::default().add_modifier(Modifier::BOLD)
@@ -81,7 +96,8 @@ pub fn success() -> Style {
 }
 pub fn state(label: &str) -> Style {
     match label {
-        "Blocked" | "Not eligible" | "INTEGRITY!" => danger(),
+        "INTEGRITY!" => danger(),
+        "Blocked" | "Not eligible" => warning(),
         "Linked" => Style::default().fg(Color::Green),
         "Needs apply" | "Eligible hint" => warning(),
         _ => Style::default(),
@@ -89,7 +105,7 @@ pub fn state(label: &str) -> Style {
 }
 pub fn pane(title: &str, focused: bool) -> Block<'static> {
     Block::default()
-        .borders(Borders::ALL)
+        .borders(Borders::TOP)
         .title(Span::styled(
             format!(" {title} "),
             if focused { accent() } else { heading() },
@@ -125,32 +141,22 @@ pub fn chrome_clip(value: &str, width: u16) -> String {
     }
     out
 }
-pub fn button(label: &'static str, key: &'static str, focused: bool) -> Span<'static> {
-    Span::styled(
-        format!(
-            " {}[{}{}] ",
-            if focused { "> " } else { "" },
-            label,
-            if key.is_empty() {
-                String::new()
-            } else {
-                format!(" · {key}")
-            }
-        ),
-        if focused { selected() } else { accent() },
-    )
-}
+#[derive(Clone, Copy)]
 pub struct ActionButton {
     pub label: &'static str,
     pub key: &'static str,
     pub target: super::input::Target,
 }
-pub struct FormActions<'a> {
-    pub buttons: &'a [ActionButton],
-    pub hint: &'a str,
+pub struct Feedback<'a> {
+    pub text: &'a str,
+    pub tone: design::Tone,
 }
-/// Shared page-form layout: only fields have focus. Actions are direct keys or
-/// clicks, never additional traversal stops. Every raw field value is escaped.
+pub struct FormActions<'a> {
+    pub choices: &'a [usize],
+    pub buttons: &'a [ActionButton],
+    pub feedback: Option<Feedback<'a>>,
+}
+/// Fields own input focus; the application shell owns the single action strip.
 pub fn field_page(
     frame: &mut Frame,
     area: Rect,
@@ -160,89 +166,117 @@ pub fn field_page(
     field_target: impl Fn(usize) -> super::input::Target,
     controls: FormActions<'_>,
 ) {
+    let choices = controls.choices;
     let fields_area = action_bar(frame, area, hits, controls);
-    let count = usize::from(fields_area.height / 3);
+    let count = usize::from(fields_area.height / 2).max(1);
     let focus = focus.min(fields.len().saturating_sub(1));
     let start = focus.saturating_sub(count.saturating_sub(1));
     for i in (start..fields.len()).take(count) {
-        let rect = Rect::new(
-            fields_area.x,
-            fields_area.y + (i - start) as u16 * 3,
-            fields_area.width,
-            3,
+        let y = fields_area.y + (i - start) as u16 * 2;
+        if y + 1 >= fields_area.bottom() {
+            break;
+        }
+        let active = i == focus && hits.input_focus_allowed();
+        frame.render_widget(
+            Paragraph::new(fields[i].0).style(if active { heading() } else { muted() }),
+            Rect::new(fields_area.x, y, fields_area.width, 1),
         );
-        input(
-            frame,
-            rect,
-            fields[i].0,
-            fields[i].1,
-            i == focus && hits.input_focus_allowed(),
+        let rect = Rect::new(fields_area.x, y + 1, fields_area.width, 1);
+        if choices.contains(&i) {
+            design::choice(frame, rect, fields[i].1, active);
+        } else {
+            design::filter(frame, rect, "", fields[i].1, active);
+        }
+        hits.click(
+            Rect::new(fields_area.x, y, fields_area.width, 2),
+            field_target(i),
         );
-        hits.click(rect, field_target(i));
     }
 }
-/// Direct-action buttons wrap independently of row/field focus. Returns the
-/// remaining content area; hints must contain trusted chrome/escaped metadata.
+/// Register foreground actions, without allocating another toolbar or hint row.
 pub fn action_bar(
     frame: &mut Frame,
     area: Rect,
     hits: &super::input::Hits,
     controls: FormActions<'_>,
 ) -> Rect {
-    let FormActions {
-        buttons: actions,
-        hint,
-    } = controls;
-    let mut rows = vec![Vec::<(usize, u16)>::new()];
-    let mut used = 0;
-    for (i, action) in actions.iter().enumerate() {
-        let width = (button(action.label, action.key, false).width() as u16).min(area.width);
-        if used > 0 && used + width > area.width {
-            rows.push(vec![]);
-            used = 0;
-        }
-        rows.last_mut().expect("action row").push((i, width));
-        used += width;
+    for action in controls.buttons {
+        hits.present(*action);
     }
-    let action_height = rows.len() as u16;
-    let content_height = area.height.saturating_sub(action_height + 1);
-    let top = area.y + content_height;
-    for (row, buttons) in rows.iter().enumerate() {
-        let mut x = area.x;
-        for &(i, width) in buttons {
-            let rect = Rect::new(x, top + row as u16, width, 1);
-            if rect.y < area.bottom() {
-                frame.render_widget(
-                    Paragraph::new(Line::from(button(actions[i].label, actions[i].key, false))),
-                    rect,
-                );
-                hits.click(rect, actions[i].target);
-            }
-            x += width;
-        }
+    if let Some(feedback) = controls.feedback {
+        let height = area.height.min(2);
+        design::notice(
+            frame,
+            Rect::new(area.x, area.bottom() - height, area.width, height),
+            match feedback.tone {
+                design::Tone::Neutral | design::Tone::Information => "Information",
+                design::Tone::Success => "Complete",
+                design::Tone::Attention => "Needs attention",
+                design::Tone::Error => "Invalid input",
+            },
+            feedback.text,
+            feedback.tone,
+        );
+        Rect::new(
+            area.x,
+            area.y,
+            area.width,
+            area.height.saturating_sub(height),
+        )
+    } else {
+        area
     }
-    chrome_prose(
-        frame,
-        Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1),
-        &chrome_clip(hint, area.width),
-        muted(),
-    );
-    Rect::new(area.x, area.y, area.width, content_height)
 }
-pub fn keys(items: &[(&str, &str)]) -> Line<'static> {
-    let mut spans = vec![];
-    for (key, label) in items {
-        if !spans.is_empty() {
-            spans.push(Span::raw("  "));
+fn metadata_lines(
+    value: &serde_json::Value,
+    label: &str,
+    depth: usize,
+    lines: &mut Vec<Line<'static>>,
+) {
+    let title = inline(label);
+    match value {
+        serde_json::Value::Object(values) if depth < 24 => {
+            if !title.is_empty() {
+                lines.push(Line::styled(
+                    format!("{}{title}", "  ".repeat(depth.min(6))),
+                    heading(),
+                ));
+            }
+            if values.is_empty() {
+                lines.push(metadata(&title, "None recorded"));
+            }
+            for (key, value) in values {
+                metadata_lines(value, key, depth + 1, lines);
+            }
         }
-        spans.push(Span::styled(format!(" {key} "), selected()));
-        spans.push(Span::raw(format!(" {label}")));
+        serde_json::Value::Array(values) if depth < 24 => {
+            lines.push(Line::styled(
+                format!("{}{title} ({})", "  ".repeat(depth.min(6)), values.len()),
+                heading(),
+            ));
+            if values.is_empty() {
+                lines.push(Line::raw("None recorded"));
+            }
+            for (index, value) in values.iter().enumerate() {
+                metadata_lines(value, &format!("{}", index + 1), depth + 1, lines);
+            }
+        }
+        serde_json::Value::String(value) => lines.push(metadata(&title, value)),
+        serde_json::Value::Null => lines.push(metadata(&title, "Not recorded")),
+        value => lines.push(metadata(&title, &value.to_string())),
     }
-    Line::from(spans)
 }
 /// Visual hierarchy for an operation's existing human report. This presentation
 /// never supplies identity, eligibility or approval data to the executor.
 pub fn review_text(body: &str) -> Text<'static> {
+    // Public metadata reports are presented as labeled facts, never used to reconstruct approval.
+    if body.trim_start().starts_with(['{', '['])
+        && let Ok(value) = serde_json::from_str::<serde_json::Value>(body)
+    {
+        let mut lines = Vec::new();
+        metadata_lines(&value, "", 0, &mut lines);
+        return Text::from(lines);
+    }
     let escaped = super::views::safe(body);
     let lines = escaped.lines().enumerate().map(|(index, line)| {
         let trimmed = line.trim_start();
@@ -252,7 +286,7 @@ pub fn review_text(body: &str) -> Text<'static> {
             Line::styled(line.to_owned(), danger())
         } else if let Some(effect) = trimmed.strip_prefix("- ") {
             Line::from(vec![
-                Span::styled(format!("{} ", glyphs::EXPAND), accent()),
+                Span::styled(format!("{} ", glyphs::PENDING), muted()),
                 Span::raw(effect.to_owned()),
             ])
         } else if let Some((label, value)) = line.split_once(": ") {
@@ -282,6 +316,9 @@ pub fn report(
     text_view(frame, inner, body, offset);
 }
 pub fn text_view(frame: &mut Frame, inner: Rect, body: Text<'static>, offset: u16) {
+    text_view_at(frame, inner, body, usize::from(offset));
+}
+pub fn text_view_at(frame: &mut Frame, inner: Rect, body: Text<'static>, offset: usize) {
     let width = usize::from(inner.width).max(1);
     let mut lines = Vec::new();
     for line in body.lines {
@@ -300,7 +337,7 @@ pub fn text_view(frame: &mut Frame, inner: Rect, body: Text<'static>, offset: u1
         }
         lines.push(Line::from(row));
     }
-    let start = usize::from(offset).min(lines.len().saturating_sub(usize::from(inner.height)));
+    let start = offset.min(lines.len().saturating_sub(usize::from(inner.height)));
     frame.render_widget(
         Paragraph::new(Text::from(
             lines
@@ -314,28 +351,9 @@ pub fn text_view(frame: &mut Frame, inner: Rect, body: Text<'static>, offset: u1
 }
 pub fn metadata(label: &str, value: &str) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{label:<13}"), muted()),
+        Span::styled(format!("{:<13} ", inline(label)), muted()),
         Span::raw(inline(value)),
     ])
-}
-pub fn input(frame: &mut Frame, area: Rect, label: &str, value: &str, focused: bool) {
-    let block = pane(
-        &format!("{label}{}", if focused { " · Focus" } else { "" }),
-        focused,
-    );
-    let inner = block.inner(area);
-    let escaped = inline(value);
-    let max = usize::from(inner.width.saturating_sub(1));
-    let shown = if escaped.len() > max && max > 3 {
-        format!("...{}", &escaped[escaped.len() - max + 3..])
-    } else {
-        escaped.chars().take(max).collect()
-    };
-    let cursor = inner.x + shown.len() as u16;
-    frame.render_widget(Paragraph::new(shown).block(block), area);
-    if focused && inner.width > 0 && inner.height > 0 {
-        frame.set_cursor_position((cursor, inner.y));
-    }
 }
 /// Trusted UI prose composed only with escaped metadata at dynamic boundaries.
 pub fn chrome_prose(frame: &mut Frame, area: Rect, text: &str, style: Style) {

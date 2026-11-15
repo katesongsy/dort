@@ -62,7 +62,7 @@ fn contextual_content_help_withholds_payload_rejects_late_read_and_restores_focu
     let mut app = f.app();
     let read = discover_content::next(&mut app).unwrap();
     app.complete(Ok(f.finish(read)));
-    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Enter);
     assert!(app.content.focused);
     app.content.scroll = 2;
     let selected = app.candidate_selected;
@@ -74,7 +74,7 @@ fn contextual_content_help_withholds_payload_rejects_late_read_and_restores_focu
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         super::files::FORMATTED_ROWS.with(|r| r.set(0));
         let screen = render(&app, w, h);
-        assert!(!screen.contains("synthetic-preview-A") && !screen.contains("Files / Discover"));
+        assert!(!screen.contains("synthetic-preview-A")); // Dimmed location metadata is not private content.
         assert_eq!(super::files::FORMATTED_ROWS.with(|r| r.get()), 0);
     }
     assert!(!app.content.text().contains("synthetic-preview-A"));
@@ -123,6 +123,8 @@ fn content_focus_uses_wrapped_viewport_without_selection_changes_or_rereads() {
     render(&app, 140, 40);
     assert!(!app.content.focused);
     key(&mut app, KeyCode::Tab);
+    assert!(!app.content.focused, "Tab never opens a reader");
+    key(&mut app, KeyCode::Enter);
     assert!(app.content.focused);
     let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
     terminal
@@ -174,10 +176,13 @@ fn content_focus_uses_wrapped_viewport_without_selection_changes_or_rereads() {
     assert_eq!(app.candidate_selected, selected);
     assert!(app.inventory.candidate_marks.is_empty());
     key(&mut app, KeyCode::BackTab);
+    assert!(app.content.focused, "Tab never leaves a reader");
+    assert_eq!(app.content.scroll, 0);
+    key(&mut app, KeyCode::Esc);
     assert!(!app.content.focused);
     assert!(discover_content::next(&mut app).is_none());
     assert!(app.content.text().starts_with("ordinary-wrapped"));
-    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Enter);
     key(&mut app, KeyCode::Char('g'));
     key(&mut app, KeyCode::Esc);
     assert!(!app.content.focused && !app.inventory.pending_g);
@@ -185,7 +190,10 @@ fn content_focus_uses_wrapped_viewport_without_selection_changes_or_rereads() {
     assert_eq!(app.candidate_selected, selected + 1);
     key(&mut app, KeyCode::Up);
     key(&mut app, KeyCode::Enter);
-    assert!(!app.content.focused); // Wide inspection leaves the visible list active.
+    assert!(app.content.focused && app.inventory.details);
+    key(&mut app, KeyCode::Char('j')); // A reading page scrolls, never selects a hidden row.
+    assert_eq!(app.candidate_selected, selected);
+    key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Char('j'));
     assert_eq!(app.candidate_selected, selected + 1);
 }
@@ -215,13 +223,17 @@ fn content_focus_mouse_compact_text_modal_and_floor_guards() {
     click(&mut app, true);
     assert!(app.content.focused);
     render(&app, 140, 40);
-    click(&mut app, false);
+    assert!(!(0..40).any(|y| (0..140).any(|x| matches!(
+        app.hits.target(x, y),
+        Some(super::input::Target::DiscoverFocus(false))
+    ))));
+    key(&mut app, KeyCode::Esc); // Full reading page has no hidden list hit target.
     assert!(!app.content.focused);
-    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Enter);
     app.resize(48, 14);
     assert!(app.content.focused);
     let screen = render(&app, 48, 14);
-    assert!(screen.contains("Content ·"));
+    assert!(screen.contains("Selected content"));
     assert!(!screen.contains("Space mark"));
     app.key(
         KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE),
@@ -231,7 +243,15 @@ fn content_focus_mouse_compact_text_modal_and_floor_guards() {
     assert_eq!(app.content.scroll, app.content.end.get());
     app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 48, 14);
     assert!(!app.content.focused);
-    assert!(render(&app, 48, 14).contains("Space mark"));
+    render(&app, 48, 14);
+    assert!(
+        super::workbench::actions(&app)
+            .iter()
+            .any(|action| matches!(
+                action.target,
+                super::input::Target::Action(super::shell::Action::ToggleMark)
+            ))
+    );
     key(&mut app, KeyCode::Char('/'));
     key(&mut app, KeyCode::Tab);
     key(&mut app, KeyCode::Char('j'));
@@ -240,19 +260,19 @@ fn content_focus_mouse_compact_text_modal_and_floor_guards() {
     key(&mut app, KeyCode::Esc);
     app.inventory.candidates.query.clear();
     app.resize(140, 40);
-    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Enter);
     key(&mut app, KeyCode::Char('?'));
     assert!(!app.content.focused && !app.content.text().starts_with("ordinary-settings"));
     key(&mut app, KeyCode::Tab);
     assert!(!app.content.focused);
     key(&mut app, KeyCode::Esc);
     app.resize(140, 40);
-    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Enter);
     app.resize(47, 13);
     assert!(!app.content.focused);
     assert!(discover_content::next(&mut app).is_none());
     app.resize(140, 40);
-    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Enter);
     app.dry_run = true;
     app.resize(140, 40);
     assert!(!app.content.focused);
@@ -279,10 +299,13 @@ fn selected_content_is_passive_escaped_ephemeral_and_late_results_are_dropped() 
     assert!(app.result.is_none() && app.receipt.is_none() && app.error.is_none());
     let screen = render(&app, 140, 40);
     assert!(screen.contains("synthetic-preview-B"));
-    let content_row = screen.lines().position(|l| l.contains("Content")).unwrap();
+    let content_row = screen
+        .lines()
+        .position(|l| l.contains("Selected content"))
+        .unwrap();
     let details_row = screen
         .lines()
-        .position(|l| l.contains("Metadata") && l.contains('┌'))
+        .position(|l| l.contains("Metadata") && l.contains('─'))
         .unwrap();
     assert!(details_row > content_row + 10);
     key(&mut app, KeyCode::Up);

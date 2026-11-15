@@ -111,40 +111,13 @@ fn details(view: &View<'_>) -> Text<'static> {
     Text::from(lines)
 }
 fn filter(frame: &mut Frame, area: Rect, view: &View<'_>) {
-    let editing = view.search.editing;
-    let prefix = if editing { "Filter > " } else { "/ Filter " };
-    let suffix = if view.metadata.is_some() {
-        format!(" | {} displayed", view.visible.len())
-    } else {
-        " | Unknown".into()
-    };
-    let escaped = ui::inline(&view.search.query);
-    let available = usize::from(area.width).saturating_sub(prefix.len() + suffix.len() + 1);
-    let shown = if escaped.len() > available && available >= 3 {
-        format!("...{}", &escaped[escaped.len() - available + 3..])
-    } else {
-        escaped.chars().take(available).collect()
-    };
-    let caret = area.x + prefix.len() as u16 + shown.len() as u16;
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(prefix, ui::accent()),
-            Span::raw(shown),
-            Span::styled(
-                if view.search.query.is_empty() && !editing {
-                    "[metadata]"
-                } else {
-                    ""
-                },
-                ui::muted(),
-            ),
-            Span::styled(suffix, ui::muted()),
-        ])),
+    ui::design::filter(
+        frame,
         area,
+        "Filter changes",
+        &view.search.query,
+        view.search.editing && view.hits.input_focus_allowed() && !view.busy,
     );
-    if editing && view.hits.input_focus_allowed() && !view.busy && area.width > 0 {
-        frame.set_cursor_position((caret.min(area.right().saturating_sub(1)), area.y));
-    }
 }
 
 pub(super) fn wide_details(area: Rect, metadata: Option<&Metadata>) -> bool {
@@ -165,15 +138,59 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
     .split(area);
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("Git / ", ui::heading()),
             Span::styled(
-                ui::chrome_clip(view.comparison.label(), area.width.saturating_sub(6)),
-                ui::accent(),
+                if view.metadata.is_some() {
+                    format!("{} displayed | ", view.visible.len())
+                } else {
+                    "Unknown observation | ".into()
+                },
+                ui::muted(),
             ),
+            Span::raw(ui::short_field(
+                "Root",
+                view.root.and_then(|p| p.to_str()).unwrap_or("not selected"),
+                area.width.saturating_sub(24),
+            )),
         ])),
         sections[0],
     );
     filter(frame, sections[1], &view);
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let action = if view.search.editing {
+        Some((
+            "Done",
+            "Enter",
+            crate::tui::input::Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        ))
+    } else if view.details {
+        Some(("Back", "Esc", crate::tui::input::Target::Back))
+    } else if view.metadata.is_some_and(|metadata| metadata.len() > 0) && !view.visible.is_empty() {
+        Some((
+            "Details",
+            "Enter",
+            crate::tui::input::Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        ))
+    } else if view.metadata.is_none() {
+        Some((
+            "Choose Git scope",
+            "Enter",
+            crate::tui::input::Target::Action(crate::tui::shell::Action::GitRoot),
+        ))
+    } else {
+        None
+    };
+    if let Some((label, key, target)) = action {
+        view.hits.present(ui::ActionButton { label, key, target });
+    }
+    view.hits.present(ui::ActionButton {
+        label: if view.details {
+            "Entries"
+        } else {
+            "Scope details"
+        },
+        key: "F3",
+        target: crate::tui::input::Target::Key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE)),
+    });
     view.hits
         .click(sections[1], crate::tui::input::Target::Filter);
     if let Some(branch) = branch {
@@ -184,11 +201,11 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
     }
     let content = sections[3];
     let wide = wide_details(area, view.metadata);
-    if !wide && view.details {
+    if view.details {
         ui::report(
             frame,
             content,
-            "Git details | Esc list",
+            "Git details",
             details(&view),
             view.scroll,
             true,
@@ -259,7 +276,7 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
             .header(Row::new(labels).style(ui::heading()))
             .block(block)
             .row_highlight_style(ui::selected())
-            .highlight_symbol("> ");
+            .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
         let mut selection = TableState::default()
             .with_selected(view.visible.iter().position(|&i| i == view.selected));
         frame.render_stateful_widget(table, panes[0], &mut selection);

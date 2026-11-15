@@ -91,6 +91,7 @@ def violations(path, source):
         rules.append(('semantic-glyph', r'[✓×▸▾›█░\u2800-\u28ff]', literals))
     if path not in CLOCK_OWNERS:
         rules.append(('private-clock', r'\bInstant\s*::|\b(?:set_interval|setInterval)\s*\(', code))
+    rules.append(('literal-selection-marker', r'\.\s*highlight_symbol\s*\(\s*(?:"|r#*")', literals))
     rules.append(('blocking-animation', r'\bthread\s*::\s*sleep\s*\(', code))
     found = []
     for rule, pattern, text in rules:
@@ -126,6 +127,12 @@ class StyleCheckerTests(unittest.TestCase):
     def test_glyph_literals_are_checked_but_metadata_punctuation_is_not(self):
         self.assertEqual(violations(TUI / 'page.rs', 'let title = "Package · version";'), [])
         self.assertEqual(violations(TUI / 'page.rs', 'let marker = r#"›"#;')[0][2], 'semantic-glyph')
+
+    def test_selection_marker_uses_shared_glyph_even_for_ascii(self):
+        for literal in ['"> "', 'r#"> "#']:
+            self.assertEqual({v[2] for v in violations(TUI / 'page.rs', '.highlight_symbol(' + literal + ')')}, {'literal-selection-marker'})
+        self.assertEqual(violations(TUI / 'page.rs', '.highlight_symbol(format!("{} ", ui::glyphs::SELECTED))'), [])
+        self.assertEqual(violations(TUI / 'page.rs', '// .highlight_symbol("> ")'), [])
 
     def test_owners_are_exact_not_any_file_in_component_folder(self):
         source = 'let s = Color::Red; let icon = "✓";'

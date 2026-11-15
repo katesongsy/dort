@@ -50,10 +50,12 @@ pub struct State {
     close_npm_draft: [String; 4],
     pub focus: usize,
     pub details: bool,
+    draft_details: bool,
     pub scroll: u16,
     pub scope: Option<install::Scope>,
     summary: String,
     metadata: String,
+    result_summary: Option<install::Summary>,
 }
 pub enum Outcome {
     Back,
@@ -67,6 +69,7 @@ impl Outcome {
 }
 impl State {
     pub fn clear_approvals(&mut self) {
+        self.draft_details = false;
         self.preview = None;
         self.close_preview = None;
         if matches!(
@@ -74,20 +77,25 @@ impl State {
             Mode::LoadingInstall | Mode::Review | Mode::LoadingClose | Mode::CloseReview
         ) {
             self.mode = Mode::Result;
+            self.result_summary = None;
             self.summary = "Review dismissed. Request a fresh review before execution.".into();
         }
     }
+    pub fn draft_metadata(&self) -> bool {
+        self.draft_details
+    }
     pub fn text_entry(&self) -> bool {
-        matches!(
-            self.mode,
-            Mode::CloseInputs
-                | Mode::PrefixInputs
-                | Mode::AptInputs
-                | Mode::Review
-                | Mode::CloseReview
-                | Mode::LoadingInstall
-                | Mode::LoadingClose
-        )
+        !self.draft_details
+            && matches!(
+                self.mode,
+                Mode::CloseInputs
+                    | Mode::PrefixInputs
+                    | Mode::AptInputs
+                    | Mode::Review
+                    | Mode::CloseReview
+                    | Mode::LoadingInstall
+                    | Mode::LoadingClose
+            )
     }
     pub fn prepare(&mut self, mut request: installation::Request) -> Task {
         if let Some(executable) = request.brew_executable().map(std::path::Path::to_owned) {
@@ -122,16 +130,8 @@ impl State {
         Task::ToolInstallPrepare(Box::new(request))
     }
     pub fn preparation_failed(&mut self, error: &str) {
-        self.summary = if self
-            .request
-            .as_ref()
-            .is_some_and(|r| r.brew_executable().is_some() || r.apt_executable().is_some())
-        {
-            "Review unavailable. a edits Advanced inputs; r requests a fresh preview; Esc returns."
-        } else {
-            "Review unavailable. r requests a fresh preview; Esc returns."
-        }
-        .into();
+        self.summary =
+            "Review unavailable. Inputs are retained; a fresh preview is required.".into();
         self.error = Some(error.into());
     }
     pub fn retry_preview(&mut self) -> Option<Task> {
@@ -150,25 +150,25 @@ impl State {
         let s = preview.review().scope;
         self.summary = if s.apt.is_some() {
             format!(
-                "APT · ROOT RISK · {} · current, not pinned\nRoot scripts/hooks/dependency code CAN EXECUTE.\nDependencies upgrade; services start/restart.\nSystem/config/data/live links may change.\nNo sandbox or rollback; native root policy.\nsudo -n -T 600: denied policy fails, no prompt.\nOverdue supervisor: keep waiting joined.\na: Advanced · d: full scope · q waits",
+                "APT · ROOT RISK · {} · current, not pinned\nRoot scripts/hooks/dependency code CAN EXECUTE.\nDependencies upgrade; services start/restart.\nSystem/config/data/live links may change.\nNo sandbox or rollback; native root policy.\nsudo -n -T 600: denied policy fails, no prompt.\nRequested supervision: 10 minutes.\nOverdue supervisor: keep waiting joined.",
                 ui::inline(&s.package)
             )
         } else if let Some(brew) = &s.brew {
             format!(
-                "Homebrew · provider-current · 10m deadline\nBuild/dependency code CAN EXECUTE.\nDependencies may upgrade; native links may\nexpose commands on PATH. No rollback.\n{} · Prefix: {}\nFresh help/layout/formula/catalog probes.\na: Advanced prefix · d: full scope · q waits",
+                "Homebrew · provider-current · 10m deadline\nBuild/dependency code CAN EXECUTE.\nDependencies may upgrade; native links may\nexpose commands on PATH. No rollback.\n{} · Prefix: {}\nFresh help/layout/formula/catalog probes.\nExit waits for completion.",
                 ui::inline(&s.package),
                 ui::inline(&brew.prefix.display().to_string())
             )
         } else if let Some(npm) = &s.npm {
             format!(
-                "npm install · scripts off · 10m deadline\nDependencies + bin/man links may expose\ncommands on PATH. No rollback. q waits.\nFresh target/runtime/prerequisite queries.\n{}@{}\nPrefix: {}\nd: full scope and query details",
+                "npm install · scripts off · 10m deadline\nDependencies + bin/man links may expose\ncommands on PATH. No rollback. Exit waits.\nFresh target/runtime/prerequisite queries.\n{}@{}\nPrefix: {}",
                 ui::inline(&s.package),
                 ui::inline(&s.version),
                 ui::inline(&npm.binding.prefix.display().to_string())
             )
         } else {
             format!(
-                "mise · exact install · 10m deadline\nProvider/backend/package code CAN EXECUTE.\nDownloads can change data/caches; no rollback.\nNo activation; readiness is not verified.\nq/Ctrl-C waits for completion.\nFresh inspection, conditional install, re-inspect.\n{}@{}\nd: full scope and arguments",
+                "mise · exact install · 10m deadline\nProvider/backend/package code CAN EXECUTE.\nDownloads can change data/caches; no rollback.\nNo activation; readiness is not verified.\nExit waits for completion.\nFresh inspection, conditional install, re-inspect.\n{}@{}",
                 ui::inline(&s.package),
                 ui::inline(&s.version)
             )
@@ -182,11 +182,13 @@ impl State {
     pub fn installed(&mut self, report: Result<install::Report, String>) {
         self.clear_approvals();
         self.mode = Mode::Result;
+        self.result_summary = None;
         self.details = false;
         self.error = None;
         match report {
             Ok(report) => {
                 let summary = report.summary();
+                self.result_summary = Some(summary);
                 let caption = if report.no_op {
                     "No installer ran; matching package reported."
                 } else if installation::succeeded(&report) {
@@ -203,7 +205,7 @@ impl State {
                     summary.status.label()
                 };
                 self.summary = format!(
-                    "{caption}\n{} · {}\n{}\n{}\nNo readiness/ownership/termination proof.\nNo rollback; effects may be partial/ongoing.\nd: full outcome · i: attempts",
+                    "{caption}\n{} · {}\n{}\n{}\nNo readiness/ownership/termination proof.\nNo rollback; effects may be partial/ongoing.",
                     summary.status.label(),
                     summary.process_label(),
                     summary.package_note(),
@@ -212,7 +214,7 @@ impl State {
                 self.metadata = serde_json::to_string_pretty(&report).expect("metadata serializes");
             }
             Err(error) => {
-                self.summary = "Outcome unavailable; effects may be partial/ongoing.\ni: inspect unresolved attempts before another install.\nNo approval is retained or replayed; no rollback.\nf: start fresh review (navigation only).".into();
+                self.summary = "Outcome unavailable; effects may be partial/ongoing.\nUnresolved attempts must be inspected before another install.\nNo approval is retained or replayed; no rollback.".into();
                 self.error = Some(error);
                 self.metadata.clear();
             }
@@ -393,6 +395,28 @@ impl State {
             _ => self.close_mise_draft = [self.fields[0].clone(), self.fields[1].clone()],
         }
     }
+    pub(super) fn closure_provider(&self) -> usize {
+        if self.close_apt {
+            3
+        } else if self.close_brew {
+            2
+        } else if self.close_npm {
+            1
+        } else {
+            0
+        }
+    }
+    pub(super) fn choose_closure_provider(&mut self, selected: usize) {
+        if selected >= 4 || self.mode != Mode::CloseInputs {
+            return;
+        }
+        for _ in 0..4 {
+            if self.closure_provider() == selected {
+                break;
+            }
+            self.toggle_close_provider();
+        }
+    }
     fn toggle_close_provider(&mut self) {
         self.retain_close_draft();
         if self.close_brew {
@@ -425,8 +449,8 @@ impl State {
         self.metadata =
             serde_json::to_string_pretty(&preview.review()).expect("metadata serializes");
         self.summary = format!(
-            "Close unresolved attempt {}\nFresh provider query; close unchanged metadata.\nNo replay, repair, readiness or rollback.\nNo root-termination or install-success proof.\nConfig/plugins may run code; caches may change.\nd: full scope and query details",
-            preview.review().attempt_id
+            "Close unresolved attempt {}\nFresh provider query; close unchanged metadata.\nNo replay, repair, readiness or rollback.\nNo root-termination or install-success proof.\nConfig/plugins may run code; caches may change.",
+            ui::inline(preview.review().attempt_id)
         );
         self.close_preview = Some(preview);
         self.mode = Mode::CloseReview;
@@ -435,6 +459,7 @@ impl State {
     }
     pub fn closed(&mut self, result: Result<install::Attempt, String>) {
         self.close_preview = None;
+        self.result_summary = None;
         self.mode = Mode::Attempts;
         self.details = false;
         match result {
@@ -450,7 +475,7 @@ impl State {
             Err(error) => {
                 self.error = Some(error);
                 self.mode = Mode::Result;
-                self.summary = "Closure not completed. i reopens attempts for a fresh review; no approval is retained.".into();
+                self.summary = "Closure not completed. A fresh attempt review is required; no approval is retained.".into();
             }
         }
     }
@@ -475,6 +500,40 @@ impl State {
         }
     }
     pub fn key(&mut self, key: KeyEvent, dry_run: bool, snapshots: &[Snapshot]) -> Option<Outcome> {
+        if matches!(
+            self.mode,
+            Mode::PrefixInputs | Mode::AptInputs | Mode::CloseInputs
+        ) {
+            if key.code == KeyCode::F(3) {
+                self.draft_details = !self.draft_details;
+                self.scroll = 0;
+                return None;
+            }
+            if self.draft_details {
+                match key.code {
+                    KeyCode::Esc => self.draft_details = false,
+                    KeyCode::Home => self.scroll = 0,
+                    KeyCode::Down | KeyCode::PageDown => {
+                        self.scroll = self.scroll.saturating_add(2)
+                    }
+                    KeyCode::Up | KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(2),
+                    _ => (),
+                }
+                return None;
+            }
+        } else if key.code == KeyCode::F(3) {
+            if self.mode == Mode::Attempts && !self.details {
+                if let Some(attempt) = self.attempts.get(self.selected) {
+                    self.metadata =
+                        serde_json::to_string_pretty(attempt).expect("metadata serializes");
+                    self.details = true;
+                }
+            } else if !self.metadata.is_empty() {
+                self.details = !self.details;
+            }
+            self.scroll = 0;
+            return None;
+        }
         if self.mode == Mode::AptInputs {
             return match key.code {
                 KeyCode::Esc => {
@@ -560,7 +619,7 @@ impl State {
                     self.focus = (self.focus + count - 1) % count;
                     None
                 }
-                KeyCode::F(2) => {
+                KeyCode::F(4) => {
                     self.toggle_close_provider();
                     None
                 }
@@ -649,6 +708,17 @@ impl State {
             {
                 return self.retry_preview().map(Outcome::task);
             }
+            KeyCode::Down | KeyCode::PageDown if self.mode == Mode::Result => {
+                self.scroll = self.scroll.saturating_add(2);
+            }
+            KeyCode::Up | KeyCode::PageUp if self.mode == Mode::Result => {
+                self.scroll = self.scroll.saturating_sub(2);
+            }
+            KeyCode::Home if self.mode == Mode::Result => self.scroll = 0,
+            KeyCode::Enter if self.mode == Mode::Result => {
+                self.clear_approvals();
+                return Some(Outcome::FreshReview);
+            }
             KeyCode::Char('f') if matches!(self.mode, Mode::Result | Mode::Attempts) => {
                 self.clear_approvals();
                 return Some(Outcome::FreshReview);
@@ -691,24 +761,167 @@ impl State {
         }
         None
     }
-    fn fresh_button(&self, frame: &mut Frame, area: Rect, hits: &super::input::Hits) {
-        let button = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
-        frame.render_widget(
-            Paragraph::new(Line::from(ui::button("Start fresh review", "f", true))),
-            button,
-        );
-        hits.click(button, Target::ToolInstallFreshReview);
+    fn fresh_action(&self, hits: &super::input::Hits) {
+        if self.mode == Mode::Result {
+            hits.present(ui::ActionButton {
+                label: "Start fresh review",
+                key: "Enter",
+                target: Target::ToolInstallFreshReview,
+            });
+        }
+        hits.present(ui::ActionButton {
+            label: "Start fresh review",
+            key: "f",
+            target: Target::ToolInstallFreshReview,
+        });
     }
     pub fn draw(&self, frame: &mut Frame, area: Rect, dry_run: bool, hits: &super::input::Hits) {
+        if !self.details
+            && matches!(
+                self.mode,
+                Mode::Review
+                    | Mode::CloseReview
+                    | Mode::Result
+                    | Mode::LoadingInstall
+                    | Mode::LoadingClose
+            )
+        {
+            hits.present(ui::ActionButton {
+                label: "Installation attempts",
+                key: "i",
+                target: Target::Key(ratatui::crossterm::event::KeyEvent::new(
+                    KeyCode::Char('i'),
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                )),
+            });
+            if self.mode == Mode::Review
+                && self
+                    .scope
+                    .as_ref()
+                    .is_some_and(|scope| scope.brew.is_some() || scope.apt.is_some())
+            {
+                hits.present(ui::ActionButton {
+                    label: "Advanced inputs",
+                    key: "a",
+                    target: Target::Key(ratatui::crossterm::event::KeyEvent::new(
+                        KeyCode::Char('a'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    )),
+                });
+            }
+        }
+        if self.mode == Mode::Attempts && !self.details {
+            hits.present(ui::ActionButton {
+                label: "Refresh attempts",
+                key: "r",
+                target: Target::Key(ratatui::crossterm::event::KeyEvent::new(
+                    KeyCode::Char('r'),
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                )),
+            });
+        }
+        if !self.metadata.is_empty()
+            || matches!(
+                self.mode,
+                Mode::PrefixInputs | Mode::AptInputs | Mode::CloseInputs
+            )
+            || self.mode == Mode::Attempts && self.attempts.get(self.selected).is_some()
+        {
+            hits.present(ui::ActionButton {
+                label: if self.draft_details {
+                    "Fields"
+                } else {
+                    "Full metadata"
+                },
+                key: "F3",
+                target: Target::Key(ratatui::crossterm::event::KeyEvent::new(
+                    KeyCode::F(3),
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                )),
+            });
+        }
+        if matches!(self.mode, Mode::LoadingInstall | Mode::LoadingClose) && self.error.is_some() {
+            hits.present(ui::ActionButton {
+                label: "Fresh preview",
+                key: "r",
+                target: Target::Key(ratatui::crossterm::event::KeyEvent::new(
+                    KeyCode::Char('r'),
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                )),
+            });
+            if self.mode == Mode::LoadingInstall
+                && self
+                    .request
+                    .as_ref()
+                    .is_some_and(|r| r.brew_executable().is_some() || r.apt_executable().is_some())
+            {
+                hits.present(ui::ActionButton {
+                    label: "Advanced inputs",
+                    key: "a",
+                    target: Target::Key(ratatui::crossterm::event::KeyEvent::new(
+                        KeyCode::Char('a'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    )),
+                });
+            }
+        }
+        if self.draft_details {
+            let fields: Vec<(&str, &str)> = match self.mode {
+                Mode::PrefixInputs => vec![("Physical Homebrew prefix", &self.brew_prefix)],
+                Mode::AptInputs => ["Trusted apt-cache", "Trusted apt-get", "Trusted sudo"]
+                    .into_iter()
+                    .zip(self.apt_fields.iter().map(String::as_str))
+                    .collect(),
+                _ => {
+                    let labels: &[&str] = if self.close_npm {
+                        &[
+                            "Trusted Node",
+                            "Search directories",
+                            "Trusted npm CLI",
+                            "Prefix",
+                        ]
+                    } else if self.close_brew {
+                        &["Trusted Homebrew", "Search directories", "Physical prefix"]
+                    } else if self.close_apt {
+                        &["Trusted dpkg-query", "Search directories"]
+                    } else {
+                        &["Trusted mise", "Search directories"]
+                    };
+                    labels
+                        .iter()
+                        .copied()
+                        .zip(self.fields.iter().map(String::as_str))
+                        .collect()
+                }
+            };
+            let mut lines = vec![ratatui::text::Line::raw(
+                "Showing current draft values executes no provider and grants no approval.",
+            )];
+            lines.extend(
+                fields
+                    .into_iter()
+                    .map(|(label, value)| ui::metadata(label, value)),
+            );
+            ui::report(
+                frame,
+                area,
+                "Draft inputs",
+                lines.into(),
+                self.scroll,
+                false,
+            );
+            hits.present(ui::ActionButton {
+                label: "Fields",
+                key: "Esc",
+                target: Target::Back,
+            });
+            return;
+        }
         if self.details {
             ui::report(
                 frame,
                 area,
-                if matches!(self.mode, Mode::Result | Mode::Attempts) {
-                    "Tools installation details · d/Esc back · f fresh review"
-                } else {
-                    "Tools installation details · d/Esc back"
-                },
+                "Tools installation details",
                 ui::review_text(&self.metadata),
                 self.scroll,
                 false,
@@ -768,17 +981,10 @@ impl State {
                     } else {
                         "Provider: mise"
                     },
-                    key: "F2",
+                    key: "F4",
                     target: Target::ToolInstallProvider,
                 });
             }
-            let hint = self
-                .error
-                .as_ref()
-                .map(|e| ui::inline(e))
-                .unwrap_or_else(|| {
-                    "Tab: fields · Enter: fresh review · Esc: Back (draft retained)".into()
-                });
             ui::field_page(
                 frame,
                 area,
@@ -787,8 +993,12 @@ impl State {
                 hits,
                 |i| Target::ToolInstallControl(i, false),
                 ui::FormActions {
+                    choices: &[],
                     buttons: &actions,
-                    hint: &hint,
+                    feedback: self.error.as_deref().map(|text| ui::Feedback {
+                        text,
+                        tone: ui::design::Tone::Attention,
+                    }),
                 },
             );
             return;
@@ -798,19 +1008,16 @@ impl State {
                 ui::chrome_prose(
                     frame,
                     area,
-                    &format!(
-                        "Attempts unavailable: {}\nr refreshes · f fresh review · Esc back",
-                        ui::inline(error)
-                    ),
+                    &format!("Attempts unavailable: {}", ui::inline(error)),
                     ui::warning(),
                 );
-                self.fresh_button(frame, area, hits);
+                self.fresh_action(hits);
                 return;
             }
             let capacity = usize::from(area.height.saturating_sub(5)).max(1);
             let offset = self.selected.saturating_sub(capacity - 1);
             let mut lines = vec![Line::styled(
-                "Installation attempts · Enter details · c close · f fresh review",
+                "Historical installation attempts",
                 ui::heading(),
             )];
             for (i, attempt) in self.attempts.iter().enumerate().skip(offset).take(capacity) {
@@ -847,6 +1054,14 @@ impl State {
                 lines.push(Line::raw("No installation attempts recorded."));
             }
             if let Some(attempt) = self.attempts.get(self.selected) {
+                hits.present(ui::ActionButton {
+                    label: "Details",
+                    key: "Enter",
+                    target: Target::Key(ratatui::crossterm::event::KeyEvent::new(
+                        KeyCode::Enter,
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    )),
+                });
                 let summary = attempt.summary();
                 lines.push(Line::styled(
                     ui::clip(summary.package_note(), area.width),
@@ -859,7 +1074,7 @@ impl State {
                         } else if attempt.explicitly_closed {
                             "Closed metadata, not install success or repair."
                         } else if !attempt.outcome.is_some_and(install::Outcome::succeeded) {
-                            "Effects may be partial/ongoing; f: fresh review."
+                            "Effects may be partial or ongoing."
                         } else {
                             "Historical only; fresh inventories + explicit binding."
                         },
@@ -869,18 +1084,17 @@ impl State {
                 ));
             }
             frame.render_widget(Paragraph::new(lines), area);
-            self.fresh_button(frame, area, hits);
+            self.fresh_action(hits);
             if self
                 .attempts
                 .get(self.selected)
                 .is_some_and(|a| a.unresolved)
             {
-                let button = Rect::new(area.x, area.bottom().saturating_sub(2), area.width, 1);
-                frame.render_widget(
-                    Paragraph::new(Line::from(ui::button("Review closure", "c", true))),
-                    button,
-                );
-                hits.click(button, Target::ToolAttemptClose);
+                hits.present(ui::ActionButton {
+                    label: "Review closure",
+                    key: "c",
+                    target: Target::ToolAttemptClose,
+                });
             }
             return;
         }
@@ -900,42 +1114,97 @@ impl State {
         } else {
             message
         };
-        ui::chrome_prose(
-            frame,
-            Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1)),
-            &message,
-            ui::muted(),
-        );
         if self.mode == Mode::Result {
-            self.fresh_button(frame, area, hits);
-        }
-        if matches!(self.mode, Mode::Review | Mode::CloseReview) {
-            let button = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
-            frame.render_widget(
-                Paragraph::new(Line::from(ui::button(
-                    if dry_run {
-                        "Preview only · execution disabled"
-                    } else if self.mode == Mode::Review
-                        && self.scope.as_ref().is_some_and(|s| s.apt.is_some())
-                    {
-                        "Install with root risk · sudo 10m"
-                    } else if self.mode == Mode::Review
-                        && self.scope.as_ref().is_some_and(|s| s.brew.is_some())
-                    {
-                        "Install core formula · 10m"
-                    } else if self.mode == Mode::Review {
-                        "Install exact version · 10m"
-                    } else {
-                        "Inspect and close attempt"
+            use install::{BinaryState, PackageState, ProcessOutcome, Status};
+            let mut lines = Vec::new();
+            if let Some(summary) = self.result_summary {
+                let tone = match summary.status {
+                    Status::ProcessFailed => ui::design::Tone::Error,
+                    Status::NoOp
+                    | Status::ExactReported
+                    | Status::CurrentReported
+                    | Status::ExplicitlyClosed => ui::design::Tone::Information,
+                    _ => ui::design::Tone::Attention,
+                };
+                lines.push(ui::design::badge(summary.status.label(), tone));
+                if let Some(caption) = self
+                    .summary
+                    .lines()
+                    .next()
+                    .filter(|caption| *caption != summary.status.label())
+                {
+                    lines.push(Line::raw(caption.to_owned()));
+                }
+                lines.push(ui::design::badge(
+                    summary.process_label(),
+                    match summary.process {
+                        Some(ProcessOutcome::Success) => ui::design::Tone::Success,
+                        Some(ProcessOutcome::Failed) => ui::design::Tone::Error,
+                        None if summary.status == Status::NoOp => ui::design::Tone::Information,
+                        _ => ui::design::Tone::Attention,
                     },
-                    "Enter",
-                    !dry_run,
-                ))),
-                button,
-            );
-            if !dry_run {
-                hits.click(button, Target::ToolInstallControl(2, true));
+                ));
+                lines.push(ui::design::badge(
+                    summary.package_note(),
+                    match summary.package {
+                        Some(
+                            PackageState::Unavailable
+                            | PackageState::Conflict
+                            | PackageState::Absent,
+                        ) => ui::design::Tone::Attention,
+                        _ => ui::design::Tone::Information,
+                    },
+                ));
+                lines.push(ui::design::badge(
+                    summary.binary_label(),
+                    if summary.binary == Some(BinaryState::Unavailable) {
+                        ui::design::Tone::Attention
+                    } else {
+                        ui::design::Tone::Neutral
+                    },
+                ));
+                lines.push(Line::raw("No readiness/ownership/termination proof."));
+                lines.push(Line::raw("No rollback; effects may be partial/ongoing."));
+            } else {
+                lines.push(ui::design::badge(
+                    if self.error.is_some() {
+                        "Outcome unavailable"
+                    } else {
+                        "No active installation review"
+                    },
+                    if self.error.is_some() {
+                        ui::design::Tone::Attention
+                    } else {
+                        ui::design::Tone::Information
+                    },
+                ));
+                lines.extend(message.lines().map(|line| Line::raw(line.to_owned())));
             }
+            ui::text_view(frame, area, ratatui::text::Text::from(lines), self.scroll);
+            self.fresh_action(hits);
+        } else {
+            ui::chrome_prose(frame, area, &message, ui::muted());
+        }
+        let approved_review = match self.mode {
+            Mode::Review => self.preview.is_some(),
+            Mode::CloseReview => self.close_preview.is_some(),
+            _ => false,
+        };
+        if !dry_run && approved_review {
+            let label = if self.mode == Mode::CloseReview {
+                "Inspect and close attempt"
+            } else if self.scope.as_ref().is_some_and(|s| s.apt.is_some()) {
+                "Install with root risk"
+            } else if self.scope.as_ref().is_some_and(|s| s.brew.is_some()) {
+                "Install core formula"
+            } else {
+                "Install exact version"
+            };
+            hits.present(ui::ActionButton {
+                label,
+                key: "Enter",
+                target: Target::ToolInstallControl(2, true),
+            });
         }
     }
 }

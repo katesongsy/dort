@@ -1,6 +1,6 @@
 //! Read-only Git presentation. Patch payloads have no Debug/Serialize implementation and
 //! never enter generic reports, errors, progress, retained drafts or metadata inventories.
-use super::{actions::Task, shell::edit_text, views::safe};
+use super::{actions::Task, components as ui, input::Target, shell::edit_text, views::safe};
 use dort_core::git::{Diff, Git, Status};
 use ratatui::{
     Frame,
@@ -8,7 +8,7 @@ use ratatui::{
     layout::Rect,
     style::Style,
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::Paragraph,
 };
 use std::path::PathBuf;
 
@@ -213,6 +213,7 @@ pub struct State {
     pub metadata: Option<Metadata>,
     pub draft: String,
     pub editing_root: bool,
+    root_details: bool,
     pub search: super::inventory::Search,
     selected: usize,
     scroll: u16,
@@ -232,7 +233,9 @@ impl State {
         }
     }
     pub fn text_entry(&self) -> bool {
-        self.editing_root || self.search.editing || self.confirmation.is_some()
+        (self.editing_root && !self.root_details)
+            || self.search.editing
+            || self.confirmation.is_some()
     }
     // Local input routing only, not page modality or menu availability.
     pub fn navigation_input(&self) -> bool {
@@ -243,6 +246,7 @@ impl State {
     }
     pub fn leave_page(&mut self) {
         self.editing_root = false;
+        self.root_details = false;
         self.search.editing = false;
         self.discard_patch();
     }
@@ -408,7 +412,22 @@ impl State {
             }
             return Some(None);
         }
+        if self.editing_root && self.root_details {
+            match key.code {
+                KeyCode::Esc | KeyCode::F(3) => self.root_details = false,
+                KeyCode::Home => self.scroll = 0,
+                KeyCode::Down | KeyCode::PageDown => self.scroll = self.scroll.saturating_add(2),
+                KeyCode::Up | KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(2),
+                _ => (),
+            }
+            return Some(None);
+        }
         if self.editing_root {
+            if key.code == KeyCode::F(3) {
+                self.root_details = true;
+                self.scroll = 0;
+                return Some(None);
+            }
             match key.code {
                 KeyCode::Esc => self.editing_root = false,
                 KeyCode::Enter if !self.draft.is_empty() => {
@@ -426,11 +445,31 @@ impl State {
             }
             return Some(None);
         }
+        if key.code == KeyCode::F(3) {
+            self.search.editing = false;
+            self.details = !self.details;
+            self.scroll = 0;
+            return Some(None);
+        }
         if self.search.editing {
             self.scroll = 0;
             self.search.key(key);
             self.clamp();
             return Some(None);
+        }
+        if self.details {
+            match key.code {
+                KeyCode::Down | KeyCode::PageDown => {
+                    self.scroll = self.scroll.saturating_add(2);
+                    return Some(None);
+                }
+                KeyCode::Up | KeyCode::PageUp => {
+                    self.scroll = self.scroll.saturating_sub(2);
+                    return Some(None);
+                }
+                KeyCode::Enter => return Some(None),
+                _ => (),
+            }
         }
         match key.code {
             KeyCode::Char('/') => {
@@ -455,7 +494,11 @@ impl State {
                 self.scroll = 0;
             }
             KeyCode::Enter => {
-                self.details = true;
+                if self.metadata.is_none() {
+                    self.editing_root = true;
+                } else if !self.visible().is_empty() {
+                    self.details = true;
+                }
                 self.scroll = 0;
             }
             KeyCode::Esc => {
@@ -471,8 +514,8 @@ impl State {
         }
         Some(None)
     }
-    pub fn wide_metadata(&self, area: Rect) -> bool {
-        metadata::wide_details(area, self.metadata.as_ref())
+    pub fn root_metadata(&self) -> bool {
+        self.editing_root && self.root_details
     }
     pub fn browsing_details(&self) -> bool {
         self.details
@@ -542,7 +585,7 @@ impl State {
             },
         );
         let scope = format!(
-            "Git-only root: {:?} ({})\n{}\nr refresh | / metadata search | w View patch content\n",
+            "Git-only root: {:?} ({})\n{}\n",
             self.root,
             if self.follows_files {
                 "current file repository"
@@ -555,7 +598,7 @@ impl State {
             // Backend has already escaped unsafe bytes. Do not route through generic safe/report paths.
             let heading = format!(
                 "{}\n{}",
-                super::views::short_field(
+                ui::short_field(
                     "Git root",
                     self.root
                         .as_ref()
@@ -576,23 +619,28 @@ impl State {
                 area.height.saturating_sub(2),
             );
             frame.render_widget(
+                Paragraph::new("Patch may contain secrets").style(ui::warning()),
+                Rect::new(area.x, area.y, area.width, 1),
+            );
+            let content = Rect::new(
+                area.x,
+                area.y + 1,
+                area.width,
+                area.height.saturating_sub(1),
+            );
+            frame.render_widget(
                 Paragraph::new(patch.styled_viewport(
                     self.patch_scroll,
                     self.horizontal,
-                    usize::from(area.width.saturating_sub(2)),
-                    usize::from(area.height.saturating_sub(2)),
-                ))
-                .block(
-                    Block::default()
-                        .title(" Patch · + added · - removed · May contain secrets ")
-                        .borders(Borders::ALL),
-                ),
-                area,
+                    usize::from(content.width),
+                    usize::from(content.height),
+                )),
+                content,
             );
             return;
         }
         if self.confirmation.is_some() {
-            let body = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(2));
+            let body = area;
             super::components::text_view(
                 frame,
                 body,
@@ -601,28 +649,65 @@ impl State {
                 ))),
                 self.scroll,
             );
-            let button = Rect::new(area.x, area.bottom().saturating_sub(2), area.width, 1);
-            frame.render_widget(
-                Paragraph::new(Line::from(super::components::button(
-                    "View patch · Enter",
-                    "",
-                    true,
-                ))),
-                button,
-            );
-            hits.click(button, super::input::Target::PatchConfirm);
-            frame.render_widget(
-                Paragraph::new("Esc: Cancel"),
-                Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1),
-            );
+            hits.present(ui::ActionButton {
+                label: "View patch",
+                key: "Enter",
+                target: Target::PatchConfirm,
+            });
+            hits.present(ui::ActionButton {
+                label: "Cancel",
+                key: "Esc",
+                target: Target::Back,
+            });
             return;
         }
-        let body = if self.editing_root {
-            format!(
-                "Exact Git root (independent scope)\nSelection applies to this session\n{}\n\n{scope}\nFull path input: {:?}",
-                super::views::short_field("Path", &self.draft, area.width),
-                self.draft
-            )
+        if self.editing_root {
+            use ratatui::crossterm::event::KeyModifiers;
+            hits.present(ui::ActionButton {
+                label: if self.root_details {
+                    "Fields"
+                } else {
+                    "Full draft"
+                },
+                key: "F3",
+                target: Target::Key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE)),
+            });
+            if self.root_details {
+                ui::report(frame, area, "Draft Git scope", vec![ui::metadata("Full root draft", &self.draft), ratatui::text::Line::raw("Relative literal paths resolve from the launch directory. This session-only draft has not been read or approved as patch content.")].into(), self.scroll, false);
+                hits.present(ui::ActionButton {
+                    label: "Back",
+                    key: "Esc",
+                    target: Target::Back,
+                });
+                return;
+            }
+            ui::field_page(
+                frame,
+                area,
+                &[("Exact Git root", &self.draft)],
+                0,
+                hits,
+                |_| Target::Key(KeyEvent::new(KeyCode::Null, KeyModifiers::NONE)),
+                ui::FormActions {
+                    choices: &[],
+                    buttons: &[
+                        ui::ActionButton {
+                            label: "Read Git scope",
+                            key: "Enter",
+                            target: Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+                        },
+                        ui::ActionButton {
+                            label: "Back",
+                            key: "Esc",
+                            target: Target::Back,
+                        },
+                    ],
+                    feedback: Some(ui::Feedback {
+                        text: "Independent selection applies to this session only.",
+                        tone: ui::design::Tone::Information,
+                    }),
+                },
+            );
         } else {
             let visible = self.visible();
             metadata::draw(
@@ -642,18 +727,6 @@ impl State {
                     busy,
                 },
             );
-            return;
-        };
-        frame.render_widget(
-            Paragraph::new(safe(&body))
-                .wrap(Wrap { trim: false })
-                .scroll((self.scroll, 0))
-                .block(
-                    Block::default()
-                        .title(format!(" Git: read-only | {:?} ", self.comparison))
-                        .borders(Borders::ALL),
-                ),
-            area,
-        );
+        }
     }
 }

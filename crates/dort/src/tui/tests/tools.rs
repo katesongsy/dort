@@ -114,7 +114,7 @@ fn inventory_has_one_action_strip_and_more_preserves_filter_without_query_replay
     key(&mut app, KeyCode::Char('/'));
     type_text(&mut app, "rip");
     key(&mut app, KeyCode::F(2));
-    assert!(app.tools_view.inventory_more.is_some());
+    assert!(app.more.is_some());
     assert_eq!(app.dialog_title(), Some("More actions"));
     let screen = render(&app, 48, 14);
     assert!(screen.contains("More actions") && screen.lines().last().unwrap().contains("Esc Back"));
@@ -132,12 +132,22 @@ fn inventory_has_one_action_strip_and_more_preserves_filter_without_query_replay
         )
         .is_none()
     );
-    assert!(app.tools_view.inventory_more.is_some() && app.interaction_notice.is_some());
+    assert!(app.more.is_some() && app.interaction_notice.is_some());
     key(&mut app, KeyCode::Esc);
     assert!(app.tools_view.searching && app.tools_view.search == "rip");
     assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
     key(&mut app, KeyCode::F(2));
-    key(&mut app, KeyCode::Down); // Inspect again prepares a new review, never a query.
+    let index = app
+        .more
+        .as_ref()
+        .unwrap()
+        .items
+        .iter()
+        .position(|item| item.action.label == "Inspect again")
+        .unwrap();
+    for _ in 0..index {
+        key(&mut app, KeyCode::Down);
+    } // Fresh review, never a query.
     let task = key(&mut app, KeyCode::Enter).unwrap();
     assert!(matches!(task, Task::ToolsPrepare(_)));
     f.run(&mut app, task);
@@ -150,7 +160,7 @@ fn inventory_has_one_action_strip_and_more_preserves_filter_without_query_replay
 fn entry_configuration_and_preview_never_query_and_printable_shortcuts_remain_text() {
     let f = Fixture::new("exit 99");
     let mut app = f.app(false);
-    assert!(render(&app, 48, 14).contains("Inspect installed tools"));
+    assert!(super::tests::has_action(&app, "Inspect installed tools"));
     key(&mut app, KeyCode::Char('e'));
     app.tools_view.focus = 1;
     type_text(&mut app, "q?;f");
@@ -190,7 +200,11 @@ fn explicit_activation_executes_once_searches_metadata_and_retry_needs_review() 
     assert!(render(&app, 48, 14).contains("1/2 reported"));
     key(&mut app, KeyCode::Enter);
     assert!(app.tools_view.details);
-    assert!(render(&app, 80, 24).contains("Package: ripgrep"));
+    assert!(
+        render(&app, 80, 24)
+            .lines()
+            .any(|line| line.contains("Package") && line.contains("ripgrep"))
+    );
     key(&mut app, KeyCode::Esc);
     f.review(&mut app);
     assert!(app.tools_view.preview.is_some());
@@ -220,7 +234,12 @@ fn resize_preview_only_and_scope_changes_cannot_reuse_inspection_confirmation() 
     type_text(&mut app, "inspect");
     assert!(app.tools_view.preview.is_none() || app.dry_run);
     assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(render(&app, 48, 14).contains("execution disabled"));
+    render(&app, 48, 14);
+    assert!(
+        !super::workbench::actions(&app)
+            .iter()
+            .any(|action| matches!(action.target, super::input::Target::ProviderConfirm))
+    );
     assert!(!f.home.join("calls").exists());
 }
 
@@ -231,7 +250,8 @@ fn preparation_finishing_after_navigation_discards_preview_and_approval() {
     let task = key(&mut app, KeyCode::Char('r')).unwrap();
     app.start(false);
     key(&mut app, KeyCode::Left);
-    assert!(app.tab == Tab::Git);
+    assert!(app.tab == Tab::Tools && app.interaction_notice.is_some());
+    app.go_tab(Tab::Git); // Actual scope change, distinct from refused busy input.
     let result = actions::perform_scoped(task, &f.host, None, &[], |_| Ok(()))
         .map_err(|e| actions::diagnostic(&e));
     app.complete(result);
@@ -264,9 +284,14 @@ fn npm_form_exposes_full_explicit_binding_without_repository_or_launcher_discove
     fs::write(&manifest, include_str!("../../../examples/dort.toml")).unwrap();
     let mut app = f.app(false);
     key(&mut app, KeyCode::Char('e'));
+    key(&mut app, KeyCode::Char(' '));
+    assert!(app.choice.is_some());
+    key(&mut app, KeyCode::Home);
     for _ in 0..3 {
-        key(&mut app, KeyCode::Char(' '));
+        key(&mut app, KeyCode::Down);
     }
+    key(&mut app, KeyCode::Enter);
+    assert!(app.choice.is_none());
     assert_eq!(app.tools_view.query, 3);
     app.tools_view.fields[0] = f.executable.to_str().unwrap().into();
     app.tools_view.fields[1] = f.home.join("trusted-bin").to_str().unwrap().into();
@@ -335,32 +360,31 @@ fn compact_wide_forms_keep_focus_and_caret_visible_and_results_have_semantic_sel
     app.tools_view.advanced();
     app.tools_view.query = 3;
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
-        for focus in 0..9 {
+        for focus in 0..7 {
             app.tools_view.focus = focus;
             let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
             terminal.draw(|frame| views::draw(frame, &app)).unwrap();
-            if focus < 7 {
-                let cursor = terminal.get_cursor_position().unwrap();
-                assert!(cursor.x < w && cursor.y >= 2 && cursor.y < h - 2);
+            let cursor = terminal.get_cursor_position().unwrap();
+            if focus == 0 {
+                assert_eq!(
+                    cursor,
+                    (0, 0).into(),
+                    "A provider choice is not a text field"
+                );
                 assert!(
                     terminal
                         .backend()
                         .buffer()
                         .content
                         .iter()
-                        .any(|c| c.fg == Color::Cyan)
+                        .any(|c| c.symbol() == super::components::glyphs::MENU
+                            && c.fg == Color::Cyan)
                 );
             } else {
-                assert!(
-                    terminal
-                        .backend()
-                        .buffer()
-                        .content
-                        .iter()
-                        .any(|c| c.bg == Color::Cyan
-                            && c.modifier.contains(Modifier::BOLD | Modifier::REVERSED))
-                );
+                super::tests::assert_text_focus(&terminal, (w, h), cursor);
             }
+            key(&mut app, KeyCode::Tab);
+            assert_eq!(app.tools_view.focus, (focus + 1) % 7);
         }
     }
     app.tools_view.query = 0;
@@ -410,18 +434,14 @@ fn detected_collection_is_process_free_until_one_selected_confirmation() {
         let text = render(&app, w, h);
         assert!(text.contains("Inspect installed tools"), "{text}");
         assert!(text.contains("Homebrew"), "{text}");
-        assert!(
-            terminal
-                .backend()
-                .buffer()
-                .content
-                .iter()
-                .any(|c| c.bg == Color::Cyan)
-        );
+        super::tests::assert_primary_action(&terminal);
     }
     key(&mut app, KeyCode::Char('d'));
     let hints = super::hints::keys(&app);
-    assert!(hints.contains(&("PgDn", "Scroll")));
+    assert!(hints.contains(&("F3", "Sources")));
+    let before = app.tools_view.scroll;
+    assert!(key(&mut app, KeyCode::PageDown).is_none());
+    assert!(app.tools_view.scroll > before);
     assert!(
         !hints
             .iter()
@@ -486,7 +506,11 @@ fn default_review_cannot_survive_shrink_navigation_or_preview_only() {
         app.resize(47, 13);
         assert!(app.tools_view.defaults.is_none());
         app.resize(80, 24);
-        assert!(key(&mut app, KeyCode::Enter).is_none());
+        assert!(matches!(
+            key(&mut app, KeyCode::Enter),
+            Some(Task::ToolsDetect(_))
+        ));
+        assert!(app.tools_view.preview.is_none());
         assert!(!f.home.join("calls").exists());
     }
     let mut app = f.app(false);

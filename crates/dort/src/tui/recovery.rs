@@ -94,10 +94,15 @@ fn details(app: &App) -> Text<'static> {
         ),
         field("Blocks new writes", row.blocks_writes()),
         Line::default(),
-        Line::styled("Actions | eligibility hints only", ui::heading()),
+        Line::styled("Recovery eligibility", ui::heading()),
     ];
     if rollback(row) {
-        lines.push(ui::keys(&[("b", "Preview rollback (schemas 1/2/4/5)")]));
+        app.presented(
+            "Review rollback",
+            "b",
+            super::input::Target::Action(super::shell::Action::Rollback),
+        );
+        lines.push(field("Rollback", "Available for guarded review"));
     } else {
         lines.push(note(
             "Rollback unavailable for this diagnosis.",
@@ -105,7 +110,12 @@ fn details(app: &App) -> Text<'static> {
         ));
     }
     if resume(row) {
-        lines.push(ui::keys(&[("s", "Preview bootstrap resume")]));
+        app.presented(
+            "Review resume",
+            "s",
+            super::input::Target::Action(super::shell::Action::Resume),
+        );
+        lines.push(field("Resume", "Available for guarded review"));
     } else if abandon(row) && row.phase == Some(Phase::Preparing) {
         lines.push(note("Resume unavailable: incomplete preparation; abandon, then create/attach a new transaction.", ui::warning()));
     } else {
@@ -115,7 +125,12 @@ fn details(app: &App) -> Text<'static> {
         ));
     }
     if abandon(row) {
-        lines.push(ui::keys(&[("x", "Preview bootstrap abandon")]));
+        app.presented(
+            "Review abandon",
+            "x",
+            super::input::Target::Action(super::shell::Action::Abandon),
+        );
+        lines.push(field("Abandon", "Available for guarded review"));
         lines.push(note(
             "Abandon retains published repository, registration and private artifacts.",
             ui::warning(),
@@ -134,41 +149,13 @@ fn details(app: &App) -> Text<'static> {
 }
 
 fn search(frame: &mut Frame, area: Rect, app: &App) {
-    let editing = app.history_search.editing;
-    let prefix = if editing { "Filter > " } else { "/ Filter " };
-    // Keep the caret and escaped query tail visible without reserving three rows.
-    let escaped = ui::inline(&app.history_search.query);
-    let suffix = if app.data.as_ref().is_some_and(|d| d.history_error.is_none()) {
-        format!(" | Showing {}", app.visible_history_rows().len())
-    } else {
-        String::new()
-    };
-    let available = usize::from(area.width).saturating_sub(prefix.len() + suffix.len() + 1);
-    let shown = if escaped.len() > available && available >= 3 {
-        format!("...{}", &escaped[escaped.len() - available + 3..])
-    } else {
-        escaped.chars().take(available).collect()
-    };
-    let caret = area.x + prefix.len() as u16 + shown.len() as u16;
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(prefix, ui::accent()),
-            Span::raw(shown),
-            Span::styled(
-                if app.history_search.query.is_empty() && !editing {
-                    "[display only]"
-                } else {
-                    ""
-                },
-                ui::muted(),
-            ),
-            Span::styled(suffix, ui::muted()),
-        ])),
+    ui::design::filter(
+        frame,
         area,
+        "Filter history",
+        &app.history_search.query,
+        app.history_search.editing && app.hits.input_focus_allowed() && !app.busy,
     );
-    if editing && app.hits.input_focus_allowed() && !app.busy && area.width > 0 {
-        frame.set_cursor_position((caret.min(area.right().saturating_sub(1)), area.y));
-    }
 }
 
 pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
@@ -193,9 +180,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         .unwrap_or_else(|| ("Unknown".into(), "Unknown".into()));
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(format!("All repositories: {total}"), ui::heading()),
             Span::styled(
-                format!(" | Blockers: {blockers}"),
+                format!("{}/{total} shown", app.visible_history_rows().len()),
+                ui::heading(),
+            ),
+            Span::styled(
+                format!(" | Global blockers: {blockers}"),
                 if available.is_some_and(|d| !d.history.iter().any(|r| r.blocks_writes())) {
                     ui::muted()
                 } else {
@@ -206,6 +196,24 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         rows[0],
     );
     search(frame, rows[1], app);
+    if app.history_search.editing {
+        app.presented(
+            "Done",
+            "Enter",
+            super::input::Target::Key(ratatui::crossterm::event::KeyEvent::new(
+                ratatui::crossterm::event::KeyCode::Enter,
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            )),
+        );
+    } else if app.history_details {
+        app.presented("Back", "Esc", super::input::Target::Back);
+    } else if available.is_some() && !app.visible_history_rows().is_empty() {
+        app.presented(
+            "Details",
+            "Enter",
+            super::input::Target::Action(super::shell::Action::Inspect),
+        );
+    }
     app.hits.click(rows[1], super::input::Target::Filter);
     let content = rows[2];
     let focused = true;
@@ -214,7 +222,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             frame,
             content,
             "Recovery | Not loaded",
-            Text::raw("Recovery diagnosis not loaded. r: read all-repository history"),
+            Text::raw("Recovery diagnosis not loaded."),
             0,
             focused,
         );
@@ -228,7 +236,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             Text::from(vec![
                 note(error, ui::warning()),
                 Line::raw("Global write safety is unavailable until diagnosis succeeds."),
-                Line::raw("r: retry diagnosis"),
             ]),
             app.details_scroll,
             focused,
@@ -236,11 +243,11 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
     let wide = super::workbench::wide_details(area, 2);
-    if !wide && app.history_details {
+    if app.history_details {
         ui::report(
             frame,
             content,
-            "Transaction details | Esc list",
+            "Journal facts",
             details(app),
             app.details_scroll,
             focused,
@@ -299,7 +306,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         .header(Row::new(["TX ID", "SCM", "PHASE", "STATE"]).style(ui::heading()))
         .block(block)
         .row_highlight_style(ui::selected())
-        .highlight_symbol("> ");
+        .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
         let mut selection =
             TableState::default().with_selected(visible.iter().position(|&i| i == app.selected));
         frame.render_stateful_widget(table, panes[0], &mut selection);

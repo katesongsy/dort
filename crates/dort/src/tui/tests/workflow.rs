@@ -119,8 +119,9 @@ fn approve(app: &mut App) -> Task {
         return key(app, KeyCode::Enter).expect("one explicit adoption approval");
     }
     assert!(key(app, KeyCode::Enter).is_none());
-    type_text(app, "yes");
-    key(app, KeyCode::Enter).expect("explicit confirmation produces approved task")
+    assert!(app.confirmation.is_some());
+    key(app, KeyCode::Enter)
+        .expect("explicit confirmation produces approved task without a typed phrase")
 }
 #[test]
 fn welcome_next_steps_are_visible_at_the_floor_without_creating_state() {
@@ -130,14 +131,20 @@ fn welcome_next_steps_are_visible_at_the_floor_without_creating_state() {
         actions::load(&fixture.host, None).unwrap(),
     )));
     let screen = super::tests::render(&app, 48, 14);
-    assert!(screen.contains("Welcome | manage local files"));
+    assert!(
+        screen.contains("Welcome") && screen.contains("Enter Create or attach"),
+        "{screen}"
+    );
     for label in [
-        "Create/attach",
+        "Create or attach",
         "Choose repository",
-        "Files: Discover",
-        "Checks: manifest",
+        "Discover files",
+        "Standalone check",
     ] {
-        assert!(screen.contains(label), "visible Welcome action: {label}");
+        assert!(
+            super::tests::has_action(&app, label),
+            "Discoverable Welcome action: {label}"
+        );
     }
     assert!(!fixture.host.state_dir.exists());
     assert!(!fixture.host.config_dir.exists());
@@ -323,18 +330,15 @@ fn mouse_confirmation_binds_displayed_exact_id_without_typing() {
     key(&mut app, KeyCode::Enter);
     let screen = super::tests::render(&app, 48, 14);
     assert!(screen.contains("editor") && !screen.contains("Type exact"));
-    let (y, row) = screen
-        .lines()
-        .enumerate()
-        .find(|(_, r)| r.contains("[Confirm"))
-        .unwrap();
-    let x = row[..row.find("[Confirm").unwrap()].chars().count() as u16;
+    let (x, y) = super::tests::target_position(&app, 48, 14, |target| {
+        matches!(target, super::input::Target::ConfirmAction)
+    });
     let task = app
         .mouse(
             MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
                 column: x,
-                row: y as u16,
+                row: y,
                 modifiers: KeyModifiers::NONE,
             },
             48,
@@ -686,10 +690,9 @@ fn bootstrap_approval_staleness_and_lock_failure_are_visible_without_retry() {
 fn dry_run_bootstrap_can_never_execute_even_after_mode_toggle() {
     let fixture = Fixture::new(false);
     let mut app = onboarding_app(&fixture, true);
-    app.open_menu(0, 100);
-    key(&mut app, KeyCode::Down);
-    key(&mut app, KeyCode::Down);
-    key(&mut app, KeyCode::Enter);
+    assert!(
+        super::tests::menu_action(&mut app, super::shell::Action::PreviewOnly, 80, 24).is_none()
+    );
     assert!(app.dry_run && app.navigation.menu.is_some());
     assert!(app.status.contains("--dry-run locks"));
     key(&mut app, KeyCode::Esc); // dismiss disabled menu, no task/approval
@@ -971,6 +974,9 @@ fn adoption_retains_all_input_through_missing_repository_picker_and_attachment()
     let task = approve(&mut app);
     let refresh = run_task(&mut app, &fixture, task).unwrap();
     run_task(&mut app, &fixture, refresh);
+    assert!(app.show_result);
+    assert!(key(&mut app, KeyCode::Enter).is_none()); // Done returns to the retained draft.
+    assert!(!app.show_result);
     assert!(matches!(
         app.shell.overlay,
         Some(Overlay::Form(Form::Adopt))
@@ -1016,7 +1022,13 @@ fn adoption_blockers_dry_run_and_back_never_write_or_lose_drafts() {
     let task = key(&mut app, KeyCode::Enter).unwrap();
     run_task(&mut app, &fixture, task);
     assert!(app.error.is_some() || app.preview.as_ref().is_some_and(|p| p.pending.blocked()));
-    key(&mut app, KeyCode::Enter);
+    if let Some(retry) = key(&mut app, KeyCode::Enter) {
+        assert!(
+            matches!(retry, Task::Files(_)),
+            "Only a fresh read may be retried"
+        );
+        run_task(&mut app, &fixture, retry);
+    }
     assert!(app.confirmation.is_none());
     key(&mut app, KeyCode::Esc);
     app.shell.adoption.source = "files/ordinary".into();
@@ -1162,7 +1174,7 @@ fn temporary_profiles_are_mandatory_union_and_drive_full_inventory_and_plans() {
         ["base", "defaults", "local", "platform"]
     );
     let screen = super::tests::render(&app, 48, 14);
-    assert!(screen.contains("> [x] base") && screen.contains("Mandatory"));
+    assert!(screen.contains("› [x] base") && screen.contains("Mandatory"));
     key(&mut app, KeyCode::Char(' ')); // base cannot be removed
     let Overlay::Profiles(picker) = app.shell.overlay.as_ref().unwrap() else {
         panic!("profiles")
@@ -1174,7 +1186,7 @@ fn temporary_profiles_are_mandatory_union_and_drive_full_inventory_and_plans() {
     for _ in 0..3 {
         key(&mut app, KeyCode::Down);
     } // Rows only; Enter applies without focusing a button.
-    assert!(super::tests::render(&app, 48, 14).contains("Apply additions"));
+    assert!(super::tests::has_action(&app, "Apply additions"));
     let task = key(&mut app, KeyCode::Enter).unwrap();
     let refresh = run_task(&mut app, &fixture, task).unwrap();
     run_task(&mut app, &fixture, refresh);

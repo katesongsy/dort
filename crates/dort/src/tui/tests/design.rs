@@ -35,7 +35,7 @@ fn locate(buffer: &Buffer, needle: &str) -> (u16, u16) {
 fn report_title(buffer: &Buffer) -> (u16, u16) {
     for y in 0..buffer.area.height {
         for x in 0..buffer.area.width {
-            if buffer[(x, y)].symbol() == "┌" && buffer[(x, y)].fg == Color::Cyan {
+            if buffer[(x, y)].symbol() == "─" && buffer[(x, y)].fg == Color::Cyan {
                 return (x, y);
             }
         }
@@ -53,6 +53,9 @@ fn synthetic_host() -> dort_core::context::HostContext {
     .unwrap()
 }
 fn inspect_all(app: &mut App, w: u16, h: u16) -> String {
+    if app.tab == Tab::Overview && !app.overview_details {
+        app.key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE), w, h);
+    }
     let mut text = String::new();
     let mut wrapped_rows = String::new();
     for offset in 0..120 {
@@ -62,9 +65,24 @@ fn inspect_all(app: &mut App, w: u16, h: u16) -> String {
         // Reconstruct consecutive rendered cell rows, including paths longer than
         // the entire compact viewport. No model/report strings feed this check.
         let b = buffer(app, w, h);
-        let (_, title_y) = report_title(&b);
-        for x in 1..w - 1 {
+        let (title_x, title_y) = report_title(&b);
+        let mut left = title_x;
+        while left > 0 && b[(left - 1, title_y)].fg == Color::Cyan {
+            left -= 1;
+        }
+        let mut right = title_x;
+        while right < w && b[(right, title_y)].fg == Color::Cyan {
+            right += 1;
+        }
+        for x in left..right {
             wrapped_rows.push_str(b[(x, title_y + 1)].symbol());
+        }
+        // At the clamped end, the final wrapped lines never become the first
+        // viewport row. Inspect those actual cells too, not model strings.
+        for y in title_y + 1..h - 1 {
+            for x in left..right {
+                text.push_str(b[(x, y)].symbol());
+            }
         }
     }
     text.push_str(&wrapped_rows);
@@ -97,27 +115,28 @@ fn workbench_has_semantic_styles_and_selected_identity_at_all_supported_sizes() 
         let b = buffer(&app, w, h);
         let active = locate(&b, "Files / Managed");
         assert!(b[active].modifier.contains(Modifier::BOLD));
-        assert!(b[active].modifier.contains(Modifier::REVERSED));
+        assert!(!b[active].modifier.contains(Modifier::REVERSED)); // Location is a fact, not selection.
         locate(&b, "STATE");
-        let (_, row_y) = locate(&b, "> [ ] editor");
+        let (_, row_y) = locate(&b, "› [ ] editor");
         let row: String = (0..w).map(|x| b[(x, row_y)].symbol()).collect();
         let byte = row
             .find("Blocked")
             .expect("selected row keeps its status column");
         let status = (row[..byte].chars().count() as u16, row_y);
-        assert_eq!(
-            b[status].bg,
-            Color::Cyan,
-            "selected row background at {w}x{h}"
+        assert!(
+            b[status]
+                .modifier
+                .contains(Modifier::REVERSED | Modifier::BOLD),
+            "selected row at {w}x{h}"
         );
         assert_eq!(
             b[status].fg,
-            Color::Black,
-            "selected row foreground at {w}x{h}"
+            Color::Yellow,
+            "Blocked keeps its independent attention fact"
         );
         let title = report_title(&b);
         assert_eq!(b[title].fg, Color::Cyan);
-        locate(&b, "Review apply");
+        assert!(super::tests::has_action(&app, "Review apply"));
         // Chrome occupies two normal rows or three compact rows, not nine.
         assert!(locate(&b, "Files / Managed").1 <= 3);
         assert!(!render(&app, w, h).contains("fallback must not be parsed"));
@@ -135,15 +154,23 @@ fn input_has_a_real_visible_caret_and_field_button_hierarchy() {
         let (x, y) = locate(b, "~/.editor");
         assert_eq!(t.get_cursor_position().unwrap(), (x + 9, y).into());
         let label = locate(t.backend().buffer(), "TARGET");
-        assert_eq!(t.backend().buffer()[label].fg, Color::Cyan);
+        assert!(
+            t.backend().buffer()[label]
+                .modifier
+                .contains(Modifier::BOLD)
+        );
     }
     for _ in 0..3 {
         key(&mut app, KeyCode::Tab);
     }
     assert_eq!(app.shell.adoption.focused, 0);
     let b = buffer(&app, 48, 14);
-    let action = locate(&b, "[Review");
-    assert!(!b[action].modifier.contains(Modifier::REVERSED));
+    let action = locate(&b, "Enter Review");
+    assert!(
+        b[action]
+            .modifier
+            .contains(Modifier::REVERSED | Modifier::BOLD)
+    );
     assert_eq!(b[action].fg, Color::Cyan);
 }
 #[test]
@@ -245,12 +272,16 @@ fn diagnostic_cards_independently_render_registry_and_history_availability() {
             })));
             for (w, h) in [(48, 14), (80, 24), (140, 40)] {
                 let initial = render(&app, w, h);
-                assert!(
-                    initial.contains(if registry_ok {
-                        "Registry 0"
-                    } else {
-                        "Registry Unknown"
-                    }) || w >= 80
+                assert!(initial.contains("Registry"));
+                let card = buffer(&app, w, h);
+                let (x, y) = locate(&card, "Registry");
+                let expected = if registry_ok { "0" } else { "Unknown" };
+                let value: String = (x - 1..x - 1 + expected.len() as u16)
+                    .map(|col| card[(col, y + 1)].symbol())
+                    .collect();
+                assert_eq!(
+                    value, expected,
+                    "Independent registry availability card at {w}x{h}"
                 );
                 let details = inspect_all(&mut app, w, h);
                 assert!(details.contains(if registry_ok {
@@ -321,8 +352,8 @@ fn checked_dashboard_preserves_result_scope_union_and_limits_through_diagnostics
         let b = buffer(&app, w, h);
         locate(&b, "Standalone manifest");
         let valid = locate(&b, "Valid");
-        assert_eq!(b[valid].fg, Color::Cyan);
-        assert!(b[valid].modifier.contains(Modifier::BOLD));
+        assert_eq!(b[valid].fg, Color::Green); // A validated manifest is a narrow success fact.
+        assert!(!b[valid].modifier.contains(Modifier::REVERSED)); // Success fact is not a focused control.
         let details = inspect_all(&mut app, w, h);
         for value in [
             "manifest-end.toml",
@@ -380,16 +411,20 @@ fn recovery_table_has_typed_columns_selection_and_integrity_styles_at_all_sizes(
     key(&mut app, KeyCode::Down);
     for (w, h) in [(48, 14), (80, 24), (110, 24), (140, 40)] {
         let b = buffer(&app, w, h);
-        locate(&b, "Blockers: 2");
+        locate(&b, "Global blockers: 2");
         for column in ["TX ID", "SCM", "PHASE", "STATE"] {
             locate(&b, column);
         }
-        let selected = locate(&b, "> bbbbbbbb");
+        let selected = locate(&b, "› bbbbbbbb");
         let text: String = (0..w).map(|x| b[(x, selected.1)].symbol()).collect();
         let byte = text.find("Preparing").unwrap();
         let phase = (text[..byte].chars().count() as u16, selected.1);
-        assert_eq!(b[phase].bg, Color::Cyan);
-        assert_eq!(b[phase].fg, Color::Black);
+        assert!(
+            b[phase]
+                .modifier
+                .contains(Modifier::REVERSED | Modifier::BOLD)
+        );
+        assert_eq!(b[phase].fg, Color::Reset); // Neutral inverse does not recolor phase data.
         assert!(
             b[phase]
                 .modifier
@@ -400,7 +435,7 @@ fn recovery_table_has_typed_columns_selection_and_integrity_styles_at_all_sizes(
         let focus = report_title(&b);
         assert_eq!(b[focus].fg, Color::Cyan);
         assert_eq!(app.selected, 1);
-        if w >= 110 {
+        if w >= 140 {
             locate(&b, "Transaction details");
         }
     }
@@ -411,10 +446,10 @@ fn recovery_table_has_typed_columns_selection_and_integrity_styles_at_all_sizes(
         t.draw(|f| views::draw(f, &app)).unwrap();
         let (x, y) = locate(t.backend().buffer(), "needle");
         assert_eq!(t.get_cursor_position().unwrap(), (x + 6, y).into());
-        locate(t.backend().buffer(), "Filter > ...");
+        locate(t.backend().buffer(), "Filter history");
         let screen = render(&app, w, h);
         assert!(!screen.contains('\u{1b}') && !screen.contains('é'));
-        assert!(screen.contains("Blockers: 2"));
+        assert!(screen.contains("Global blockers: 2"));
     }
 }
 #[test]
@@ -443,15 +478,15 @@ fn recovery_details_keep_full_ids_and_guards_inspectable_without_mutating_diagno
                 app.details_scroll = offset;
                 all.push_str(&render(&app, w, h));
                 let b = buffer(&app, w, h);
-                let (x, y) = locate(&b, "Transaction details");
+                let (x, y) = locate(&b, "Journal facts");
                 // The title begins two cells after its pane's left border.
-                for col in x - 1..w - 1 {
+                for col in x - 1..w {
                     cells.push_str(b[(col, y + 1)].symbol());
                 }
                 // Also join each full visible pane, including the final rows
                 // below the clamped scroll start at the end of the document.
-                for line in y + 1..h - 5 {
-                    for col in x - 1..w - 1 {
+                for line in y + 1..h - 1 {
+                    for col in x - 1..w {
                         all.push_str(b[(col, line)].symbol());
                     }
                 }
@@ -473,7 +508,7 @@ fn recovery_details_keep_full_ids_and_guards_inspectable_without_mutating_diagno
             assert!(!all.contains('\u{1b}'));
             app.details_scroll = u16::MAX;
             let end = render(&app, w, h);
-            assert!(end.contains("Blockers:"));
+            assert!(end.contains("Global blockers:"));
             key(&mut app, KeyCode::Home);
             assert_eq!(app.details_scroll, 0);
         }
@@ -528,12 +563,16 @@ fn git_metadata_tables_have_typed_columns_focus_and_selected_styles_at_all_sizes
         for column in ["PATH", "KIND", "XY"] {
             locate(&b, column);
         }
-        let selected = locate(&b, "> new-name");
+        let selected = locate(&b, "› new-name");
         let row: String = (0..w).map(|x| b[(x, selected.1)].symbol()).collect();
         let byte = row.find("renamed").unwrap();
         let status = (row[..byte].chars().count() as u16, selected.1);
-        assert_eq!(b[status].bg, Color::Cyan);
-        assert_eq!(b[status].fg, Color::Black);
+        assert!(
+            b[status]
+                .modifier
+                .contains(Modifier::REVERSED | Modifier::BOLD)
+        );
+        assert_eq!(b[status].fg, Color::Yellow); // Renamed remains an independent attention fact.
         assert!(
             b[status]
                 .modifier
@@ -541,7 +580,8 @@ fn git_metadata_tables_have_typed_columns_focus_and_selected_styles_at_all_sizes
         );
         assert_eq!(b[locate(&b, "unmerged")].fg, Color::Red);
         assert_eq!(b[report_title(&b)].fg, Color::Cyan);
-        if w >= 110 {
+        if w >= 140 {
+            // Rail plus a useful read-only inspector must both fit.
             locate(&b, "Git details");
         }
     }
@@ -563,8 +603,8 @@ fn git_metadata_tables_have_typed_columns_focus_and_selected_styles_at_all_sizes
             locate(&b, column);
         }
         locate(&b, "100644 -> 100755");
-        locate(&b, "Staged (index vs HEAD");
-        locate(&b, "> changed-file");
+        locate(&b, "Git / Staged");
+        locate(&b, "› changed-file");
     }
 }
 #[test]
@@ -593,15 +633,15 @@ fn git_metadata_full_paths_branch_and_limits_are_reachable_using_real_scroll_key
         for _ in 0..60 {
             let b = buffer(&app, w, h);
             let (x, y) = locate(&b, "Git details");
-            for line in y + 1..h - 5 {
-                for col in x - 1..w - 1 {
+            for line in y + 1..h - 1 {
+                for col in x - 1..w {
                     all.push_str(b[(col, line)].symbol());
                 }
             }
             // Git's ordinary metadata scroll advances two rows: capture these
             // consecutive rows to verify paths longer than the whole viewport.
             for line in y + 1..y + 3 {
-                for col in x - 1..w - 1 {
+                for col in x - 1..w {
                     consecutive.push_str(b[(col, line)].symbol());
                 }
             }
@@ -650,7 +690,7 @@ fn git_metadata_unknown_empty_and_filter_caret_remain_distinct_at_the_floor() {
         let screen = render(&app, w, h);
         assert!(screen.contains("Unknown") && screen.contains("Summary unavailable/not loaded"));
         assert!(!screen.contains("0 entries") && !screen.contains("No changes"));
-        key(&mut app, KeyCode::Enter);
+        key(&mut app, KeyCode::F(3)); // Scope facts remain inspectable; Enter chooses a missing scope.
         assert!(render(&app, w, h).contains("Summary unavailable/not loaded"));
         key(&mut app, KeyCode::Esc);
     }
@@ -661,7 +701,7 @@ fn git_metadata_unknown_empty_and_filter_caret_remain_distinct_at_the_floor() {
         t.draw(|f| views::draw(f, &app)).unwrap();
         let (x, y) = locate(t.backend().buffer(), "needle");
         assert_eq!(t.get_cursor_position().unwrap(), (x + 6, y).into());
-        locate(t.backend().buffer(), "Filter > ...");
+        locate(t.backend().buffer(), "Filter changes");
         let screen = render(&app, w, h);
         assert!(!screen.contains('é') && !screen.contains('\u{1b}'));
     }

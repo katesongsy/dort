@@ -11,6 +11,7 @@ mod appearance_tests;
 #[path = "tests/batch.rs"]
 mod batch_tests;
 mod batch_ui;
+mod choice;
 mod components;
 #[cfg(test)]
 #[path = "tests/consistency.rs"]
@@ -41,6 +42,8 @@ mod help;
 #[cfg(test)]
 #[path = "tests/help.rs"]
 mod help_tests;
+#[cfg(test)]
+#[path = "tests/action_hints.rs"]
 mod hints;
 #[cfg(test)]
 #[path = "tests/hints.rs"]
@@ -57,6 +60,7 @@ mod inventory;
 #[cfg(test)]
 #[path = "tests/menus.rs"]
 mod menu_tests;
+mod more;
 mod navigation;
 #[cfg(test)]
 #[path = "tests/navigation.rs"]
@@ -181,6 +185,7 @@ fn run_loop(
 ) -> Result<()> {
     launch(Task::Refresh, host, &mut app, worker)?;
     let mut queued = None;
+    let mut deferred_event = None;
     let mut dirty = true;
     let animation_clock = Instant::now();
     let mut last_size = None;
@@ -263,11 +268,26 @@ fn run_loop(
             } else {
                 Duration::ZERO
             };
-            if !event::poll(timeout).map_err(terminal_error)? {
+            let incoming = if index == 0
+                && let Some(incoming) = deferred_event.take()
+            {
+                incoming
+            } else {
+                if !event::poll(timeout).map_err(terminal_error)? {
+                    break;
+                }
+                event::read().map_err(terminal_error)?
+            };
+            dirty = true;
+            // More consumes the current frame's typed controls. After a coalesced edit/
+            // selection, draw that state first; never reuse a previous scope's actions.
+            if index > 0
+                && matches!(&incoming, Event::Key(key) if key.kind == KeyEventKind::Press && key.code == event::KeyCode::F(2))
+            {
+                deferred_event = Some(incoming);
                 break;
             }
-            dirty = true;
-            match event::read().map_err(terminal_error)? {
+            match incoming {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     let size = terminal.size().map_err(terminal_error)?;
                     if let Some(task) = app.key(key, size.width, size.height) {

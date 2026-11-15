@@ -110,10 +110,6 @@ fn detail(plan: &Plan, selected: usize) -> Text<'static> {
             }
         }
     }
-    lines.push(Line::styled(
-        "i: full report, permissions, warnings and guards",
-        ui::muted(),
-    ));
     Text::from(lines)
 }
 pub fn draw_batch(
@@ -227,7 +223,7 @@ fn draw_inner(
     )
     .header(Row::new(["FILE", "STATUS", "PLANNED CHANGE"]).style(ui::heading()))
     .row_highlight_style(ui::selected())
-    .highlight_symbol("> ");
+    .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
     let mut state =
         TableState::default().with_selected((!plan.files.is_empty()).then_some(preview.selected));
     frame.render_stateful_widget(table, parts[1], &mut state);
@@ -245,7 +241,7 @@ fn draw_inner(
         ui::report(
             frame,
             parts[2],
-            "Change details · i full report",
+            "Change details",
             detail(plan, preview.selected),
             preview.effect_scroll,
             true,
@@ -254,7 +250,7 @@ fn draw_inner(
         ui::prose(
             frame,
             parts[2],
-            "i: inspect complete effects, paths and blockers",
+            "The full report contains all effects, paths and blockers.",
             ui::accent(),
         );
     }

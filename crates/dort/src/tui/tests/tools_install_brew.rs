@@ -15,8 +15,8 @@ fn native_brew_review_is_one_activation_current_not_exact_and_stales_catalogs() 
                 && screen.contains("No rollback"),
             "{screen}"
         );
-        assert!(screen.contains("Install core formula"));
-        assert!(!screen.contains("Install exact version"));
+        assert!(super::tests::has_action(&app, "Install core formula"));
+        assert!(!super::tests::has_action(&app, "Install exact version"));
     }
     key(&mut app, KeyCode::Char('d'));
     assert!(key(&mut app, KeyCode::Enter).is_none());
@@ -54,10 +54,7 @@ fn advanced_brew_prefix_is_retained_process_free_with_compact_focus_and_caret() 
         terminal.draw(|frame| views::draw(frame, &app)).unwrap();
         let cursor = terminal.get_cursor_position().unwrap();
         assert!(cursor.x < size.0 && cursor.y < size.1 - 2);
-        assert_eq!(
-            terminal.backend().buffer()[(cursor.x, cursor.y - 1)].fg,
-            Color::Cyan
-        );
+        super::tests::assert_text_focus(&terminal, size, cursor);
     }
     // Printable global shortcuts remain input, not navigation/quit.
     key(&mut app, KeyCode::Char('q'));
@@ -150,7 +147,7 @@ fn brew_prerequisite_freshness_includes_npm_manifest_provenance() {
         .reconciliation
         .stale_for_install
         .insert("npm".into());
-    assert!(render(&app, 80, 24).contains("Collect fresh inventory"));
+    assert!(super::tests::has_action(&app, "Collect fresh inventory"));
     assert!(key(&mut app, KeyCode::Char('i')).is_none());
     app.tools_view.reconciliation.stale_for_install.clear();
     fs::write(f.repo.join("dort.toml"), format!("{manifest}\n# changed\n")).unwrap();
@@ -208,31 +205,22 @@ fn damaged_brew_closure_requests_only_executable_path_and_prefix_with_retained_d
     assert!(app.tools_view.installation.mode == Mode::CloseInputs);
     let expected = app.tools_view.installation.fields.clone();
     for size in [(48, 14), (80, 24), (140, 40)] {
-        for focus in 0..5 {
+        for focus in 0..3 {
             app.tools_view.installation.focus = focus;
             let mut terminal = Terminal::new(TestBackend::new(size.0, size.1)).unwrap();
             terminal.draw(|frame| views::draw(frame, &app)).unwrap();
-            if focus < 3 {
-                let cursor = terminal.get_cursor_position().unwrap();
-                assert!(cursor.x < size.0 && cursor.y < size.1 - 2);
-                assert_eq!(
-                    terminal.backend().buffer()[(cursor.x, cursor.y - 1)].fg,
-                    Color::Cyan
-                );
-            } else {
-                let screen = render(&app, size.0, size.1);
-                assert!(screen.contains(if focus == 3 {
-                    "Review closure"
-                } else {
-                    "Provider: brew"
-                }));
-            }
+            let cursor = terminal.get_cursor_position().unwrap();
+            super::tests::assert_text_focus(&terminal, size, cursor);
+            key(&mut app, KeyCode::Tab);
+            assert_eq!(app.tools_view.installation.focus, (focus + 1) % 3);
+            key(&mut app, KeyCode::BackTab);
+            assert_eq!(app.tools_view.installation.focus, focus);
         }
     }
-    key(&mut app, KeyCode::F(2)); // apt
-    key(&mut app, KeyCode::F(2)); // mise
-    key(&mut app, KeyCode::F(2)); // npm
-    key(&mut app, KeyCode::F(2)); // brew
+    super::tests::cycle_closure_provider(&mut app); // apt
+    super::tests::cycle_closure_provider(&mut app); // mise
+    super::tests::cycle_closure_provider(&mut app); // npm
+    super::tests::cycle_closure_provider(&mut app); // brew
     assert_eq!(expected, app.tools_view.installation.fields);
     app.tools_view.installation.focus = 0;
     let calls = f.calls();

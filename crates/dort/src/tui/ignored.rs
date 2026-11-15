@@ -15,6 +15,50 @@ pub fn draw(
     paths: &[PathBuf],
     selected: usize,
 ) {
+    use super::input::Target;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    if paths.get(selected).is_some() || app.shell.picker_details {
+        app.presented(
+            if app.shell.picker_details {
+                "Paths"
+            } else {
+                "Full path"
+            },
+            "F3",
+            Target::Key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE)),
+        );
+    }
+    if app.shell.picker_details {
+        let lines = vec![
+            ui::metadata(
+                "Saved ignored path",
+                paths
+                    .get(selected)
+                    .and_then(|p| p.to_str())
+                    .unwrap_or("No selection"),
+            ),
+            Line::raw(
+                "Removing this preference does not override ancestor rules or safety exclusions.",
+            ),
+        ];
+        ui::report(
+            frame,
+            area,
+            "Ignored path metadata",
+            lines.into(),
+            app.shell.scroll,
+            false,
+        );
+        app.presented("Back", "Esc", Target::Back);
+        return;
+    }
+    if paths.get(selected).is_some() {
+        app.presented(
+            "Review unignore",
+            "Enter",
+            Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        );
+    }
     let parts = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(3),
@@ -35,22 +79,17 @@ pub fn draw(
     frame.render_stateful_widget(
         Table::new(rows, [Constraint::Percentage(100)])
             .block(ui::pane("Ignored exact paths and descendants", true))
-            .row_highlight_style(ui::accent())
-            .highlight_symbol("> "),
+            .row_highlight_style(ui::selected())
+            .highlight_symbol(format!("{} ", ui::glyphs::SELECTED)),
         parts[1],
         &mut state,
     );
     for (y, index) in (state.offset()..paths.len())
-        .take(usize::from(parts[1].height.saturating_sub(2)))
+        .take(usize::from(parts[1].height.saturating_sub(1)))
         .enumerate()
     {
         app.hits.click(
-            Rect::new(
-                parts[1].x + 1,
-                parts[1].y + 1 + y as u16,
-                parts[1].width.saturating_sub(2),
-                1,
-            ),
+            Rect::new(parts[1].x, parts[1].y + 1 + y as u16, parts[1].width, 1),
             super::input::Target::Picker(index, false),
         );
     }

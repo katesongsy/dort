@@ -82,45 +82,44 @@ fn paged_cells(app: &mut App, modal: bool) -> String {
         let mut terminal = Terminal::new(TestBackend::new(48, 14)).unwrap();
         terminal.draw(|f| views::draw(f, app)).unwrap();
         let b = terminal.backend().buffer();
+        let title = if modal {
+            "Selection metadata"
+        } else if app.error.is_some() {
+            "Read failed"
+        } else {
+            "Selected item"
+        };
         let y = (0..14)
             .find(|y| {
                 (0..48)
                     .map(|x| b[(x, *y)].symbol())
                     .collect::<String>()
-                    .contains(
-                        if modal
-                            && matches!(
-                                app.shell.overlay,
-                                Some(Overlay::Profiles(_) | Overlay::Repositories { .. })
-                            )
-                        {
-                            "Selection metadata"
-                        } else {
-                            "┌"
-                        },
-                    )
+                    .contains(title)
             })
-            .unwrap();
+            .expect("reading surface");
         let mut viewport = String::new();
-        // Task errors pin a risk/read-only banner outside the scroll viewport.
-        // Exclude that fixed row when stitching, not any diagnostic/path cells.
+        // Top-only panes use the full content width; the error banner is pinned.
         let pinned_rows = u16::from(app.error.is_some());
-        let left = (0..48).find(|x| b[(*x, y)].symbol() == "┌").unwrap();
-        let right = (left..48)
-            .rev()
-            .find(|x| b[(*x, y)].symbol() == "┐")
-            .unwrap();
-        for row in y + 1 + pinned_rows..14 {
-            if b[(left, row)].symbol() == "└" {
+        let (left, right) = if modal {
+            let left = (0..48)
+                .find(|x| b[(*x, y)].symbol() == "│")
+                .expect("dialog edge");
+            let right = (0..48).rev().find(|x| b[(*x, y)].symbol() == "│").unwrap();
+            (left + 1, right)
+        } else {
+            (0, 48)
+        };
+        for row in y + 1 + pinned_rows..13 {
+            if modal && b[(left - 1, row)].symbol() == "└" {
                 break;
             }
-            for x in left + 1..right {
+            for x in left..right {
                 viewport.push_str(b[(x, row)].symbol());
             }
         }
         let overlap = (0..=viewport.len().min(joined.len()))
             .rev()
-            .find(|n| joined.ends_with(&viewport[..*n]))
+            .find(|n| viewport.is_char_boundary(*n) && joined.ends_with(&viewport[..*n]))
             .unwrap();
         joined.push_str(&viewport[overlap..]);
         assert!(key(app, KeyCode::PageDown).is_none());
@@ -160,15 +159,17 @@ fn profile_table_distinguishes_membership_focus_and_apply_without_changing_scope
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal.draw(|f| views::draw(f, &app)).unwrap();
         let b = terminal.backend().buffer();
-        let i = b.content.iter().position(|c| c.symbol() == ">").unwrap();
-        assert_eq!(b.content[i].bg, Color::Cyan);
+        let i = b.content.iter().position(|c| c.symbol() == "›").unwrap();
+        assert_eq!(b.content[i].fg, Color::Reset);
+        assert_eq!(b.content[i].bg, Color::Reset);
         assert!(
             b.content[i]
                 .modifier
                 .contains(Modifier::BOLD | Modifier::REVERSED)
         );
         let screen = render(&app, w, h);
-        for label in ["PROFILE", "MEMBERSHIP", "Mandatory", "Apply additions"] {
+        assert!(super::tests::has_action(&app, "Apply additions"));
+        for label in ["PROFILE", "MEMBERSHIP", "Mandatory"] {
             assert!(screen.contains(label));
         }
     }
@@ -185,7 +186,7 @@ fn profile_table_distinguishes_membership_focus_and_apply_without_changing_scope
     for _ in 0..3 {
         key(&mut app, KeyCode::Down);
     }
-    assert!(render(&app, 48, 14).contains("Apply additions"));
+    assert!(super::tests::has_action(&app, "Apply additions"));
     let Some(Task::Profiles {
         manifest,
         requested,
@@ -231,7 +232,7 @@ fn mouse_profile_checkboxes_preserve_mandatory_union_and_separate_apply() {
     assert!(click(&mut app, "extra-q?").is_none());
     assert!(app.requested_profiles.is_empty());
     assert!(
-        matches!(click(&mut app, "[Apply additions"), Some(Task::Profiles { requested, apply: true, manifest: None }) if requested == ["extra-q?"])
+        matches!(click(&mut app, "Enter Apply additions"), Some(Task::Profiles { requested, apply: true, manifest: None }) if requested == ["extra-q?"])
     );
     assert!(app.requested_profiles.is_empty()); // read-only validation must finish first
 }
@@ -248,8 +249,12 @@ fn repository_picker_preserves_raw_indices_and_retained_create_adopt_drafts() {
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let screen = render(&app, w, h);
         assert!(screen.contains("REPOSITORY") && screen.contains("CHOICE"));
-        assert!(screen.contains("> Enter exact repository path"));
-        assert!(screen.contains("Create/attach"));
+        assert!(screen.contains("› Enter exact repository path"));
+        assert!(
+            super::workbench::actions(&app)
+                .iter()
+                .any(|a| matches!(a.target, super::input::Target::Picker(3, true)))
+        );
     }
     key(&mut app, KeyCode::Down);
     assert!(matches!(
@@ -277,8 +282,15 @@ fn repository_picker_preserves_raw_indices_and_retained_create_adopt_drafts() {
         48,
         14,
     );
-    assert!(render(&app, 48, 14).contains("Create/attach"));
-    assert!(key(&mut app, KeyCode::F(2)).is_none());
+    assert!(super::tests::has_action(&app, "Create/attach"));
+    assert!(
+        app.key(
+            KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
+            80,
+            24
+        )
+        .is_none()
+    );
     assert!(matches!(app.shell.overlay, Some(Overlay::Form(Form::Init))));
     key(&mut app, KeyCode::Esc);
     assert!(matches!(

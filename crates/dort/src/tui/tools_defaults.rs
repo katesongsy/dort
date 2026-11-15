@@ -18,6 +18,18 @@ impl State {
             );
             return;
         };
+        hits.present(ui::ActionButton {
+            label: if self.details {
+                "Sources"
+            } else {
+                "Exact inspection scopes"
+            },
+            key: "F3",
+            target: Target::Key(ratatui::crossterm::event::KeyEvent::new(
+                ratatui::crossterm::event::KeyCode::F(3),
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            )),
+        });
         if self.details {
             let scopes: Vec<_> = defaults
                 .choices
@@ -30,7 +42,7 @@ impl State {
             ui::report(
                 frame,
                 area,
-                "Exact inspection scopes · d/Esc back · PgUp/PgDn scroll",
+                "Exact inspection scopes",
                 ui::review_text(&scope),
                 self.scroll,
                 false,
@@ -42,38 +54,39 @@ impl State {
             .iter()
             .filter(|c| c.selected && c.preview.is_some())
             .count();
-        let label = if dry_run {
-            "Preview only · disabled"
-        } else if selected == 0 {
-            "No inventories selected"
-        } else {
-            "Inspect installed tools"
-        };
+        let mut buttons = vec![
+            ui::ActionButton {
+                label: "Advanced",
+                key: "e",
+                target: Target::ToolsDefault(5, true),
+            },
+            ui::ActionButton {
+                label: "Refresh",
+                key: "r",
+                target: Target::ToolsDefault(6, true),
+            },
+        ];
+        if !dry_run && selected > 0 {
+            buttons.insert(
+                0,
+                ui::ActionButton {
+                    label: "Inspect installed tools",
+                    key: "Enter",
+                    target: Target::ToolsDefault(4, true),
+                },
+            );
+        }
         let content = ui::action_bar(
             frame,
             area,
             hits,
             ui::FormActions {
-                buttons: &[
-                    ui::ActionButton {
-                        label,
-                        key: "Enter",
-                        target: Target::ToolsDefault(4, true),
-                    },
-                    ui::ActionButton {
-                        label: "Advanced",
-                        key: "e",
-                        target: Target::ToolsDefault(5, true),
-                    },
-                    ui::ActionButton {
-                        label: "Refresh",
-                        key: "r",
-                        target: Target::ToolsDefault(6, true),
-                    },
-                ],
-                hint: self
-                    .default_feedback
-                    .unwrap_or("Up/Down: manager · Space: toggle · Enter: inspect · d: scopes"),
+                choices: &[],
+                buttons: &buttons,
+                feedback: self.default_feedback.map(|text| ui::Feedback {
+                    text,
+                    tone: ui::design::Tone::Attention,
+                }),
             },
         );
         let mut lines = vec![Line::styled(
@@ -119,7 +132,9 @@ impl State {
         }
         lines.push(Line::raw("Config/plugins may run code; caches may change."));
         if self.fresh_review {
-            lines.push(Line::raw("Approve inventories; p: compare, bind new IDs."));
+            lines.push(Line::raw(
+                "Fresh inventories and explicit bindings are required.",
+            ));
         }
         frame.render_widget(Paragraph::new(lines), content);
     }

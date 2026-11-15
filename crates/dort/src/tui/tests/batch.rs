@@ -112,7 +112,25 @@ fn select(app: &mut App, name: &str) {
     panic!("file not keyboard reachable: {name}");
 }
 fn click(app: &mut App, label: &str, offset: u16) -> Option<Task> {
+    if label == "Edit item" {
+        return super::tests::more_target(app, |t| matches!(t, super::input::Target::BatchEdit));
+    }
     let screen = render(app, SIZE.0, SIZE.1);
+    if matches!(label, "Done" | "Review all") {
+        let (x, y) = super::tests::target_position(app, SIZE.0, SIZE.1, |t| {
+            matches!(t, super::input::Target::BatchControl(_, true))
+        });
+        return app.mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: x,
+                row: y,
+                modifiers: KeyModifiers::NONE,
+            },
+            SIZE.0,
+            SIZE.1,
+        );
+    }
     let (x, y) = screen
         .lines()
         .enumerate()
@@ -137,8 +155,7 @@ fn approve(app: &mut App) -> Task {
         return key(app, KeyCode::Enter).expect("one explicit combined adoption approval");
     }
     assert!(key(app, KeyCode::Enter).is_none());
-    text(app, "yes");
-    key(app, KeyCode::Enter).expect("literal approval")
+    key(app, KeyCode::Enter).expect("explicit reviewed approval")
 }
 #[test]
 fn separate_item_form_retains_edits_and_only_returns_to_combined_review() {
@@ -158,7 +175,7 @@ fn separate_item_form_retains_edits_and_only_returns_to_combined_review() {
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let screen = render(&app, w, h);
         assert!(screen.contains("Edit item"));
-        assert!(!screen.contains("Review all") && screen.contains("Page · Files /"));
+        assert!(!screen.contains("Review all") && screen.contains("Dort / Files /"));
         assert!(!screen.contains("Adopt all") && !screen.contains("Content ·"));
     }
     key(&mut app, KeyCode::Tab); // TARGET -> ID, fields only.
@@ -276,7 +293,9 @@ fn tree_folds_marks_hidden_items_and_batch_editor_retains_real_fields_at_floor()
     assert!(key(&mut app, KeyCode::Char('E')).is_none());
     let screen = render(&app, 48, 14);
     assert!(
-        screen.contains("TARGET") && screen.contains("SOURCE") && screen.contains("Review all")
+        screen.contains("TARGET")
+            && screen.contains("SOURCE")
+            && super::tests::has_action(&app, "Review all")
     );
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         super::files::FORMATTED_ROWS.with(|rows| rows.set(0));
