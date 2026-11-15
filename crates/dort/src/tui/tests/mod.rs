@@ -73,6 +73,20 @@ pub(super) fn target_position(
         .find(|(x, y)| app.hits.target(*x, *y).is_some_and(&target))
         .expect("Actual foreground must expose the typed hit target")
 }
+pub(super) fn click_places(app: &mut App, width: u16, height: u16) -> Option<super::actions::Task> {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    render(app, width, height);
+    app.mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: width - 2,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        },
+        width,
+        height,
+    )
+}
 pub(super) fn has_action(app: &App, label: &str) -> bool {
     render(app, 80, 24);
     super::workbench::actions(app)
@@ -84,6 +98,20 @@ pub(super) fn more_target(
     target: impl Fn(super::input::Target) -> bool,
 ) -> Option<super::actions::Task> {
     render(app, 80, 24);
+    if super::workbench::strip_actions(app, 80).1.is_empty() {
+        use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let (column, row) = target_position(app, 80, 24, &target);
+        return app.mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+            80,
+            24,
+        );
+    }
     assert!(app.key(key(KeyCode::F(2)), 80, 24).is_none());
     let menu = app.more.as_ref().expect("More is a real foreground");
     assert!(menu.items.iter().all(|item| !matches!(
@@ -239,7 +267,7 @@ fn compact_forms_and_profile_picker_always_show_focused_control() {
     app.shell.overlay = None;
     app.tab = Tab::Overview;
     app.key(key(KeyCode::Left), 80, 24);
-    assert!(app.tab == Tab::Tools);
+    assert!(app.tab == Tab::Overview);
     app.key(key(KeyCode::Right), 80, 24);
     assert!(app.tab == Tab::Overview);
 }

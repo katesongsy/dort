@@ -372,7 +372,7 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
         area.y += height;
         area.height = area.height.saturating_sub(height);
     }
-    let mut sections = vec![("Workbench", "F10: Places; Ctrl-K: searchable task launcher; F2: contextual More; F1: Help. Esc returns one meaningful level. Fields accept printable keys literally; footer buttons never join field traversal.".to_owned())];
+    let mut sections = vec![("Workbench", "Places: destination groups; Ctrl-K: searchable task launcher; F2: additional contextual actions when shown; F1: Help. Esc returns one meaningful level. Fields accept printable keys literally; footer buttons never join field traversal.".to_owned())];
     if matches!(help.topic, Topic::Tools) {
         sections.insert(0, ("Tools boundaries", "Discovery is metadata-only. Prepare selected real scopes before the single inspection confirmation. Snapshots are session claims, not ownership/readiness or execution authority. Bind each declared tool explicitly; changed npm declarations need fresh inspection. Declaration is manifest-only. Installs and historical closure have separate reviews; fresh-review entry never queries, binds or replays automatically. Closure is neither success nor repair.".to_owned()));
     }

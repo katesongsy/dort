@@ -136,7 +136,7 @@ fn direct_keys_select_rows_scroll_details_and_ignore_tab_without_region_focus() 
             })
         );
         press(&mut app, KeyCode::Right, size);
-        assert!(app.tab == tab.next());
+        assert!(app.tab == tab);
         press(&mut app, KeyCode::Left, size);
         assert!(app.tab == tab);
         assert!(!app.git_view.sensitive() && app.confirmation.is_none());

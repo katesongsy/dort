@@ -2,6 +2,8 @@
 
 The TUI declaration form is a navigable page following the [shared interaction contracts](tui-interactions.md). Tab/Shift-Tab traverses only the controls relevant to the selected providers; Space opens a platform-provider choice, F4 reveals optional dependencies and F3 opens full draft metadata. Provider drafts, including intentionally empty values, are retained independently. Enter from a field prepares the process-free preview. Saving still requires the separate real confirmation gate. Menu dismissal retains drafts/reviews; actual navigation drops pending approval.
 
+An inspected package can seed a separate retained TUI draft from its selected session snapshot. The application-boundary platform determines the single populated platform; Homebrew and APT must match their supported platforms. The provider-reported package is copied, with the observed version suggested only for mise/npm. The user supplies the tool ID, binary and npm runtime; no command or ownership is inferred. Drafts are keyed to the selected snapshot and package, kept separate from the manual draft, and bounded to 128 retained alternatives. This is metadata only; it does not query or rebind snapshots, execute candidates or grant approval. The ordinary real preview and confirmation remain required.
+
 Tool declarations are desired metadata, not package installation, installed-binary adoption or provider ownership. CLI `tools declare` and Tools → Add tool declaration share `services/declaration.rs` and the core `tools::declaration` service. Only an already registered repository is eligible. No provider, candidate binary or Git process is dispatched.
 
 ## Preview and focused edit

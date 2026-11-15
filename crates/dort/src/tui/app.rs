@@ -19,21 +19,6 @@ pub enum Tab {
     Git,
     Tools,
 }
-impl Tab {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Overview => Self::Files,
-            Self::Files => Self::Recovery,
-            Self::Recovery => Self::Checks,
-            Self::Checks => Self::Git,
-            Self::Git => Self::Tools,
-            Self::Tools => Self::Overview,
-        }
-    }
-    pub fn previous(self) -> Self {
-        self.next().next().next().next().next()
-    }
-}
 pub struct Preview {
     pub pending: Pending,
     pub text: String,
@@ -819,9 +804,13 @@ impl App {
         }
         let target = self.hits.target(event.column, event.row)?;
         if matches!(target, Target::More) {
-            let actions = super::workbench::actions(self);
+            let (_, hidden) = super::workbench::strip_actions(self, width);
+            let mut actions = super::workbench::actions(self);
             self.hits.clear();
-            self.open_more(actions);
+            if !hidden.is_empty() {
+                actions.extend(hidden);
+                self.open_more(actions);
+            }
             return None;
         }
         if self.tab == Tab::Files
@@ -887,7 +876,12 @@ impl App {
                 None
             }
             Target::More => {
-                self.open_more(super::workbench::actions(self));
+                let (_, hidden) = super::workbench::strip_actions(self, width);
+                if !hidden.is_empty() {
+                    let mut actions = super::workbench::actions(self);
+                    actions.extend(hidden);
+                    self.open_more(actions);
+                }
                 None
             }
             Target::MoreRow(index) => {
@@ -1353,7 +1347,16 @@ impl App {
         }
     }
     pub fn key(&mut self, key: KeyEvent, width: u16, height: u16) -> Option<Task> {
-        let more_actions = (key.code == KeyCode::F(2)).then(|| super::workbench::actions(self));
+        let more_actions = (key.code == KeyCode::F(2)).then(|| {
+            let hidden = super::workbench::strip_actions(self, width).1;
+            if hidden.is_empty() {
+                Vec::new()
+            } else {
+                let mut actions = super::workbench::actions(self);
+                actions.extend(hidden);
+                actions
+            }
+        });
         self.hits.clear();
         self.last_click = None;
         if key.code != KeyCode::Char('g')
@@ -1428,17 +1431,7 @@ impl App {
         {
             return self.menu_key(key.code, width);
         }
-        if key.code == KeyCode::F(10)
-            && self.navigation.menu.is_none()
-            && width >= 48
-            && height >= 14
-        {
-            self.open_menu(super::navigation::group(self), width);
-            return None;
-        }
-        if self.dialog_title().is_some()
-            && matches!(key.code, KeyCode::Left | KeyCode::Right | KeyCode::F(10))
-        {
+        if self.dialog_title().is_some() && matches!(key.code, KeyCode::Left | KeyCode::Right) {
             let reason = self
                 .navigation_block()
                 .unwrap_or("Close this dialog with Esc before navigating.");
@@ -1503,7 +1496,9 @@ impl App {
             return self.more_key(key.code, width, height);
         }
         if key.code == KeyCode::F(2) {
-            self.open_more(more_actions.unwrap_or_default());
+            if let Some(actions) = more_actions.filter(|actions| !actions.is_empty()) {
+                self.open_more(actions);
+            }
             return None;
         }
         if key.code == KeyCode::F(3)
@@ -1557,10 +1552,6 @@ impl App {
                 }
                 _ => (),
             }
-        }
-        if key.code == KeyCode::F(10) && self.menus_available() {
-            self.open_menu(super::navigation::group(self), width);
-            return None;
         }
         if self.busy {
             if matches!(
@@ -1846,17 +1837,6 @@ impl App {
         self.workspace_key(key)
     }
     fn workspace_key(&mut self, key: KeyEvent) -> Option<Task> {
-        if !self.text_entry()
-            && !self.git_view.sensitive()
-            && matches!(key.code, KeyCode::Left | KeyCode::Right)
-        {
-            let tab = if key.code == KeyCode::Left {
-                self.tab.previous()
-            } else {
-                self.tab.next()
-            };
-            return self.activate(Action::Destination(tab));
-        }
         if self.tab == Tab::Recovery && self.history_details && !self.history_search.editing {
             match key.code {
                 KeyCode::Down | KeyCode::PageDown | KeyCode::Char('j') => {

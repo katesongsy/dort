@@ -78,6 +78,55 @@ fn type_text(app: &mut App, text: &str) {
 }
 
 #[test]
+fn selected_inventory_opens_separate_retained_manifest_only_draft() {
+    let f = Fixture::new(
+        "printf '{\"formulae\":[{\"full_name\":\"ripgrep\",\"installed\":[{\"version\":\"14.1.0\"}]}]}'",
+    );
+    let mut app = f.app(false);
+    app.tools_view.platform = Some(Platform::Macos);
+    app.tools_view.declaration.fields[0] = "manual-draft".into();
+    f.review(&mut app);
+    let task = key(&mut app, KeyCode::Enter).unwrap();
+    f.run(&mut app, task);
+    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
+    assert!(
+        super::tests::more_target(&mut app, |target| matches!(
+            target,
+            super::input::Target::InventoryKey(KeyCode::Char('t'))
+        ))
+        .is_none()
+    );
+    assert!(app.tools_view.declaration_open);
+    let fields = &app.tools_view.declaration.fields;
+    assert_eq!((&*fields[0], &*fields[1]), ("", ""));
+    assert_eq!(
+        (&*fields[4], &*fields[5], &*fields[6]),
+        ("brew", "ripgrep", "")
+    );
+    assert!(fields[8..12].iter().all(String::is_empty));
+    assert!(app.tools_view.preview.is_none());
+    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
+    assert!(!f.home.join(".config").exists());
+    type_text(&mut app, "rg");
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Char('a'));
+    assert_eq!(app.tools_view.declaration.fields[0], "manual-draft");
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Char('t'));
+    assert_eq!(app.tools_view.declaration.fields[0], "rg");
+    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
+    key(&mut app, KeyCode::Esc);
+    app.tools_view.platform = Some(Platform::Ubuntu);
+    assert!(
+        !app.tools_view
+            .browse_actions()
+            .iter()
+            .any(|a| a.label == "Add selected to repository"),
+        "Homebrew cannot seed an Ubuntu declaration"
+    );
+}
+
+#[test]
 fn inventory_has_one_action_strip_and_more_preserves_filter_without_query_replay() {
     let f = Fixture::new(
         "printf '{\"formulae\":[{\"full_name\":\"ripgrep\",\"installed\":[{\"version\":\"14.1.0\"}]}]}'",
@@ -89,7 +138,17 @@ fn inventory_has_one_action_strip_and_more_preserves_filter_without_query_replay
     assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let screen = render(&app, w, h);
-        assert_eq!(screen.matches("Filter packages").count(), 1, "{screen}");
+        assert_eq!(
+            screen
+                .lines()
+                .take(h as usize - 1)
+                .collect::<Vec<_>>()
+                .join("\n")
+                .matches("Filter packages")
+                .count(),
+            1,
+            "{screen}"
+        );
         assert_eq!(screen.matches("F1 Help").count(), 1, "{screen}");
         assert!(
             screen.lines().last().unwrap().contains("F2 More"),
@@ -113,6 +172,14 @@ fn inventory_has_one_action_strip_and_more_preserves_filter_without_query_replay
     app.write_warning = false;
     key(&mut app, KeyCode::Char('/'));
     type_text(&mut app, "rip");
+    render(&app, 80, 24);
+    let (shown, _) = super::workbench::strip_actions(&app, 80);
+    assert!(
+        shown
+            .iter()
+            .all(|a| a.key.chars().count() != 1 && a.key != "Space"),
+        "printable keys belong to the filter"
+    );
     key(&mut app, KeyCode::F(2));
     assert!(app.more.is_some());
     assert_eq!(app.dialog_title(), Some("More actions"));
@@ -227,6 +294,8 @@ fn resize_preview_only_and_scope_changes_cannot_reuse_inspection_confirmation() 
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Left);
+    assert!(app.tab == Tab::Tools && app.tools_view.preview.is_none());
+    app.activate(super::shell::Action::Destination(Tab::Git));
     assert!(app.tab == Tab::Git && app.tools_view.preview.is_none());
     assert!(!f.home.join("calls").exists());
     let mut app = f.app(true);

@@ -66,7 +66,7 @@ Use a small single-cell glyph vocabulary with ASCII fallbacks: selection `›`/`
 
 ## Actions and interaction
 
-The [interaction contract](tui-interactions.md) owns input/approval behavior. The visual system must describe the actual foreground, not advertise underlying shortcuts. Keep one primary action and one foreground key-hint region. Overflow belongs under More, not another footer. A page's primary task must not require guessing a shortcut or opening a command palette.
+The [interaction contract](tui-interactions.md) owns input/approval behavior. The visual system must describe the actual foreground, not advertise underlying shortcuts. Keep one primary action and one foreground key-hint region with up to eight relevant entries. Show F2 More only when additional eligible actions do not fit; overflow belongs there, not in another footer. A page's primary task must not require guessing a shortcut or opening a command palette.
 
 Forms traverse input controls, never action-strip buttons. Enter requests the contextual primary step from a single-line field; a short choice surface owns its selection/application behavior. Esc returns one meaningful level with drafts retained. Menus merely opened/dismissed retain focus and opaque previews; actual navigation drops approval. Do not remap existing workflow keys incidentally while changing styling: migrate a coherent surface, document its actual controls and validate the complete path.
 

@@ -28,6 +28,7 @@ pub struct State {
     pub focus: usize,
     pub failure: Option<String>,
     pub details: bool,
+    pub(super) from_inspection: bool,
     advanced: bool,
     scroll: u16,
     provider_drafts: BTreeMap<(usize, String), [String; 4]>,
@@ -40,6 +41,31 @@ fn list(s: &str) -> Vec<String> {
         .collect()
 }
 impl State {
+    pub(super) fn seed_inspection(
+        &mut self,
+        platform: dort_core::platform::Platform,
+        query: dort_core::tools::inspection::Query,
+        package: String,
+        version: String,
+    ) {
+        use dort_core::{platform::Platform, tools::inspection::Query};
+        let i = match platform {
+            Platform::Macos => 4,
+            Platform::Ubuntu => 8,
+        };
+        self.from_inspection = true;
+        self.fields[i] = match query {
+            Query::BrewFormulae => "brew",
+            Query::DpkgPackages => "apt",
+            Query::MiseInstalled => "mise",
+            Query::NpmGlobals => "npm",
+        }
+        .into();
+        self.fields[i + 1] = package;
+        if matches!(query, Query::MiseInstalled | Query::NpmGlobals) {
+            self.fields[i + 2] = version;
+        }
+    }
     pub fn controls(&self) -> Vec<usize> {
         let mut controls = vec![0, 1, 2];
         if self.advanced {
@@ -79,6 +105,11 @@ impl State {
         self.failure = None;
     }
     pub fn request(&self) -> dort_core::Result<Request> {
+        if self.fields[0].trim().is_empty() || self.fields[1].trim().is_empty() {
+            return Err(dort_core::Error::Invalid(
+                "Enter a tool ID and bare binary name before reviewing.".into(),
+            ));
+        }
         let mut install = serde_json::Map::new();
         for (platform, i) in [("macos", 4), ("ubuntu", 8)] {
             let f = &self.fields;
@@ -211,6 +242,12 @@ impl State {
             .map(|text| ui::Feedback {
                 text,
                 tone: ui::design::Tone::Error,
+            })
+            .or_else(|| {
+                self.from_inspection.then_some(ui::Feedback {
+                    text: "Inspection is a past provider claim, not ownership. Enter a tool ID and command; select the npm runtime if needed.",
+                    tone: ui::design::Tone::Information,
+                })
             })
             .or_else(|| {
                 (!self.advanced && !self.fields[3].is_empty()).then_some(ui::Feedback {

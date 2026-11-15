@@ -4,7 +4,7 @@ The [design system](design-system.md) is the mandatory visual/component standard
 
 ## Pages and dialogs
 
-Workflow forms, batch editing, reviews, results, errors, history and ignored-path management are navigable pages. `surface.rs` provides page titles, breadcrumbs and Back. F10 and render-owned mouse menu targets remain available while editing text. Opening/dismissing a menu preserves fields, focus and opaque previews; selecting an available destination, including the same tab, drops pending approvals and private Git payload references but retains drafts.
+Workflow forms, batch editing, reviews, results, errors, history and ignored-path management are navigable pages. `surface.rs` provides page titles, breadcrumbs and Back. The render-owned Places mouse target remains available while editing text; Ctrl-K provides keyboard access to searchable destinations and tasks. Left/Right never changes destinations. Opening/dismissing a menu preserves fields, focus and opaque previews; selecting an available destination, including the same tab, drops pending approvals and private Git payload references but retains drafts.
 
 Short repository/profile choices, Actions, Help/About and existing final confirmation/disclosure gates are framed, dimmed dialogs. Only the foreground owns hit regions and input caret. Background clicks and navigation attempts explain the paused navigation; they never implicitly cancel, approve or disclose content. Esc and explicit Close/Cancel controls leave the dialog. A running worker also pauses navigation, with visible feedback; q/Ctrl-C waits for the one owned joined worker.
 
@@ -24,7 +24,7 @@ Provider inventory browsing uses the shared one-line filter and aligned package/
 
 ## Text and validation
 
-The single foreground action strip follows the actual foreground: Help overrides retained pages/menus/tasks/errors; declaration and Advanced pages describe field/review actions rather than browsing shortcuts. Metadata subviews advertise scrolling and explicit Back controls, never hidden row selections or inert Enter actions. Reconciliation distinguishes tool-row traversal, an explicit snapshot-choice dialog and the direct Enter comparison; selecting a binding never queries a provider. These controls describe existing dispatch and grant no execution authority.
+The single foreground action strip shows up to eight contextual entries, fitting the available width; F2 More appears only when additional eligible actions do not fit. The same partition governs keyboard and mouse access to More. The strip follows the actual foreground: Help overrides retained pages/menus/tasks/errors; declaration and Advanced pages describe field/review actions rather than browsing shortcuts. Metadata subviews advertise scrolling and explicit Back controls, never hidden row selections or inert Enter actions. Reconciliation distinguishes tool-row traversal, an explicit snapshot-choice dialog and the direct Enter comparison; selecting a binding never queries a provider. These controls describe existing dispatch and grant no execution authority.
 
 Trusted Unicode decoration is distinct from metadata. `StatusText` escapes owned dynamic ingress; trusted static/count chrome is explicit. Metadata still escapes non-ASCII, control and bidi characters at boundaries. There is no global unescape. Terminal-cell clipping preserves UTF-8 and existing independent ASCII/color fallbacks.
 

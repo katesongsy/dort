@@ -170,6 +170,7 @@ impl App {
             self.tab = tab;
         }
     }
+    #[cfg(test)]
     pub(super) fn menus_available(&self) -> bool {
         self.navigation_block().is_none()
     }
@@ -231,7 +232,7 @@ impl App {
         }
         let menu = self.navigation.menu.as_mut()?;
         match key {
-            KeyCode::Esc | KeyCode::F(10) => self.navigation.menu = None,
+            KeyCode::Esc => self.navigation.menu = None,
             KeyCode::Left if menu.expanded => {
                 menu.expanded = false;
                 menu.selected = 0;

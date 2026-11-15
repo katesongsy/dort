@@ -12,6 +12,21 @@ use super::{
 use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
+#[test]
+fn f10_neither_opens_nor_closes_places() {
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        let mut app = App::new(false);
+        render(&app, w, h);
+        key(&mut app, KeyCode::F(10), w, h);
+        assert!(app.navigation.menu.is_none() && app.tab == Tab::Overview);
+        super::tests::click_places(&mut app, w, h);
+        assert!(app.navigation.menu.is_some());
+        key(&mut app, KeyCode::F(10), w, h);
+        assert!(app.navigation.menu.is_some());
+        key(&mut app, KeyCode::Esc, w, h);
+        assert!(app.navigation.menu.is_none());
+    }
+}
 fn key(app: &mut App, code: KeyCode, width: u16, height: u16) -> Option<Task> {
     app.key(KeyEvent::new(code, KeyModifiers::NONE), width, height)
 }
@@ -50,7 +65,7 @@ fn navigation_hints_are_consolidated_and_numeric_destination_aliases_are_inert()
             assert!(key(&mut app, KeyCode::Char(digit), w, h).is_none());
             assert!(app.tab == Tab::Overview && app.shell.overlay.is_none());
         }
-        key(&mut app, KeyCode::F(10), w, h);
+        super::tests::click_places(&mut app, w, h);
         key(&mut app, KeyCode::Enter, w, h);
         let screen = render(&app, w, h);
         assert!(!screen.contains("Arrows move"));
@@ -80,7 +95,7 @@ fn menus_are_keyboard_and_mouse_accessible_at_every_supported_size() {
         app.tab = Tab::Files;
         let screen = render(&app, w, h);
         assert!(screen.contains("Places") && screen.contains("Files / Managed"));
-        key(&mut app, KeyCode::F(10), w, h);
+        super::tests::click_places(&mut app, w, h);
         assert!(app.navigation.menu.is_some());
         key(&mut app, KeyCode::Enter, w, h);
         let screen = render(&app, w, h);
@@ -173,7 +188,7 @@ fn menu_cancel_retains_filter_focus_selection_and_per_destination_scroll() {
     app.details_scroll = 11;
     app.inventory.managed.query = "literal q?/".into();
     app.inventory.managed.editing = true;
-    key(&mut app, KeyCode::F(10), 80, 24);
+    super::tests::click_places(&mut app, 80, 24);
     key(&mut app, KeyCode::Esc, 80, 24);
     assert_eq!(app.selected, 7);
     assert_eq!(app.inventory.managed.query, "literal q?/");
@@ -198,7 +213,7 @@ fn menu_focus_owns_help_quit_caret_and_outside_clicks_without_editing_search() {
         app.tab = Tab::Files;
         app.inventory.managed.query = "retained".into();
         app.inventory.managed.editing = true;
-        key(&mut app, KeyCode::F(10), w, h);
+        super::tests::click_places(&mut app, w, h);
         key(&mut app, KeyCode::Enter, w, h);
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal.draw(|f| super::views::draw(f, &app)).unwrap();
@@ -221,7 +236,7 @@ fn menu_focus_owns_help_quit_caret_and_outside_clicks_without_editing_search() {
         assert_eq!(app.inventory.managed.query, "retained");
         key(&mut app, KeyCode::Char('?'), w, h);
         assert_eq!(app.inventory.managed.query, "retained?");
-        key(&mut app, KeyCode::F(10), w, h);
+        super::tests::click_places(&mut app, w, h);
         key(&mut app, KeyCode::Char('q'), w, h);
         assert!(app.quit);
     }
@@ -271,31 +286,31 @@ fn pages_keep_menus_while_tasks_retain_the_joined_navigation_guard() {
     ] {
         let mut app = App::new(false);
         app.shell.overlay = Some(Overlay::Form(form));
-        key(&mut app, KeyCode::F(10), 80, 24);
+        super::tests::click_places(&mut app, 80, 24);
         assert!(app.navigation.menu.is_some() && app.shell.overlay.is_some());
         key(&mut app, KeyCode::Esc, 80, 24);
         assert!(app.shell.overlay.is_some());
     }
     let mut app = App::new(false);
     app.start(false);
-    key(&mut app, KeyCode::F(10), 80, 24);
+    super::tests::click_places(&mut app, 80, 24);
     assert!(app.navigation.menu.is_none());
     key(&mut app, KeyCode::Char('q'), 80, 24);
     assert!(app.exit_requested && !app.quit);
     let mut app = App::new(false);
     app.error = Some("metadata failure".into());
-    key(&mut app, KeyCode::F(10), 80, 24);
+    super::tests::click_places(&mut app, 80, 24);
     assert!(app.navigation.menu.is_some());
     let mut app = App::new(false);
     app.tab = Tab::Git;
     app.git_view.editing_root = true;
     app.git_view.draft = "retained Git scope".into();
-    key(&mut app, KeyCode::F(10), 80, 24);
+    super::tests::click_places(&mut app, 80, 24);
     assert!(app.navigation.menu.is_some());
     assert_eq!(app.git_view.draft, "retained Git scope");
     key(&mut app, KeyCode::Esc, 80, 24);
     app.git_view.editing_root = false;
-    key(&mut app, KeyCode::F(10), 80, 24);
+    super::tests::click_places(&mut app, 80, 24);
     assert!(app.navigation.menu.is_some());
     app.resize(47, 13);
     assert!(app.navigation.menu.is_none());

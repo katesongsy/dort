@@ -231,92 +231,117 @@ fn compact(label: &'static str) -> &'static str {
         label
     }
 }
-fn strip(frame: &mut Frame, area: Rect, app: &App) {
+/// The same width-aware partition drives the strip and the More dialog.
+pub(super) fn strip_actions(
+    app: &App,
+    width: u16,
+) -> (Vec<ui::design::StripAction>, Vec<ui::ActionButton>) {
     use ui::design::StripAction;
-    let available = actions(app);
-    let enabled = |action: &&ui::ActionButton| match action.target {
-        Target::Action(value) => app.action_reason(value).is_none(),
-        _ => true,
-    };
-    let primary = available.iter().filter(enabled).find(|a| a.key == "Enter");
-    let back = available.iter().find(|a| a.key == "Esc");
-    let mut output = Vec::new();
-    if let Some(action) = primary {
-        output.push(StripAction {
-            key: action.key,
-            label: if area.width < 80 {
-                compact(action.label)
-            } else {
-                action.label
-            },
-            target: action.target,
-            primary: true,
-        });
-    }
-    if app.busy
-        && let Some(action) = available.iter().find(|a| a.key == "q")
-    {
-        output.push(StripAction {
-            key: action.key,
-            label: action.label,
-            target: action.target,
-            primary: false,
-        });
-    }
-    if let Some(action) = back {
-        output.push(StripAction {
-            key: action.key,
-            label: action.label,
-            target: action.target,
-            primary: false,
-        });
-    }
-    if app.more.is_none()
-        && app.choice.is_none()
+    let mut available = actions(app);
+    if app.dialog_title().is_none()
         && app.help.is_none()
+        && app.more.is_none()
         && app.navigation.menu.is_none()
         && !app.busy
     {
+        available.push(ui::ActionButton {
+            key: "Ctrl-K",
+            label: "Commands",
+            target: Target::Commands,
+        });
+    }
+    if app.help.is_none() && !available.iter().any(|a| a.key == "F1") {
+        available.push(ui::ActionButton {
+            key: "F1",
+            label: "Help",
+            target: Target::Action(Action::Help),
+        });
+    }
+    // Keep the primary and Back visible before secondary controls.
+    available.sort_by_key(|a| match a.key {
+        "Enter" => 0,
+        "Esc" => 1,
+        "F1" => 2,
+        _ => 3,
+    });
+    let more_allowed = app.more.is_none()
+        && app.choice.is_none()
+        && app.help.is_none()
+        && app.navigation.menu.is_none()
+        && !app.busy;
+    let mut shown: Vec<ui::ActionButton> = Vec::new();
+    let mut hidden: Vec<ui::ActionButton> = Vec::new();
+    let mut used = 0usize;
+    for action in available {
+        if shown.iter().chain(&hidden).any(|a| a.label == action.label) {
+            continue;
+        }
+        let label = if width < 80 {
+            compact(action.label)
+        } else {
+            action.label
+        };
+        let cells = ratatui::text::Line::raw(format!(" {} {} ", action.key, label)).width()
+            + usize::from(!shown.is_empty());
+        let enabled =
+            !matches!(action.target, Target::Action(value) if app.action_reason(value).is_some());
+        if !action.key.is_empty()
+            && !(app.text_entry() && (action.key.chars().count() == 1 || action.key == "Space"))
+            && enabled
+            && shown.len() < 8
+            && !shown.iter().any(|a| a.key == action.key)
+            && used + cells <= usize::from(width)
+        {
+            used += cells;
+            shown.push(action);
+        } else if more_allowed && super::more::eligible(app, &action) {
+            hidden.push(action);
+        }
+    }
+    if !hidden.is_empty() {
+        let more_width = " F2 More ".len();
+        while !shown.is_empty() && (shown.len() >= 8 || used + 1 + more_width > usize::from(width))
+        {
+            let action = shown.pop().expect("nonempty");
+            let label = if width < 80 {
+                compact(action.label)
+            } else {
+                action.label
+            };
+            used = used.saturating_sub(
+                ratatui::text::Line::raw(format!(" {} {} ", action.key, label)).width()
+                    + usize::from(!shown.is_empty()),
+            );
+            if super::more::eligible(app, &action) {
+                hidden.insert(0, action);
+            }
+        }
+    }
+    let mut output: Vec<_> = shown
+        .into_iter()
+        .map(|a| StripAction {
+            key: a.key,
+            label: if width < 80 {
+                compact(a.label)
+            } else {
+                a.label
+            },
+            target: a.target,
+            primary: a.key == "Enter",
+        })
+        .collect();
+    if !hidden.is_empty() {
         output.push(StripAction {
             key: "F2",
             label: "More",
             target: Target::More,
             primary: false,
         });
-    } else if app.more.as_ref().is_some_and(|menu| !menu.details)
-        || app.choice.as_ref().is_some_and(|choice| !choice.details)
-    {
-        output.push(StripAction {
-            key: "F3",
-            label: "Details",
-            target: Target::Key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE)),
-            primary: false,
-        });
     }
-    if area.width >= 100 && app.dialog_title().is_none() && !app.busy && output.len() < 3 {
-        output.push(StripAction {
-            key: "Ctrl-K",
-            label: "Commands",
-            target: Target::Commands,
-            primary: false,
-        });
-    }
-    if app.help.is_none() {
-        output.push(StripAction {
-            key: "F1",
-            label: "Help",
-            target: Target::Action(Action::Help),
-            primary: false,
-        });
-    }
-    let width = output
-        .iter()
-        .map(|a| a.key.len() + a.label.len() + 4)
-        .sum::<usize>()
-        .saturating_sub(1);
-    if width > usize::from(area.width) && app.more.is_none() && back.is_some() && output.len() > 3 {
-        output.retain(|a| a.key != "F2");
-    }
+    (output, hidden)
+}
+fn strip(frame: &mut Frame, area: Rect, app: &App) {
+    let (output, _) = strip_actions(app, area.width);
     ui::design::action_strip(frame, area, &output, &app.hits);
 }
 fn title(app: &App) -> &'static str {

@@ -12,7 +12,7 @@ use ratatui::{
     text::Line,
     widgets::Paragraph,
 };
-use std::{cell::Cell, path::PathBuf};
+use std::{cell::Cell, collections::BTreeMap, path::PathBuf};
 
 const QUERIES: [Query; 4] = [
     Query::BrewFormulae,
@@ -20,7 +20,8 @@ const QUERIES: [Query; 4] = [
     Query::MiseInstalled,
     Query::NpmGlobals,
 ];
-const INVENTORY_ACTIONS: [(&str, KeyCode, &str); 8] = [
+const INVENTORY_ACTIONS: [(&str, KeyCode, &str); 9] = [
+    ("Add selected to repository", KeyCode::Char('t'), "Draft"),
     ("Inspection details", KeyCode::Char('d'), "Metadata"),
     ("Inspect again", KeyCode::Char('r'), "Review"),
     ("Inspection settings", KeyCode::Char('e'), "Draft"),
@@ -64,6 +65,9 @@ pub struct State {
     pub installation: super::tools_install::State,
     pub declaration_open: bool,
     pub declaration: super::tool_declaration::State,
+    pub platform: Option<dort_core::platform::Platform>,
+    declaration_key: Option<String>,
+    saved_declarations: BTreeMap<String, super::tool_declaration::State>,
     pub reconciliation: super::tools_reconcile::State,
     pub notice: Option<&'static str>,
     pub scope: String,
@@ -102,6 +106,9 @@ impl Default for State {
             installation: Default::default(),
             declaration_open: false,
             declaration: Default::default(),
+            platform: None,
+            declaration_key: None,
+            saved_declarations: BTreeMap::new(),
             reconciliation: Default::default(),
             notice: None,
             scope: String::new(),
@@ -310,9 +317,77 @@ impl State {
         self.installation.clear_approvals();
         self.declaration_open = false;
     }
-    pub fn declare(&mut self) {
+    fn switch_declaration(&mut self, key: Option<String>) {
+        if self.declaration_key != key {
+            let old = std::mem::take(&mut self.declaration);
+            self.saved_declarations
+                .insert(self.declaration_key.take().unwrap_or_default(), old);
+            self.declaration = self
+                .saved_declarations
+                .remove(key.as_deref().unwrap_or_default())
+                .unwrap_or_default();
+            self.declaration_key = key;
+        }
         self.leave();
         self.declaration_open = true;
+    }
+    pub fn declare(&mut self) {
+        self.switch_declaration(None);
+    }
+    fn can_declare_selected(&self) -> bool {
+        use dort_core::platform::Platform;
+        let Some(platform) = self.platform else {
+            return false;
+        };
+        let Some(report) = &self.report else {
+            return false;
+        };
+        let compatible = match report.provider.description.query {
+            Query::BrewFormulae => platform == Platform::Macos,
+            Query::DpkgPackages => platform == Platform::Ubuntu,
+            Query::MiseInstalled | Query::NpmGlobals => true,
+        };
+        compatible && self.browsing_inventory() && !self.matching.is_empty()
+    }
+    fn declare_selected(&mut self) {
+        if !self.can_declare_selected() {
+            return;
+        }
+        let Some(platform) = self.platform else {
+            return;
+        };
+        let Some(report) = self.report.as_ref() else {
+            return;
+        };
+        let Observation::Complete { installations } = &report.provider.observation else {
+            return;
+        };
+        let Some(entry) = self
+            .matching
+            .get(self.selected)
+            .and_then(|&i| installations.get(i))
+        else {
+            return;
+        };
+        let query = report.provider.description.query;
+        let package = entry.package.clone();
+        let version = entry.version.clone();
+        let Some(snapshot) = self.snapshots.get(self.current) else {
+            return;
+        };
+        let key = format!("{}\0{query:?}\0{package}\0{version}", snapshot.id);
+        let new = self.declaration_key.as_ref() != Some(&key)
+            && !self.saved_declarations.contains_key(&key);
+        if new && self.saved_declarations.len() >= 128 {
+            self.notice =
+                Some("Declaration draft limit reached; retained drafts were not replaced.");
+            return;
+        }
+        self.switch_declaration(Some(key));
+        if new {
+            self.declaration
+                .seed_inspection(platform, query, package, version);
+        }
     }
     pub fn shrink(&mut self) {
         self.installation.clear_approvals();
@@ -686,6 +761,7 @@ impl State {
         match key.code {
             KeyCode::Char('i') => return Some(Some(self.open_attempts())),
             KeyCode::Char('a') => self.declare(),
+            KeyCode::Char('t') if self.can_declare_selected() => self.declare_selected(),
             KeyCode::Char('s') => self.catalog_browser = true,
             KeyCode::Char('p') => {
                 self.recon_open = true;
@@ -1079,6 +1155,7 @@ impl State {
     pub fn browse_actions(&self) -> Vec<ui::ActionButton> {
         INVENTORY_ACTIONS
             .iter()
+            .filter(|(_, code, _)| *code != KeyCode::Char('t') || self.can_declare_selected())
             .map(|(label, code, _)| ui::ActionButton {
                 label,
                 key: match code {
@@ -1089,6 +1166,7 @@ impl State {
                     KeyCode::Char('/') => "/",
                     KeyCode::Char('p') => "p",
                     KeyCode::Char('a') => "a",
+                    KeyCode::Char('t') => "t",
                     KeyCode::Char('s') => "s",
                     _ => "i",
                 },

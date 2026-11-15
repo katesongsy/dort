@@ -174,12 +174,12 @@ fn input_has_a_real_visible_caret_and_field_button_hierarchy() {
     assert_eq!(b[action].fg, Color::Cyan);
 }
 #[test]
-fn arrows_change_destination_and_tab_does_not_select_screen_regions() {
+fn arrows_and_tab_do_not_change_destinations() {
     let mut app = files_app();
     key(&mut app, KeyCode::Tab);
     assert!(app.tab == Tab::Files);
     key(&mut app, KeyCode::Right);
-    assert!(app.tab == Tab::Recovery);
+    assert!(app.tab == Tab::Files);
     key(&mut app, KeyCode::BackTab);
     key(&mut app, KeyCode::Left);
     assert!(app.tab == Tab::Files && app.preview.is_none());

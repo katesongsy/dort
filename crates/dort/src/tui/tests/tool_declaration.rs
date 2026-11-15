@@ -1,6 +1,34 @@
 #[path = "declaration_choices.rs"]
 mod choices;
 
+#[test]
+fn inspection_seed_uses_only_observed_platform_and_version_policy() {
+    use dort_core::{platform::Platform, tools::inspection::Query};
+    for (platform, query, provider, index, version) in [
+        (Platform::Macos, Query::BrewFormulae, "brew", 4, ""),
+        (Platform::Ubuntu, Query::DpkgPackages, "apt", 8, ""),
+        (Platform::Macos, Query::MiseInstalled, "mise", 4, "1.2.3"),
+        (Platform::Ubuntu, Query::NpmGlobals, "npm", 8, "1.2.3"),
+    ] {
+        let mut draft = super::tool_declaration::State::default();
+        draft.seed_inspection(platform, query, "package".into(), "1.2.3".into());
+        assert_eq!(&draft.fields[index], provider);
+        assert_eq!(&draft.fields[index + 1], "package");
+        assert_eq!(&draft.fields[index + 2], version);
+        assert!(
+            draft.fields[index + 3].is_empty(),
+            "npm runtime must be chosen explicitly"
+        );
+        assert!(draft.fields[0].is_empty() && draft.fields[1].is_empty());
+        let other = if index == 4 { 8 } else { 4 };
+        assert!(draft.fields[other..other + 4].iter().all(String::is_empty));
+        assert!(
+            draft.request().is_err(),
+            "package observations never authorize a declaration"
+        );
+    }
+}
+
 use super::{
     actions::{self, Output, Task},
     app::{App, Tab},

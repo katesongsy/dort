@@ -152,6 +152,7 @@ pub fn run(
     reduced_motion: bool,
 ) -> Result<()> {
     let mut app = App::new(dry_run);
+    app.tools_view.platform = Some(host.platform);
     app.appearance = appearance;
     app.reduced_motion = reduced_motion;
     if repository.is_some() {

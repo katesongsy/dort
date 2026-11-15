@@ -179,7 +179,7 @@ class Session:
             self.pump()
             if self.code is not None:
                 break
-        assert marker in self.screen.text(), "Expected terminal state was not rendered"
+        assert marker in self.screen.text(), f"Expected {marker!r} was not rendered: {self.screen.text()!r}"
 
     def settle(self):
         deadline = time.monotonic() + 0.2
@@ -219,7 +219,7 @@ class Session:
 
     def navigate(self, group, item):
         self.settle()
-        self.send(b'\x1b[21~')  # Places is groups-first at every width.
+        self.click_label('[Places]')  # Places is groups-first at every width.
         self.wait(b'PLACE')
         self.settle()
         marker = ' ▸' if (group + ' ▸').encode() in self.screen.text() else ' >'
@@ -229,6 +229,7 @@ class Session:
             self.settle()
             label = ('› ' if ('› ' + label).encode() in self.screen.text() else '> ') + label
         self.click_label(label, min_row=3)
+        self.settle()
 
     def destination(self, group):
         items = {"Overview": "Overview", "Files": "Managed",
@@ -242,8 +243,13 @@ class Session:
 
     def more_action(self, label):
         self.settle()  # Let an automatic read refresh and its foreground frame complete.
+        footer = self.screen.text().decode().splitlines()[-1]
+        if label in footer:
+            self.click_action(label)
+            return
+        assert 'F2 More' in footer, 'Neither direct action nor More is visible: ' + label
         self.send(b'\x1bOQ')
-        self.wait(b'ACTION')
+        self.wait(b'More actions')
         self.send(b'\x1b[H')
         for _ in range(40):
             self.settle()
@@ -331,7 +337,7 @@ def tools_workflows(binary, base, env):
                     XDG_STATE_HOME=str(auto_home / '.local/state'))
     with Session([binary, 'tui'], auto_env) as session:
         session.wait(b'loaded.')
-        session.send(b'\x1b[D')
+        session.navigate('Tools', 'Inspect installed tools [c]')
         session.wait(b'[x] Homebrew')
         assert not (auto_home / 'calls').exists(), 'Default discovery executed a provider'
         session.send(b'd')
@@ -348,7 +354,7 @@ def tools_workflows(binary, base, env):
         session.finish()
     with Session([binary, '--dry-run', 'tui'], auto_env, (14, 48)) as session:
         session.wait(b'loaded.')
-        session.send(b'\x1b[D')
+        session.navigate('Tools', 'Inspect installed tools [c]')
         session.wait(b'[x] Homebrew')
         session.send(b'\r')
         session.settle()
@@ -358,7 +364,7 @@ def tools_workflows(binary, base, env):
     print('PASS default discovery, exact scopes, one-click collection and compact preview-only guard')
     with Session([binary, 'tui'], tools_env) as session:
         session.wait(b'loaded.')
-        session.send(b'\x1b[D')
+        session.navigate('Tools', 'Inspect installed tools [c]')
         session.wait(b'Inspect installed tools')
         session.send(b'e' + str(executable).encode() + b'\t\x15/no-external-programs\t\r')
         session.wait(b'Run query')
@@ -401,7 +407,7 @@ def tools_workflows(binary, base, env):
     print('PASS Tools query review, explicit activation, resize, search and fresh retry')
     with Session([binary, '--dry-run', 'tui'], tools_env, (14, 48)) as session:
         session.wait(b'loaded.')
-        session.send(b'\x1b[D')
+        session.navigate('Tools', 'Inspect installed tools [c]')
         session.wait(b'Homebrew')
         session.send(b'e' + str(executable).encode() + b'\t\x15/no-external-programs\t\r')
         session.wait(b'execution disabled')
@@ -446,7 +452,7 @@ def tool_declaration_workflows(binary, base, env):
                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
     with Session([binary, 'tui'], scoped) as session:
         session.wait(b'loaded.')
-        session.send(b'\x1b[D')
+        session.navigate('Tools', 'Inspect installed tools [c]')
         session.wait(b'Homebrew formulae')
         session.send(b'a')
         session.wait(b'Add tool declaration')
@@ -487,6 +493,34 @@ def tool_declaration_workflows(binary, base, env):
     assert not (home / 'PROVIDER-RAN').exists()
     print('PASS retained multi-platform tool declaration, click confirmation and compact schema-5 Recovery')
 
+    mise = bin_dir / 'mise'
+    mise.write_text('#!/bin/sh\nprintf Q >> "$HOME/inspection-calls"\nprintf \'{"observed":[{"version":"1.2.3","installed":true}]}\'\n')
+    mise.chmod(0o700)
+    with Session([binary, 'tui'], scoped, (14, 48)) as session:
+        session.wait(b'loaded.')
+        session.navigate('Tools', 'Inspect installed tools [c]')
+        session.wait(b'[x] mise')
+        assert not (home / 'inspection-calls').exists()
+        session.send(b'\r')
+        session.wait(b'1/1 reported')
+        session.more_action('Add selected to repository')
+        session.focused_field('Tool ID')
+        assert (home / 'inspection-calls').read_text() == 'Q'
+        session.send(b'observed\tobserved\r')
+        session.wait(b'Already declared: false')
+        assert (repo / 'dort.toml').read_text() == original
+        session.send(b'\r')
+        session.wait(b'Confirm')
+        session.send(b'\r')
+        session.wait(b'Tool declaration completed.')
+        session.send(b'q')
+        session.finish()
+    declared = (repo / 'dort.toml').read_text()
+    assert '[[tools]]' in declared and 'observed' in declared and '1.2.3' in declared
+    assert (home / 'inspection-calls').read_text() == 'Q', 'Declaration replayed inspection'
+    assert not (home / 'PROVIDER-RAN').exists(), 'Declaration executed a candidate'
+    print('PASS observed package to retained declaration with one inspection and explicit save')
+
 
 def tools_reconciliation_workflows(binary, base, env):
     home = base / 'reconciliation-home'
@@ -513,7 +547,7 @@ def tools_reconciliation_workflows(binary, base, env):
     candidate.chmod(0o700)
     with Session([binary, 'tui'], scoped_env) as session:
         session.wait(b'loaded.')
-        session.send(b'\x1b[D')
+        session.navigate('Tools', 'Inspect installed tools [c]')
         session.wait(b'Inspect installed tools')
         session.send(b'e\x1b[Z ')
         session.wait(b'Choose inspection provider')
@@ -614,7 +648,7 @@ def tool_install_workflows(binary, base, env):
                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
     with Session([binary, 'tui'], scoped) as session:
         session.wait(b'loaded.')
-        session.send(b'\x1b[D')
+        session.navigate('Tools', 'Inspect installed tools [c]')
         session.wait(b'[x] mise')
         assert not (home / 'calls').exists(), 'Defaults executed mise'
         session.send(b'\r')
@@ -689,7 +723,7 @@ def npm_install_workflows(binary, base, env):
                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
     with Session([binary, 'tui'], scoped, (40, 120)) as session:
         session.wait(b'loaded.')
-        session.send(b'\x1b[D')
+        session.navigate('Tools', 'Inspect installed tools [c]')
         session.wait(b'[x] mise')
         session.send(b'\r')
         session.wait(b'node')
@@ -798,7 +832,7 @@ esac
     if sys.platform == 'darwin':
         with Session([binary, 'tui'], scoped, (40, 120)) as session:
             session.wait(b'loaded.')
-            session.send(b'\x1b[D')
+            session.navigate('Tools', 'Inspect installed tools [c]')
             session.wait(b'Homebrew')
             session.send(b'e' + str(brew).encode() + b'\t\x15' + str(bin_dir).encode() + b'\t\r')
             session.wait(b'Run query')
@@ -887,7 +921,7 @@ exit 9
     subprocess.run([binary, '--json', '--yes', 'init', str(repo)], env=scoped, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
     with Session([binary, 'tui'], scoped) as session:
         session.wait(b'loaded.')
-        session.send(b'\x1b[D')
+        session.navigate('Tools', 'Inspect installed tools [c]')
         session.wait(b'[x] mise')
         session.send(b'\r')
         session.wait(b'0 packages reported')
@@ -968,7 +1002,7 @@ printf installed > "$HOME/installed"''',
     if sys.platform == 'linux':
         with Session([binary, 'tui'], scoped, (40, 120)) as session:
             session.wait(b'loaded.')
-            session.send(b'\x1b[D')
+            session.navigate('Tools', 'Inspect installed tools [c]')
             session.wait(b'apt / dpkg packages')
             session.click_label('apt / dpkg packages')
             session.send(b'e')
@@ -1040,7 +1074,7 @@ def interaction_surface_workflows(binary, base, env):
                       XDG_STATE_HOME=str(home / '.local/state'))
         with Session([binary, 'tui'], scoped, size) as session:
             session.wait(b'loaded.')
-            session.send(b'\x1b[D')
+            session.navigate('Tools', 'Inspect installed tools [c]')
             session.wait(b'Inspect installed tools')
             session.settle()
             assert b'\\u{b7}' not in session.screen.text(), 'Trusted decoration was metadata-escaped'
@@ -1048,19 +1082,20 @@ def interaction_surface_workflows(binary, base, env):
             # A foreground-changing event and F2 arrive in one input burst.
             # More must use the newly rendered declaration, not cached Tools actions.
             session.send(b'a\x1bOQ')
-            session.wait(b'Dependencies')
-            session.wait(b'ACTION')
-            assert b'Inspect selected' not in session.screen.text()
-            session.send(b'\x1b')
+            session.settle()
+            if b'ACTION' in session.screen.text():
+                session.wait(b'Dependencies')
+                assert b'Inspect selected' not in session.screen.text()
+                session.send(b'\x1b')
             session.wait(b'Tool ID')
             session.send(b'q?/')
             session.wait(b'Tool ID')
             session.wait(b'q?/')
             session.settle()
             footer = session.screen.text().splitlines()[-1]
-            assert b'Review' in footer and b'More' in footer and b'Help' in footer, 'Declaration strip describes the underlying Tools page'
+            assert b'Review' in footer and b'Help' in footer, 'Declaration strip describes the underlying Tools page'
             assert b'Inspect tools' not in footer and b'Snapshots' not in footer
-            session.send(b'\x1b[21~')  # F10 opens a page menu even during text entry.
+            session.click_label('[Places]')  # Places remains available during text entry.
             session.wait(b'Overview')
             session.settle()
             session.send(b'\x1b')
@@ -1073,8 +1108,7 @@ def interaction_surface_workflows(binary, base, env):
             footer = session.screen.text().splitlines()[-1]
             assert b'Back' in footer and b'Review' not in footer, 'Help strip describes the background page'
             assert b'Review' not in footer
-            session.send(b'\x1b[21~')
-            session.wait(b'Dialog open:')
+            session.mouse(0, size[1] - 2, 0)
             session.mouse(0, 0, 0)  # Outside click cannot navigate or dismiss Help.
             session.settle()
             assert b'Explicit provider inspection' in session.screen.text() and b'Keys in this context' in session.screen.text(), 'Outside click dismissed the dialog'
@@ -1159,7 +1193,9 @@ def run():
         for menu_size in [(14, 48), (24, 80), (40, 140)]:
             with Session([binary, 'tui'], env, menu_size) as session:
                 session.wait(b'loaded.')
-                session.send(b'\x1b[21~')  # F10
+                session.send(b'\x1b[21~')  # F10 no longer opens Places.
+                session.settle(); assert b'PLACE' not in session.screen.text()
+                session.click_label('[Places]')
                 session.settle(); assert b'Keys in this context' not in session.screen.text()
                 session.send(b'\x1b[C\r')  # Overview -> Files group, then expand at every width.
                 session.wait(b'Discover')
@@ -1177,11 +1213,13 @@ def run():
                 session.send(b'12345')
                 session.settle()
                 assert b'Files / Discover' in session.screen.text(), 'Numeric aliases changed destination'
-                session.send(b"\x1b[21~\r")  # F10: expand Files, then use its local shortcut.
+                session.click_label('[Places]')
+                session.send(b"\r")  # Expand Files, then use its local shortcut.
                 session.wait(b"Managed")
                 session.send(b"m")
                 session.wait(b"Files / Managed")
-                session.send(b"\x1b[21~\x1b[C\x1b[C\r")  # Checks group, explicitly expanded.
+                session.click_label('[Places]')
+                session.send(b"\x1b[C\x1b[C\r")  # Checks group, explicitly expanded.
                 session.wait(b"Diagnostics")
                 session.send(b"j")
                 session.wait(b"Checks / Diagnostics")
@@ -1211,7 +1249,7 @@ def run():
                 session.send(b"\tq")
                 session.settle()
                 session.focused_field('ID')
-                session.send(b'\x1b[21~')
+                session.click_label('[Places]')
                 session.wait(b'Files >' if ascii_only else 'Files ▸'.encode())
                 session.settle()
                 assert not session.screen.cursor_visible, 'Places retained the background field caret'
@@ -1588,7 +1626,10 @@ def run():
             session.wait(b"Selected content")
             session.send(b"\x1b")
             session.wait(b"NAME")
-            session.send(b"\x1b[C")  # direct destination, never action selection
+            session.send(b"\x1b[C")  # Arrows do not switch destinations.
+            session.settle()
+            assert b"Files / Discover" in session.screen.text()
+            session.navigate("Recovery", "All repositories")
             session.wait(b"All repositories")
             session.navigate("Files", "Managed")
             session.wait(b"Files / Managed")  # destination chooses managed view
@@ -1794,7 +1835,7 @@ def run():
             session.send(b'\x1b')
             session.wait(b"PATH")
             session.navigate("Git", "Unstaged [u]")
-            session.wait(b"Unstaged (worktree vs index)")
+            session.wait(b"Git / Unstaged")
             session.wait(b"100644 -> 100644")  # loaded diff before content action
             session.more_action('View patch')
             session.wait(b"May expose secrets")

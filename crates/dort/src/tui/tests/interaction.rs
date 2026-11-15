@@ -197,7 +197,7 @@ fn workflow_pages_allow_menus_and_keep_field_text_focus_until_actual_navigation(
             assert!(!app.quit);
             let path = app.shell.init_draft.clone();
             let focused = app.shell.path_focused;
-            key(&mut app, KeyCode::F(10), size.0, size.1);
+            super::tests::click_places(&mut app, size.0, size.1);
             assert!(app.navigation.menu.is_some());
             key(&mut app, KeyCode::Esc, size.0, size.1);
             assert!(matches!(app.shell.overlay,Some(Overlay::Form(f)) if f==form));
@@ -222,7 +222,7 @@ fn workflow_pages_allow_menus_and_keep_field_text_focus_until_actual_navigation(
             assert!(app.tools_view.declaration.focus < 12);
         }
         let focus = app.tools_view.declaration.focus;
-        key(&mut app, KeyCode::F(10), size.0, size.1);
+        super::tests::click_places(&mut app, size.0, size.1);
         assert!(app.navigation.menu.is_some());
         key(&mut app, KeyCode::Esc, size.0, size.1);
         assert_eq!(app.tools_view.declaration.focus, focus);
@@ -288,7 +288,7 @@ fn real_dialogs_dim_capture_and_explain_disabled_navigation_without_outside_canc
                     .contains(Modifier::DIM)
             );
             assert!(render(&app, size.0, size.1).contains(app.dialog_title().unwrap()));
-            key(&mut app, KeyCode::F(10), size.0, size.1);
+            super::tests::click_places(&mut app, size.0, size.1);
             assert!(
                 app.navigation.menu.is_none()
                     && app.dialog_title().is_some()
@@ -374,7 +374,7 @@ fn direct_field_submission_is_preview_only_and_busy_navigation_explains_joined_w
     ));
     app.shell.overlay = None;
     app.start(true);
-    key(&mut app, KeyCode::F(10), 80, 24);
+    super::tests::click_places(&mut app, 80, 24);
     assert!(app.busy && app.navigation.menu.is_none() && app.interaction_notice.is_some());
     key(&mut app, KeyCode::Char('q'), 80, 24);
     assert!(app.busy && app.exit_requested && !app.quit);

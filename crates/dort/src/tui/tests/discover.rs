@@ -93,7 +93,7 @@ fn contextual_content_help_withholds_payload_rejects_late_read_and_restores_focu
     assert!(app.content.text().contains("synthetic-preview-A"));
     assert!(app.content.focused);
     app.content.scroll = 2;
-    key(&mut app, KeyCode::F(10));
+    super::tests::click_places(&mut app, 80, 24);
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         assert!(!render(&app, w, h).contains("synthetic-preview-A"));
     }
@@ -101,7 +101,7 @@ fn contextual_content_help_withholds_payload_rejects_late_read_and_restores_focu
     key(&mut app, KeyCode::Esc);
     assert!(app.content.focused && app.content.scroll == 2);
     let late = discover_content::next(&mut app).unwrap();
-    key(&mut app, KeyCode::F(10));
+    super::tests::click_places(&mut app, 80, 24);
     app.complete(Ok(f.finish(late)));
     assert!(!app.content.text().contains("synthetic-preview-A"));
     key(&mut app, KeyCode::Esc);

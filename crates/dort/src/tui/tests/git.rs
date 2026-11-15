@@ -262,7 +262,7 @@ fn git_menu_comparisons_are_read_only_and_never_bypass_or_restore_disclosure() {
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.run(&mut app, task);
     assert!(render(&app, 100, 30).contains("PRIVATE-PATCH"));
-    key(&mut app, KeyCode::F(10));
+    super::tests::click_places(&mut app, 100, 30);
     assert!(app.navigation.menu.is_some() && !app.git_view.sensitive());
     assert!(!render(&app, 100, 30).contains("PRIVATE-PATCH"));
     key(&mut app, KeyCode::Esc);

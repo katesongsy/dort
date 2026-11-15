@@ -264,7 +264,7 @@ fn help_retains_real_preview_confirmation_and_shrink_still_clears_approval() {
     let task = key(&mut app, KeyCode::Char('I')).unwrap();
     f.finish(&mut app, task);
     let original = app.preview.as_ref().unwrap().text.clone();
-    key(&mut app, KeyCode::F(10));
+    super::tests::click_places(&mut app, 80, 24);
     assert!(app.navigation.menu.is_some() && app.preview.is_some());
     key(&mut app, KeyCode::Esc); // Dismissing a menu retains the real preview.
     key(&mut app, KeyCode::F(1));

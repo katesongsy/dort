@@ -25,6 +25,22 @@ impl More {
         }
     }
 }
+pub(super) fn eligible(app: &App, action: &ui::ActionButton) -> bool {
+    !matches!(action.key, "Enter" | "Esc")
+        && !(matches!(action.target, Target::ToolInstallControl(_, true))
+            && app.tools_view.install_open
+            && matches!(
+                app.tools_view.installation.mode,
+                super::tools_install::Mode::Review | super::tools_install::Mode::CloseReview
+            ))
+        && !matches!(
+            action.target,
+            Target::Continue
+                | Target::ConfirmAction
+                | Target::ProviderConfirm
+                | Target::PatchConfirm
+        )
+}
 impl App {
     pub(super) fn open_commands(&mut self) -> Option<Task> {
         if let Some(reason) = self.navigation_block() {
@@ -67,23 +83,7 @@ impl App {
             self.interaction_notice = self.navigation_block();
             return;
         }
-        actions.retain(|action| {
-            !matches!(action.key, "Enter" | "Esc")
-                && !(matches!(action.target, Target::ToolInstallControl(_, true))
-                    && self.tools_view.install_open
-                    && matches!(
-                        self.tools_view.installation.mode,
-                        super::tools_install::Mode::Review
-                            | super::tools_install::Mode::CloseReview
-                    ))
-                && !matches!(
-                    action.target,
-                    Target::Continue
-                        | Target::ConfirmAction
-                        | Target::ProviderConfirm
-                        | Target::PatchConfirm
-                )
-        });
+        actions.retain(|action| eligible(self, action));
         let mut items = Vec::new();
         for action in actions {
             if items
