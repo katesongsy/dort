@@ -13,6 +13,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tui:** migrate workbench to calm navigation ([578a7ca](https://github.com/katesongsy/dort/commit/578a7ca95a781c893d040fce081fc6191b04f501))
+
 - **tui:** enforce shared design system and calm inventory ([bbc5109](https://github.com/katesongsy/dort/commit/bbc5109721752e8fda74daea0ae3c4162dfc7655))
 
 - **tui:** unify workbench interactions and fresh-review outcomes ([2f8fac1](https://github.com/katesongsy/dort/commit/2f8fac1a306649c00098c0f7a2dff9057a2f662f))
