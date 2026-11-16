@@ -77,7 +77,7 @@ exit 90
         assert!(app.complete(result).is_none());
     }
     fn choose(&self, app: &mut App) {
-        key(app, KeyCode::Char('g'));
+        key(app, KeyCode::Char('P'));
         text(app, "git-only");
         let task = key(app, KeyCode::Enter).unwrap();
         self.run(app, task);
@@ -228,7 +228,7 @@ fn independent_git_summaries_match_backend_and_never_prefetch_content() {
         key(&mut app, KeyCode::Delete);
         key(&mut app, KeyCode::Enter);
         assert!(render(&app, 100, 30).contains("100644 -> 100755"));
-        let task = key(&mut app, KeyCode::Char('r')).unwrap();
+        let task = key(&mut app, KeyCode::Char('R')).unwrap();
         f.run(&mut app, task);
     }
     assert_eq!(f.patch_calls(), 0);
@@ -246,7 +246,6 @@ fn git_menu_comparisons_are_read_only_and_never_bypass_or_restore_disclosure() {
         (2, super::git::Comparison::Staged),
     ] {
         app.open_menu(5, 100);
-        assert!(key(&mut app, KeyCode::Enter).is_none());
         app.navigation.menu.as_mut().unwrap().selected = selected;
         let task = key(&mut app, KeyCode::Enter).unwrap();
         f.run(&mut app, task);
@@ -292,7 +291,7 @@ fn patch_disclosure_is_once_isolated_and_dropped_on_close_scope_resize_or_exit()
     assert!(!app.status.contains("PRIVATE-PATCH"));
     key(&mut app, KeyCode::Esc);
     assert!(!render(&app, 100, 30).contains("PRIVATE-PATCH"));
-    let task = key(&mut app, KeyCode::Char('r')).unwrap();
+    let task = key(&mut app, KeyCode::Char('R')).unwrap();
     f.run(&mut app, task);
     assert_eq!(f.patch_calls(), 1);
     key(&mut app, KeyCode::Char('w'));
@@ -312,7 +311,7 @@ fn patch_disclosure_is_once_isolated_and_dropped_on_close_scope_resize_or_exit()
     assert!(!render(&app, 100, 30).contains("PRIVATE-PATCH"));
     let task = patch_task(&mut app);
     f.run(&mut app, task);
-    key(&mut app, KeyCode::Char('g'));
+    key(&mut app, KeyCode::Char('P'));
     assert!(!render(&app, 100, 30).contains("PRIVATE-PATCH"));
     key(&mut app, KeyCode::Esc);
     let task = patch_task(&mut app);
@@ -353,7 +352,7 @@ fn refusals_empty_missing_git_and_patch_errors_keep_content_out_of_diagnostics()
         fs::remove_file(f.root.join(refusal)).unwrap();
     }
     fs::write(f.root.join("empty"), "").unwrap();
-    let task = key(&mut app, KeyCode::Char('r')).unwrap();
+    let task = key(&mut app, KeyCode::Char('R')).unwrap();
     f.run(&mut app, task);
     assert!(render(&app, 100, 30).contains("No changes"));
     fs::write(f.root.join("fail"), "").unwrap();
@@ -392,7 +391,6 @@ fn git_root_default_and_independent_selection_do_not_require_healthy_file_observ
     assert_eq!(app.repository.as_ref(), Some(&other));
     assert_eq!(app.git_view.root.as_ref(), Some(&f.root));
     app.open_menu(5, 100);
-    assert!(key(&mut app, KeyCode::Enter).is_none());
     key(&mut app, KeyCode::End);
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.run(&mut app, task);

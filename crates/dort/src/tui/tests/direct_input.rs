@@ -224,7 +224,7 @@ fn clicks_and_wheels_use_hovered_rows_and_details_with_filtered_raw_identity() {
         if tab != Tab::Git {
             assert_eq!(app.selected, 1);
         }
-        let (x, y) = at(&app, "Places", size);
+        let (x, y) = at(&app, "Menu", size);
         mouse(
             &mut app,
             MouseEventKind::Down(MouseButton::Left),
@@ -311,7 +311,7 @@ fn hit_rows_follow_rendered_table_offset_and_stale_geometry_is_inert() {
 fn mouse_form_controls_and_palette_actions_never_bypass_typed_approval_or_disclosure() {
     let size = (80, 24);
     let mut app = fixture(Tab::Files);
-    press(&mut app, KeyCode::Char('o'), size);
+    press(&mut app, KeyCode::Char('O'), size);
     let (x, y) = at(&app, "ID", size);
     mouse(
         &mut app,
@@ -405,7 +405,7 @@ fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_ta
     );
     press(&mut app, KeyCode::Esc, size);
     press(&mut app, KeyCode::Char('n'), size);
-    let (x, y) = at(&app, "Places", size);
+    let (x, y) = at(&app, "Menu", size);
     mouse(
         &mut app,
         MouseEventKind::Down(MouseButton::Left),
@@ -442,7 +442,7 @@ fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_ta
     render(&app, size.0, size.1);
     let (x, y) = super::tests::target_position(&app, size.0, size.1, |t| {
         matches!(t, super::input::Target::NavigationBlocked)
-    }); // Visibly paused Places, not a hidden live menu.
+    }); // Visibly paused Menu, not a hidden live menu.
     assert!(matches!(
         app.hits.target(x, y),
         Some(super::input::Target::NavigationBlocked)

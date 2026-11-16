@@ -76,9 +76,9 @@ impl Fixture {
     }
     fn collect(&self, app: &mut App, executable: &std::path::Path) {
         app.tools_view.fields[0] = executable.to_str().unwrap().into();
-        let task = key(app, KeyCode::Char('r')).unwrap();
+        let task = key(app, KeyCode::Char('R')).unwrap();
         self.run(app, task);
-        for c in "inspect".chars() {
+        for c in "yes".chars() {
             assert!(key(app, KeyCode::Char(c)).is_none());
         }
         let task = key(app, KeyCode::Enter).unwrap();
@@ -351,7 +351,7 @@ fn reconciliation_text_shortcuts_and_failed_load_retry_remain_provider_free() {
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.run(&mut app, task);
     assert!(app.error.is_some());
-    let retry = key(&mut app, KeyCode::Char('r')).unwrap();
+    let retry = key(&mut app, KeyCode::Char('R')).unwrap();
     assert!(matches!(retry, Task::ToolsReconcilePrepare(_)));
     assert!(f.calls().is_empty());
 }
@@ -367,7 +367,7 @@ fn full_session_refuses_a_new_query_before_approval_instead_of_overwriting_snaps
         copy.id = format!("s{i}");
         app.tools_view.snapshots.push(copy);
     }
-    let task = key(&mut app, KeyCode::Char('r')).unwrap();
+    let task = key(&mut app, KeyCode::Char('R')).unwrap();
     f.run(&mut app, task);
     assert!(app.tools_view.preview.is_none());
     assert!(app.tools_view.notice.is_some());

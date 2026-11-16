@@ -26,6 +26,81 @@ fn action(label: &'static str, action: Action) -> Entry {
 pub const GROUPS: [&str; 7] = [
     "Session", "Overview", "Files", "Recovery", "Checks", "Git", "Tools",
 ];
+/// Stable internal IDs are separate from presentation order; Menu and rail share this order.
+pub const SECTION_ORDER: [usize; 7] = [1, 2, 6, 3, 4, 5, 0];
+pub fn section_tab(group: usize) -> Option<Tab> {
+    match group {
+        1 => Some(Tab::Overview),
+        2 => Some(Tab::Files),
+        6 => Some(Tab::Tools),
+        3 => Some(Tab::Recovery),
+        4 => Some(Tab::Checks),
+        5 => Some(Tab::Git),
+        _ => None,
+    }
+}
+pub fn context_key(key: &'static str) -> &'static str {
+    match key {
+        "o" => "O",
+        "f" => "F",
+        "t" => "T",
+        "r" => "R",
+        "c" => "C",
+        "g" => "P",
+        _ => key,
+    }
+}
+pub const SECTION_HINTS: [&str; 7] = [
+    "Session",
+    "Overview o",
+    "Files f",
+    "Recovery r",
+    "Checks c",
+    "Git g",
+    "Tools t",
+];
+pub fn section_shortcut(key: char) -> Option<usize> {
+    match key {
+        'o' => Some(1),
+        'f' => Some(2),
+        'r' => Some(3),
+        'c' => Some(4),
+        'g' => Some(5),
+        't' => Some(6),
+        _ => None,
+    }
+}
+pub fn section_hint(tab: Tab) -> &'static str {
+    SECTION_HINTS[index(tab) + 1]
+}
+/// Numbers share one catalog between pages, Menu and keyboard dispatch.
+pub fn local_catalog(group: usize) -> &'static [(usize, &'static str)] {
+    match group {
+        2 => &[(0, "1 Managed"), (1, "2 Discover"), (2, "3 Ignored paths")],
+        4 => &[(0, "1 Manifest checks"), (1, "2 Diagnostics")],
+        5 => &[(0, "1 Status"), (1, "2 Unstaged"), (2, "3 Staged")],
+        6 => &[
+            (0, "1 Inventory"),
+            (3, "2 Snapshots"),
+            (5, "3 Reconcile"),
+            (4, "4 Attempts"),
+        ],
+        _ => &[],
+    }
+}
+/// Numbered destinations retain the same order on pages and in Menu; tasks follow.
+pub fn entry_order(group: usize) -> Vec<usize> {
+    let mut order: Vec<_> = local_catalog(group)
+        .iter()
+        .map(|(index, _)| *index)
+        .collect();
+    for index in 0..entries(group).len() {
+        if !order.contains(&index) {
+            order.push(index);
+        }
+    }
+    order
+}
 pub fn entries(group: usize) -> Vec<Entry> {
     use Action::*;
     match group {
@@ -39,32 +114,32 @@ pub fn entries(group: usize) -> Vec<Entry> {
         ],
         1 => vec![action("Overview [o]", Destination(Tab::Overview))],
         2 => vec![
-            action("Managed [m]", Destination(Tab::Files)),
-            action("Discover [f]", Discover),
-            action("Ignored paths [U]", ManageIgnored),
+            action("Managed [1]", Destination(Tab::Files)),
+            action("Discover [2]", Discover),
+            action("Ignored paths [3]", ManageIgnored),
         ],
         3 => vec![action("All repositories [r]", Destination(Tab::Recovery))],
         4 => vec![
             Entry {
-                label: "Manifest checks [m]",
+                label: "Manifest checks [1]",
                 item: Item::Manifest,
             },
-            action("Diagnostics [j]", Diagnostics),
+            action("Diagnostics [2]", Diagnostics),
         ],
         5 => vec![
-            action("Status [z]", GitStatus),
-            action("Unstaged [u]", GitUnstaged),
-            action("Staged [s]", GitStaged),
-            action("Choose Git scope [g]", GitRoot),
-            action("Follow selected repository [f]", GitDefault),
+            action("Status [1]", GitStatus),
+            action("Unstaged [2]", GitUnstaged),
+            action("Staged [3]", GitStaged),
+            action("Choose Git scope [p]", GitRoot),
+            action("Follow selected repository [b]", GitDefault),
         ],
         _ => vec![
-            action("Tools [t]", Destination(Tab::Tools)),
+            action("Inventory [1]", Destination(Tab::Tools)),
             action("Add tool declaration [a]", ToolDeclaration),
-            action("Inspect installed tools [c]", ToolsConfigure),
-            action("Session snapshots [s]", ToolsSnapshots),
-            action("Installation attempts [i]", ToolAttempts),
-            action("Reconcile snapshots [p]", ToolsReconcile),
+            action("Inspect installed tools [v]", ToolsConfigure),
+            action("Session snapshots [2]", ToolsSnapshots),
+            action("Installation attempts [4]", ToolAttempts),
+            action("Reconcile snapshots [3]", ToolsReconcile),
         ],
     }
 }
@@ -73,7 +148,7 @@ pub fn shortcut(item: Item) -> ratatui::crossterm::event::KeyCode {
     use Action::*;
     use ratatui::crossterm::event::KeyCode;
     KeyCode::Char(match item {
-        Item::Manifest => 'm',
+        Item::Manifest => '1',
         Item::Action(action) => match action {
             Choose => 'p',
             Init => 'n',
@@ -82,22 +157,22 @@ pub fn shortcut(item: Item) -> ratatui::crossterm::event::KeyCode {
             About => 'a',
             Quit => 'q',
             Destination(Tab::Overview) => 'o',
-            Destination(Tab::Files) => 'm',
+            Destination(Tab::Files) => '1',
             Destination(Tab::Recovery) => 'r',
-            Destination(Tab::Tools) => 't',
+            Destination(Tab::Tools) => '1',
             ToolDeclaration => 'a',
-            ToolsConfigure => 'c',
-            ToolsSnapshots => 's',
-            ToolAttempts => 'i',
-            ToolsReconcile => 'p',
-            Discover => 'f',
-            ManageIgnored => 'U',
-            Diagnostics => 'j',
-            GitStatus => 'z',
-            GitUnstaged => 'u',
-            GitStaged => 's',
-            GitRoot => 'g',
-            GitDefault => 'f',
+            ToolsConfigure => 'v',
+            ToolsSnapshots => '2',
+            ToolAttempts => '4',
+            ToolsReconcile => '3',
+            Discover => '2',
+            ManageIgnored => '3',
+            Diagnostics => '2',
+            GitStatus => '1',
+            GitUnstaged => '2',
+            GitStaged => '3',
+            GitRoot => 'p',
+            GitDefault => 'b',
             _ => unreachable!("navigation items have explicit shortcuts"),
         },
     })
@@ -112,7 +187,6 @@ pub fn owns(action: Action) -> bool {
 pub struct Menu {
     pub group: usize,
     pub selected: usize,
-    pub expanded: bool,
     pub content_focus: bool,
     pub content_scroll: u16,
 }
@@ -191,8 +265,7 @@ impl App {
             .unwrap_or((self.content.focused, self.content.scroll));
         self.navigation.menu = Some(Menu {
             group: selected_group.min(GROUPS.len() - 1),
-            selected: 0,
-            expanded: false,
+            selected: current_entry(self, selected_group),
             content_focus,
             content_scroll,
         });
@@ -223,44 +296,43 @@ impl App {
     ) -> Option<super::actions::Task> {
         use ratatui::crossterm::event::KeyCode;
         let menu = self.navigation.menu?;
-        if menu.expanded
-            && let Some(entry) = entries(menu.group)
-                .into_iter()
-                .find(|e| shortcut(e.item) == key)
+        if let KeyCode::Char(digit @ '1'..='9') = key
+            && let Some(&(index, _)) = local_catalog(menu.group).get((digit as u8 - b'1') as usize)
+        {
+            return self.menu_item(entries(menu.group)[index].item);
+        }
+        if let Some(entry) = entries(menu.group)
+            .into_iter()
+            .find(|e| shortcut(e.item) == key)
         {
             return self.menu_item(entry.item);
         }
         let menu = self.navigation.menu.as_mut()?;
+        let order = entry_order(menu.group);
+        let position = order
+            .iter()
+            .position(|index| *index == menu.selected)
+            .unwrap_or(0);
         match key {
             KeyCode::Esc => self.navigation.menu = None,
-            KeyCode::Left if menu.expanded => {
-                menu.expanded = false;
-                menu.selected = 0;
-            }
-            KeyCode::Left | KeyCode::Right => {
-                menu.group = (menu.group
-                    + if key == KeyCode::Left {
-                        GROUPS.len() - 1
+            KeyCode::Up | KeyCode::Down => {
+                let position = SECTION_ORDER
+                    .iter()
+                    .position(|group| *group == menu.group)
+                    .unwrap_or(0);
+                menu.group = SECTION_ORDER[(position
+                    + if key == KeyCode::Up {
+                        SECTION_ORDER.len() - 1
                     } else {
                         1
                     })
-                    % GROUPS.len();
+                    % SECTION_ORDER.len()];
                 menu.selected = 0;
             }
-            KeyCode::Up if !menu.expanded => {
-                menu.group = (menu.group + GROUPS.len() - 1) % GROUPS.len()
-            }
-            KeyCode::Down if !menu.expanded => menu.group = (menu.group + 1) % GROUPS.len(),
-            KeyCode::Up => menu.selected = menu.selected.saturating_sub(1),
-            KeyCode::Down => menu.selected = (menu.selected + 1).min(entries(menu.group).len() - 1),
-            KeyCode::Home if !menu.expanded => menu.group = 0,
-            KeyCode::End if !menu.expanded => menu.group = GROUPS.len() - 1,
-            KeyCode::Home => menu.selected = 0,
-            KeyCode::End => menu.selected = entries(menu.group).len() - 1,
-            KeyCode::Enter if !menu.expanded => {
-                menu.expanded = true;
-                menu.selected = 0;
-            }
+            KeyCode::Left => menu.selected = order[position.saturating_sub(1)],
+            KeyCode::Right => menu.selected = order[(position + 1).min(order.len() - 1)],
+            KeyCode::Home => menu.selected = order[0],
+            KeyCode::End => menu.selected = order[order.len() - 1],
             KeyCode::Enter => {
                 let item = entries(menu.group).get(menu.selected)?.item;
                 return self.menu_item(item);
@@ -271,103 +343,136 @@ impl App {
     }
 }
 pub fn popup(frame: &mut Frame, app: &App, menu: Menu) {
-    let area = ui::design::choice_dialog(frame, "Places", &app.hits);
     let items = entries(menu.group);
-    let reason = if menu.expanded {
-        items.get(menu.selected).and_then(|entry| match entry.item {
+    let current = items.get(menu.selected);
+    let reason = current
+        .and_then(|entry| match entry.item {
             Item::Action(action) => app.action_reason(action),
             Item::Manifest => None,
         })
-    } else {
-        None
-    }
-    .or(app.interaction_notice);
-    let extra = if reason.is_some() { 2 } else { 0 };
-    let body = Rect::new(
-        area.x,
-        area.y,
-        area.width,
-        area.height.saturating_sub(extra),
-    );
-    let selected = if menu.expanded {
-        menu.selected
-    } else {
-        menu.group
-    };
-    let capacity = ui::design::pair_capacity(body).max(1);
-    let offset = selected.saturating_sub(capacity - 1);
-    let labels: Vec<_> = if menu.expanded {
-        items
-            .iter()
-            .enumerate()
-            .map(|(id, entry)| {
-                let label = entry
-                    .label
-                    .split(" [")
-                    .next()
-                    .unwrap_or(entry.label)
-                    .to_owned();
-                let key = match shortcut(entry.item) {
-                    ratatui::crossterm::event::KeyCode::Char(c) => c.to_string(),
-                    ratatui::crossterm::event::KeyCode::F(n) => format!("F{n}"),
-                    _ => String::new(),
-                };
-                (id, label, key)
-            })
-            .collect()
-    } else {
-        GROUPS
-            .iter()
-            .enumerate()
-            .map(|(id, label)| (id, (*label).to_owned(), String::new()))
-            .collect()
-    };
-    let rows: Vec<_> = labels
+        .or(app.interaction_notice);
+    let sections: Vec<_> = SECTION_ORDER
         .iter()
-        .skip(offset)
-        .take(capacity)
-        .map(|(identity, label, key)| ui::design::PairRow {
-            identity: *identity,
-            values: [label, key],
+        .copied()
+        .map(|group| ui::navigation::Section {
+            label: SECTION_HINTS[group],
+            target: Target::MenuGroup(group),
+            selected: group == menu.group,
+            destinations: entry_order(group)
+                .into_iter()
+                .map(|index| {
+                    let entry = entries(group)[index];
+                    ui::navigation::Destination {
+                        label: local_catalog(group)
+                            .iter()
+                            .find(|(id, _)| *id == index)
+                            .map_or(label_only(entry.label), |(_, label)| label),
+                        target: if group == menu.group {
+                            Target::MenuItem(index)
+                        } else {
+                            Target::MenuDestination(group, index)
+                        },
+                        selected: group == menu.group && index == menu.selected,
+                    }
+                })
+                .collect(),
         })
         .collect();
-    ui::design::pairs_with_disclosure(
+    ui::navigation::menu(
         frame,
-        body,
-        ui::design::PairTable {
-            headers: [
-                if menu.expanded {
-                    GROUPS[menu.group]
-                } else {
-                    "PLACE"
-                },
-                "KEY",
-            ],
-            rows: &rows,
-            selected,
-        },
+        &sections,
+        current.map_or("", |entry| entry.label),
+        reason,
         &app.hits,
-        |index| {
-            if menu.expanded {
-                Target::MenuItem(index)
-            } else {
-                Target::MenuGroup(index)
-            }
-        },
-        !menu.expanded,
     );
-    if let Some(reason) = reason {
-        ui::design::notice(
-            frame,
-            Rect::new(
-                area.x,
-                area.bottom().saturating_sub(extra),
-                area.width,
-                extra,
-            ),
-            "Unavailable",
-            reason,
-            ui::design::Tone::Attention,
-        );
+}
+
+fn label_only(label: &'static str) -> &'static str {
+    label.split(" [").next().unwrap_or(label)
+}
+fn current_entry(app: &App, group: usize) -> usize {
+    let item = match app.tab {
+        Tab::Files
+            if matches!(
+                app.shell.overlay,
+                Some(super::shell::Overlay::Ignored { .. })
+            ) =>
+        {
+            Item::Action(Action::ManageIgnored)
+        }
+        Tab::Files if app.discovering => Item::Action(Action::Discover),
+        Tab::Checks if app.showing_diagnostics => Item::Action(Action::Diagnostics),
+        Tab::Checks => Item::Manifest,
+        Tab::Git => Item::Action(match app.git_view.comparison {
+            super::git::Comparison::Status => Action::GitStatus,
+            super::git::Comparison::Unstaged => Action::GitUnstaged,
+            super::git::Comparison::Staged => Action::GitStaged,
+        }),
+        Tab::Tools if app.tools_view.catalog_browser => Item::Action(Action::ToolsSnapshots),
+        Tab::Tools if app.tools_view.recon_open => Item::Action(Action::ToolsReconcile),
+        Tab::Tools if app.tools_view.install_open => Item::Action(Action::ToolAttempts),
+        tab => Item::Action(Action::Destination(tab)),
+    };
+    entries(group)
+        .iter()
+        .position(|entry| entry.item == item)
+        .unwrap_or(0)
+}
+
+/// Stable destinations only: forms, reviews and readers keep their own Back path.
+pub fn local_available(app: &App) -> bool {
+    use super::shell::Overlay;
+    let stable_tools = app.tab == Tab::Tools
+        && (app.tools_view.catalog_browser
+            || app.tools_view.recon_open && !app.tools_view.reconciliation.binding_metadata()
+            || app.tools_view.setup && !app.tools_view.details
+            || app.tools_view.install_open
+                && matches!(
+                    app.tools_view.installation.mode,
+                    super::tools_install::Mode::Attempts
+                ));
+    let ignored = matches!(app.shell.overlay, Some(Overlay::Ignored { .. }));
+    if app.busy
+        || app.error.is_some()
+        || app.preview.is_some()
+        || app.show_result
+        || app.confirmation.is_some()
+        || app.shell.overlay.is_some() && !ignored
+        || app.page_title().is_some() && !stable_tools && !ignored
+        || app.git_view.sensitive()
+    {
+        return false;
     }
+    !local_catalog(group(app)).is_empty()
+}
+pub fn local(frame: &mut Frame, area: Rect, app: &App) -> Rect {
+    if !local_available(app) {
+        return area;
+    }
+    let group = group(app);
+    let current = current_entry(app, group);
+    let items: Vec<_> = local_catalog(group)
+        .iter()
+        .map(|&(index, label)| ui::navigation::Destination {
+            label,
+            target: Target::LocalDestination(group, index),
+            selected: current == index,
+        })
+        .collect();
+    if items.len() < 2 {
+        return area;
+    }
+    ui::navigation::local(
+        frame,
+        Rect::new(area.x, area.y, area.width, 1),
+        &items,
+        Target::MenuGroup(group),
+        &app.hits,
+    );
+    Rect::new(
+        area.x,
+        area.y + 1,
+        area.width,
+        area.height.saturating_sub(1),
+    )
 }

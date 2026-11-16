@@ -48,7 +48,7 @@ impl Topic {
             Self::Tools => "Explicit provider inspection",
             Self::GitContent => "Git content disclosure",
             Self::Actions => "Actions",
-            Self::Menu => "Places",
+            Self::Menu => "Menu",
             Self::More => "More actions",
             Self::Choice => "Choose a value",
             Self::Form(_) => "Form",
@@ -98,7 +98,7 @@ impl Topic {
             }
             Self::Actions => "Find a task by name. Unavailable tasks explain their prerequisites.",
             Self::Menu => {
-                "Choose a destination group, then a place or task. Opening/dismissing retains drafts."
+                "Up/Down selects a section; Left/Right selects a local destination. Enter opens it; Esc closes Menu. Opening/dismissing retains drafts."
             }
             Self::More => {
                 "Choose a contextual action. This menu never grants an execution approval."
@@ -158,10 +158,16 @@ impl Topic {
                 ("Esc", "Return without choosing"),
             ],
             Self::Menu => &[
-                ("Left/Right", "Choose a group"),
-                ("Up/Down", "Choose a destination"),
-                ("Enter", "Open group or destination"),
-                ("Esc", "Back one level"),
+                ("Up/Down", "Choose a section"),
+                ("Left/Right", "Choose a local destination"),
+                ("Enter", "Open selected destination"),
+                ("1/2/3/4", "Open numbered destination in this section"),
+                (
+                    "o/f/t/r/c/g",
+                    "Open Overview/Files/Tools/Recovery/Checks/Git",
+                ),
+                ("Ctrl-G", "Open Menu, including Session"),
+                ("Esc / Ctrl-G", "Close Menu without navigating"),
             ],
             Self::Form(_) | Self::BatchItem => &[
                 ("Tab / Shift-Tab", "Traverse fields only"),
@@ -372,13 +378,12 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
         area.y += height;
         area.height = area.height.saturating_sub(height);
     }
-    let mut sections = vec![("Workbench", "Places: destination groups; Ctrl-K: searchable task launcher; F2: additional contextual actions when shown; F1: Help. Esc returns one meaningful level. Fields accept printable keys literally; footer buttons never join field traversal.".to_owned())];
+    let mut sections = vec![("Workbench", "Ctrl-G / Menu: sections and destinations; Ctrl-K: searchable task launcher; F2: additional contextual actions when shown; F1: Help. Esc returns one meaningful level. Outside text entry, o/f/t/r/c/g opens Overview/Files/Tools/Recovery/Checks/Git. Menu and the wide rail use that order, with Session last in Menu. Contextual O/F/T/R/C retains adoption/discovery/profiles/refresh/inspection actions; P chooses Git scope. Home selects the first Files row. Numbered local destinations use 1/2/3/4 within the current section outside text entry, or the selected Menu section. Fields and filters accept digits and other printable keys literally; footer buttons never join field traversal.".to_owned())];
     if matches!(help.topic, Topic::Tools) {
         sections.insert(0, ("Tools boundaries", "Discovery is metadata-only. Prepare selected real scopes before the single inspection confirmation. Snapshots are session claims, not ownership/readiness or execution authority. Bind each declared tool explicitly; changed npm declarations need fresh inspection. Declaration is manifest-only. Installs and historical closure have separate reviews; fresh-review entry never queries, binds or replays automatically. Closure is neither success nor repair.".to_owned()));
     }
     if matches!(help.topic, Topic::Menu)
         && let Some(menu) = app.navigation.menu
-        && menu.expanded
         && let Some(entry) = super::navigation::entries(menu.group).get(menu.selected)
     {
         let mut detail = entry.label.to_owned();

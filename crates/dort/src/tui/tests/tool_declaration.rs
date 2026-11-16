@@ -244,7 +244,7 @@ fn stale_declaration_write_discards_approval_and_retry_only_prepares_new_preview
     app.start(true);
     app.complete(f.output(task).map_err(|e| actions::diagnostic(&e)));
     assert!(app.failed_write && app.preview.is_none() && app.confirmation.is_none());
-    let retry = key(&mut app, KeyCode::Char('r')).unwrap();
+    let retry = key(&mut app, KeyCode::Char('R')).unwrap();
     assert!(matches!(retry, Task::ToolDeclaration(_)));
     app.complete(f.output(retry).map_err(|e| actions::diagnostic(&e)));
     assert!(app.preview.is_some() && app.confirmation.is_none());

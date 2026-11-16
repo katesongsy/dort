@@ -124,7 +124,7 @@ fn apt_advanced_retains_three_missing_inputs_and_compact_caret_without_processes
     key(&mut app, KeyCode::Backspace);
     key(&mut app, KeyCode::Esc);
     assert!(app.tools_view.installation.preview.is_none());
-    let task = key(&mut app, KeyCode::Char('r')).unwrap();
+    let task = key(&mut app, KeyCode::Char('R')).unwrap();
     f.run(&mut app, task);
     assert!(app.tools_view.installation.preview.is_some());
     assert_eq!(calls, f.calls());
@@ -177,7 +177,7 @@ fn apt_damaged_closure_uses_only_two_dpkg_fields_and_retains_drafts() {
     app.tools_view.recon_open = false;
     let task = key(&mut app, KeyCode::Char('i')).unwrap();
     f.run(&mut app, task);
-    let task = key(&mut app, KeyCode::Char('c'));
+    let task = key(&mut app, KeyCode::Char('C'));
     assert!(task.is_none());
     assert!(app.tools_view.installation.close_apt);
     for size in [(48, 14), (80, 24)] {
@@ -189,7 +189,7 @@ fn apt_damaged_closure_uses_only_two_dpkg_fields_and_retains_drafts() {
     key(&mut app, KeyCode::Backspace);
     let fields = app.tools_view.installation.fields.clone();
     key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Char('c'));
+    key(&mut app, KeyCode::Char('C'));
     assert_eq!(fields, app.tools_view.installation.fields);
     app.tools_view.installation.focus = 2;
     let task = key(&mut app, KeyCode::Enter).unwrap();

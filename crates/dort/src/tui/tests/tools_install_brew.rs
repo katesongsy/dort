@@ -67,7 +67,7 @@ fn advanced_brew_prefix_is_retained_process_free_with_compact_focus_and_caret() 
     key(&mut app, KeyCode::Char('a'));
     key(&mut app, KeyCode::Esc);
     assert!(app.tools_view.installation.preview.is_none());
-    let task = key(&mut app, KeyCode::Char('r')).unwrap();
+    let task = key(&mut app, KeyCode::Char('R')).unwrap();
     f.run(&mut app, task);
     assert!(app.tools_view.installation.preview.is_some());
     assert_eq!(calls, f.calls());
@@ -200,7 +200,7 @@ fn damaged_brew_closure_requests_only_executable_path_and_prefix_with_retained_d
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
     let task = app.tools_view.open_attempts();
     f.run(&mut app, task);
-    key(&mut app, KeyCode::Char('c'));
+    key(&mut app, KeyCode::Char('C'));
     assert!(app.tools_view.installation.close_brew);
     assert!(app.tools_view.installation.mode == Mode::CloseInputs);
     let expected = app.tools_view.installation.fields.clone();

@@ -204,9 +204,6 @@ fn workflow_pages_allow_menus_and_keep_field_text_focus_until_actual_navigation(
             assert_eq!(app.shell.init_draft, path);
             assert_eq!(app.shell.path_focused, focused);
             app.open_menu(1, size.0);
-            if !app.navigation.menu.unwrap().expanded {
-                key(&mut app, KeyCode::Enter, size.0, size.1);
-            }
             key(&mut app, KeyCode::Enter, size.0, size.1);
             assert!(app.shell.overlay.is_none() && app.tab == Tab::Overview);
             assert_eq!(app.shell.init_draft, path);

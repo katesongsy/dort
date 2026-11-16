@@ -81,7 +81,6 @@ fn ignore_folder_confirm_refresh_manage_and_unignore_are_complete_tui_workflows(
             .all(|c| !c.entry.path.starts_with(f.host.home.join(".tool")))
     );
     app.open_menu(2, 100);
-    assert!(key(&mut app, KeyCode::Enter).is_none());
     key(&mut app, KeyCode::End);
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.finish(&mut app, task);
@@ -134,7 +133,7 @@ fn visible_ignore_controls_mouse_and_keyboard_work_at_all_supported_sizes() {
         app.resize(w, h);
         let screen = render(&app, w, h);
         assert!(
-            screen.contains("Places") && screen.contains("F2 More") && screen.contains("F1 Help"),
+            screen.contains("Menu") && screen.contains("F2 More") && screen.contains("F1 Help"),
             "{screen}"
         );
         let (column, row) =
@@ -210,7 +209,7 @@ fn visible_ignore_controls_mouse_and_keyboard_work_at_all_supported_sizes() {
         f.finish(&mut app, task);
         app.resize(w, h);
         app.open_menu(2, w);
-        app.navigation.menu.as_mut().unwrap().expanded = true;
+        app.navigation.menu.as_mut().unwrap().selected = 2;
         assert!(render(&app, w, h).contains("Ignored paths"));
         let (column, row) = (0..h)
             .flat_map(|y| (0..w).map(move |x| (x, y)))
@@ -306,6 +305,23 @@ fn help_retains_real_preview_confirmation_and_shrink_still_clears_approval() {
     assert_eq!(Rules::load(&f.host).unwrap().paths().count(), 1);
 }
 #[test]
+fn plain_section_navigation_drops_real_preview_ownership_without_any_write() {
+    let f = Fixture::new();
+    let mut app = f.app(false);
+    let task = key(&mut app, KeyCode::Char('I')).unwrap();
+    f.finish(&mut app, task);
+    assert!(app.preview.is_some());
+    app.key(
+        KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE),
+        80,
+        24,
+    );
+    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.tab == super::app::Tab::Overview);
+    assert!(!f.host.config_dir.exists() && !f.host.state_dir.exists());
+}
+
+#[test]
 fn actual_menu_navigation_drops_real_preview_ownership_without_any_write() {
     let f = Fixture::new();
     let mut app = f.app(false);
@@ -313,8 +329,7 @@ fn actual_menu_navigation_drops_real_preview_ownership_without_any_write() {
     f.finish(&mut app, task);
     assert!(app.preview.is_some());
     app.open_menu(1, 80);
-    key(&mut app, KeyCode::Enter); // Expand Overview, retaining the real preview.
-    assert!(app.preview.is_some());
+    assert!(app.preview.is_some()); // Opening Menu retains the real preview.
     key(&mut app, KeyCode::Enter); // Actual navigation discards it.
     assert!(app.preview.is_none() && app.confirmation.is_none());
     assert!(app.tab == super::app::Tab::Overview);

@@ -41,7 +41,7 @@ fn details(app: &App, rows: &[&Entry], query: &str, selected: usize) -> Text<'st
     } else {
         lines.push(Line::raw("No matching actions. Ctrl-U clears the search."));
     }
-    lines.push(Line::raw("Commands operate on this view or selection. Places provides navigation and session controls. Search matches labels case-insensitively; the operation's review defines execution scope. Effect labels distinguish drafts, mutation previews and content warnings."));
+    lines.push(Line::raw("Commands operate on this view or selection. Menu provides navigation and session controls. Search matches labels case-insensitively; the operation's review defines execution scope. Effect labels distinguish drafts, mutation previews and content warnings."));
     Text::from(lines)
 }
 pub fn draw(

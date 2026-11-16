@@ -219,16 +219,28 @@ class Session:
 
     def navigate(self, group, item):
         self.settle()
-        self.click_label('[Places]')  # Places is groups-first at every width.
-        self.wait(b'PLACE')
+        self.send(b'\x07')  # Ctrl-G opens the same Menu as the mouse control.
+        self.wait(b'Left/Right destination')
         self.settle()
-        marker = ' ▸' if (group + ' ▸').encode() in self.screen.text() else ' >'
-        self.click_label(group + marker)
-        label = item.split(' [')[0]
-        if group == 'Overview':
-            self.settle()
-            label = ('› ' if ('› ' + label).encode() in self.screen.text() else '> ') + label
-        self.click_label(label, min_row=3)
+        groups = ['Overview', 'Files', 'Tools', 'Recovery', 'Checks', 'Git', 'Session']
+        destinations = {
+            'Session': ['Choose repository', 'Create/attach', 'Preview-only mode', 'Help', 'About', 'Quit'],
+            'Overview': ['Overview'],
+            'Files': ['Managed', 'Discover', 'Ignored paths'],
+            'Recovery': ['All repositories'],
+            'Checks': ['Manifest checks', 'Diagnostics'],
+            'Git': ['Status', 'Unstaged', 'Staged', 'Choose Git scope', 'Follow selected repository'],
+            'Tools': ['Inventory', 'Session snapshots', 'Reconcile snapshots', 'Installation attempts', 'Add tool declaration', 'Inspect installed tools'],
+        }
+        rows, columns = len(self.screen.cells), len(self.screen.cells[0])
+        modal_width, modal_height = min(columns - 2, 72), min(rows - 3, 16)
+        x, y = (columns - modal_width) // 2 + 1, (rows - 1 - modal_height) // 2 + 1
+        self.mouse(0, x + 2, y + 1 + groups.index(group))  # Section selection never dispatches.
+        self.settle()
+        index = destinations[group].index(item.split(' [')[0])
+        self.send(b'\x1b[C' * index)
+        self.settle()
+        self.send(b'\r')
         self.settle()
 
     def destination(self, group):
@@ -347,7 +359,7 @@ def tools_workflows(binary, base, env):
         session.click_action('Inspect installed tools')
         session.wait(b'Snapshot s1')
         assert (auto_home / 'calls').read_text() == 'ran', 'Collection did not execute exactly once'
-        session.send(b'c')
+        session.send(b'C')
         session.wait(b'[x] Homebrew')
         assert (auto_home / 'calls').read_text() == 'ran', 'Refresh replayed approval'
         session.send(b'q')
@@ -393,7 +405,7 @@ def tools_workflows(binary, base, env):
         assert (home / 'calls').read_text() == 'ran', 'Dismissing More replayed approval'
         session.send(b'/RIPGREP\r')
         session.wait(b'ripgrep')
-        session.send(b'r')
+        session.send(b'R')
         session.wait(b'Run query')
         session.settle()
         assert (home / 'calls').read_text() == 'ran', 'Retry replayed inspection approval'
@@ -684,7 +696,7 @@ def tool_install_workflows(binary, base, env):
         session.wait(b'loaded.')
         session.navigate('Tools', 'Installation attempts [i]')
         session.wait(b'UNRESOLVED')
-        session.send(b'c')
+        session.send(b'C')
         session.wait(b'Trusted mise executable')
         session.send(str(mise).encode() + b'\t' + str(bin_dir).encode() + b'\t\r')
         session.wait(b'Enter Inspect')
@@ -728,7 +740,7 @@ def npm_install_workflows(binary, base, env):
         session.send(b'\r')
         session.wait(b'node')
         assert (home / 'calls').read_text() == 'M'
-        session.send(b'c')
+        session.send(b'C')
         session.wait(b'Inspect installed tools')
         session.send(b'\x1b[Be')  # Move from mise to npm, then Advanced.
         session.wait(b'Global npm prefix')
@@ -772,7 +784,7 @@ def npm_install_workflows(binary, base, env):
         session.wait(b'loaded.')
         session.navigate('Tools', 'Installation attempts [i]')
         session.wait(b'UNRESOLVED')
-        session.send(b'c')
+        session.send(b'C')
         session.wait(b'Trusted mise executable')
         session.closure_provider(1)
         session.wait(b'Trusted Node executable')
@@ -874,7 +886,7 @@ esac
         session.wait(b'loaded.')
         session.navigate('Tools', 'Installation attempts [i]')
         session.wait(b'UNRESOLVED')
-        session.send(b'c')
+        session.send(b'C')
         session.wait(b'Trusted mise executable')
         session.closure_provider(2)
         session.wait(b'Trusted Homebrew executable')
@@ -1046,7 +1058,7 @@ printf installed > "$HOME/installed"''',
         session.wait(b'loaded.')
         session.navigate('Tools', 'Installation attempts [i]')
         session.wait(b'UNRESOLVED')
-        session.send(b'c')
+        session.send(b'C')
         session.wait(b'Trusted mise executable')
         session.closure_provider(3)
         session.wait(b'Trusted dpkg-query')
@@ -1074,11 +1086,16 @@ def interaction_surface_workflows(binary, base, env):
                       XDG_STATE_HOME=str(home / '.local/state'))
         with Session([binary, 'tui'], scoped, size) as session:
             session.wait(b'loaded.')
-            session.navigate('Tools', 'Inspect installed tools [c]')
+            session.send(b't')  # Plain t directly opens Tools outside text entry.
             session.wait(b'Inspect installed tools')
             session.settle()
             assert b'\\u{b7}' not in session.screen.text(), 'Trusted decoration was metadata-escaped'
             assert '·'.encode() in session.screen.text(), 'UTF-8 chrome lost its actual separator'
+            session.send(b'2')  # Tools-local 2 is Snapshots, not Files Discover.
+            session.wait(b'Tools / Session snapshots')
+            session.send(b't')
+            session.wait(b'Inspect installed tools')
+            session.settle()
             # A foreground-changing event and F2 arrive in one input burst.
             # More must use the newly rendered declaration, not cached Tools actions.
             session.send(b'a\x1bOQ')
@@ -1095,7 +1112,8 @@ def interaction_surface_workflows(binary, base, env):
             footer = session.screen.text().splitlines()[-1]
             assert b'Review' in footer and b'Help' in footer, 'Declaration strip describes the underlying Tools page'
             assert b'Inspect tools' not in footer and b'Snapshots' not in footer
-            session.click_label('[Places]')  # Places remains available during text entry.
+            session.send(b'\x07')  # Ctrl-G opens navigation during text entry.
+            session.wait(b'Left/Right destination')
             session.wait(b'Overview')
             session.settle()
             session.send(b'\x1b')
@@ -1172,7 +1190,7 @@ def run():
         # Text carries navigation/state meaning even with a low-color terminal.
         with Session([binary, "--dry-run", "tui"], dict(env, TERM="vt100", NO_COLOR="1"), (14, 48)) as session:
             session.wait(b"loaded.")
-            for label in [b"[Places]", b"Overview", b"DRY RUN", b"Create or attach", b"F2 More", b"F1 Help"]:
+            for label in [b"Ctrl-G Menu", b"Overview", b"DRY RUN", b"Create or attach", b"F2 More", b"F1 Help"]:
                 session.wait(label)
             session.send(b"?")
             session.wait(b"Start with a repository")
@@ -1193,16 +1211,16 @@ def run():
         for menu_size in [(14, 48), (24, 80), (40, 140)]:
             with Session([binary, 'tui'], env, menu_size) as session:
                 session.wait(b'loaded.')
-                session.send(b'\x1b[21~')  # F10 no longer opens Places.
-                session.settle(); assert b'PLACE' not in session.screen.text()
-                session.click_label('[Places]')
+                session.send(b'\x1b[21~')  # F10 no longer opens Menu.
+                session.settle(); assert b'Left/Right destination' not in session.screen.text()
+                session.click_label('Ctrl-G Menu')
+                session.wait(b'Left/Right destination')
                 session.settle(); assert b'Keys in this context' not in session.screen.text()
-                session.send(b'\x1b[C\r')  # Overview -> Files group, then expand at every width.
+                session.send(b'\x1b[B\x1b[C')  # Overview -> Files section -> Discover; no dispatch yet.
                 session.wait(b'Discover')
-                session.send(b'\x1b[B')
                 session.settle()
                 session.send(b'\x1bOP')
-                session.wait(b'Choose a destination group')
+                session.wait(b'Up/Down selects a section')
                 session.send(b'\r')  # Help cannot select the retained menu entry
                 session.settle()
                 session.send(b'\x1b')
@@ -1210,18 +1228,20 @@ def run():
                 session.send(b'\r')
                 session.wait(b'0 / 0 shown')
                 session.wait(b'Files / Discover')
-                session.send(b'12345')
+                session.send(b'1')
+                session.wait(b'Files / Managed')
+                session.send(b'2')
+                session.wait(b'Files / Discover')
+                session.send(b'9')  # No ninth local destination exists in Files.
                 session.settle()
-                assert b'Files / Discover' in session.screen.text(), 'Numeric aliases changed destination'
-                session.click_label('[Places]')
-                session.send(b"\r")  # Expand Files, then use its local shortcut.
-                session.wait(b"Managed")
-                session.send(b"m")
+                assert b'Files / Discover' in session.screen.text(), 'An unassigned local number changed destination'
+                session.click_label('Managed', min_row=1)  # Persistent local destinations are direct mouse targets.
                 session.wait(b"Files / Managed")
-                session.click_label('[Places]')
-                session.send(b"\x1b[C\x1b[C\r")  # Checks group, explicitly expanded.
+                session.click_label('Ctrl-G Menu')
+                session.wait(b'Left/Right destination')
+                session.send(b"\x1b[B\x1b[B\x1b[B\x1b[C")  # Files -> Tools -> Recovery -> Checks -> Diagnostics.
                 session.wait(b"Diagnostics")
-                session.send(b"j")
+                session.send(b"\r")
                 session.wait(b"Checks / Diagnostics")
                 session.send(b'q')
                 session.finish()
@@ -1242,17 +1262,17 @@ def run():
                 session.wait(b"loaded.")
                 session.navigate("Files", "Managed")
                 session.wait(b"Files / Managed")
-                session.send(b"o")
+                session.send(b"O")
                 session.wait(b"TARGET")
                 session.send(b"~/.editor")
                 session.wait(b"~/.editor")
                 session.send(b"\tq")
                 session.settle()
                 session.focused_field('ID')
-                session.click_label('[Places]')
-                session.wait(b'Files >' if ascii_only else 'Files ▸'.encode())
+                session.send(b'\x07')
+                session.wait(b'Left/Right destination')
                 session.settle()
-                assert not session.screen.cursor_visible, 'Places retained the background field caret'
+                assert not session.screen.cursor_visible, 'Menu retained the background field caret'
                 assert session.screen.text().isascii() == ascii_only, "Unexpected decoration capability"
                 assert session.data.isascii() == ascii_only, "Unexpected output encoding"
                 assert has_color_sgr(session.data) != monochrome, "Unexpected color capability"
@@ -1273,7 +1293,7 @@ def run():
                              XDG_STATE_HOME=str(discovery_home / ".local/state"))
         with Session([binary, "tui"], discovery_env, (24, 80)) as session:
             session.wait(b"loaded.")
-            session.send(b"f")
+            session.send(b"F")
             session.wait(b"Filter files")
             session.send(b"/nvim\x1b")
             session.settle()
@@ -1301,7 +1321,7 @@ def run():
         (plugins / 'editor.lua').write_text('synthetic-plugin-preview\n')
         with Session([binary, 'tui'], discovery_env, (32, 140)) as session:
             session.wait(b'loaded.')
-            session.send(b'f')
+            session.send(b'F')
             session.wait(b'Filter files')
             session.send(b'/settings.json\rljlj')  # Open .pi and agent.
             session.click_label('[ ] settings.json', offset=5)
@@ -1310,7 +1330,7 @@ def run():
             session.destination("Git")
             session.settle()
             assert b'synthetic-agent-preview' not in session.screen.text()
-            session.send(b'f')
+            session.send(b'F')
             # The old status can survive a destination switch. Wait for the
             # refreshed list itself before typing into its filter.
             session.wait(b'[ ] settings.json')
@@ -1333,9 +1353,9 @@ def run():
         ignore_store = ignore_home / '.config' / 'dort' / 'discovery-ignore.toml'
         with Session([binary, 'tui'], ignore_env, (14, 48)) as session:
             session.wait(b'loaded.')
-            session.send(b'f')
+            session.send(b'F')
             session.wait(b'Filter files')
-            session.wait(b'[Places]')
+            session.wait(b'Ctrl-G Menu')
             session.more_action('Ignore selected')
             session.wait(b'Ignore discovery path')
             assert not ignore_store.exists(), 'Ignore preview wrote preferences'
@@ -1377,9 +1397,9 @@ def run():
         assert not any('/.editor' in c['entry']['path'] for c in json.loads(output.stdout)['candidates'])
         with Session([binary, 'tui'], ignore_env, (14, 48)) as session:
             session.wait(b'loaded.')
-            session.send(b'f')
+            session.send(b'F')
             session.wait(b'Filter files')
-            session.navigate('Files', 'Ignored paths [U]')
+            session.navigate('Files', 'Ignored paths [3]')
             session.wait(b'Ignored exact paths')
             assert b'Enter' in session.screen.text().splitlines()[-1]
             session.send(b'\r')
@@ -1560,7 +1580,7 @@ def run():
             session.navigate("Checks", "Diagnostics [j]")
             session.wait(b"Checks / Diagnostics")
             session.wait(b"Registered repositories: 0")
-            session.send(b"r")
+            session.send(b"R")
             session.wait(b"Diagnostics | Dort")
             session.settle()  # identical refresh result may still be the prior frame
             session.navigate("Session", "About")
@@ -1654,7 +1674,7 @@ def run():
                          XDG_STATE_HOME=str(focus_home / '.local/state'))
         with Session([binary, 'tui'], focus_env, (40, 140)) as session:
             session.wait(b'loaded.')
-            session.send(b'f')
+            session.send(b'F')
             session.wait(b'focus-start-marker')
             session.send(b'\r')  # Explicit reader, not a Tab focus stop.
             session.settle()
@@ -1663,7 +1683,7 @@ def run():
             assert b'second-file-marker' not in session.screen.text()
             session.send(b'G')
             session.wait(b'focus-end-marker')
-            session.send(b'gg')
+            session.send(b'\x1b[H')  # Home replaces the old gg chord.
             session.wait(b'focus-start-marker')
             session.resize((14, 48))
             session.wait(b'Selected content')
@@ -1680,7 +1700,7 @@ def run():
 
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
-            session.send(b"f")
+            session.send(b"F")
             session.wait(b"Eligible hint")
             session.send(b"\r")
             session.wait(b"Selected content")
@@ -1758,7 +1778,7 @@ def run():
             session.wait(b"PRIVATE-PATCH\\x1b[31m")
             session.send(b"\x1b")
             session.wait(b"1 entries")
-            session.send(b"r")
+            session.send(b"R")
             session.wait(b"PATH")
             session.settle()
             assert b"PRIVATE-PATCH" not in session.screen.text()
@@ -1795,7 +1815,7 @@ def run():
             session.send(b"/q?/\r")
             session.wait(b"0 displayed")
             session.wait(b"No matches")
-            session.send(b"\x1b[3~r")
+            session.send(b"\x1b[3~R")
             session.settle()  # identical summaries can otherwise match the prior frame
             session.wait(b"1 entries")
             session.wait(b"PATH")
@@ -2122,7 +2142,7 @@ def run():
         candidate.write_text("ordinary adoption settings\n")
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
-            session.send(b"o")
+            session.send(b"O")
             session.focused_field('TARGET')
             session.send(b"~/.q?config\tconfig\tfiles/config\r")  # Fields only; Enter previews.
             session.wait(b"Enter Adopt all")
@@ -2196,7 +2216,7 @@ def run():
         batch_home, batch_repo, targets, batch_env = batch_fixture('batch-adopt', False)
         with Session([binary, 'tui'], batch_env) as session:
             session.wait(b'loaded.')
-            session.send(b'f')
+            session.send(b'F')
             session.wait(b'Filter files')
             session.send(b'/bundle\rlljlj')  # Open .config and bundle, then select a leaf.
             session.click_label('[ ] only-a')

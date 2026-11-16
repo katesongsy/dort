@@ -170,8 +170,7 @@ fn content_focus_uses_wrapped_viewport_without_selection_changes_or_rereads() {
     assert_eq!(app.content.scroll, end);
     key(&mut app, KeyCode::Char('j'));
     assert_eq!(app.content.scroll, end);
-    key(&mut app, KeyCode::Char('g'));
-    key(&mut app, KeyCode::Char('g'));
+    key(&mut app, KeyCode::Home);
     assert_eq!(app.content.scroll, 0);
     assert_eq!(app.candidate_selected, selected);
     assert!(app.inventory.candidate_marks.is_empty());
@@ -183,7 +182,7 @@ fn content_focus_uses_wrapped_viewport_without_selection_changes_or_rereads() {
     assert!(discover_content::next(&mut app).is_none());
     assert!(app.content.text().starts_with("ordinary-wrapped"));
     key(&mut app, KeyCode::Enter);
-    key(&mut app, KeyCode::Char('g'));
+    key(&mut app, KeyCode::Home);
     key(&mut app, KeyCode::Esc);
     assert!(!app.content.focused && !app.inventory.pending_g);
     key(&mut app, KeyCode::Char('j'));

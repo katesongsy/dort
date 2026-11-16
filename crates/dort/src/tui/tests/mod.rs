@@ -53,12 +53,15 @@ pub(super) fn menu_action(
                 .position(|e| e.item == Item::Action(action))
                 .map(|index| (group, index))
         })
-        .expect("Task has a Places destination");
+        .expect("Task has a Menu destination");
     app.open_menu(group, width);
-    assert!(app.key(key(KeyCode::Enter), width, height).is_none());
-    assert!(app.navigation.menu.as_ref().is_some_and(|m| m.expanded));
-    for _ in 0..index {
-        assert!(app.key(key(KeyCode::Down), width, height).is_none());
+    app.navigation.menu.as_mut().unwrap().selected = 0;
+    let position = navigation::entry_order(group)
+        .iter()
+        .position(|id| *id == index)
+        .unwrap();
+    for _ in 0..position {
+        assert!(app.key(key(KeyCode::Right), width, height).is_none());
     }
     app.key(key(KeyCode::Enter), width, height)
 }
@@ -289,7 +292,7 @@ fn compact_navigation_and_report_home_are_readable_without_color() {
     let mut app = App::new(true);
     for (width, height) in [(48, 14), (80, 24), (140, 40)] {
         let screen = render(&app, width, height);
-        for label in ["Places", "Overview", "More", "Help", "DRY RUN"] {
+        for label in ["Menu", "Overview", "More", "Help", "DRY RUN"] {
             assert!(
                 screen.contains(label),
                 "missing textual {label} at {width}x{height}"
@@ -347,7 +350,7 @@ fn long_lists_keep_selection_visible_through_resize_and_form_back() {
     assert!(render(&app, 48, 14).contains("› /repository-199"));
     app.key(key(KeyCode::Esc), 48, 14);
     assert_eq!(app.selected, 120);
-    app.key(key(KeyCode::Char('o')), 48, 14);
+    app.key(key(KeyCode::Char('O')), 48, 14);
     app.shell.adoption.target = "q?/".repeat(100);
     app.key(key(KeyCode::PageDown), 48, 14);
     app.key(key(KeyCode::Tab), 48, 14);

@@ -709,12 +709,18 @@ impl App {
             if event.kind == MouseEventKind::Down(MouseButton::Left) {
                 match target {
                     Some(Target::MenuGroup(group)) => {
-                        // This is traversal inside the owned Places dialog, not
+                        // This is traversal inside the owned Menu dialog, not
                         // an attempt to open navigation through another dialog.
                         if let Some(menu) = &mut self.navigation.menu {
                             menu.group = group.min(super::navigation::GROUPS.len() - 1);
                             menu.selected = 0;
-                            menu.expanded = true;
+                        }
+                    }
+                    Some(Target::MenuDestination(group, index)) => {
+                        if let Some(entry) = super::navigation::entries(group).get(index) {
+                            let task = self.menu_item(entry.item);
+                            super::discover_content::sync(self, width, height);
+                            return task;
                         }
                     }
                     Some(Target::MenuItem(index)) => {
@@ -868,7 +874,7 @@ impl App {
             return None;
         }
         match target {
-            Target::Key(key) => self.key(key, width, height),
+            Target::Key(key) => self.action_key(key, width, height),
             Target::ChoiceRow(index) => {
                 if let Some(choice) = &mut self.choice {
                     choice.select(index);
@@ -908,12 +914,18 @@ impl App {
             }
             Target::MenuGroup(group) => {
                 self.open_menu(group, width);
-                if let Some(menu) = &mut self.navigation.menu {
-                    menu.expanded = true;
-                }
                 None
             }
-            Target::MenuItem(_) => None,
+            Target::LocalDestination(group, index) => {
+                if let Some(reason) = self.navigation_block() {
+                    self.interaction_notice = Some(reason);
+                    self.status = reason.into();
+                    return None;
+                }
+                let item = super::navigation::entries(group).get(index)?.item;
+                self.menu_item(item)
+            }
+            Target::MenuItem(_) | Target::MenuDestination(_, _) => None,
             Target::Feedback(control) => self.feedback(control, width, height),
             Target::Continue => {
                 if self.preview.is_some() {
@@ -1060,7 +1072,7 @@ impl App {
                 if self.tab != Tab::Tools || !self.tools_view.install_open {
                     return None;
                 }
-                self.key(
+                self.action_key(
                     KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE),
                     width,
                     height,
@@ -1073,7 +1085,7 @@ impl App {
                 {
                     return None;
                 }
-                self.key(
+                self.action_key(
                     KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE),
                     width,
                     height,
@@ -1102,7 +1114,7 @@ impl App {
                 if self.tab != Tab::Tools || !self.tools_view.install_open {
                     return None;
                 }
-                self.key(
+                self.action_key(
                     KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE),
                     width,
                     height,
@@ -1179,7 +1191,7 @@ impl App {
                     if code != KeyCode::Char('/') {
                         self.tools_view.searching = false;
                     }
-                    self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height)
+                    self.action_key(KeyEvent::new(code, KeyModifiers::NONE), width, height)
                 } else {
                     None
                 }
@@ -1317,7 +1329,7 @@ impl App {
     ) -> Option<Task> {
         use super::task_surfaces::Control;
         if self.error.is_some() {
-            return self.key(
+            return self.action_key(
                 KeyEvent::new(
                     match control {
                         Control::Retry => KeyCode::Char('r'),
@@ -1346,7 +1358,44 @@ impl App {
             Control::Back => None,
         }
     }
-    pub fn key(&mut self, key: KeyEvent, width: u16, height: u16) -> Option<Task> {
+    pub fn key(&mut self, mut key: KeyEvent, width: u16, height: u16) -> Option<Task> {
+        if !self.key_text_entry()
+            && self.tab == Tab::Git
+            && key.code == KeyCode::Char('P')
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
+            key.code = KeyCode::Char('g');
+            key.modifiers = KeyModifiers::NONE;
+            return self.dispatch_key(key, width, height, false);
+        }
+        // Lowercase section letters are global outside text; uppercase retains
+        // the former contextual workflow action. Never alter typed field text.
+        if !self.key_text_entry()
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            && let KeyCode::Char(letter @ ('O' | 'F' | 'T' | 'R' | 'C')) = key.code
+        {
+            key.code = KeyCode::Char(letter.to_ascii_lowercase());
+            key.modifiers = KeyModifiers::NONE;
+            return self.dispatch_key(key, width, height, false);
+        }
+        self.dispatch_key(key, width, height, true)
+    }
+    /// A rendered typed control invokes its contextual action, not a section alias.
+    /// All normal approval, text ownership and worker guards still run.
+    pub(super) fn action_key(&mut self, key: KeyEvent, width: u16, height: u16) -> Option<Task> {
+        self.dispatch_key(key, width, height, false)
+    }
+    fn dispatch_key(
+        &mut self,
+        key: KeyEvent,
+        width: u16,
+        height: u16,
+        section_shortcuts: bool,
+    ) -> Option<Task> {
         let more_actions = (key.code == KeyCode::F(2)).then(|| {
             let hidden = super::workbench::strip_actions(self, width).1;
             if hidden.is_empty() {
@@ -1378,7 +1427,7 @@ impl App {
                     .menu
                     .map(|m| (m.content_focus, m.content_scroll))
             });
-        let task = self.key_inner(key, width, height, more_actions);
+        let task = self.key_inner(key, width, height, more_actions, section_shortcuts);
         super::discover_content::sync(self, width, height);
         if self.help.is_none()
             && self.navigation.menu.is_none()
@@ -1399,6 +1448,7 @@ impl App {
         width: u16,
         height: u16,
         more_actions: Option<Vec<super::components::ActionButton>>,
+        section_shortcuts: bool,
     ) -> Option<Task> {
         let interrupt =
             key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
@@ -1425,6 +1475,47 @@ impl App {
             return None;
         }
         self.resize(width, height);
+        if section_shortcuts
+            && key.modifiers == KeyModifiers::NONE
+            && !self.key_text_entry()
+            && let KeyCode::Char(letter) = key.code
+            && let Some(group) = super::navigation::section_shortcut(letter)
+        {
+            if width < 48 || height < 14 {
+                return None;
+            }
+            // The owned Menu allows direct section activation; other dialogs do not.
+            if (self.navigation.menu.is_none() || self.help.is_some() || self.busy)
+                && let Some(reason) = self.navigation_block()
+            {
+                self.interaction_notice = Some(reason);
+                self.status = reason.into();
+                return None;
+            }
+            return self.menu_item(super::navigation::entries(group)[0].item);
+        }
+        if key.modifiers == KeyModifiers::NONE
+            && let KeyCode::Char(digit @ '1'..='9') = key.code
+            && width >= 48
+            && height >= 14
+            && self.dialog_title().is_none()
+            && !self.text_entry()
+            && super::navigation::local_available(self)
+            && let Some(&(index, _)) =
+                super::navigation::local_catalog(super::navigation::group(self))
+                    .get((digit as u8 - b'1') as usize)
+        {
+            return self
+                .menu_item(super::navigation::entries(super::navigation::group(self))[index].item);
+        }
+        if key.code == KeyCode::Char('g') && key.modifiers == KeyModifiers::CONTROL {
+            if self.help.is_none() && self.navigation.menu.is_some() {
+                self.navigation.menu = None;
+            } else if width >= 48 && height >= 14 {
+                self.open_menu(super::navigation::group(self), width);
+            }
+            return None;
+        }
         if self.help.is_none()
             && self.navigation.menu.is_some()
             && !matches!(key.code, KeyCode::F(1) | KeyCode::Char('?'))
@@ -2023,12 +2114,8 @@ impl App {
                     self.move_files(true, 1);
                     return None;
                 }
-                KeyCode::Char('g') => {
-                    if std::mem::take(&mut self.inventory.pending_g) {
-                        self.move_files(true, usize::MAX);
-                    } else {
-                        self.inventory.pending_g = true;
-                    }
+                KeyCode::Home => {
+                    self.move_files(true, usize::MAX);
                     return None;
                 }
                 KeyCode::Char('G') => {
@@ -2543,6 +2630,30 @@ impl App {
         self.clamp_file_selection();
         self.clamp_history_selection();
         None
+    }
+    pub(super) fn key_text_entry(&self) -> bool {
+        if self.tab == Tab::Tools
+            && self.tools_view.install_open
+            && matches!(
+                self.tools_view.installation.mode,
+                super::tools_install::Mode::Review
+                    | super::tools_install::Mode::CloseReview
+                    | super::tools_install::Mode::LoadingInstall
+                    | super::tools_install::Mode::LoadingClose
+            )
+        {
+            return false;
+        }
+        self.help.is_none()
+            && self.more.is_none()
+            && self.choice.is_none()
+            && self.navigation.menu.is_none()
+            && !self.busy
+            && self.error.is_none()
+            && !self.show_result
+            && self.preview.is_none()
+            && self.confirmation.is_none()
+            && self.text_entry()
     }
     pub fn text_entry(&self) -> bool {
         self.batch_editor

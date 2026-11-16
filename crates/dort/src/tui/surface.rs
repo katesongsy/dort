@@ -16,7 +16,7 @@ impl App {
             return Some(menu.title);
         }
         if self.navigation.menu.is_some() {
-            return Some("Places");
+            return Some("Menu");
         }
         if self.confirmation.is_some() {
             return Some("Confirm reviewed changes");

@@ -745,7 +745,7 @@ fn discovery_marks_ineligible_entries_and_enter_preserves_existing_draft() {
     app.shell.adoption.target = "retained target".into();
     app.shell.adoption.id = "retained-id".into();
     app.shell.adoption.source = "retained/source".into();
-    let task = key(&mut app, KeyCode::Char('f')).unwrap();
+    let task = key(&mut app, KeyCode::Char('F')).unwrap();
     run_task(&mut app, &fixture, task);
     app.inventory.candidate_folded = std::sync::Arc::new(super::visibility::Folds::all(false));
     app.inventory.group = None;
@@ -821,7 +821,7 @@ fn discovery_is_independent_metadata_only_and_keeps_exact_candidate_identity() {
     let fixture = Fixture::new(false);
     fs::write(fixture.host.home.join(".q?config"), "private-body-marker\n").unwrap();
     let mut app = onboarding_app(&fixture, false);
-    let task = key(&mut app, KeyCode::Char('f')).unwrap();
+    let task = key(&mut app, KeyCode::Char('F')).unwrap();
     run_task(&mut app, &fixture, task);
     let discovery = app.discovery.as_ref().unwrap();
     assert!(discovery.repository.is_none());
@@ -842,11 +842,11 @@ fn discovery_is_independent_metadata_only_and_keeps_exact_candidate_identity() {
     assert_eq!(app.shell.adoption.source, "files/.q?config");
     key(&mut app, KeyCode::Esc);
     fs::write(fixture.host.home.join(".aaa"), "ordinary\n").unwrap();
-    let task = key(&mut app, KeyCode::Char('r')).unwrap();
+    let task = key(&mut app, KeyCode::Char('R')).unwrap();
     run_task(&mut app, &fixture, task);
     assert_eq!(app.candidate_selected, 1);
     fs::remove_file(fixture.host.home.join(".q?config")).unwrap();
-    let task = key(&mut app, KeyCode::Char('r')).unwrap();
+    let task = key(&mut app, KeyCode::Char('R')).unwrap();
     run_task(&mut app, &fixture, task);
     assert!(app.status.contains("disappeared"));
     assert!(!fixture.host.config_dir.exists() && !fixture.host.state_dir.exists());
@@ -859,7 +859,7 @@ fn wide_candidate_inspection_then_direct_action_opens_exact_draft() {
     fs::write(&path, "ordinary settings\n").unwrap();
     let mut app = onboarding_app(&fixture, false);
     app.shell.adoption.target = "retained target".into();
-    let task = key(&mut app, KeyCode::Char('f')).unwrap();
+    let task = key(&mut app, KeyCode::Char('F')).unwrap();
     run_task(&mut app, &fixture, task);
     for code in [KeyCode::Enter, KeyCode::PageDown, KeyCode::Home] {
         assert!(
@@ -926,7 +926,7 @@ fn discovery_protects_selected_root_and_rejects_invalid_scope_without_fallback()
 }
 
 fn adoption_fields(app: &mut App, target: &str, id: &str, source: &str) {
-    key(app, KeyCode::Char('o'));
+    key(app, KeyCode::Char('O'));
     type_text(app, target);
     key(app, KeyCode::Tab);
     type_text(app, id);
@@ -1039,7 +1039,7 @@ fn adoption_blockers_dry_run_and_back_never_write_or_lose_drafts() {
     assert!(app.confirmation.is_none());
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Char('o'));
+    key(&mut app, KeyCode::Char('O'));
     assert_eq!(app.shell.adoption.target, "~/.ordinary");
     assert!(!fixture.host.config_dir.exists() && !fixture.host.state_dir.exists());
     assert!(!fixture.root.join("files").exists());
@@ -1158,7 +1158,7 @@ fn temporary_profiles_are_mandatory_union_and_drive_full_inventory_and_plans() {
     fs::write(&config_path, &config).unwrap();
     let mut app = onboarding_app(&fixture, false);
     assert!(app.data.as_ref().unwrap().files.is_empty());
-    let task = key(&mut app, KeyCode::Char('t')).unwrap();
+    let task = key(&mut app, KeyCode::Char('T')).unwrap();
     run_task(&mut app, &fixture, task);
     let Overlay::Profiles(picker) = app.shell.overlay.as_ref().unwrap() else {
         panic!("profiles")
@@ -1211,7 +1211,7 @@ fn temporary_profiles_are_mandatory_union_and_drive_full_inventory_and_plans() {
     assert_observation_parity(plan, &expected);
     assert!(plan.inputs.active_profiles.contains("extra"));
     key(&mut app, KeyCode::Esc);
-    let task = key(&mut app, KeyCode::Char('c')).unwrap();
+    let task = key(&mut app, KeyCode::Char('C')).unwrap();
     run_task(&mut app, &fixture, task);
     assert!(
         app.check
@@ -1286,7 +1286,7 @@ fn file_search_is_text_only_and_never_narrows_approved_apply() {
     key(&mut app, KeyCode::Esc);
     assert_eq!(app.selected, 1);
     assert_eq!(app.visible_file_rows(), [1]);
-    let task = key(&mut app, KeyCode::Char('r')).unwrap();
+    let task = key(&mut app, KeyCode::Char('R')).unwrap();
     run_task(&mut app, &fixture, task);
     assert_eq!(app.selected, 1);
     assert_eq!(app.inventory.managed.query, "second");
@@ -1360,13 +1360,13 @@ fn candidate_search_retains_raw_selection_and_does_not_change_manual_drafts() {
     fs::write(fixture.host.home.join(".aaa"), "ordinary\n").unwrap();
     fs::write(fixture.host.home.join(".q?config"), "ordinary\n").unwrap();
     let mut app = onboarding_app(&fixture, false);
-    let task = key(&mut app, KeyCode::Char('f')).unwrap();
+    let task = key(&mut app, KeyCode::Char('F')).unwrap();
     run_task(&mut app, &fixture, task);
     key(&mut app, KeyCode::Char('/'));
     type_text(&mut app, "q?");
     key(&mut app, KeyCode::Esc);
     let selected = app.candidate_selected;
-    let task = key(&mut app, KeyCode::Char('r')).unwrap();
+    let task = key(&mut app, KeyCode::Char('R')).unwrap();
     run_task(&mut app, &fixture, task);
     assert_eq!(app.candidate_selected, selected);
     assert_eq!(app.visible_file_rows(), [selected]);
@@ -1375,7 +1375,7 @@ fn candidate_search_retains_raw_selection_and_does_not_change_manual_drafts() {
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Delete);
     assert_eq!(app.visible_file_rows().len(), 2);
-    key(&mut app, KeyCode::Char('o'));
+    key(&mut app, KeyCode::Char('O'));
     assert!(app.shell.adoption.target.ends_with(".q?config"));
     assert!(!fixture.host.state_dir.exists() && !fixture.host.config_dir.exists());
 }
@@ -1390,7 +1390,7 @@ fn failed_profile_union_leaves_prior_scope_and_invalid_inventory_is_not_empty_su
     .unwrap();
     let mut app = onboarding_app(&fixture, false);
     app.repository = Some(fixture.root.clone());
-    let task = key(&mut app, KeyCode::Char('t')).unwrap();
+    let task = key(&mut app, KeyCode::Char('T')).unwrap();
     run_task(&mut app, &fixture, task);
     key(&mut app, KeyCode::Down);
     key(&mut app, KeyCode::Char(' ')); // extra
@@ -1577,7 +1577,7 @@ fn diagnostics_share_doctor_metadata_and_keep_configuration_failure_content_free
     let text = super::tests::render(&app, 140, 45);
     assert!(text.contains("Diagnostics | Dort") && text.contains("Global write blockers: 0"));
     assert!(text.contains("Session file root:") && text.contains("Files inspects live state"));
-    let task = key(&mut app, KeyCode::Char('r')).unwrap();
+    let task = key(&mut app, KeyCode::Char('R')).unwrap();
     assert!(matches!(task, Task::Diagnostics));
     run_task(&mut app, &fixture, task);
     fs::create_dir_all(&fixture.host.config_dir).unwrap();
@@ -1695,7 +1695,7 @@ fn preview_read_retry_keeps_intent_but_reads_new_state_before_any_approval() {
     assert!(app.error.is_some());
     assert!(!super::tests::render(&app, 120, 35).contains("private-value-marker"));
     fs::write(fixture.root.join("dort.toml"), old).unwrap();
-    let task = key(&mut app, KeyCode::Char('r')).unwrap();
+    let task = key(&mut app, KeyCode::Char('R')).unwrap();
     assert!(matches!(task, Task::Files(Request::Apply)));
     run_task(&mut app, &fixture, task);
     assert!(app.preview.is_some() && app.confirmation.is_none());

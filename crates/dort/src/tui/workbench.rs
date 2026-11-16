@@ -200,6 +200,9 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
             }
         }
     }
+    for action in &mut result {
+        action.key = super::navigation::context_key(action.key);
+    }
     result
 }
 fn compact(label: &'static str) -> &'static str {
@@ -476,7 +479,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         app.navigation_block().is_some(),
         &app.hits,
     );
-    let mut body = areas.body;
+    let mut body = super::navigation::local(frame, areas.body, app);
     if app.write_warning && !app.busy {
         frame.render_widget(
             Paragraph::new(ui::design::badge(

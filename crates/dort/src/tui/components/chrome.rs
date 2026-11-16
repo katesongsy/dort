@@ -24,8 +24,8 @@ pub fn shell(
     hits: &Hits,
 ) -> Areas {
     let area = frame.area();
-    let places = " [Places] ";
-    let width = places.len() as u16;
+    let menu = " Ctrl-G Menu ";
+    let width = menu.len() as u16;
     let title_area = Rect::new(area.x, area.y, area.width.saturating_sub(width), 1);
     let suffix = if dry_run { " [DRY RUN]" } else { "" };
     let title = format!(
@@ -44,7 +44,7 @@ pub fn shell(
         1,
     );
     frame.render_widget(
-        Paragraph::new(places).style(if blocked { ui::muted() } else { ui::heading() }),
+        Paragraph::new(menu).style(if blocked { ui::muted() } else { ui::heading() }),
         control,
     );
     hits.click(
@@ -64,15 +64,11 @@ pub fn shell(
     );
     if area.width >= 100 {
         let rail = Rect::new(body.x, body.y, 16, body.height);
-        let choices = [
-            (Tab::Overview, "Overview"),
-            (Tab::Files, "Files"),
-            (Tab::Tools, "Tools"),
-            (Tab::Recovery, "Recovery"),
-            (Tab::Checks, "Checks"),
-            (Tab::Git, "Git"),
-        ];
-        for (index, (destination, label)) in choices.into_iter().enumerate() {
+        let choices = crate::tui::navigation::SECTION_ORDER
+            .into_iter()
+            .filter_map(crate::tui::navigation::section_tab);
+        for (index, destination) in choices.enumerate() {
+            let label = crate::tui::navigation::section_hint(destination);
             if index as u16 >= rail.height {
                 break;
             }

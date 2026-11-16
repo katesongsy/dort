@@ -27,7 +27,6 @@ fn menu_labels_have_unique_working_local_shortcuts_and_keep_guards() {
             let mut app = App::new(false);
             let blocked = matches!(entry.item, navigation::Item::Action(action) if app.action_reason(action).is_some());
             app.open_menu(group, 80);
-            key(&mut app, KeyCode::Enter, 80, 24);
             let _ = key(&mut app, code, 80, 24);
             assert!(app.preview.is_none() && app.confirmation.is_none());
             if code == KeyCode::F(1) {
@@ -42,22 +41,19 @@ fn menu_labels_have_unique_working_local_shortcuts_and_keep_guards() {
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let mut app = App::new(false);
         app.open_menu(4, w);
-        app.navigation.menu.as_mut().unwrap().expanded = true;
         assert!(matches!(
-            key(&mut app, KeyCode::Char('j'), w, h),
+            key(&mut app, KeyCode::Char('2'), w, h),
             Some(Task::Diagnostics)
         ));
         assert!(app.tab == Tab::Checks && app.showing_diagnostics);
         app.open_menu(2, w);
-        app.navigation.menu.as_mut().unwrap().expanded = true;
         assert!(matches!(
-            key(&mut app, KeyCode::Char('U'), w, h),
+            key(&mut app, KeyCode::Char('3'), w, h),
             Some(Task::IgnoredPaths)
         ));
         assert!(app.preview.is_none() && app.confirmation.is_none());
         app = App::new(true);
         app.open_menu(0, w);
-        app.navigation.menu.as_mut().unwrap().expanded = true;
         assert!(key(&mut app, KeyCode::Char('v'), w, h).is_none());
         assert!(app.dry_run && app.navigation.menu.is_some());
     }

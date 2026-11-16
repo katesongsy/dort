@@ -63,7 +63,7 @@ impl Fixture {
         assert!(app.complete(out).is_none());
     }
     fn review(&self, app: &mut App) {
-        let task = key(app, KeyCode::Char('r')).unwrap();
+        let task = key(app, KeyCode::Char('R')).unwrap();
         assert!(matches!(task, Task::ToolsPrepare(_)));
         self.run(app, task);
     }
@@ -112,7 +112,7 @@ fn selected_inventory_opens_separate_retained_manifest_only_draft() {
     key(&mut app, KeyCode::Char('a'));
     assert_eq!(app.tools_view.declaration.fields[0], "manual-draft");
     key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Char('t'));
+    key(&mut app, KeyCode::Char('T'));
     assert_eq!(app.tools_view.declaration.fields[0], "rg");
     assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
     key(&mut app, KeyCode::Esc);
@@ -283,7 +283,7 @@ fn resize_preview_only_and_scope_changes_cannot_reuse_inspection_confirmation() 
     let f = Fixture::new("exit 99");
     let mut app = f.app(false);
     f.review(&mut app);
-    type_text(&mut app, "inspect");
+    type_text(&mut app, "yes");
     app.resize(47, 13);
     assert!(app.tools_view.preview.is_none() || app.dry_run);
     assert!(
@@ -300,7 +300,7 @@ fn resize_preview_only_and_scope_changes_cannot_reuse_inspection_confirmation() 
     assert!(!f.home.join("calls").exists());
     let mut app = f.app(true);
     f.review(&mut app);
-    type_text(&mut app, "inspect");
+    type_text(&mut app, "yes");
     assert!(app.tools_view.preview.is_none() || app.dry_run);
     assert!(key(&mut app, KeyCode::Enter).is_none());
     render(&app, 48, 14);
@@ -316,7 +316,7 @@ fn resize_preview_only_and_scope_changes_cannot_reuse_inspection_confirmation() 
 fn preparation_finishing_after_navigation_discards_preview_and_approval() {
     let f = Fixture::new("exit 99");
     let mut app = f.app(false);
-    let task = key(&mut app, KeyCode::Char('r')).unwrap();
+    let task = key(&mut app, KeyCode::Char('R')).unwrap();
     app.start(false);
     key(&mut app, KeyCode::Left);
     assert!(app.tab == Tab::Tools && app.interaction_notice.is_some());
@@ -333,7 +333,7 @@ fn unavailable_is_not_empty_and_never_displays_raw_provider_payload() {
     let f = Fixture::new("printf PRIVATE; printf PRIVATE >&2; exit 7");
     let mut app = f.app(false);
     f.review(&mut app);
-    type_text(&mut app, "inspect");
+    type_text(&mut app, "yes");
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.run(&mut app, task);
     let text = render(&app, 80, 24);
@@ -377,7 +377,7 @@ fn npm_form_exposes_full_explicit_binding_without_repository_or_launcher_discove
             && app.tools_view.scope.contains("runtime_tool")
     );
     assert!(!f.home.join("calls").exists());
-    type_text(&mut app, "inspect");
+    type_text(&mut app, "yes");
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.run(&mut app, task);
     assert_eq!(
@@ -401,7 +401,7 @@ fn healthy_empty_observation_is_distinct_and_approved_query_is_not_a_write_recei
     let f = Fixture::new(r#"printf '{"formulae":[]}'"#);
     let mut app = f.app(false);
     f.review(&mut app);
-    type_text(&mut app, "inspect");
+    type_text(&mut app, "yes");
     let task = key(&mut app, KeyCode::Enter).unwrap();
     let activity = super::task_surfaces::Activity::for_task(&task, &app);
     assert!(activity.provider_inspection);
@@ -459,7 +459,7 @@ fn compact_wide_forms_keep_focus_and_caret_visible_and_results_have_semantic_sel
     app.tools_view.query = 0;
     app.tools_view.configuring = false;
     f.review(&mut app);
-    type_text(&mut app, "inspect");
+    type_text(&mut app, "yes");
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.run(&mut app, task);
     let mut terminal = Terminal::new(TestBackend::new(48, 14)).unwrap();
@@ -538,7 +538,7 @@ fn detected_collection_is_process_free_until_one_selected_confirmation() {
     assert!(super::hints::keys(&app).contains(&("Enter", "Back")));
     assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
     assert!(matches!(
-        key(&mut app, KeyCode::Char('r')),
+        key(&mut app, KeyCode::Char('R')),
         Some(Task::ToolsDetect(_))
     ));
     assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");

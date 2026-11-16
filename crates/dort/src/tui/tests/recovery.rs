@@ -171,7 +171,7 @@ fn unavailable_history_is_not_empty_or_an_actionable_stale_selection() {
     assert!(!text.contains("No retained transactions"));
     assert!(key(&mut app, KeyCode::Char('b')).is_none());
     assert!(matches!(
-        key(&mut app, KeyCode::Char('r')),
+        key(&mut app, KeyCode::Char('R')),
         Some(Task::History)
     ));
     app.complete(Ok(Output::History {
@@ -230,7 +230,7 @@ fn error_retry_never_retains_approval_and_failed_writes_offer_read_only_recovery
     app.retry = Task::Files(dort_core::planner::Request::Apply).retry_intent();
     app.complete(Err("stale preview read".into()));
     assert!(matches!(
-        key(&mut app, KeyCode::Char('r')),
+        key(&mut app, KeyCode::Char('R')),
         Some(Task::Files(_))
     ));
     assert!(app.preview.is_none() && app.confirmation.is_none());
@@ -239,7 +239,7 @@ fn error_retry_never_retains_approval_and_failed_writes_offer_read_only_recovery
     app.complete(Err("held writer lock".into()));
     assert!(app.retry.is_none());
     assert!(matches!(
-        key(&mut app, KeyCode::Char('r')),
+        key(&mut app, KeyCode::Char('R')),
         Some(Task::Refresh)
     ));
     app.start(true);
@@ -255,10 +255,10 @@ fn error_retry_never_retains_approval_and_failed_writes_offer_read_only_recovery
     assert!(app.retry.is_none());
     app.tab = Tab::Git;
     app.repository = Some(std::path::PathBuf::from("/missing-git-root"));
-    key(&mut app, KeyCode::Char('r'));
+    key(&mut app, KeyCode::Char('R'));
     assert!(app.error.is_some());
     assert!(
-        key(&mut app, KeyCode::Char('r')).is_none(),
+        key(&mut app, KeyCode::Char('R')).is_none(),
         "missing Git must not retry an unrelated file intent"
     );
     key(&mut app, KeyCode::Esc);

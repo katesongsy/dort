@@ -274,7 +274,7 @@ fn item_form_mouse_done_never_reviews_an_individual_item() {
 fn tree_folds_marks_hidden_items_and_batch_editor_retains_real_fields_at_floor() {
     let f = Fixture::new(false);
     let mut app = f.app(false);
-    let task = key(&mut app, KeyCode::Char('f')).unwrap();
+    let task = key(&mut app, KeyCode::Char('F')).unwrap();
     f.run(&mut app, task);
     select(&mut app, "only-a");
     assert!(key(&mut app, KeyCode::Char(' ')).is_none());
@@ -371,7 +371,7 @@ fn same_named_files_adopt_into_preserved_subtrees_without_moving_existing_mappin
         fs::write(path.join("init.lua"), "ordinary nested settings\n").unwrap();
     }
     let mut app = f.app(false);
-    let task = key(&mut app, KeyCode::Char('f')).unwrap();
+    let task = key(&mut app, KeyCode::Char('F')).unwrap();
     f.run(&mut app, task);
     key(&mut app, KeyCode::Char('/'));
     text(&mut app, "init.lua");
@@ -572,7 +572,7 @@ fn unavailable_inventory_preserves_marks_until_a_healthy_full_refresh() {
 fn mouse_tree_controls_use_rendered_geometry_and_never_open_previews_or_approve() {
     let f = Fixture::new(false);
     let mut app = f.app(false);
-    let task = key(&mut app, KeyCode::Char('f')).unwrap();
+    let task = key(&mut app, KeyCode::Char('F')).unwrap();
     f.run(&mut app, task);
     select(&mut app, "only-a");
     assert!(click(&mut app, "[ ]", 1).is_none());

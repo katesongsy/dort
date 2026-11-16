@@ -74,7 +74,7 @@ fn all_provider_failures_keep_presence_separate_and_fresh_entry_is_navigation_on
         key(&mut app, KeyCode::Char('d'));
         assert!(key(&mut app, KeyCode::Enter).is_none());
         assert_eq!(calls, f.calls());
-        let task = key(&mut app, KeyCode::Char('f')).unwrap();
+        let task = key(&mut app, KeyCode::Char('F')).unwrap();
         assert!(matches!(task, Task::ToolsDetect(_)));
         assert!(!app.tools_view.install_open);
         assert!(app.tools_view.setup && app.tools_view.fresh_review);
@@ -139,13 +139,13 @@ fn fresh_review_advanced_preserves_explicitly_empty_inventory_drafts() {
     app.tools_view.install_open = true;
     app.tools_view.installation.mode = Mode::Result;
     let calls = f.calls();
-    let task = key(&mut app, KeyCode::Char('f')).unwrap();
+    let task = key(&mut app, KeyCode::Char('F')).unwrap();
     f.run(&mut app, isolated_detect(task, &f));
     app.tools_view.default_focus = 2;
     app.tools_view.select_advanced();
     assert!(app.tools_view.fields.iter().all(String::is_empty));
     assert!(app.tools_view.configuring);
-    assert!(key(&mut app, KeyCode::Char('f')).is_none());
+    assert!(key(&mut app, KeyCode::Char('F')).is_none());
     assert!(app.tools_view.configuring);
     assert_eq!(calls, f.calls());
 }
@@ -156,7 +156,7 @@ fn fresh_query_still_needs_approval_new_binding_and_new_install_review() {
     failed_result(&f, &mut app, PackageState::Absent, ProcessOutcome::Success);
     let old = serde_json::to_string(&app.tools_view.snapshots).unwrap();
     let calls = f.calls();
-    let task = key(&mut app, KeyCode::Char('f')).unwrap();
+    let task = key(&mut app, KeyCode::Char('F')).unwrap();
     f.run(&mut app, isolated_detect(task, &f));
     assert_eq!(calls, f.calls());
     assert_eq!(
@@ -251,7 +251,7 @@ fn unresolved_and_closed_attempt_details_never_offer_replay_or_implied_success()
     let calls = f.calls();
     let before = fs::read_dir(&root).unwrap().count();
     key(&mut app, KeyCode::Char('d'));
-    let task = key(&mut app, KeyCode::Char('f')).unwrap();
+    let task = key(&mut app, KeyCode::Char('F')).unwrap();
     f.run(&mut app, isolated_detect(task, &f));
     assert_eq!(calls, f.calls());
     assert_eq!(before, fs::read_dir(&root).unwrap().count());
@@ -285,7 +285,7 @@ fn unresolved_and_closed_attempt_details_never_offer_replay_or_implied_success()
     assert!(install::diagnose(&f.host).unwrap()[0].unresolved);
     let task = key(&mut app, KeyCode::Char('i')).unwrap();
     f.run(&mut app, task);
-    key(&mut app, KeyCode::Char('c')); // damaged scope form
+    key(&mut app, KeyCode::Char('C')); // damaged scope form
     app.tools_view.installation.fields[0] = f.executable.display().to_string();
     app.tools_view.installation.fields[1] = f.bin.display().to_string();
     app.tools_view.installation.focus = 2;
@@ -316,7 +316,7 @@ fn fresh_entry_is_safe_in_preview_only_small_and_late_result_states() {
         ProcessOutcome::Success,
     );
     let calls = f.calls();
-    let task = key(&mut app, KeyCode::Char('f')).unwrap();
+    let task = key(&mut app, KeyCode::Char('F')).unwrap();
     f.run(&mut app, isolated_detect(task, &f));
     assert!(key(&mut app, KeyCode::Enter).is_none());
     assert_eq!(calls, f.calls());
@@ -327,7 +327,7 @@ fn fresh_entry_is_safe_in_preview_only_small_and_late_result_states() {
         PackageState::Conflict,
         ProcessOutcome::Success,
     );
-    let task = key(&mut app, KeyCode::Char('f')).unwrap();
+    let task = key(&mut app, KeyCode::Char('F')).unwrap();
     key(&mut app, KeyCode::Esc);
     f.run(&mut app, isolated_detect(task, &f));
     assert!(app.tools_view.installation.preview.is_none());

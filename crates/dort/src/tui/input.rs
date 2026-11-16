@@ -23,6 +23,8 @@ pub enum Target {
     Destination(super::app::Tab),
     MenuGroup(usize),
     MenuItem(usize),
+    MenuDestination(usize, usize),
+    LocalDestination(usize, usize),
     Row(usize),
     Filter,
     FormControl(usize, bool),
@@ -96,7 +98,8 @@ impl Hits {
         self.regions.borrow_mut().clear();
         self.actions.borrow_mut().clear();
     }
-    pub fn present(&self, action: super::components::ActionButton) {
+    pub fn present(&self, mut action: super::components::ActionButton) {
+        action.key = super::navigation::context_key(action.key);
         if !self
             .actions
             .borrow()

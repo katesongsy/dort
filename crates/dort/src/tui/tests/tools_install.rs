@@ -353,7 +353,7 @@ fn malformed_attempt_has_retained_fallback_form_and_one_fresh_closure_activation
     let task = app.tools_view.open_attempts();
     f.run(&mut app, task);
     assert!(render(&app, 48, 14).contains("UNRESOLVED"));
-    assert!(key(&mut app, KeyCode::Char('c')).is_none());
+    assert!(key(&mut app, KeyCode::Char('C')).is_none());
     assert!(app.tools_view.installation.mode == Mode::CloseInputs);
     assert_eq!(
         app.tools_view.installation.fields[0],
@@ -407,7 +407,7 @@ fn recomputing_with_old_snapshots_cannot_skip_explicit_fresh_inventory_after_ins
     assert!(key(&mut app, KeyCode::Char('i')).is_none());
     assert_eq!(f.calls(), "QQIQ");
     assert!(matches!(
-        key(&mut app, KeyCode::Char('c')),
+        key(&mut app, KeyCode::Char('C')),
         Some(Task::ToolsDetect(_))
     ));
     assert_eq!(f.calls(), "QQIQ");
@@ -428,7 +428,7 @@ fn stale_approval_returns_owned_failure_without_replay_or_file_recovery_receipt(
     assert!(app.tools_view.installation.error.is_some());
     assert!(app.error.is_none() && app.receipt.is_none());
     assert!(app.tools_view.installation.preview.is_none());
-    assert!(key(&mut app, KeyCode::Char('r')).is_none());
+    assert!(key(&mut app, KeyCode::Char('R')).is_none());
     assert!(app.tools_view.reconciliation.result.is_none());
 }
 
@@ -513,7 +513,7 @@ fn damaged_npm_closure_has_retained_provider_drafts_and_compact_focus_caret() {
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
     let task = app.tools_view.open_attempts();
     f.run(&mut app, task);
-    key(&mut app, KeyCode::Char('c'));
+    key(&mut app, KeyCode::Char('C'));
     assert!(app.tools_view.installation.mode == Mode::CloseInputs);
     // Existing mise metadata is the initial fallback; switch deliberately to npm.
     super::tests::cycle_closure_provider(&mut app);
@@ -589,7 +589,7 @@ fn unavailable_attempt_storage_is_not_a_healthy_empty_list() {
     assert!(!screen.contains("No installation attempts"));
     assert!(super::tests::has_action(&app, "Start fresh review"));
     assert!(matches!(
-        key(&mut app, KeyCode::Char('f')),
+        key(&mut app, KeyCode::Char('F')),
         Some(Task::ToolsDetect(_))
     ));
     assert_eq!(f.calls(), "Q");

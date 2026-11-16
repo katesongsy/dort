@@ -7,6 +7,7 @@ pub mod glyphs;
 pub mod help;
 pub mod menu;
 pub mod motion;
+pub mod navigation;
 pub(in crate::tui) mod surface;
 
 pub fn short_field(label: &str, value: &str, width: u16) -> String {

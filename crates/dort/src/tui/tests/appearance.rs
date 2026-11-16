@@ -172,7 +172,7 @@ fn compatible_cells_preserve_geometry_raw_mouse_identity_and_textual_states() {
 fn compatible_forms_keep_caret_tab_and_mouse_controls_at_all_sizes() {
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let mut app = App::new(false);
-        key(&mut app, KeyCode::Char('o'), w, h);
+        key(&mut app, KeyCode::Char('O'), w, h);
         for c in "~/.editor".chars() {
             key(&mut app, KeyCode::Char(c), w, h);
         }
@@ -233,7 +233,7 @@ fn every_destination_and_common_overlays_use_supported_ascii_decoration() {
             check_cells(&draw(&app, w, h), true, true);
             key(&mut app, KeyCode::Esc, w, h);
         }
-        for shortcut in [' ', 'p', 'n', 'v', 't'] {
+        for shortcut in [' ', 'p', 'n', 'v', 'T'] {
             key(&mut app, KeyCode::Char(shortcut), w, h);
             check_cells(&draw(&app, w, h), true, true);
             key(&mut app, KeyCode::Esc, w, h);
