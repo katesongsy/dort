@@ -15,6 +15,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tui:** improve navigation and menu interactions ([4d6a4b0](https://github.com/katesongsy/dort/commit/4d6a4b073cf7b155a49ce266927f1f9c27fa94d7))
+
 - **tui:** refine navigation and seed tool declarations from inventory ([7f01069](https://github.com/katesongsy/dort/commit/7f010691a5286605e686c7e1f566e8a37638e902))
 
 - **tui:** migrate workbench to calm navigation ([578a7ca](https://github.com/katesongsy/dort/commit/578a7ca95a781c893d040fce081fc6191b04f501))
