@@ -22,7 +22,7 @@ fn child_lock_probe() {
         home.into(),
         None,
         None,
-        Platform::Ubuntu,
+        Platform::Linux,
         Architecture::X86_64,
     )
     .unwrap();

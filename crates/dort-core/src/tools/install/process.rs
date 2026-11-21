@@ -12,8 +12,8 @@ use std::{
 };
 
 pub(super) fn run(scope: &Scope, timeout: Duration) -> ProcessOutcome {
-    // Privileged supervisors must never enter this user-SIGKILL-group runner.
-    if scope.apt.is_some() {
+    // Only explicitly bound provider scopes can launch an installer.
+    if scope.brew.is_none() && scope.npm.is_none() {
         return ProcessOutcome::Unavailable;
     }
     let mut command = Command::new(&scope.executable);
@@ -39,13 +39,6 @@ pub(super) fn run(scope: &Scope, timeout: Duration) -> ProcessOutcome {
         .process_group(0);
     if scope.brew.is_some() {
         super::brew::environment(&mut command);
-    } else if scope.npm.is_none() {
-        command
-            .env("MISE_NO_CONFIG", "1")
-            .env("MISE_NO_ENV", "1")
-            .env("MISE_NO_HOOKS", "1")
-            .env("MISE_YES", "1")
-            .env("MISE_AUTO_INSTALL", "0");
     }
     let mut child = match command.spawn() {
         Ok(c) => c,

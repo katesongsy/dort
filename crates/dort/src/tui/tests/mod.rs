@@ -121,7 +121,6 @@ pub(super) fn more_target(
         item.action.target,
         super::input::Target::ConfirmAction
             | super::input::Target::Continue
-            | super::input::Target::ProviderConfirm
             | super::input::Target::PatchConfirm
             | super::input::Target::ToolInstallControl(_, true)
     )));
@@ -175,33 +174,6 @@ pub(super) fn assert_primary_action(terminal: &Terminal<TestBackend>) {
         "Missing explicit primary action role"
     );
 }
-pub(super) fn cycle_closure_provider(app: &mut App) {
-    let previous = app.tools_view.installation.closure_provider();
-    assert!(app.key(key(KeyCode::F(4)), 80, 24).is_none());
-    assert!(app.choice.is_some());
-    assert!(
-        app.key(
-            key(if previous == 3 {
-                KeyCode::Home
-            } else {
-                KeyCode::Down
-            }),
-            80,
-            24
-        )
-        .is_none()
-    );
-    assert!(app.key(key(KeyCode::Enter), 80, 24).is_none());
-    assert!(app.choice.is_none());
-    assert_eq!(
-        app.tools_view.installation.closure_provider(),
-        (previous + 1) % 4
-    );
-    assert!(
-        app.tools_view.installation.preview.is_none()
-            && app.tools_view.installation.close_preview.is_none()
-    );
-}
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
@@ -212,6 +184,21 @@ pub(super) fn destination(app: &mut App, tab: super::app::Tab, width: u16, heigh
         width,
         height,
     );
+}
+pub(super) fn focus_form(app: &mut App) {
+    if app.form_page().is_some() && !app.form_has_focus() {
+        assert!(
+            app.key(
+                ratatui::crossterm::event::KeyEvent::new(
+                    ratatui::crossterm::event::KeyCode::Tab,
+                    ratatui::crossterm::event::KeyModifiers::NONE
+                ),
+                80,
+                24
+            )
+            .is_none()
+        );
+    }
 }
 pub(super) fn render(app: &App, width: u16, height: u16) -> String {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
@@ -236,6 +223,7 @@ fn compact_forms_and_profile_picker_always_show_focused_control() {
     use super::shell::{Form, Overlay};
     let mut app = App::new(false);
     app.shell.overlay = Some(Overlay::Form(Form::Adopt));
+    super::tests::focus_form(&mut app);
     let prefixes = ["TARGET", "ID", "SOURCE"]; // Only fields participate in traversal.
     for (i, prefix) in prefixes.iter().enumerate() {
         app.shell.adoption.focused = i;
@@ -252,6 +240,7 @@ fn compact_forms_and_profile_picker_always_show_focused_control() {
     let screen = render(&app, 48, 14);
     assert!(screen.contains("..."));
     app.shell.overlay = Some(Overlay::Form(Form::Check));
+    super::tests::focus_form(&mut app);
     for _ in 0..8 {
         app.key(key(KeyCode::Tab), 48, 14);
         assert_eq!(app.shell.manifest_focused, 0);
@@ -264,6 +253,7 @@ fn compact_forms_and_profile_picker_always_show_focused_control() {
         );
     }
     app.shell.overlay = Some(Overlay::Form(Form::RemoveId));
+    super::tests::focus_form(&mut app);
     app.shell.unmanage_focused = 0;
     assert!(render(&app, 48, 14).contains("Exact ID"));
     assert!(render(&app, 48, 14).contains("Review"));
@@ -364,7 +354,8 @@ fn long_lists_keep_selection_visible_through_resize_and_form_back() {
     app.resize(48, 14);
     assert_eq!(app.shell.adoption.target, "q?/".repeat(100));
     assert!(matches!(app.shell.overlay, Some(Overlay::Form(_))));
-    app.key(key(KeyCode::Esc), 48, 14);
+    app.key(key(KeyCode::Esc), 48, 14); // stop editing
+    app.key(key(KeyCode::Esc), 48, 14); // return to list
     assert!(render(&app, 48, 14).contains("› [ ] file-120"));
 }
 
@@ -390,6 +381,8 @@ fn quit_during_work_waits_for_completion() {
 fn navigation_and_metadata_escaping() {
     let mut app = App::new(true);
     app.complete(Ok(Output::Data(Data {
+        tools: None,
+        tools_source: None,
         overview: None,
         managed: vec![],
         files_error: Some("no repository\n\u{1b}[31m\u{202e}".into()),
@@ -450,6 +443,7 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     assert!(matches!(&app.shell.overlay, Some(Overlay::Actions { query, .. }) if query.is_empty()));
     app.key(key(KeyCode::Esc), 80, 24);
     app.key(key(KeyCode::Char('n')), 80, 24);
+    focus_form(&mut app);
     for c in "q?/".chars() {
         app.key(key(KeyCode::Char(c)), 80, 24);
     }
@@ -498,6 +492,8 @@ fn busy_shell_cannot_change_scope_or_toggle_mode_or_start_another_job() {
 #[test]
 fn refresh_preserves_selected_identity_and_clamps_if_it_disappears() {
     let data = |ids: &[&str]| Data {
+        tools: None,
+        tools_source: None,
         overview: None,
         managed: vec![],
         files_error: None,
@@ -539,6 +535,8 @@ fn completion_keeps_noop_result_visible_through_refresh_and_read_failure() {
     );
     app.start(false);
     app.complete(Ok(Output::Data(Data {
+        tools: None,
+        tools_source: None,
         overview: None,
         managed: vec![],
         files_error: None,

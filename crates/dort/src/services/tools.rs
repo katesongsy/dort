@@ -27,6 +27,8 @@ pub struct Approval {
 pub struct Review<'a> {
     pub manifest: Option<&'a Path>,
     pub provider: &'a inspection::Description,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefix_probe: Option<&'a inspection::Description>,
 }
 #[derive(Serialize)]
 pub struct Report {
@@ -118,10 +120,24 @@ impl Request {
     }
 }
 impl Preview {
+    /// Standalone npm inventory never needs a manifest or a fabricated runtime ID.
+    pub fn npm_inventory(
+        host: &HostContext,
+        executable: PathBuf,
+        search_dirs: Vec<PathBuf>,
+    ) -> Result<Self> {
+        Ok(Self {
+            core: inspection::Preview::npm_inventory(executable, host.home.clone(), search_dirs)
+                .map_err(|e| invalid(&e.to_string()))?,
+            manifest: None,
+            source: None,
+        })
+    }
     pub fn review(&self) -> Review<'_> {
         Review {
             manifest: self.manifest.as_deref(),
             provider: self.core.description(),
+            prefix_probe: self.core.prefix_probe(),
         }
     }
     pub fn approve(self) -> Approval {

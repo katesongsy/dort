@@ -129,7 +129,7 @@ fn workflow_gallery(kind: &str, width: u16, height: u16, ascii: bool, mono: bool
                 ), 0, false);
             }
             "Choices" => ui::choice::draw(frame, &hits, ui::choice::View {
-                title: "Choose snapshot", rows: &[("s1 / mise", "available"), ("s2 / npm", "unavailable")],
+                title: "Choose provider", rows: &[("Homebrew", "available"), ("npm", "unavailable")],
                 selected: 1, details: false, scroll: 0, feedback: None,
             }),
             "More" => ui::menu::draw(frame, "More", &[
@@ -211,8 +211,7 @@ fn compact_shell_keeps_dry_run_and_tools_help_visible() {
     let lines: Vec<_> = rendered.lines().collect();
     assert!(lines[0].contains("[DRY RUN]"));
     assert!(lines.last().unwrap().contains("F1 Help"));
-    app.tools_view.configuring = true;
-    app.tools_view.config_details = true;
+    app.tools_view.settings_open = true;
     let rendered = super::tests::render(&app, 48, 14);
     assert!(rendered.lines().next().unwrap().contains("[DRY RUN]"));
 }
@@ -434,7 +433,7 @@ fn css(color: Color, background: bool) -> String {
         Color::Indexed(_) => "#a9b6c7".into(),
     }
 }
-fn html(buffer: &Buffer) -> String {
+pub(super) fn html(buffer: &Buffer) -> String {
     let mut output = String::from("<pre>");
     for row in buffer.content.chunks(buffer.area.width as usize) {
         for cell in row {

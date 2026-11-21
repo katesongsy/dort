@@ -8,14 +8,19 @@ use std::{
 fn fixture(body: &str) -> (tempfile::TempDir, Scope) {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().canonicalize().unwrap();
-    let executable = home.join("fake-mise");
+    let executable = home.join("fake-brew");
     fs::write(&executable, format!("#!/bin/sh\n{body}\n")).unwrap();
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
     let scope = Scope {
         npm: None,
-        brew: None,
-        apt: None,
-        platform: crate::platform::Platform::Ubuntu,
+        brew: Some(super::super::brew::Scope {
+            prefix: home.clone(),
+            repository: home.clone(),
+            cellar: home.join("Cellar"),
+            policy: crate::tools::VersionPolicy::ProviderDefault {},
+            catalogs: vec![],
+        }),
+        platform: crate::platform::Platform::Linux,
         architecture: crate::platform::Architecture::X86_64,
         repository: home.clone(),
         repository_id: "a".repeat(64),

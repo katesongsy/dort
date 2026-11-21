@@ -662,7 +662,7 @@ fn bootstrap_crash_helper() {
         root.join("home"),
         None,
         None,
-        dort_core::platform::Platform::Ubuntu,
+        dort_core::platform::Platform::Linux,
         dort_core::platform::Architecture::X86_64,
     )
     .unwrap();

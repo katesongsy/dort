@@ -17,7 +17,7 @@ impl Fixture {
         let home = root.join("home");
         fs::create_dir(&home).unwrap();
         let host =
-            HostContext::new(home, None, None, Platform::Ubuntu, Architecture::X86_64).unwrap();
+            HostContext::new(home, None, None, Platform::Linux, Architecture::X86_64).unwrap();
         Self {
             _temp: temp,
             root,
@@ -38,12 +38,67 @@ impl Fixture {
     }
 }
 #[test]
+fn named_tool_settings_are_process_free_and_reject_conflicts_or_internal_inputs() {
+    let f = Fixture::new();
+    let first = f.program("bin/brew");
+    let second = f.program("other/brew");
+    let manifest=f.manifest("[[tools]]\nid='a'\nbinary='a'\n[tools.install]\nprovider='brew'\npackage='a'\n[[tools]]\nid='b'\nbinary='b'\n[tools.install]\nprovider='brew'\npackage='b'\n");
+    let input = Inputs {
+        search_dirs: vec![f.root.join("bin")],
+        ..Default::default()
+    };
+    let chosen = input
+        .clone()
+        .with_settings(
+            &f.host,
+            &manifest,
+            &[format!("a={}", second.display())],
+            &[],
+            &[],
+        )
+        .unwrap();
+    assert_eq!(chosen.overrides.len(), 1);
+    assert_eq!(chosen.overrides[0].executable, second);
+    for values in [
+        vec!["a=relative".into()],
+        vec!["PRIVATE_BAD_INPUT".into()],
+        vec![
+            format!("a={}", first.display()),
+            format!("a={}", first.display()),
+        ],
+        vec![
+            format!("a={}", first.display()),
+            format!("b={}", second.display()),
+        ],
+    ] {
+        let error = input
+            .clone()
+            .with_settings(&f.host, &manifest, &values, &[], &[])
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(!error.contains("PRIVATE_BAD_INPUT"));
+    }
+    assert!(
+        input
+            .with_settings(
+                &f.host,
+                &manifest,
+                &[],
+                &[format!("a={}", first.display())],
+                &[]
+            )
+            .is_err()
+    );
+    assert!(!f.host.home.join("calls").exists());
+}
+#[test]
 fn only_absolute_executable_metadata_and_path_precedence_are_used() {
     let f = Fixture::new();
     let first = f.program("first/brew");
     f.program("second/brew");
-    f.program("first/mise");
-    fs::write(f.root.join("first/dpkg-query"), "not executable").unwrap();
+    f.program("first/node");
+    fs::write(f.root.join("first/npm"), "not executable").unwrap();
     let defaults = Inputs {
         search_dirs: vec![
             PathBuf::new(),
@@ -55,7 +110,7 @@ fn only_absolute_executable_metadata_and_path_precedence_are_used() {
         ..Default::default()
     }
     .detect(&f.host, None);
-    assert_eq!(defaults.choices.len(), 4);
+    assert_eq!(defaults.choices.len(), 2);
     assert_eq!(
         defaults.choices[0].request.as_ref().unwrap().executable,
         first
@@ -69,8 +124,16 @@ fn only_absolute_executable_metadata_and_path_precedence_are_used() {
             .len(),
         2
     );
-    assert!(defaults.choices[0].selected && defaults.choices[2].selected);
-    assert!(!defaults.choices[1].selected && !defaults.choices[3].selected);
+    let ready = |i: usize| {
+        defaults.choices[i]
+            .request
+            .clone()
+            .unwrap()
+            .prepare(&f.host)
+            .is_ok()
+    };
+    assert!(ready(0));
+    assert!(!ready(1));
     assert!(!f.host.home.join("calls").exists());
 }
 #[test]
@@ -85,11 +148,18 @@ fn npm_needs_a_unique_declared_runtime_and_complete_colocated_layout() {
         ],
         ..Default::default()
     };
-    let manifest = f.manifest("[[tools]]\nid='node-runtime'\nbinary='node'\n[tools.install.ubuntu]\nprovider='mise'\npackage='node'\n");
+    let manifest = f.manifest("[[tools]]\nid='node-runtime'\nbinary='node'\n[tools.install]\nprovider='brew'\npackage='node'\n");
     let incomplete = inputs.clone().detect(&f.host, Some(manifest.clone()));
-    assert!(!incomplete.choices[3].selected);
+    assert!(
+        incomplete.choices[1]
+            .request
+            .clone()
+            .unwrap()
+            .prepare(&f.host)
+            .is_err()
+    );
     assert_eq!(
-        incomplete.choices[3]
+        incomplete.choices[1]
             .request
             .as_ref()
             .unwrap()
@@ -101,14 +171,35 @@ fn npm_needs_a_unique_declared_runtime_and_complete_colocated_layout() {
     fs::create_dir_all(cli.parent().unwrap()).unwrap();
     fs::write(&cli, "DO NOT EXECUTE").unwrap();
     let complete = inputs.clone().detect(&f.host, Some(manifest));
-    let request = complete.choices[3].request.as_ref().unwrap();
+    let request = complete.choices[1].request.as_ref().unwrap();
     assert_eq!(request.prefix.as_ref().unwrap(), &f.root.join("runtime"));
     assert_eq!(request.npm_cli.as_ref().unwrap(), &cli);
-    assert!(complete.choices[3].preview.is_some() && complete.choices[3].selected);
+    assert!(
+        complete.choices[1]
+            .request
+            .clone()
+            .unwrap()
+            .prepare(&f.host)
+            .is_ok()
+    );
     let ambiguous =
-        f.manifest("[[tools]]\nid='one'\nbinary='node'\n[tools.install.ubuntu]\nprovider='mise'\npackage='node'\n[[tools]]\nid='two'\nbinary='node'\n[tools.install.ubuntu]\nprovider='mise'\npackage='node'\n");
-    assert!(!inputs.clone().detect(&f.host, Some(ambiguous)).choices[3].selected);
-    assert!(!inputs.detect(&f.host, None).choices[3].selected);
+        f.manifest("[[tools]]\nid='one'\nbinary='node'\n[tools.install]\nprovider='brew'\npackage='node'\n[[tools]]\nid='two'\nbinary='node'\n[tools.install]\nprovider='brew'\npackage='node'\n");
+    assert!(
+        inputs.clone().detect(&f.host, Some(ambiguous)).choices[1]
+            .request
+            .clone()
+            .unwrap()
+            .prepare(&f.host)
+            .is_err()
+    );
+    assert!(
+        inputs.detect(&f.host, None).choices[1]
+            .request
+            .clone()
+            .unwrap()
+            .prepare(&f.host)
+            .is_err()
+    );
     assert!(!f.host.home.join("calls").exists());
 }
 
@@ -135,8 +226,10 @@ fn retained_overrides_are_prepared_without_running_or_silently_replaced() {
     .detect(&f.host, None);
     assert_eq!(
         defaults.choices[0]
-            .preview
-            .as_ref()
+            .request
+            .clone()
+            .unwrap()
+            .prepare(&f.host)
             .unwrap()
             .review()
             .provider

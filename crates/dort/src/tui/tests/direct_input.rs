@@ -15,7 +15,7 @@ fn press(app: &mut App, code: KeyCode, size: (u16, u16)) {
     assert!(
         matches!(
             app.key(KeyEvent::new(code, KeyModifiers::NONE), size.0, size.1),
-            None | Some(super::actions::Task::ToolsDetect(_))
+            None | Some(super::actions::Task::ToolsSettingsDetect { .. })
         ),
         "metadata browsing may detect defaults, never execute a provider"
     );
@@ -325,7 +325,8 @@ fn mouse_form_controls_and_palette_actions_never_bypass_typed_approval_or_disclo
     press(&mut app, KeyCode::Tab, size);
     assert_eq!(app.shell.adoption.focused, 2);
     assert_eq!(app.shell.adoption.id, "q");
-    press(&mut app, KeyCode::Esc, size);
+    press(&mut app, KeyCode::Esc, size); // stop editing
+    press(&mut app, KeyCode::Esc, size); // leave form
     press(&mut app, KeyCode::Char(';'), size);
     for c in "delete managed link".chars() {
         press(&mut app, KeyCode::Char(c), size);

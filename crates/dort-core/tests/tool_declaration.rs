@@ -17,9 +17,9 @@ use std::{
     path::PathBuf,
     process::Command,
 };
-const ORIGINAL: &str = "# PRIVATE_MANIFEST_COMMENT\nschema = 1 # keep formatting\n\n[[files]]\nid='keep'\nsource='keep'\ntarget='~/.keep'\nmode='link'\n[files.overrides]\nubuntu='keep-ubuntu'\n";
+const ORIGINAL: &str = "# PRIVATE_MANIFEST_COMMENT\nschema = 1 # keep formatting\n\n[[files]]\nid='keep'\nsource='keep'\ntarget='~/.keep'\nmode='link'\n[files.overrides]\nlinux='keep-linux'\n";
 fn tool() -> Tool {
-    Manifest::parse("schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install.macos]\nprovider='brew'\npackage='demo'\n[tools.install.ubuntu]\nprovider='apt'\npackage='demo'\n").unwrap().tools.remove(0)
+    Manifest::parse("schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nprovider='brew'\npackage='demo'\n").unwrap().tools.remove(0)
 }
 struct Fixture {
     home: support::TestHome,
@@ -33,7 +33,7 @@ impl Fixture {
         let repo = home.repository("repo");
         fs::write(repo.join("dort.toml"), ORIGINAL).unwrap();
         fs::write(repo.join("keep"), "untouched source").unwrap();
-        fs::write(repo.join("keep-ubuntu"), "untouched override").unwrap();
+        fs::write(repo.join("keep-linux"), "untouched override").unwrap();
         fs::write(home.host.home.join(".keep"), "untouched live file").unwrap();
         let lock = WriterLock::acquire(&home.host).unwrap();
         let id = RepositoryRegistry::register(&home.host, &lock, &repo).unwrap();
@@ -425,7 +425,7 @@ fn child_crash_probe() {
         home.into(),
         None,
         None,
-        Platform::Ubuntu,
+        Platform::Linux,
         Architecture::X86_64,
     )
     .unwrap();

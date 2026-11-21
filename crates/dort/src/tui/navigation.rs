@@ -79,12 +79,7 @@ pub fn local_catalog(group: usize) -> &'static [(usize, &'static str)] {
         2 => &[(0, "1 Managed"), (1, "2 Discover"), (2, "3 Ignored paths")],
         4 => &[(0, "1 Manifest checks"), (1, "2 Diagnostics")],
         5 => &[(0, "1 Status"), (1, "2 Unstaged"), (2, "3 Staged")],
-        6 => &[
-            (0, "1 Inventory"),
-            (3, "2 Snapshots"),
-            (5, "3 Reconcile"),
-            (4, "4 Attempts"),
-        ],
+        6 => &[(0, "1 Declared"), (1, "2 Installed"), (2, "3 History")],
         _ => &[],
     }
 }
@@ -134,12 +129,9 @@ pub fn entries(group: usize) -> Vec<Entry> {
             action("Follow selected repository [b]", GitDefault),
         ],
         _ => vec![
-            action("Inventory [1]", Destination(Tab::Tools)),
-            action("Add tool declaration [a]", ToolDeclaration),
-            action("Inspect installed tools [v]", ToolsConfigure),
-            action("Session snapshots [2]", ToolsSnapshots),
-            action("Installation attempts [4]", ToolAttempts),
-            action("Reconcile snapshots [3]", ToolsReconcile),
+            action("Declared tools [1]", Destination(Tab::Tools)),
+            action("Installed tools [2]", ToolsInstalled),
+            action("Installation history [3]", ToolAttempts),
         ],
     }
 }
@@ -161,10 +153,11 @@ pub fn shortcut(item: Item) -> ratatui::crossterm::event::KeyCode {
             Destination(Tab::Recovery) => 'r',
             Destination(Tab::Tools) => '1',
             ToolDeclaration => 'a',
-            ToolsConfigure => 'v',
-            ToolsSnapshots => '2',
-            ToolAttempts => '4',
-            ToolsReconcile => '3',
+            ToolsConfigure => 's',
+            ToolsInstalled => '2',
+            ToolAttempts => '3',
+            ToolsCheck => 'C',
+            ToolsInstallMissing => 'i',
             Discover => '2',
             ManageIgnored => '3',
             Diagnostics => '2',
@@ -212,15 +205,14 @@ pub fn group(app: &App) -> usize {
 pub fn location(app: &App) -> &'static str {
     match app.tab {
         Tab::Overview => "Overview",
+        Tab::Tools if app.tools_view.installed_open => "Tools / Installed tools",
         Tab::Tools if app.tools_view.install_open => match app.tools_view.installation.mode {
-            super::tools_install::Mode::Attempts => "Tools / Installation attempts",
+            super::tools_install::Mode::Attempts => "Tools / Installation history",
             super::tools_install::Mode::CloseInputs
             | super::tools_install::Mode::LoadingClose
             | super::tools_install::Mode::CloseReview => "Tools / Close attempt",
-            super::tools_install::Mode::Result => "Tools / Installation outcome",
-            _ => "Tools / Package installation",
         },
-        Tab::Tools => "Tools / Inspection and comparison",
+        Tab::Tools => "Tools / Declared tools",
         Tab::Files if app.discovering => "Files / Discover",
         Tab::Files => "Files / Managed",
         Tab::Recovery => "Recovery / All repositories",
@@ -236,7 +228,8 @@ pub fn location(app: &App) -> &'static str {
 impl App {
     pub(super) fn go_tab(&mut self, tab: Tab) {
         if self.tab != tab {
-            self.tools_view.leave();
+            self.form_focus = None;
+            self.tools_view.leave_section();
             self.navigation.selected[index(self.tab)] = self.selected;
             self.navigation.scroll[index(self.tab)] = self.details_scroll;
             self.selected = self.navigation.selected[index(tab)];
@@ -408,8 +401,7 @@ fn current_entry(app: &App, group: usize) -> usize {
             super::git::Comparison::Unstaged => Action::GitUnstaged,
             super::git::Comparison::Staged => Action::GitStaged,
         }),
-        Tab::Tools if app.tools_view.catalog_browser => Item::Action(Action::ToolsSnapshots),
-        Tab::Tools if app.tools_view.recon_open => Item::Action(Action::ToolsReconcile),
+        Tab::Tools if app.tools_view.installed_open => Item::Action(Action::ToolsInstalled),
         Tab::Tools if app.tools_view.install_open => Item::Action(Action::ToolAttempts),
         tab => Item::Action(Action::Destination(tab)),
     };
@@ -422,15 +414,6 @@ fn current_entry(app: &App, group: usize) -> usize {
 /// Stable destinations only: forms, reviews and readers keep their own Back path.
 pub fn local_available(app: &App) -> bool {
     use super::shell::Overlay;
-    let stable_tools = app.tab == Tab::Tools
-        && (app.tools_view.catalog_browser
-            || app.tools_view.recon_open && !app.tools_view.reconciliation.binding_metadata()
-            || app.tools_view.setup && !app.tools_view.details
-            || app.tools_view.install_open
-                && matches!(
-                    app.tools_view.installation.mode,
-                    super::tools_install::Mode::Attempts
-                ));
     let ignored = matches!(app.shell.overlay, Some(Overlay::Ignored { .. }));
     if app.busy
         || app.error.is_some()
@@ -438,7 +421,9 @@ pub fn local_available(app: &App) -> bool {
         || app.show_result
         || app.confirmation.is_some()
         || app.shell.overlay.is_some() && !ignored
-        || app.page_title().is_some() && !stable_tools && !ignored
+        || app.page_title().is_some()
+            && !ignored
+            && !(app.tab == Tab::Tools && app.tools_view.collection_visible())
         || app.git_view.sensitive()
     {
         return false;

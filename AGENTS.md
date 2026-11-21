@@ -49,12 +49,12 @@ Prefer descriptive Conventional Commits. Regenerate `CHANGLOG.md` from committed
 
 Use pinned Rust **1.99.1**, edition **2024** and committed `Cargo.lock`. Prefer existing dependencies and validate deliberate lockfile changes with `--locked`.
 
-Run from the repository root; keep independent Rust tests serial to avoid fixture lock-descriptor interference. Follow [validation methods](docs/validation.md) for coverage and opt-in environments. Keep checks and visual expectations meaningful; investigate failures rather than weakening gates or regenerating baselines to pass.
+Run from the repository root. Independent Rust tests run in separate processes with private `TMPDIR` (`python3 scripts/test.py full`), which isolates fixture paths and avoids lock-descriptor inheritance between tests. Direct `cargo test` runs must keep `--test-threads=1` because same-process tests can briefly retain a sibling's fork-inherited lock descriptor until exec. Follow [validation methods](docs/validation.md) for coverage and opt-in environments. Keep checks and visual expectations meaningful; investigate failures rather than weakening gates or regenerating baselines to pass.
 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked -- --test-threads=1
+python3 scripts/test.py full
 cargo build --workspace --locked
 python3 scripts/check-docs.py --self-test
 python3 scripts/check-docs.py

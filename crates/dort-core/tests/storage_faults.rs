@@ -89,7 +89,7 @@ impl Fixture {
         } else {
             Architecture::X86_64
         };
-        let host = HostContext::new(home, None, None, Platform::Ubuntu, architecture).unwrap();
+        let host = HostContext::new(home, None, None, Platform::Linux, architecture).unwrap();
         let repo = root.path().join("repository");
         if !matches!(action, Action::Create) {
             fs::create_dir(&repo).unwrap();

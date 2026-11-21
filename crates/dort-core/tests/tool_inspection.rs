@@ -62,42 +62,6 @@ printf '{"formulae":[{"full_name":"ripgrep","installed":[{"version":"14.1.0"}]}]
 }
 
 #[test]
-fn fixed_mise_query_reports_metadata_not_active_binary_ownership() {
-    let home = TestHome::new();
-    let p = preview(
-        &home,
-        Query::MiseInstalled,
-        r#"
-[ "$#" = 3 ] && [ "$1" = ls ] && [ "$2" = --installed ] && [ "$3" = --json ]
-[ "$MISE_OFFLINE" = 1 ] && [ "$MISE_AUTO_INSTALL" = 0 ]
-printf '{"node":[{"version":"22.0.0","installed":true,"active":false,"install_path":"/PRIVATE"}]}'
-"#,
-    );
-    let report = p.approve().inspect();
-    assert!(
-        matches!(&report.observation, Observation::Complete { installations } if installations.len() == 1)
-    );
-    assert!(!serde_json::to_string(&report).unwrap().contains("PRIVATE"));
-}
-
-#[test]
-fn fixed_dpkg_query_retains_architecture_and_opaque_version() {
-    let home = TestHome::new();
-    let p = preview(
-        &home,
-        Query::DpkgPackages,
-        r#"
-[ "$#" = 3 ] && [ "$1" = --no-pager ] && [ "$2" = --show ]
-[ "$3" = '--showformat=${binary:Package}\t${Version}\t${db:Status-Status}\t${db:Status-Eflag}\n' ]
-printf 'libc6:arm64\t2:2.39-0ubuntu8.4\tinstalled\tok\n'
-"#,
-    );
-    assert!(
-        matches!(p.approve().inspect().observation, Observation::Complete { installations } if installations[0].package == "libc6:arm64")
-    );
-}
-
-#[test]
 fn failed_missing_and_malformed_queries_are_not_healthy_empty_or_raw_diagnostics() {
     for (script, expected) in [
         (
@@ -107,7 +71,7 @@ fn failed_missing_and_malformed_queries_are_not_healthy_empty_or_raw_diagnostics
         ("printf PRIVATE", Failure::Malformed),
     ] {
         let home = TestHome::new();
-        let report = preview(&home, Query::MiseInstalled, script)
+        let report = preview(&home, Query::BrewFormulae, script)
             .approve()
             .inspect();
         assert!(
@@ -118,7 +82,7 @@ fn failed_missing_and_malformed_queries_are_not_healthy_empty_or_raw_diagnostics
     }
     let home = TestHome::new();
     let p = Preview::new(
-        Query::MiseInstalled,
+        Query::BrewFormulae,
         home.host.home.join("missing"),
         home.host.home.clone(),
         vec![PathBuf::from("/no-external-programs")],
@@ -139,7 +103,7 @@ fn npm_uses_selected_node_cli_and_prefix_and_retains_runtime_binding() {
     // interpreting any JavaScript. The CLI is deliberately not executable.
     let fake_node = preview(
         &home,
-        Query::MiseInstalled,
+        Query::BrewFormulae,
         r#"
 [ "$#" = 13 ] && [ "$1" = "$HOME/npm-cli.js" ]
 shift
@@ -235,15 +199,15 @@ fn npm_rejects_unbound_queries_and_undeclared_or_relative_runtime_bindings() {
 fn relative_non_utf8_and_implicit_path_search_are_rejected_without_execution() {
     use std::{ffi::OsString, os::unix::ffi::OsStringExt};
     for path in [
-        PathBuf::from("mise"),
-        PathBuf::from("/trusted/../mise"),
-        PathBuf::from("/trusted/./mise"),
+        PathBuf::from("brew"),
+        PathBuf::from("/trusted/../brew"),
+        PathBuf::from("/trusted/./brew"),
         PathBuf::from(OsString::from_vec(b"/bad\xff".to_vec())),
         PathBuf::from("/bad\0"),
     ] {
         assert!(matches!(
             Preview::new(
-                Query::MiseInstalled,
+                Query::BrewFormulae,
                 path,
                 "/home".into(),
                 vec!["/bin".into()]
@@ -259,8 +223,8 @@ fn relative_non_utf8_and_implicit_path_search_are_rejected_without_execution() {
     ] {
         assert!(matches!(
             Preview::new(
-                Query::MiseInstalled,
-                "/trusted/mise".into(),
+                Query::BrewFormulae,
+                "/trusted/brew".into(),
                 "/home".into(),
                 paths
             ),

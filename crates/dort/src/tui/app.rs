@@ -74,6 +74,7 @@ pub struct App {
     pub git: Result<PathBuf, String>,
     pub git_view: super::git::State,
     pub tools_view: super::tools::State,
+    pub form_focus: Option<&'static str>,
     pub result: Option<String>,
     pub receipt: Option<super::task_surfaces::Receipt>,
     pub show_result: bool,
@@ -165,6 +166,7 @@ impl App {
             git: Err("Git unavailable; install Git separately and restart Dort".into()),
             git_view: super::git::State::new(),
             tools_view: Default::default(),
+            form_focus: None,
             result: None,
             receipt: None,
             show_result: false,
@@ -226,6 +228,11 @@ impl App {
         super::discover_content::sync(self, self.viewport.0, self.viewport.1);
     }
     pub fn complete(&mut self, result: Result<Output, String>) -> Option<Task> {
+        let (result, recovery) = match result {
+            Ok(Output::RecoveryRequired(blocker)) => (Err(blocker.to_string()), Some(blocker)),
+            other => (other, None),
+        };
+        let blocked = recovery.is_some();
         if let Ok(Output::DiscoverContent(report)) = result {
             self.content.accept(report);
             return None;
@@ -239,7 +246,7 @@ impl App {
         }
         let writing = self.writing;
         let activity = self.activity.take();
-        self.failed_write = writing && result.is_err();
+        self.failed_write = (writing || blocked) && result.is_err();
         self.busy = false;
         self.writing = false;
         if self.exit_requested {
@@ -249,12 +256,57 @@ impl App {
             self.retry = None;
         }
         match result {
+            Ok(Output::ToolsInstalledPreview(preview)) => {
+                if self.tab == Tab::Tools
+                    && self.tools_view.installed_open
+                    && self.tools_view.installed.waiting
+                    && !self.quit
+                {
+                    self.tools_view.installed.waiting = false;
+                    self.tools_view.installed.preview = Some(preview);
+                }
+            }
+            Ok(Output::ToolsInstalled(current)) => {
+                if self.tab == Tab::Tools && self.tools_view.installed_open && !self.quit {
+                    self.tools_view.installed.completed(current);
+                }
+            }
+            Ok(Output::ToolsCheckPreview(preview)) => {
+                if self.tab == Tab::Tools && self.tools_view.declared.check_waiting {
+                    self.tools_view.declared.check_waiting = false;
+                    self.tools_view.declared.check_preview = Some(preview);
+                    self.details_scroll = 0;
+                }
+            }
+            Ok(Output::ToolsChecked(checked)) => {
+                if self.tab == Tab::Tools && self.tools_view.landing() {
+                    self.tools_view.declared.checked = Some(std::sync::Arc::new(checked));
+                    self.tools_view.declared.installed = None;
+                    self.tools_view.declared.stale = false;
+                    self.status =
+                        "Declared tools checked. Select a tool for details, or Install missing."
+                            .into();
+                }
+            }
+            Ok(Output::ToolsMissingPreview(preview)) => {
+                if self.tab == Tab::Tools && self.tools_view.declared.install_waiting {
+                    self.tools_view.declared.install_waiting = false;
+                    self.tools_view.declared.install_preview = Some(preview);
+                    self.details_scroll = 0;
+                }
+            }
+            Ok(Output::ToolsMissingInstalled(installed)) => {
+                self.write_warning |= !installed.succeeded();
+                self.tools_view.declared.installed = Some(installed);
+                self.tools_view.declared.stale = true;
+                self.tools_view.declared.result_open = self.tab == Tab::Tools;
+                self.details_scroll = 0;
+            }
             Err(error) => {
                 if self.tools_view.install_open
                     && matches!(
                         self.tools_view.installation.mode,
-                        super::tools_install::Mode::LoadingInstall
-                            | super::tools_install::Mode::LoadingClose
+                        super::tools_install::Mode::LoadingClose
                     )
                 {
                     self.tools_view.installation.preparation_failed(&error);
@@ -264,12 +316,15 @@ impl App {
                 self.failure = Some(super::task_surfaces::Failure {
                     cause: error.clone(),
                     activity,
+                    recovery,
                 });
-                self.write_warning |= writing;
+                self.write_warning |= writing && !blocked;
                 self.show_result = false;
                 self.git_view.failed();
                 self.details_scroll = 0;
-                self.status = if writing {
+                self.status = if blocked {
+                    error.clone().into()
+                } else if writing {
                     format!(
                         "Error: {error}\nA failed write may leave partial effects. Inspect Recovery; nothing is automatically undone."
                     ).into()
@@ -283,7 +338,9 @@ impl App {
                 }
                 self.error = Some(self.status.to_string());
             }
-            Ok(Output::DiscoverContent(_) | Output::DiscoveryTree(_)) => unreachable!(),
+            Ok(
+                Output::DiscoverContent(_) | Output::DiscoveryTree(_) | Output::RecoveryRequired(_),
+            ) => unreachable!(),
             Ok(Output::History { rows, error }) => {
                 let identity = self
                     .data
@@ -321,37 +378,6 @@ impl App {
                     "Read-only Diagnostics loaded; unavailable observations include their cause."
                         .into();
             }
-            Ok(Output::ToolsReconciliationPrepared(prepared)) => {
-                self.tools_view.reconciliation.ready(*prepared);
-                self.status = "Declarations loaded. Explicitly choose snapshot IDs; unbound tools remain not observed.".into();
-            }
-            Ok(Output::ToolsReconciled(report)) => {
-                self.tools_view.reconciliation.completed(report);
-                self.status = "Snapshot-based metadata reconciliation finished. No provider refreshed, candidate executed or installation authorized.".into();
-            }
-            Ok(Output::ToolInstallPreview(preview)) => {
-                if self.tab == Tab::Tools
-                    && self.tools_view.install_open
-                    && !self.quit
-                    && self.tools_view.installation.mode
-                        == super::tools_install::Mode::LoadingInstall
-                {
-                    self.tools_view.installation.reviewed(*preview);
-                    self.status = "Review one package install. Scope, probes and argv are available in Details. No queries ran for this review.".into();
-                }
-            }
-            Ok(Output::ToolInstalled(result)) => {
-                self.tools_view.reconciliation.invalidate();
-                self.tools_view.reconciliation.stale_for_install = self
-                    .tools_view
-                    .snapshots
-                    .iter()
-                    .map(|s| s.id.clone())
-                    .collect();
-                self.tools_view.recon_open = false;
-                self.tools_view.installation.installed(result);
-                self.status = "Installation finished or stopped. Inspect the typed outcome and Tools installation attempts. No readiness or rollback claim; snapshots were not refreshed.".into();
-            }
             Ok(Output::ToolAttempts(result)) => {
                 if self.tab == Tab::Tools && self.tools_view.install_open && !self.quit {
                     self.tools_view.installation.attempts_ready(result);
@@ -372,35 +398,18 @@ impl App {
                 self.tools_view.installation.closed(result);
                 self.status = "Inspect closure outcome. Closing metadata does not replay, repair or roll back an install.".into();
             }
-            Ok(Output::ToolsDefaults(defaults)) => {
-                if self.tab == Tab::Tools && self.tools_view.setup && !self.quit {
-                    self.tools_view.defaults_ready(defaults);
-                    self.status = "Review selected inspections and their exact scopes. No provider has executed yet.".into();
-                }
-            }
-            Ok(Output::ToolsReports(reports)) => {
-                let count = reports.len();
-                let unavailable = reports.iter().filter(|r| !r.available()).count();
-                let mut stored = 0;
-                for report in reports {
-                    stored += usize::from(self.tools_view.completed(report));
-                }
-                self.tools_view.collection_result = true;
-                self.status = super::components::StatusText::chrome(format!(
-                    "Inspected {count} scopes · {stored} snapshots retained · {unavailable} unavailable."
-                ));
-            }
-            Ok(Output::ToolsPreview(preview)) => {
+            Ok(Output::ToolsSettingsDetected(tool, request)) => {
                 if self.tab == Tab::Tools && !self.quit {
-                    self.tools_view.reviewed(preview);
-                    self.status =
-                        "Review exact query and risks. No provider has executed yet.".into();
+                    self.tools_view.settings_ready(tool, request);
                 }
             }
-            Ok(Output::ToolsReport(report)) => {
-                let available = report.available();
-                let stored = self.tools_view.completed(report);
-                self.status = if !stored { "Inspection executed but its metadata exceeded session limits and was not stored." } else if available { "Inspection complete: provider claims only; no ownership or binary identity verified." } else { "Provider observation unavailable; a retry requires a fresh review and approval." }.into();
+            Ok(Output::ToolsSettingsSaved(request)) => {
+                if self.tab == Tab::Tools && self.tools_view.settings_open && !self.quit {
+                    self.tools_view.settings_saved(request);
+                    self.status =
+                        "Tool settings saved for this session. Check installed to refresh status."
+                            .into();
+                }
             }
             Ok(Output::Git(report)) => {
                 self.git_view.accept(
@@ -416,6 +425,15 @@ impl App {
                 self.status = "Git read completed. Summaries are metadata-only; patch viewing requires a new confirmation.".into();
             }
             Ok(Output::Data(data)) => {
+                if self
+                    .tools_view
+                    .declared
+                    .checked
+                    .as_ref()
+                    .is_some_and(|c| data.tools_source.as_ref() != Some(&c.source))
+                {
+                    self.tools_view.declared.invalidate();
+                }
                 self.replace_data(data);
                 // Adoption must refresh managed/history observations as well as
                 // Discover, so immediately opening Recovery sees the new receipt.
@@ -452,6 +470,9 @@ impl App {
                         self.check = Some((report, true));
                         self.shell.overlay = Some(Overlay::Form(Form::Check));
                     } else {
+                        if self.requested_profiles != requested {
+                            self.tools_view.declared.invalidate();
+                        }
                         self.requested_profiles = requested;
                         self.shell.overlay = None;
                         if self
@@ -566,8 +587,9 @@ impl App {
                 Err(error) => self.status = super::actions::diagnostic(&error).into(),
             },
             Ok(Output::Completed(completion)) => {
-                if matches!(completion.operation, "Tool declaration" | "Rollback") {
-                    self.tools_view.reconciliation.invalidate();
+                if completion.operation == "Tool declaration" {
+                    self.tools_view.declaration_finished();
+                    self.form_focus = None;
                 }
                 if completion.operation == "Discovery preferences" {
                     self.content = Default::default();
@@ -873,6 +895,16 @@ impl App {
         {
             return None;
         }
+        if matches!(
+            target,
+            Target::FormControl(_, false)
+                | Target::ToolDeclarationControl(_, false)
+                | Target::ToolsControl(_, false)
+                | Target::BatchControl(_, false)
+                | Target::ToolInstallControl(_, false)
+        ) {
+            self.form_focus = self.form_page();
+        }
         match target {
             Target::Key(key) => self.action_key(key, width, height),
             Target::ChoiceRow(index) => {
@@ -1027,7 +1059,7 @@ impl App {
                 }
                 None
             }
-            Target::ProviderConfirm | Target::PatchConfirm => self.key(
+            Target::PatchConfirm => self.key(
                 KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
                 width,
                 height,
@@ -1051,74 +1083,11 @@ impl App {
                 }
                 None
             }
-            Target::ToolsReconControl(index, activate) => {
-                if self.tab != Tab::Tools || !self.tools_view.recon_open {
-                    return None;
-                }
-                if !activate {
-                    self.tools_view.reconciliation.focus = index;
-                }
-                if activate {
-                    self.key(
-                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-                        width,
-                        height,
-                    )
-                } else {
-                    None
-                }
-            }
-            Target::ToolInstallFreshReview => {
-                if self.tab != Tab::Tools || !self.tools_view.install_open {
-                    return None;
-                }
-                self.action_key(
-                    KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE),
-                    width,
-                    height,
-                )
-            }
-            Target::ToolInstallCollect => {
-                if self.tab != Tab::Tools
-                    || !self.tools_view.recon_open
-                    || self.tools_view.install_open
-                {
-                    return None;
-                }
-                self.action_key(
-                    KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE),
-                    width,
-                    height,
-                )
-            }
-            Target::ToolInstallSelected => {
-                if self.tab != Tab::Tools
-                    || !self.tools_view.recon_open
-                    || self.tools_view.install_open
-                {
-                    return None;
-                }
-                self.key(
-                    KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
-                    width,
-                    height,
-                )
-            }
             Target::ToolAttemptRow(index) => {
                 if self.tab == Tab::Tools && self.tools_view.install_open {
                     self.tools_view.installation.selected = index;
                 }
                 None
-            }
-            Target::ToolAttemptClose => {
-                if self.tab != Tab::Tools || !self.tools_view.install_open {
-                    return None;
-                }
-                self.action_key(
-                    KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE),
-                    width,
-                    height,
-                )
             }
             Target::ToolInstallProvider => {
                 if self.tab != Tab::Tools
@@ -1139,7 +1108,6 @@ impl App {
                 }
                 if !activate {
                     let count = match self.tools_view.installation.mode {
-                        super::tools_install::Mode::AptInputs => 3,
                         super::tools_install::Mode::CloseInputs => {
                             self.tools_view.installation.close_field_count()
                         }
@@ -1157,62 +1125,25 @@ impl App {
                     None
                 }
             }
-            Target::ToolsDefault(index, activate) => {
-                if self.tab != Tab::Tools || !self.tools_view.setup {
-                    return None;
-                }
-                if index < 4 {
-                    self.tools_view.default_focus = index;
-                }
-                if activate {
-                    let code = match index {
-                        0..=3 => KeyCode::Char(' '),
-                        4 => KeyCode::Enter,
-                        5 => KeyCode::Char('e'),
-                        _ => KeyCode::Char('r'),
-                    };
-                    self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height)
-                } else {
-                    None
-                }
-            }
             Target::ToolsRow(index) => {
-                self.tools_view.selected = index;
+                if self.tools_view.installed_open {
+                    self.tools_view.installed.selected = index;
+                } else if self.tools_view.landing() {
+                    self.tools_view.declared_selected = index;
+                }
                 None
             }
-            Target::InventoryKey(code) => {
-                if self.tab == Tab::Tools
-                    && self.tools_view.browsing_inventory()
-                    && !self.busy
-                    && self.preview.is_none()
-                    && self.error.is_none()
-                    && !self.show_result
-                {
-                    if code != KeyCode::Char('/') {
-                        self.tools_view.searching = false;
-                    }
-                    self.action_key(KeyEvent::new(code, KeyModifiers::NONE), width, height)
-                } else {
-                    None
-                }
-            }
             Target::ToolsControl(index, activate) => {
-                if self.tab != Tab::Tools || !self.tools_view.configuring {
+                if self.tab != Tab::Tools || !self.tools_view.settings_open {
                     return None;
                 }
                 if !activate {
-                    self.tools_view.focus = index;
+                    self.tools_view.settings.focus =
+                        index.min(self.tools_view.settings.count() - 1);
                 }
                 if activate {
                     self.key(
-                        KeyEvent::new(
-                            if index == 8 {
-                                KeyCode::Esc
-                            } else {
-                                KeyCode::Enter
-                            },
-                            KeyModifiers::NONE,
-                        ),
+                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
                         width,
                         height,
                     )
@@ -1427,7 +1358,19 @@ impl App {
                     .menu
                     .map(|m| (m.content_focus, m.content_scroll))
             });
+        let form_before = self.form_page();
+        let transient_before = self.help.is_some()
+            || self.more.is_some()
+            || self.choice.is_some()
+            || self.navigation.menu.is_some();
         let task = self.key_inner(key, width, height, more_actions, section_shortcuts);
+        let transient_after = self.help.is_some()
+            || self.more.is_some()
+            || self.choice.is_some()
+            || self.navigation.menu.is_some();
+        if !transient_before && !transient_after && form_before != self.form_page() {
+            self.form_focus = None;
+        }
         super::discover_content::sync(self, width, height);
         if self.help.is_none()
             && self.navigation.menu.is_none()
@@ -1708,12 +1651,7 @@ impl App {
                         if self.tools_view.declaration_open {
                             return self.tools_view.declaration.prepare();
                         }
-                        if self.tools_view.recon_open {
-                            return Some(Task::ToolsReconcilePrepare(
-                                self.tools_view.reconciliation.request(),
-                            ));
-                        }
-                        return Some(self.tools_view.prepare());
+                        return Some(Task::ToolsCheckPrepare(self.tools_view.inspection_inputs()));
                     }
                     return Some(self.refresh_task());
                 }
@@ -1836,7 +1774,7 @@ impl App {
                 KeyCode::Right => preview.horizontal = preview.horizontal.saturating_add(8),
                 KeyCode::Left => preview.horizontal = preview.horizontal.saturating_sub(8),
                 KeyCode::Enter if !preview.pending.blocked() && !self.dry_run => {
-                    self.confirmation = Some(Confirmation { prompt_scroll: 0 })
+                    return self.approve_preview();
                 }
                 KeyCode::Enter => {
                     self.status = "Approval disabled: blocked preview or --dry-run.".into()
@@ -1847,6 +1785,36 @@ impl App {
                 preview.clamp_scroll(width, height);
             }
             return None;
+        }
+        if let Some(owner) = self.form_page() {
+            if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) && !self.form_has_focus() {
+                self.focus_first_field();
+                self.form_focus = Some(owner);
+                return None;
+            }
+            if key.code == KeyCode::Esc && self.form_has_focus() {
+                self.form_focus = None;
+                return None;
+            }
+            if !self.form_has_focus()
+                && !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                && matches!(
+                    key.code,
+                    KeyCode::Char(_)
+                        | KeyCode::Backspace
+                        | KeyCode::Delete
+                        | KeyCode::Left
+                        | KeyCode::Right
+                        | KeyCode::Up
+                        | KeyCode::Down
+                        | KeyCode::Home
+                        | KeyCode::End
+                )
+            {
+                return None;
+            }
         }
         if let Some(editor) = self.batch_editor.as_mut().filter(|e| e.open) {
             return editor.key(key);
@@ -1878,6 +1846,12 @@ impl App {
         }
         if self.open_control_choice(key.code) {
             return None;
+        }
+        if self.tab == Tab::Tools
+            && self.tools_view.landing()
+            && let Some(task) = super::declared_tools::key(self, key.code)
+        {
+            return task;
         }
         if self.tab == Tab::Tools
             && let Some(task) = self.tools_view.key(key, self.dry_run)
@@ -2434,6 +2408,7 @@ impl App {
             self.status = reason.into();
             return None;
         }
+        self.form_focus = None;
         self.failed_write = false;
         self.show_result = false;
         self.shell.scroll = 0;
@@ -2516,15 +2491,38 @@ impl App {
             Action::Destination(tab) => {
                 self.go_tab(tab);
                 if tab == Tab::Files { self.discovering = false; }
-                if tab == Tab::Tools && self.tools_view.snapshots.is_empty() {
-                    return Some(self.tools_view.configure());
+                if tab == Tab::Tools {
+                    self.tools_view.leave_section();
                 }
             }
             Action::ToolDeclaration => { self.go_tab(Tab::Tools); self.tools_view.declare(); }
-            Action::ToolsConfigure => { self.go_tab(Tab::Tools); return Some(self.tools_view.configure()); }
+            Action::ToolsConfigure => {
+                let tool = self.data.as_ref()?.tools.as_ref()?.as_ref().ok()?.get(self.tools_view.declared_selected)?.clone();
+                self.go_tab(Tab::Tools);
+                return self.tools_view.configure(tool);
+            }
+            Action::ToolsInstalled => {
+                self.go_tab(Tab::Tools);
+                return self.tools_view.open_installed();
+            }
+            Action::ToolsCheck => {
+                self.go_tab(Tab::Tools);
+                let details = self.tools_view.declared_details;
+                self.tools_view.leave_section();
+                self.tools_view.declared_details = details;
+                self.tools_view.declared.check_waiting = true;
+                return Some(Task::ToolsCheckPrepare(self.tools_view.inspection_inputs()));
+            }
+            Action::ToolsInstallMissing => {
+                self.go_tab(Tab::Tools);
+                let checked = self.tools_view.declared.checked.clone()?;
+                let details = self.tools_view.declared_details;
+                self.tools_view.leave_section();
+                self.tools_view.declared_details = details;
+                self.tools_view.declared.install_waiting = true;
+                return Some(Task::ToolsInstallMissingPrepare(checked));
+            }
             Action::ToolAttempts => { self.go_tab(Tab::Tools); return Some(self.tools_view.open_attempts()); }
-            Action::ToolsSnapshots => { self.go_tab(Tab::Tools); self.tools_view.leave(); self.tools_view.catalog_browser = true; }
-            Action::ToolsReconcile => { self.go_tab(Tab::Tools); self.tools_view.leave(); self.tools_view.recon_open = true; }
             Action::Choose => self.shell.overlay = Some(Overlay::Repositories { selected: 0 }),
             Action::Init => { self.shell.path_focused = 0; self.shell.overlay = Some(Overlay::Form(Form::Init)); }
             Action::ManageIgnored => return Some(Task::IgnoredPaths),
@@ -2632,18 +2630,6 @@ impl App {
         None
     }
     pub(super) fn key_text_entry(&self) -> bool {
-        if self.tab == Tab::Tools
-            && self.tools_view.install_open
-            && matches!(
-                self.tools_view.installation.mode,
-                super::tools_install::Mode::Review
-                    | super::tools_install::Mode::CloseReview
-                    | super::tools_install::Mode::LoadingInstall
-                    | super::tools_install::Mode::LoadingClose
-            )
-        {
-            return false;
-        }
         self.help.is_none()
             && self.more.is_none()
             && self.choice.is_none()
@@ -2655,17 +2641,109 @@ impl App {
             && self.confirmation.is_none()
             && self.text_entry()
     }
-    pub fn text_entry(&self) -> bool {
-        self.batch_editor
+    /// Stable identity of the foreground form, independent of its selected field.
+    pub(super) fn form_page(&self) -> Option<&'static str> {
+        if self.help.is_some()
+            || self.more.is_some()
+            || self.choice.is_some()
+            || self.navigation.menu.is_some()
+            || self.busy
+            || self.error.is_some()
+            || self.show_result
+            || self.preview.is_some()
+            || self.confirmation.is_some()
+        {
+            return None;
+        }
+        if let Some(Overlay::Form(form)) = self.shell.overlay {
+            if self.shell.form_details {
+                return None;
+            }
+            return Some(match form {
+                Form::Adopt => "adopt",
+                Form::Check => "check",
+                Form::Choose => "choose",
+                Form::Init => "init",
+                Form::KeepId => "keep",
+                Form::RemoveId => "remove",
+            });
+        }
+        if self
+            .batch_editor
             .as_ref()
             .is_some_and(|e| e.open && e.item_form && !e.details)
-            || self.shell.text_entry()
-            || (self.tab == Tab::Git && self.git_view.text_entry())
-            || (self.tab == Tab::Tools && self.tools_view.text_entry())
-            || (self.tab == Tab::Recovery && self.history_search.editing)
-            || (self.shell.overlay.is_none()
-                && self.tab == Tab::Files
-                && self.inventory.search(self.discovering).editing)
+        {
+            return Some("batch item");
+        }
+        if self.tab == Tab::Git && self.git_view.editing_root && self.git_view.text_entry() {
+            return Some("git scope");
+        }
+        if self.tab != Tab::Tools {
+            return None;
+        }
+        let tools = &self.tools_view;
+        if tools.install_open
+            && tools.installation.text_entry()
+            && matches!(
+                tools.installation.mode,
+                super::tools_install::Mode::CloseInputs
+            )
+        {
+            return Some("installation");
+        }
+        if tools.declaration_open
+            && tools.declaration.change != Some(dort_core::tools::declaration::Change::Remove)
+        {
+            return Some("declaration");
+        }
+        if tools.settings_open {
+            return Some("tool settings");
+        }
+        None
+    }
+    pub(super) fn form_has_focus(&self) -> bool {
+        self.form_page()
+            .is_none_or(|owner| self.form_focus == Some(owner))
+    }
+    fn focus_first_field(&mut self) {
+        self.shell.scroll = 0;
+        match self.form_page() {
+            Some("choose" | "init") => self.shell.path_focused = 0,
+            Some("check") => self.shell.manifest_focused = 0,
+            Some("keep" | "remove") => self.shell.unmanage_focused = 0,
+            Some("adopt") => self.shell.adoption.focused = 0,
+            Some("batch item") => {
+                if let Some(editor) = &mut self.batch_editor {
+                    editor.focused = editor.item * 3;
+                }
+            }
+            Some("declaration") => {
+                self.tools_view.declaration.focus = self
+                    .tools_view
+                    .declaration
+                    .controls()
+                    .first()
+                    .copied()
+                    .unwrap_or(1)
+            }
+            Some("installation") => self.tools_view.installation.focus = 0,
+            Some("tool settings") => self.tools_view.settings.focus = 0,
+            _ => (),
+        }
+    }
+    pub fn text_entry(&self) -> bool {
+        self.form_has_focus()
+            && (self
+                .batch_editor
+                .as_ref()
+                .is_some_and(|e| e.open && e.item_form && !e.details)
+                || self.shell.text_entry()
+                || (self.tab == Tab::Git && self.git_view.text_entry())
+                || (self.tab == Tab::Tools && self.tools_view.text_entry())
+                || (self.tab == Tab::Recovery && self.history_search.editing)
+                || (self.shell.overlay.is_none()
+                    && self.tab == Tab::Files
+                    && self.inventory.search(self.discovering).editing))
     }
     pub fn file_selection(&self) -> usize {
         if let Some(group) = self.inventory.group {
@@ -2788,6 +2866,7 @@ impl App {
         }
     }
     fn reset_repository_scope(&mut self) {
+        self.tools_view.declared.invalidate();
         self.git_view.discard_patch();
         if self.git_view.follows_files {
             self.git_view.scope_changed();
@@ -2916,6 +2995,43 @@ impl App {
     }
     pub fn action_reason(&self, action: Action) -> Option<&'static str> {
         match action {
+            Action::ToolsInstallMissing if self.tools_view.declared.stale => {
+                Some("Check installed again before preparing another install review.")
+            }
+            Action::ToolsInstallMissing
+                if self
+                    .tools_view
+                    .declared
+                    .checked
+                    .as_ref()
+                    .is_some_and(|c| c.missing() == 0) =>
+            {
+                Some(
+                    "No missing packages were observed. See tool details for unknown results or version differences.",
+                )
+            }
+            Action::ToolsInstallMissing if self.tools_view.declared.checked.is_none() => {
+                Some("Check installed first to find missing tools.")
+            }
+            Action::ToolsCheck
+                if self
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.tools.as_ref())
+                    .is_some_and(|t| t.as_ref().is_ok_and(Vec::is_empty)) =>
+            {
+                Some("Add a tool declaration before checking installed tools.")
+            }
+            Action::ToolsCheck
+                if self
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.repository.as_ref())
+                    .or(self.repository.as_ref())
+                    .is_none() =>
+            {
+                Some("Choose a repository to check its declared tools.")
+            }
             Action::CheckCurrent | Action::Profiles
                 if self
                     .data
@@ -3118,6 +3234,40 @@ impl App {
             }
         }
     }
+    fn approve_preview(&mut self) -> Option<Task> {
+        if self.preview.as_ref().is_none_or(|p| p.pending.blocked()) || self.dry_run {
+            return None;
+        }
+        if self
+            .preview
+            .as_ref()
+            .is_some_and(|p| matches!(p.pending, Pending::Batch(_)))
+        {
+            return self.batch_confirm_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        }
+        let ack = self
+            .preview
+            .as_ref()?
+            .pending
+            .removal_id()
+            .map(str::to_owned);
+        let pending = self.preview.take()?.pending;
+        self.confirmation = None;
+        match pending.approve(ack.as_deref()) {
+            Ok(approval) => Some(Task::Execute(approval)),
+            Err(error) => {
+                self.error = Some(format!(
+                    "Approval refused: {}",
+                    super::actions::diagnostic(&error)
+                ));
+                self.retry = None;
+                self.failure = None;
+                self.failed_write = false;
+                self.status = "Approval refused; a fresh review is required.".into();
+                None
+            }
+        }
+    }
     fn confirm_key(&mut self, key: KeyEvent) -> Option<Task> {
         let confirmation = self.confirmation.as_mut()?;
         match key.code {
@@ -3129,29 +3279,7 @@ impl App {
                 confirmation.prompt_scroll = confirmation.prompt_scroll.saturating_sub(4)
             }
             KeyCode::Home => confirmation.prompt_scroll = 0,
-            KeyCode::Enter => {
-                let ack = self
-                    .preview
-                    .as_ref()?
-                    .pending
-                    .removal_id()
-                    .map(str::to_owned);
-                let pending = self.preview.take()?.pending;
-                self.confirmation = None;
-                match pending.approve(ack.as_deref()) {
-                    Ok(approval) => return Some(Task::Execute(approval)),
-                    Err(error) => {
-                        self.error = Some(format!(
-                            "Approval refused: {}",
-                            super::actions::diagnostic(&error)
-                        ));
-                        self.retry = None;
-                        self.failure = None;
-                        self.failed_write = false;
-                        self.status = "Approval refused; a fresh review is required.".into();
-                    }
-                }
-            }
+            KeyCode::Enter => return self.approve_preview(),
             _ => (),
         }
         None

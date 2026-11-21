@@ -5,7 +5,6 @@ pub const EXPAND: &str = "▸";
 pub const COMPLETE: &str = "✓";
 pub const FAILED: &str = "×";
 pub const PENDING: &str = "·";
-pub const SEPARATOR: &str = "·";
 pub const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 pub const ASCII_SPINNER: [&str; 4] = ["|", "/", "-", "\\"];
 

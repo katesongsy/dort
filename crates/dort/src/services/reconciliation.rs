@@ -9,7 +9,7 @@ use dort_core::{
     profiles::selected,
     tools::{binaries, inspection, planning},
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
@@ -28,55 +28,6 @@ fn serialize_report<S: serde::Serializer>(
     serializer: S,
 ) -> std::result::Result<S::Ok, S::Error> {
     report.as_ref().serialize(serializer)
-}
-/// Request data only. Deserializing this never grants execution authority: every
-/// scope is reconstructed into a real fixed-operation core preview and approved.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ScopeRequest {
-    pub id: String,
-    pub provider: Provider,
-    pub executable: PathBuf,
-    pub search_dirs: Vec<PathBuf>,
-    pub runtime_tool: Option<String>,
-    pub npm_cli: Option<PathBuf>,
-    pub prefix: Option<PathBuf>,
-}
-impl ScopeRequest {
-    pub fn parse(text: &str) -> Result<Self> {
-        if text.len() > 32_768 {
-            return Err(invalid("inspection scope request is too large"));
-        }
-        let request: Self = serde_json::from_str(text).map_err(|_| {
-            invalid("inspection scope must be strict typed JSON; request contents withheld")
-        })?;
-        if !identifier(&request.id) {
-            return Err(invalid("snapshot ID must be a bounded identifier"));
-        }
-        Ok(request)
-    }
-    pub fn prepare(
-        &self,
-        host: &HostContext,
-        manifest: &std::path::Path,
-    ) -> Result<tools::Preview> {
-        let query = match self.provider {
-            Provider::Brew => inspection::Query::BrewFormulae,
-            Provider::Apt => inspection::Query::DpkgPackages,
-            Provider::Mise => inspection::Query::MiseInstalled,
-            Provider::Npm => inspection::Query::NpmGlobals,
-        };
-        tools::Request {
-            query,
-            executable: self.executable.clone(),
-            search_dirs: self.search_dirs.clone(),
-            manifest: (self.provider == Provider::Npm).then(|| manifest.to_owned()),
-            runtime_tool: self.runtime_tool.clone(),
-            npm_cli: self.npm_cli.clone(),
-            prefix: self.prefix.clone(),
-        }
-        .prepare(host)
-    }
 }
 fn identifier(s: &str) -> bool {
     !s.is_empty()
@@ -103,7 +54,6 @@ pub struct Scope {
 }
 pub struct ToolChoice {
     pub id: String,
-    pub binary: String,
     pub provider: Option<Provider>,
 }
 pub struct Prepared {
@@ -138,8 +88,7 @@ impl Request {
             .filter(|t| selected(&t.profiles, &active))
             .map(|t| ToolChoice {
                 id: t.id.clone(),
-                binary: t.binary.clone(),
-                provider: t.install.get(&host.platform).map(|i| i.provider),
+                provider: Some(t.install.provider),
             })
             .collect();
         tools.sort_by(|a, b| a.id.cmp(&b.id));
@@ -261,23 +210,4 @@ pub fn snapshot_records(snapshots: &[Snapshot]) -> usize {
             _ => 0,
         })
         .sum()
-}
-pub fn parse_bindings(values: &[String]) -> Result<BTreeMap<String, String>> {
-    let mut bindings = BTreeMap::new();
-    for value in values {
-        let Some((tool, scope)) = value.split_once('=') else {
-            return Err(invalid("binding must be TOOL=SNAPSHOT"));
-        };
-        if tool.is_empty()
-            || !tool.as_bytes()[0].is_ascii_alphanumeric()
-            || !tool
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-            || !identifier(scope)
-            || bindings.insert(tool.into(), scope.into()).is_some()
-        {
-            return Err(invalid("invalid or duplicate tool binding"));
-        }
-    }
-    Ok(bindings)
 }

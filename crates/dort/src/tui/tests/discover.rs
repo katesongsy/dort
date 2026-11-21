@@ -26,7 +26,7 @@ impl Fixture {
         let home = temp.path().canonicalize().unwrap().join("home");
         fs::create_dir(&home).unwrap();
         let host =
-            HostContext::new(home, None, None, Platform::Ubuntu, Architecture::X86_64).unwrap();
+            HostContext::new(home, None, None, Platform::Linux, Architecture::X86_64).unwrap();
         fs::write(
             host.home.join(".a"),
             "synthetic-preview-A\n\u{1b}[31mescaped\n",

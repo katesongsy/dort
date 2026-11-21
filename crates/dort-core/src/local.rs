@@ -16,6 +16,19 @@ fn schema_one() -> u32 {
     1
 }
 
+/// Bind the file's full identity but only parent identities: unrelated sibling
+/// creation changes a parent clock without making this read unsafe.
+fn same_read(before: &crate::observation::Entry, after: &crate::observation::Entry) -> bool {
+    before.path == after.path
+        && before.kind == after.kind
+        && before.fingerprint == after.fingerprint
+        && before.link_target == after.link_target
+        && before.parents.len() == after.parents.len()
+        && before.parents.iter().zip(&after.parents).all(|(a, b)| {
+            a.path == b.path && crate::adoption::parent_identity(&a.fingerprint, &b.fingerprint)
+        })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RepositoryRecord {
@@ -76,7 +89,7 @@ impl LocalConfig {
             .map_err(|_| Error::Invalid("invalid local configuration (values redacted)".into()))?;
         config.validate()?;
         let mut after = crate::observation::inspect(&host.local_config_path(), false)?;
-        if before != after {
+        if !same_read(&before, &after) {
             return Err(Error::Invalid(
                 "local configuration changed during read".into(),
             ));
@@ -263,4 +276,48 @@ fn inspect_repository(host: &HostContext, root: &Path) -> Result<PathBuf> {
         .map_err(|e| io_error("read repository manifest", &path, e))?;
     Manifest::parse(&text)?;
     Ok(root)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::same_read;
+    use crate::observation::{Entry, Fingerprint, Kind, Parent};
+
+    fn fingerprint(inode: u64, modified: i64) -> Fingerprint {
+        Fingerprint {
+            device: 1,
+            inode,
+            links: 1,
+            mode: 0o100600,
+            uid: 501,
+            gid: 20,
+            size: 10,
+            modified: (modified, 0),
+            changed: (modified, 0),
+        }
+    }
+
+    fn entry(parent_modified: i64, parent_inode: u64) -> Entry {
+        Entry {
+            path: "/h/.config/dort/local.toml".into(),
+            kind: Kind::Regular,
+            fingerprint: Some(fingerprint(7, 100)),
+            parents: vec![Parent {
+                path: "/h/.config/dort".into(),
+                fingerprint: fingerprint(parent_inode, parent_modified),
+            }],
+            link_target: None,
+            sha256: None,
+            sensitive: true,
+        }
+    }
+
+    #[test]
+    fn unrelated_parent_clock_changes_do_not_invalidate_a_config_read() {
+        assert!(same_read(&entry(100, 3), &entry(999, 3)));
+        assert!(!same_read(&entry(100, 3), &entry(100, 4)));
+        let mut replaced = entry(100, 3);
+        replaced.fingerprint = Some(fingerprint(8, 100));
+        assert!(!same_read(&entry(100, 3), &replaced));
+    }
 }

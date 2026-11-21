@@ -77,7 +77,7 @@ enum Command {
         #[command(subcommand)]
         command: GitCommand,
     },
-    /// Inspect tools, compare declarations, or review one bounded package install.
+    /// Manage declarations, check installed tools, and review missing installations.
     Tools {
         #[command(subcommand)]
         command: ToolsCommand,
@@ -204,46 +204,64 @@ enum PlanCommand {
     },
 }
 
+#[derive(clap::Args)]
+struct DeclaredToolsArgs {
+    /// Manifest to check; defaults to the selected repository's dort.toml.
+    #[arg(long)]
+    manifest: Option<PathBuf>,
+    #[arg(long = "profile")]
+    profiles: Vec<String>,
+    /// Package-manager program for a declared tool in a nonstandard layout: TOOL=PATH.
+    #[arg(long = "program", value_name = "TOOL=PATH")]
+    programs: Vec<String>,
+    /// npm CLI script for a declared npm tool: TOOL=PATH.
+    #[arg(long = "npm-cli", value_name = "TOOL=PATH")]
+    npm_clis: Vec<String>,
+    /// Global package destination for a declared npm tool: TOOL=PATH.
+    #[arg(long = "npm-prefix", value_name = "TOOL=PATH")]
+    npm_prefixes: Vec<String>,
+}
+
+#[derive(clap::Args)]
+struct InstalledToolsArgs {
+    /// Optional manifest for declared Node/npm runtime settings.
+    #[arg(long)]
+    manifest: Option<PathBuf>,
+    #[arg(long = "program", value_name = "TOOL=PATH")]
+    programs: Vec<String>,
+    #[arg(long = "npm-cli", value_name = "TOOL=PATH")]
+    npm_clis: Vec<String>,
+    #[arg(long = "npm-prefix", value_name = "TOOL=PATH")]
+    npm_prefixes: Vec<String>,
+}
 #[derive(Subcommand)]
 enum ToolsCommand {
+    /// Inspect installed packages using detected package managers; keep only this result.
+    Inspect(InstalledToolsArgs),
+    /// Check declared tools using automatically detected, reviewed provider scopes.
+    Check(DeclaredToolsArgs),
+    /// Check declarations and review all eligible missing tools for serial installation.
+    InstallMissing(DeclaredToolsArgs),
     /// Add one desired tool declaration to a registered repository; never install packages.
     Declare {
-        /// Strict Tool JSON: id, binary, profiles, requires, install (macos/ubuntu specs).
+        /// Strict Tool JSON: id, binary, profiles, requires, install (provider/package/version/runtime_tool).
         #[arg(long)]
         declaration: String,
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
-    /// Inspect scopes and declarations; optionally install one missing supported package.
-    Reconcile {
-        /// Review one missing exact mise/npm package, core formula or root-risk Ubuntu package.
+    /// Edit one existing tool declaration, keeping its ID and installed packages.
+    Edit {
         #[arg(long)]
-        install_tool: Option<String>,
-        /// Expected physical Homebrew prefix, only with --install-tool for brew.
-        #[arg(long, requires = "install_tool")]
-        brew_prefix: Option<PathBuf>,
-        /// Trusted physical APT candidate-query program (APT installation only).
-        #[arg(long, requires = "install_tool")]
-        apt_cache: Option<PathBuf>,
-        /// Trusted physical privileged APT installer (APT installation only).
-        #[arg(long, requires = "install_tool")]
-        apt_get: Option<PathBuf>,
-        /// Trusted physical sudo with policy-permitted command timeouts (APT only).
-        #[arg(long, requires = "install_tool")]
-        sudo: Option<PathBuf>,
-        #[arg(long)]
-        manifest: PathBuf,
-        /// Explicit tool lookup directories, independent of provider child PATH.
-        #[arg(long = "tool-search-dir", required = true)]
-        tool_search_dirs: Vec<PathBuf>,
+        declaration: String,
         #[arg(long = "profile")]
         profiles: Vec<String>,
-        /// Strict JSON: id, provider, executable, search_dirs, optional npm binding fields.
-        #[arg(long = "scope", required = true)]
-        scopes: Vec<String>,
-        /// Explicit selected-tool to snapshot-ID binding. Unbound tools stay unobserved.
-        #[arg(long = "bind")]
-        bindings: Vec<String>,
+    },
+    /// Remove a tool declaration; leave installed packages untouched.
+    Remove {
+        id: String,
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
     },
     /// List private Tools installation attempts; optionally inspect one full record.
     Attempts {
@@ -253,7 +271,7 @@ enum ToolsCommand {
     /// Freshly inspect and close an unchanged unresolved attempt; never replay or roll back.
     CloseAttempt {
         id: String,
-        /// Damaged-scope provider (default: mise); known attempts keep their original scope.
+        /// Required for damaged provider scope; known attempts retain their original scope.
         #[arg(long, value_enum)]
         provider: Option<InstallationProvider>,
         #[arg(long)]
@@ -266,54 +284,11 @@ enum ToolsCommand {
         #[arg(long = "search-dir")]
         search_dirs: Vec<PathBuf>,
     },
-    /// Query a trusted provider; configuration/plugins may run and caches may change.
-    Inspect {
-        #[arg(value_enum)]
-        provider: InspectionProvider,
-        /// Trusted absolute provider path (dpkg-query for apt, Node for npm).
-        #[arg(long)]
-        executable: PathBuf,
-        /// Explicit trusted absolute child search directory; repeat for each directory.
-        #[arg(long = "search-dir", required = true)]
-        search_dirs: Vec<PathBuf>,
-        /// Absolute manifest declaring npm's runtime tool (npm only).
-        #[arg(long)]
-        manifest: Option<PathBuf>,
-        #[arg(long)]
-        runtime_tool: Option<String>,
-        /// Trusted absolute npm CLI script, executed by the selected Node (npm only).
-        #[arg(long)]
-        npm_cli: Option<PathBuf>,
-        /// Explicit absolute global npm prefix (npm only).
-        #[arg(long)]
-        prefix: Option<PathBuf>,
-    },
 }
 #[derive(Clone, Copy, ValueEnum)]
 enum InstallationProvider {
-    Apt,
-    Mise,
     Npm,
     Brew,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-enum InspectionProvider {
-    Brew,
-    Apt,
-    Mise,
-    Npm,
-}
-impl InspectionProvider {
-    fn query(self) -> dort_core::tools::inspection::Query {
-        use dort_core::tools::inspection::Query;
-        match self {
-            Self::Brew => Query::BrewFormulae,
-            Self::Apt => Query::DpkgPackages,
-            Self::Mise => Query::MiseInstalled,
-            Self::Npm => Query::NpmGlobals,
-        }
-    }
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -340,6 +315,7 @@ pub fn run() -> ExitCode {
                 Error::Parse(_)
                 | Error::Validation(_)
                 | Error::Invalid(_)
+                | Error::RecoveryRequired(_)
                 | Error::NoRepository => (2, "validation"),
             };
             if cli.json {
@@ -355,214 +331,315 @@ pub fn run() -> ExitCode {
     }
 }
 
-fn tools_reconcile(
+fn declared_tools(
     cli: &Cli,
     host: &HostContext,
-    command: &ToolsCommand,
+    args: &DeclaredToolsArgs,
+    install_missing: bool,
 ) -> dort_core::Result<ExitCode> {
-    use crate::services::reconciliation::{self, ScopeRequest, Snapshot};
-    use std::collections::BTreeSet;
-    let ToolsCommand::Reconcile {
-        install_tool,
-        brew_prefix,
-        apt_cache,
-        apt_get,
-        sudo,
-        manifest,
-        tool_search_dirs,
-        profiles,
-        scopes,
-        bindings,
-    } = command
-    else {
-        unreachable!()
-    };
-    if scopes.len() > reconciliation::MAX_SNAPSHOTS {
-        return Err(Error::Invalid("too many inspection scopes".into()));
+    use crate::services::declared_tools::{Input, Status};
+    if cli.confirm_remove.is_some() {
+        return Err(Error::Invalid(
+            "Tool checks and installation do not use --confirm-remove".into(),
+        ));
     }
-    let effective_profiles = if install_tool.is_some() {
-        crate::services::installation::profiles(host, manifest, profiles)?
-    } else {
-        profiles.clone()
+    let launch = crate::environment::launch_directory()?;
+    let manifest = match &args.manifest {
+        Some(path) => crate::services::resolve_root(path, &launch),
+        None => {
+            let local = LocalConfig::load(host)?;
+            let explicit = cli
+                .repo
+                .as_ref()
+                .map(|p| crate::services::resolve_root(p, &launch));
+            crate::services::declared_tools::manifest(
+                &local.select_repository(explicit.as_deref())?,
+            )
+        }
     };
-    let prepared = reconciliation::Request {
-        manifest: manifest.clone(),
-        tool_search_dirs: tool_search_dirs.clone(),
-        profiles: effective_profiles,
+    let detection = crate::environment::inspection_inputs().with_settings(
+        host,
+        &manifest,
+        &args.programs,
+        &args.npm_clis,
+        &args.npm_prefixes,
+    )?;
+    let preview = Input {
+        manifest,
+        profiles: args.profiles.clone(),
+        detection,
     }
     .prepare(host)?;
-    let mut previews = Vec::new();
-    let mut ids = BTreeSet::new();
-    for scope in scopes {
-        let request = ScopeRequest::parse(scope)?;
-        if !ids.insert(request.id.clone()) {
-            return Err(Error::Invalid("duplicate snapshot ID".into()));
-        }
-        previews.push((request.id.clone(), request.prepare(host, manifest)?));
-    }
-    let bindings = reconciliation::parse_bindings(bindings)?;
-    prepared.validate_bindings(&bindings, &ids)?;
-    if let Some(tool) = install_tool
-        && !prepared.tools.iter().any(|t| {
-            &t.id == tool
-                && matches!(
-                    t.provider,
-                    Some(
-                        dort_core::model::Provider::Mise
-                            | dort_core::model::Provider::Npm
-                            | dort_core::model::Provider::Brew
-                            | dort_core::model::Provider::Apt
-                    )
-                )
-        })
-    {
-        return Err(Error::Invalid(
-            "installation must select an active mise, npm, Homebrew or APT tool".into(),
-        ));
-    }
-    if (apt_cache.is_some() || apt_get.is_some() || sudo.is_some())
-        && !prepared.tools.iter().any(|t| {
-            Some(&t.id) == install_tool.as_ref()
-                && t.provider == Some(dort_core::model::Provider::Apt)
-        })
-    {
-        return Err(Error::Invalid(
-            "--apt-cache, --apt-get and --sudo are only for APT installation".into(),
-        ));
-    }
-    if brew_prefix.is_some()
-        && !prepared.tools.iter().any(|t| {
-            Some(&t.id) == install_tool.as_ref()
-                && t.provider == Some(dort_core::model::Provider::Brew)
-        })
-    {
-        return Err(Error::Invalid(
-            "--brew-prefix is only for Homebrew installation".into(),
-        ));
-    }
     if cli.dry_run {
-        print_git_json(
-            &serde_json::json!({"reconciliation": &prepared.scope, "bindings": &bindings,
-            "inspections": previews.iter().map(|(id, p)| serde_json::json!({"id":id,"review":p.review()})).collect::<Vec<_>>(),
-            "requested_install": install_tool, "brew_prefix": brew_prefix, "apt_cache": apt_cache, "apt_get": apt_get, "sudo": sudo, "installation_review": "Requires approved inventories first; this dry-run runs no queries or installs"}),
-        )?;
+        if cli.json {
+            print_git_json(
+                &serde_json::json!({"check_review":preview.review(), "install_missing":install_missing, "preview_only":true}),
+            )?;
+        } else {
+            print!(
+                "{}",
+                crate::services::presentation::check_review(&preview.review())
+            );
+        }
         return Ok(ExitCode::SUCCESS);
     }
     if !cli.yes && !interactive(cli) {
-        return Err(Error::Invalid("reconciliation inspections require --yes in JSON/nonterminal mode, or --dry-run to review without execution".into()));
+        return Err(Error::Invalid("Tool checks require terminal confirmation or --yes; use --dry-run for a process-free review.".into()));
     }
     if !cli.json {
-        print_git_json(
-            &serde_json::json!({"reconciliation":&prepared.scope,"bindings":&bindings}),
-        )?;
+        print!(
+            "{}",
+            crate::services::presentation::check_review(&preview.review())
+        );
     }
-    let mut snapshots = Vec::new();
-    for (id, preview) in previews {
-        if !cli.json {
-            print_git_json(&serde_json::json!({"snapshot":&id,"review":preview.review()}))?;
-        }
-        if !cli.yes
-            && !confirmed(&format!(
-                "Snapshot {id}: config/plugins may run; caches may change. Run query? [y/N] "
-            ))?
-        {
-            return Err(Error::Invalid("scope not approved; earlier approved inspections may already have run, and nothing is automatically undone".into()));
-        }
-        snapshots.push(Snapshot {
-            id,
-            report: std::sync::Arc::new(preview.approve().inspect()),
-        });
-        if reconciliation::snapshot_records(&snapshots) > reconciliation::MAX_SNAPSHOT_RECORDS {
-            return Err(Error::Invalid(
-                "session snapshot record limit exceeded; approved inspections already ran and nothing is automatically undone".into(),
-            ));
+    if !cli.yes
+        && !confirmed("Check declared tools? Provider configuration/plugins may run. [y/N] ")?
+    {
+        return Err(Error::Invalid("Tool checks were not approved.".into()));
+    }
+    let checked = preview.approve().check(host)?;
+    let statuses: Vec<_> = checked.reconciliation.plan.rows.iter().map(|r|
+        serde_json::json!({"tool":r.id, "status":crate::services::declared_tools::status(r)})
+    ).collect();
+    if !cli.json {
+        for row in &checked.reconciliation.plan.rows {
+            println!(
+                "{}: {}",
+                crate::services::presentation::inline(&row.id),
+                crate::services::declared_tools::status(row).label()
+            );
         }
     }
-    let report = prepared.reconcile(&snapshots, bindings)?;
-    let unavailable =
-        !report.binaries.available() || snapshots.iter().any(|s| !s.report.available());
-    let blocked = report.plan.has_blockers();
-    if let Some(tool) = install_tool {
-        let mut request =
-            crate::services::installation::Request::selected(&report, tool, &snapshots)?;
-        if let Some(prefix) = brew_prefix {
-            if request.brew_executable().is_none() {
-                return Err(Error::Invalid(
-                    "--brew-prefix is only for Homebrew installation".into(),
-                ));
-            }
-            request.set_brew_prefix(prefix.clone());
-        }
-        if let Some(defaults) = request.apt_programs().cloned() {
-            request.set_apt_programs([
-                apt_cache.clone().or(defaults[0].clone()),
-                apt_get.clone().or(defaults[1].clone()),
-                sudo.clone().or(defaults[2].clone()),
-            ]);
-        }
-        let preview = request.prepare(host)?;
-        if !cli.json {
-            print_git_json(&preview.review())?;
-        }
-        approve(cli)?;
-        let lock = WriterLock::acquire(host)?;
-        let result = dort_core::tools::install::execute(host, &lock, preview.approve(), |_| {})?;
-        let success = crate::services::installation::succeeded(&result);
-        print_git_json(&result)?;
-        return Ok(if success {
-            ExitCode::SUCCESS
-        } else {
-            ExitCode::from(1)
-        });
-    }
-    print_git_json(&serde_json::json!({"snapshots":&snapshots,"reconciliation":&report}))?;
-    Ok(if unavailable {
-        ExitCode::from(1)
-    } else if blocked {
-        ExitCode::from(4)
+    let complete = checked
+        .reconciliation
+        .plan
+        .rows
+        .iter()
+        .all(|r| crate::services::declared_tools::status(r) == Status::Installed);
+    let mut exit = if !checked.available() {
+        1
+    } else if complete {
+        0
     } else {
-        ExitCode::SUCCESS
-    })
+        4
+    };
+    if install_missing {
+        let preview = checked.prepare_missing(host)?;
+        if !cli.json {
+            print!(
+                "{}",
+                crate::services::presentation::install_review(&preview.review())
+            );
+        }
+        if preview.is_empty() {
+            if cli.json {
+                print_git_json(
+                    &serde_json::json!({"check":checked, "statuses":statuses, "installation_review":preview.review(), "installation":null}),
+                )?;
+            }
+        } else {
+            if !cli.yes
+                && !confirmed(
+                    "Install the displayed missing tools? Partial effects are possible; no rollback. [y/N] ",
+                )?
+            {
+                return Err(Error::Invalid("Installation was not approved; approved checks may already have changed provider caches.".into()));
+            }
+            let deferred = preview.deferred.len();
+            let approval = preview.approve()?;
+            let lock = WriterLock::acquire(host)?;
+            let installed = approval.execute(host, &lock, |_| {});
+            exit = if !installed.succeeded() {
+                1
+            } else if deferred > 0
+                || checked.reconciliation.plan.rows.iter().any(|r| {
+                    !matches!(
+                        crate::services::declared_tools::status(r),
+                        Status::Installed | Status::Missing
+                    )
+                })
+            {
+                4
+            } else {
+                0
+            };
+            if cli.json {
+                print_git_json(
+                    &serde_json::json!({"before_installation":{"check":checked, "statuses":statuses}, "installation":installed}),
+                )?;
+            } else {
+                print!(
+                    "{}",
+                    crate::services::presentation::installed_result(&installed)
+                );
+            }
+        }
+    } else if cli.json {
+        print_git_json(&serde_json::json!({"check":checked, "statuses":statuses}))?;
+    }
+    Ok(ExitCode::from(exit))
 }
 
-fn tools_inspect(
+fn installed_tools(
+    cli: &Cli,
+    host: &HostContext,
+    args: &InstalledToolsArgs,
+) -> dort_core::Result<ExitCode> {
+    use crate::services::{installed_tools, presentation};
+    if cli.confirm_remove.is_some() {
+        return Err(Error::Invalid(
+            "Inspection does not use --confirm-remove.".into(),
+        ));
+    }
+    let launch = crate::environment::launch_directory()?;
+    let explicit = cli
+        .repo
+        .as_ref()
+        .map(|p| crate::services::resolve_root(p, &launch));
+    let manifest = args
+        .manifest
+        .as_ref()
+        .map(|p| crate::services::resolve_root(p, &launch))
+        .or_else(|| {
+            LocalConfig::load(host)
+                .ok()?
+                .select_repository(explicit.as_deref())
+                .ok()
+                .map(|r| r.join("dort.toml"))
+        });
+    let mut input = crate::environment::inspection_inputs();
+    if !args.programs.is_empty() || !args.npm_clis.is_empty() || !args.npm_prefixes.is_empty() {
+        let manifest = manifest.as_ref().ok_or_else(|| {
+            Error::Invalid("Select a repository before supplying tool settings.".into())
+        })?;
+        input = input.with_settings(
+            host,
+            manifest,
+            &args.programs,
+            &args.npm_clis,
+            &args.npm_prefixes,
+        )?;
+    }
+    let preview = installed_tools::prepare(host, manifest, input)?;
+    if cli.dry_run {
+        if cli.json {
+            print_git_json(
+                &serde_json::json!({"inspection_review":preview.review(), "preview_only":true}),
+            )?;
+        } else {
+            print!("{}", presentation::installed_review(&preview.review()));
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+    if !preview.is_empty() {
+        if !cli.yes && !interactive(cli) {
+            return Err(Error::Invalid("Inspection requires terminal confirmation or --yes; use --dry-run for a process-free review.".into()));
+        }
+        if !cli.json {
+            print!("{}", presentation::installed_review(&preview.review()));
+        }
+        if !cli.yes
+            && !confirmed(
+                "Inspect installed tools? Package-manager configuration/plugins may run. [y/N] ",
+            )?
+        {
+            return Err(Error::Invalid("Inspection was not approved.".into()));
+        }
+    }
+    let current = preview.approve().inspect()?;
+    if cli.json {
+        print_git_json(&current)?;
+    } else {
+        print!("{}", presentation::installed(&current));
+    }
+    Ok(ExitCode::from(if current.available() { 0 } else { 1 }))
+}
+
+fn tools_command(
     cli: &Cli,
     host: &HostContext,
     command: &ToolsCommand,
 ) -> dort_core::Result<ExitCode> {
-    if let ToolsCommand::Declare {
-        declaration,
-        profiles,
-    } = command
-    {
+    match command {
+        ToolsCommand::Inspect(args) => return installed_tools(cli, host, args),
+        ToolsCommand::Check(args) => return declared_tools(cli, host, args, false),
+        ToolsCommand::InstallMissing(args) => return declared_tools(cli, host, args, true),
+        _ => (),
+    }
+    if matches!(
+        command,
+        ToolsCommand::Declare { .. } | ToolsCommand::Edit { .. } | ToolsCommand::Remove { .. }
+    ) {
         if cli.confirm_remove.is_some() {
             return Err(Error::Invalid(
-                "tool declaration is add-only; omit --confirm-remove".into(),
+                "declaration changes use ordinary approval; omit --confirm-remove".into(),
             ));
         }
         let local = LocalConfig::load(host)?;
         let repository = local.select_repository(cli.repo.as_deref())?;
-        let profiles = if profiles.is_empty() {
-            &local.active_profiles
-        } else {
-            profiles
+        let preview = match command {
+            ToolsCommand::Declare {
+                declaration,
+                profiles,
+            }
+            | ToolsCommand::Edit {
+                declaration,
+                profiles,
+            } => {
+                let mut request = crate::services::declaration::Request::parse(declaration)?;
+                if matches!(command, ToolsCommand::Edit { .. }) {
+                    request.change = Some(dort_core::tools::declaration::Change::Edit);
+                }
+                request.prepare(host, &repository, profiles)?
+            }
+            ToolsCommand::Remove { id, profiles } => {
+                crate::services::declaration::prepare_remove(host, &repository, profiles, id)?
+            }
+            _ => unreachable!(),
         };
-        let preview = crate::services::declaration::Request::parse(declaration)?.prepare(
-            host,
-            &repository,
-            profiles,
-        )?;
         if cli.dry_run {
-            print_git_json(&preview)?;
+            if cli.json {
+                print_git_json(&preview)?;
+            } else {
+                print!(
+                    "{}",
+                    crate::services::presentation::safe(&crate::services::declaration::report(
+                        &preview
+                    ))
+                );
+            }
         } else {
             if !cli.json {
-                print_git_json(&preview)?;
+                print!(
+                    "{}",
+                    crate::services::presentation::safe(&crate::services::declaration::report(
+                        &preview
+                    ))
+                );
             }
             approve(cli)?;
             let approval = dort_core::tools::declaration::Approval::from_preview(preview)?;
             let lock = WriterLock::acquire(host)?;
             let tx = dort_core::tools::declaration::execute(host, &lock, approval, |_| Ok(()))?;
-            mutation_report("declare-tool", tx)?;
+            if cli.json {
+                mutation_report(
+                    match command {
+                        ToolsCommand::Edit { .. } => "edit-tool",
+                        ToolsCommand::Remove { .. } => "remove-tool",
+                        _ => "declare-tool",
+                    },
+                    tx,
+                )?;
+            } else {
+                println!(
+                    "{}",
+                    if tx.is_some() {
+                        "Declaration saved."
+                    } else {
+                        "No changes were needed."
+                    }
+                );
+            }
         }
         return Ok(ExitCode::SUCCESS);
     }
@@ -578,9 +655,21 @@ fn tools_inspect(
                 .iter()
                 .find(|a| &a.id == id)
                 .ok_or_else(|| Error::Invalid("installation attempt not found".into()))?;
-            print_git_json(attempt)?;
+            if cli.json {
+                print_git_json(attempt)?;
+            } else {
+                print!("{}", crate::services::presentation::attempt(attempt));
+            }
         } else {
-            print_git_json(&attempts)?;
+            if cli.json {
+                print_git_json(&attempts)?;
+            } else if attempts.is_empty() {
+                println!("No installation history.");
+            } else {
+                for attempt in &attempts {
+                    print!("{}", crate::services::presentation::attempt(attempt));
+                }
+            }
         }
         return Ok(ExitCode::SUCCESS);
     }
@@ -623,7 +712,6 @@ fn tools_inspect(
                 executable: executable.clone(),
                 search_dirs: search_dirs.clone(),
                 npm_binding,
-                apt: matches!(provider, Some(InstallationProvider::Apt)),
                 brew_prefix: if matches!(provider, Some(InstallationProvider::Brew)) {
                     Some(prefix.clone().ok_or_else(|| {
                         Error::Invalid("Homebrew fallback requires --prefix".into())
@@ -633,70 +721,27 @@ fn tools_inspect(
                 },
             },
         )?;
-        if cli.dry_run || !cli.json {
+        if cli.dry_run && cli.json {
             print_git_json(&preview.review())?;
+        } else if !cli.json {
+            print!(
+                "{}",
+                crate::services::presentation::close_review(&preview.review())
+            );
         }
         if !cli.dry_run {
             approve(cli)?;
             let lock = WriterLock::acquire(host)?;
-            print_git_json(&dort_core::tools::install::close(
-                host,
-                &lock,
-                preview.approve(),
-            )?)?;
+            let attempt = dort_core::tools::install::close(host, &lock, preview.approve())?;
+            if cli.json {
+                print_git_json(&attempt)?;
+            } else {
+                print!("{}", crate::services::presentation::attempt(&attempt));
+            }
         }
         return Ok(ExitCode::SUCCESS);
     }
-    if matches!(command, ToolsCommand::Reconcile { .. }) {
-        return tools_reconcile(cli, host, command);
-    }
-    let ToolsCommand::Inspect {
-        provider,
-        executable,
-        search_dirs,
-        manifest,
-        runtime_tool,
-        npm_cli,
-        prefix,
-    } = command
-    else {
-        unreachable!()
-    };
-    let preview = crate::services::tools::Request {
-        query: provider.query(),
-        executable: executable.clone(),
-        search_dirs: search_dirs.clone(),
-        manifest: manifest.clone(),
-        runtime_tool: runtime_tool.clone(),
-        npm_cli: npm_cli.clone(),
-        prefix: prefix.clone(),
-    }
-    .prepare(host)?;
-    if cli.dry_run {
-        print_git_json(&preview.review())?;
-        return Ok(ExitCode::SUCCESS);
-    }
-    if !cli.json {
-        print_git_json(&preview.review())?;
-    }
-    if !cli.yes {
-        if !interactive(cli) {
-            return Err(Error::Invalid("provider inspection requires --yes in JSON/nonterminal mode, or use --dry-run to review without execution".into()));
-        }
-        if !confirmed("Provider config/plugins may run; caches may change. Run query? [y/N] ")? {
-            return Err(Error::Invalid(
-                "provider inspection not approved; nothing executed".into(),
-            ));
-        }
-    }
-    let report = preview.approve().inspect();
-    let available = report.available();
-    print_git_json(&report)?;
-    Ok(if available {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::from(1)
-    })
+    unreachable!("all Tools commands are handled above")
 }
 
 fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
@@ -718,7 +763,7 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
     }
     let host = HostContext::from_env()?;
     if let Command::Tools { command } = command {
-        return tools_inspect(cli, &host, command);
+        return tools_command(cli, &host, command);
     }
     // Read only; missing configuration uses defaults without creating directories.
     let local = LocalConfig::load(&host)?;

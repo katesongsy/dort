@@ -323,7 +323,7 @@ fn child_crash_probe() {
         home.into(),
         None,
         None,
-        Platform::Ubuntu,
+        Platform::Linux,
         Architecture::X86_64,
     )
     .unwrap();
@@ -561,7 +561,20 @@ fn malformed_tail_preserves_earlier_intent_and_blocks_registry_and_recovery() {
     assert!(reports[0].problem.is_some());
     assert!(reports[0].blocks_writes());
     assert_eq!(fs::read(f.txpath().join("000000.json")).unwrap(), first);
-    assert!(RepositoryRegistry::register(&f.home.host, &f.lock, &f.repo).is_err());
+    let Error::RecoveryRequired(blocker) =
+        RepositoryRegistry::register(&f.home.host, &f.lock, &f.repo).unwrap_err()
+    else {
+        panic!("typed recovery blocker");
+    };
+    assert_eq!(blocker.transaction.repository_id, f.id);
+    assert_eq!(blocker.transaction.transaction_id, f.transaction());
+    assert_eq!(blocker.repository_root.as_deref(), Some(f.repo.as_path()));
+    assert_eq!(blocker.operation(), "File adoption");
+    let message = blocker.to_string();
+    assert!(message.contains("can't verify an earlier operation's recovery record"));
+    assert!(message.contains("New changes are paused"));
+    assert!(message.contains("dort recovery list"));
+    assert!(!message.contains("truncated") && !message.contains("malformed transaction"));
     assert!(
         adoption::rollback(&f.home.host, &f.lock, &f.id, &f.transaction(), |_| Ok(())).is_err()
     );
@@ -609,6 +622,14 @@ fn partial_private_preparation_can_be_abandoned_without_live_changes() {
         )
         .is_err()
     );
+    let Error::RecoveryRequired(blocker) =
+        RepositoryRegistry::register(&f.home.host, &f.lock, &f.repo).unwrap_err()
+    else {
+        panic!("unfinished operation must still block writes");
+    };
+    assert_eq!(blocker.reason(), "An earlier operation did not finish.");
+    assert_eq!(blocker.transaction.transaction_id, f.transaction());
+    assert!(blocker.transaction.problem.is_none());
     fs::write(f.txpath().join("destination.backup"), b"partial").unwrap();
     fs::set_permissions(
         f.txpath().join("destination.backup"),
@@ -766,7 +787,7 @@ fn different_filesystem_state_has_no_cross_device_copy_fallback() {
         f.host.home.clone(),
         None,
         Some(state.path().canonicalize().unwrap()),
-        Platform::Ubuntu,
+        Platform::Linux,
         Architecture::X86_64,
     )
     .unwrap();

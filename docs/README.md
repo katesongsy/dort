@@ -14,10 +14,11 @@ Start with the [user guide](user/README.md):
 ## Durable technical references
 
 - [Architecture](../ARCHITECTURE.md): implemented module boundaries, execution, persistence and recovery contracts.
-- [Bounded Tools installation](tool-installation.md): exact mise/npm and provider-current Homebrew core/Ubuntu APT scopes, independent opaque approvals, native-effect disclosures, fixed probes/provider-specific supervision, compatible attempt schemas and guarded historical closure.
-- [Tool declarations](tool-declarations.md): focused manifest-only edits, single-use approval and schema-5 recovery contracts.
+- [Declaration-driven tools](declared-tools.md): automatic reviewed checks, per-tool status and one combined serial missing-install approval.
+- [Bounded Tools installation](tool-installation.md): exact npm and provider-current Homebrew core scopes on macOS/Linux/WSL, independent opaque approvals, native-effect disclosures, fixed probes, joined supervision, supported attempt schemas and guarded historical closure.
+- [Tool declarations](tool-declarations.md): focused manifest-only edits, single-use approval and schema-5/6 recovery contracts.
 - [Provider inspection](tools-inspection.md): shared CLI/TUI approval, process, metadata and runtime-binding boundaries.
-- [Snapshot reconciliation](binary-reconciliation.md): explicit multi-snapshot binding, no-follow candidate metadata and frontend scope/freshness boundaries.
+- [Internal package comparison](binary-reconciliation.md): exact current-check associations, no-follow command metadata and scope/freshness boundaries.
 - [Non-executable command previews](install-command-previews.md): fixed argv/control descriptions, native side-effect caveats and no execution authority.
 - [Pure tool package planning](tools-planning.md): explicit-scope claims, binary uncertainty, version/no-op semantics and dependency blockers.
 - [TUI design system](design-system.md): mandatory semantic styling, component, motion and agent-review standards.

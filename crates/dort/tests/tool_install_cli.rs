@@ -26,7 +26,7 @@ impl Fixture {
             fs::create_dir(p).unwrap();
         }
         fs::create_dir(repo.join(".git")).unwrap();
-        fs::write(repo.join("dort.toml"), "schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='mise',package='demo',version='1.2.3'}\nubuntu={provider='mise',package='demo',version='1.2.3'}\n").unwrap();
+        fs::write(repo.join("dort.toml"), "schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nprovider='npm'\npackage='demo'\nversion='1.2.3'\nruntime_tool='node'\n[[tools]]\nid='node'\nbinary='node'\n[tools.install]\nprovider='brew'\npackage='node'\n").unwrap();
         let host = HostContext::new(
             home,
             None,
@@ -38,7 +38,14 @@ impl Fixture {
         let lock = WriterLock::acquire(&host).unwrap();
         RepositoryRegistry::register(&host, &lock, &repo).unwrap();
         drop(lock);
-        let executable = root.join("mise");
+        let executable = root.join("runtime/bin/node");
+        fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        let cli = root.join("runtime/lib/node_modules/npm/bin/npm-cli.js");
+        fs::create_dir_all(cli.parent().unwrap()).unwrap();
+        fs::write(cli, "PRIVATE_CLI").unwrap();
+        let brew = bin.join("brew");
+        fs::write(&brew, "#!/bin/sh\nprintf '%s' '{\"formulae\":[{\"full_name\":\"node\",\"installed\":[{\"version\":\"24.0.0\"}]}]}'\n").unwrap();
+        fs::set_permissions(brew, fs::Permissions::from_mode(0o700)).unwrap();
         let behavior = match mode {
             "fail" => "exit 9",
             "present-fail" => "printf installed > \"$HOME/installed\"; exit 9",
@@ -50,7 +57,20 @@ impl Fixture {
             }
             _ => "printf installed > \"$HOME/installed\"",
         };
-        fs::write(&executable, format!("#!/bin/sh\nif [ \"$1\" = ls ]; then\n printf Q >> \"$HOME/calls\"\n if [ -f \"$HOME/unavailable\" ]; then printf PRIVATE_QUERY; exit 4; fi\n if [ -f \"$HOME/conflict\" ]; then printf '{{\"demo\":[{{\"version\":\"2.0.0\",\"installed\":true}}]}}'; exit 0; fi\n if [ -f \"$HOME/installed\" ]; then printf '{{\"demo\":[{{\"version\":\"1.2.3\",\"installed\":true}}]}}'; else printf '{{}}'; fi\n exit 0\nfi\nprintf I >> \"$HOME/calls\"\nprintf '%s\\n' \"$@\" > \"$HOME/argv\"\nprintf PRIVATE_OUTPUT; printf PRIVATE_ERROR >&2\n{behavior}\n")).unwrap();
+        fs::write(&executable, format!(r##"#!/bin/sh
+shift
+if [ "$1" = ls ]; then
+ printf Q >> "$HOME/calls"
+ if [ -f "$HOME/unavailable" ]; then printf PRIVATE_QUERY; exit 4; fi
+ if [ -f "$HOME/conflict" ]; then printf '{{"dependencies":{{"demo":{{"version":"2.0.0"}}}}}}'; exit 0; fi
+ if [ -f "$HOME/installed" ]; then printf '{{"dependencies":{{"demo":{{"version":"1.2.3"}}}}}}'; else printf '{{}}'; fi
+ exit 0
+fi
+printf I >> "$HOME/calls"
+printf '%s\n' "$@" > "$HOME/argv"
+printf PRIVATE_OUTPUT; printf PRIVATE_ERROR >&2
+{behavior}
+"##)).unwrap();
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
         Self {
             _temp: temp,
@@ -64,25 +84,23 @@ impl Fixture {
         let mut c = Command::new(env!("CARGO_BIN_EXE_dort"));
         c.env_clear()
             .env("HOME", &self.host.home)
-            .env("PATH", "/no-programs")
+            .env(
+                "PATH",
+                std::env::join_paths([self.executable.parent().unwrap(), self.bin.as_path()])
+                    .unwrap(),
+            )
             .current_dir(&self.repo);
         c
     }
     fn install(&self) -> Command {
-        let scope = serde_json::json!({"id":"chosen","provider":"mise","executable":self.executable,"search_dirs":[self.bin]}).to_string();
         let mut c = self.cmd();
-        c.args(["--json", "tools", "reconcile", "--manifest"])
-            .arg(self.repo.join("dort.toml"))
-            .arg("--tool-search-dir")
-            .arg(&self.bin)
-            .args([
-                "--scope",
-                &scope,
-                "--bind",
-                "demo=chosen",
-                "--install-tool",
-                "demo",
-            ]);
+        c.args([
+            "--json",
+            "tools",
+            "install-missing",
+            "--npm-prefix",
+            &format!("demo={}", self.host.home.join("globals").display()),
+        ]);
         c
     }
     fn calls(&self) -> String {
@@ -115,7 +133,7 @@ fn dry_run_and_nonterminal_refusal_never_query_and_exact_install_has_private_att
     assert!(
         String::from_utf8(output)
             .unwrap()
-            .contains("requested_install")
+            .contains("install_missing")
     );
     assert_eq!(f.calls(), "");
     assert!(!f.host.state_dir.join("tools-attempts").exists());
@@ -131,7 +149,8 @@ fn dry_run_and_nonterminal_refusal_never_query_and_exact_install_has_private_att
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(!text.contains("PRIVATE"));
     assert!(!String::from_utf8(out.stderr).unwrap().contains("PRIVATE"));
-    let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let output: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let report = &output["installation"]["results"][0]["report"];
     assert_eq!(report["outcome"]["package"], "exact_present");
     assert_eq!(report["readiness_verified"], false);
     assert_eq!(report["summary"]["status"], "exact_reported");
@@ -139,7 +158,10 @@ fn dry_run_and_nonterminal_refusal_never_query_and_exact_install_has_private_att
     assert_eq!(f.calls(), "QQIQ"); // Collection, fresh inspection, installer, post-inspection.
     assert_eq!(
         fs::read_to_string(f.host.home.join("argv")).unwrap(),
-        "--no-config\n--no-env\n--no-hooks\ninstall\n--jobs=1\ndemo@1.2.3\n"
+        format!(
+            "install\n--global\n--prefix\n{}\n--ignore-scripts\n--audit=false\n--fund=false\n--update-notifier=false\n--logs-max=0\n--loglevel=silent\n--registry=https://registry.npmjs.org/\n--userconfig=/dev/null\n--globalconfig=/dev/null\ndemo@1.2.3\n",
+            f.host.home.join("globals").display()
+        )
     );
     let attempts = f.attempts();
     assert_eq!(attempts.as_array().unwrap().len(), 1);
@@ -174,7 +196,8 @@ fn failed_install_reports_observed_failure_without_claiming_readiness() {
         .get_output()
         .stdout
         .clone();
-    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let output: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let report = &output["installation"]["results"][0]["report"];
     assert_eq!(report["outcome"]["process"], "failed");
     assert_eq!(report["outcome"]["package"], "absent");
     assert_eq!(report["possible_partial_effects"], true);

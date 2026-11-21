@@ -282,8 +282,8 @@ fn about_reports_build_version_and_returns_to_prior_focus_and_details() {
         text.push_str(&render(&app, 120, 45));
     }
     assert!(text.contains("Other package installations"));
-    assert!(text.contains("APT privilege:"));
-    assert!(text.contains("noninteractive sudo -n -T 600"));
+    assert!(text.contains("brew/npm"));
+    assert!(text.contains("macOS, Linux and WSL"));
     key(&mut app, KeyCode::Esc);
     assert!(app.tab == Tab::Recovery);
     assert_eq!(app.details_scroll, 8);

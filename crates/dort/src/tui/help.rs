@@ -45,7 +45,7 @@ impl Topic {
             Self::Checks => "Manifest checks",
             Self::Diagnostics => "Diagnostics",
             Self::Git => "Git inspection",
-            Self::Tools => "Explicit provider inspection",
+            Self::Tools => "Tools",
             Self::GitContent => "Git content disclosure",
             Self::Actions => "Actions",
             Self::Menu => "Menu",
@@ -94,7 +94,7 @@ impl Topic {
                 "Patches may contain secrets. Each new view requires deliberate disclosure."
             }
             Self::Tools => {
-                "Provider queries and installations require their own real, single-use reviews."
+                "Enter opens the selected tool or package. Check and Install are named actions. Installed tools keeps only the current inspection; Add declaration prefills known package fields for a separate manifest review."
             }
             Self::Actions => "Find a task by name. Unavailable tasks explain their prerequisites.",
             Self::Menu => {
@@ -104,7 +104,7 @@ impl Topic {
                 "Choose a contextual action. This menu never grants an execution approval."
             }
             Self::Choice => {
-                "Select a draft value or explicit snapshot binding; no provider executes."
+                "Choose a value for the current form. Selecting a value runs no programs."
             }
             Self::Form(Form::Adopt) => {
                 "Declare one ordinary file mapping, then review the real adoption effects."
@@ -176,39 +176,63 @@ impl Topic {
                 ("Ctrl-U", "Clear current field"),
                 ("Esc", "Back, retaining draft"),
             ],
+            Self::Tools if app.tools_view.installed_open => &[
+                (
+                    "Enter",
+                    "Open the selected package; Run inspection on its explicit review",
+                ),
+                ("a", "Add a declaration with inspected fields prefilled"),
+                ("R", "Review a new installed-package inspection"),
+                ("/", "Filter current installed packages"),
+                ("Esc", "Back, retaining only the current inspection"),
+            ],
             Self::Tools if app.tools_view.declaration_open => &[
-                ("Tab", "Traverse visible declaration controls"),
-                ("Space", "Choose a platform provider"),
-                ("Enter", "Prepare declaration review"),
-                ("F3", "Draft metadata"),
-                ("F4", "Show/hide optional dependencies"),
+                ("Tab / Shift-Tab", "Edit declaration fields"),
+                ("Space", "Choose the platform package manager"),
+                ("Enter", "Review the declaration change"),
+                ("F4", "Show/hide dependencies"),
+                ("Esc", "Stop editing, then Back"),
             ],
-            Self::Tools if app.tools_view.configuring => &[
-                ("Tab", "Traverse relevant scope controls"),
-                ("Space", "Choose provider from its field"),
-                ("Enter", "Prepare exact query review"),
-                ("F3", "Full draft scope"),
-                ("Esc", "Back, retaining input"),
+            Self::Tools if app.tools_view.settings_open => &[
+                ("Tab / Shift-Tab", "Edit the necessary tool settings"),
+                (
+                    "Enter",
+                    "Validate and save session settings; runs no programs",
+                ),
+                ("Esc", "Stop editing, then Back"),
             ],
-            Self::Tools if app.tools_view.setup => &[
-                ("Up/Down", "Select manager"),
-                ("Space", "Toggle an eligible inventory"),
-                ("Enter", "Inspect selected reviewed scopes"),
-                ("F3", "Exact prepared scopes"),
-                ("F2", "Advanced settings and refresh"),
+            Self::Tools if app.tools_view.landing() && app.tools_view.declared.result_open => &[
+                ("Enter/Esc", "Done; return to tool statuses"),
+                ("Up/Down/PgUp/PgDn", "Read per-tool install outcomes"),
             ],
-            Self::Tools if app.tools_view.recon_open => &[
-                ("Tab", "Traverse fields/tool bindings"),
-                ("Space", "Choose an explicit compatible snapshot"),
-                ("Enter", "Load declarations, calculate, or inspect a result"),
-                ("F3", "Full metadata"),
-                ("F2", "Eligible installation review or fresh inventory"),
+            Self::Tools
+                if app.tools_view.declared.check_preview.is_some()
+                    || app.tools_view.declared.install_preview.is_some() =>
+            {
+                &[
+                    (
+                        "Up/Down/PgUp/PgDn",
+                        "Read the complete scope, reasons and risks",
+                    ),
+                    ("Enter", "Activate the explicitly displayed review action"),
+                    ("Esc", "Cancel without executing"),
+                ]
+            }
+            Self::Tools if app.tools_view.install_open => &[
+                ("Enter", "Open the selected installation record"),
+                ("x", "Review closure of an unresolved record"),
+                ("R", "Refresh installation history"),
+                ("Esc", "Back without replaying an installation"),
             ],
             Self::Tools => &[
-                ("Enter", "Contextual primary shown in the action strip"),
-                ("F2", "Inspection, installation and closure review actions"),
-                ("F3", "Full metadata when offered"),
-                ("Esc", "Back; never replay an old approval"),
+                ("Enter", "Open the selected tool; never Check or Install"),
+                ("C", "Review Check installed"),
+                ("i", "Review Install missing after checking"),
+                ("e / d", "Edit / remove the selected declaration"),
+                ("a", "Add a declaration"),
+                ("s", "Tool settings when configuration needs attention"),
+                ("h", "Installation history"),
+                ("Esc", "Back"),
             ],
             Self::Actions => &[
                 ("Type", "Search task names"),
@@ -380,7 +404,7 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
     }
     let mut sections = vec![("Workbench", "Ctrl-G / Menu: sections and destinations; Ctrl-K: searchable task launcher; F2: additional contextual actions when shown; F1: Help. Esc returns one meaningful level. Outside text entry, o/f/t/r/c/g opens Overview/Files/Tools/Recovery/Checks/Git. Menu and the wide rail use that order, with Session last in Menu. Contextual O/F/T/R/C retains adoption/discovery/profiles/refresh/inspection actions; P chooses Git scope. Home selects the first Files row. Numbered local destinations use 1/2/3/4 within the current section outside text entry, or the selected Menu section. Fields and filters accept digits and other printable keys literally; footer buttons never join field traversal.".to_owned())];
     if matches!(help.topic, Topic::Tools) {
-        sections.insert(0, ("Tools boundaries", "Discovery is metadata-only. Prepare selected real scopes before the single inspection confirmation. Snapshots are session claims, not ownership/readiness or execution authority. Bind each declared tool explicitly; changed npm declarations need fresh inspection. Declaration is manifest-only. Installs and historical closure have separate reviews; fresh-review entry never queries, binds or replays automatically. Closure is neither success nor repair.".to_owned()));
+        sections.insert(0, ("Tools boundaries", "Tools starts with declarations. Check installed prepares only needed detected provider scopes and shows automatic per-tool associations for approval. Installed means a matching package-manager claim, not verified command readiness. Unknown is never missing. Install missing reviews up to 32 eligible tools once, executes serially and stops on failure; earlier effects remain, with no rollback or silent upgrades. Deferred prerequisites need a fresh check/review. Observations and their associations stay internal. Tool settings are available from its details; installation history retains outcomes and explicit record closure. Navigation and preparation run no provider commands; approvals are never replayed.".to_owned()));
     }
     if matches!(help.topic, Topic::Menu)
         && let Some(menu) = app.navigation.menu

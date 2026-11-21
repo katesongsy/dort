@@ -34,11 +34,6 @@ struct Formula {
 struct BrewVersion {
     version: String,
 }
-#[derive(Deserialize)]
-struct MiseVersion {
-    version: String,
-    installed: bool,
-}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -83,26 +78,6 @@ pub(super) fn parse(query: Query, bytes: &[u8]) -> Result<Vec<Installation>, Fai
                 }
             }
         }
-        Query::MiseInstalled => {
-            let report: BTreeMap<String, Vec<MiseVersion>> =
-                serde_json::from_slice(bytes).map_err(|_| Failure::Malformed)?;
-            if report.len() > MAX_RECORDS {
-                return Err(Failure::Malformed);
-            }
-            for (package, versions) in report {
-                if !token(&package, 256) || versions.is_empty() {
-                    return Err(Failure::Malformed);
-                }
-                for version in versions {
-                    // A query promising only installed entries must not silently hide a
-                    // missing/broken/lazy runtime as an empty healthy inventory.
-                    if !version.installed {
-                        return Err(Failure::Malformed);
-                    }
-                    push(&mut entries, &package, &version.version)?;
-                }
-            }
-        }
         Query::NpmGlobals => {
             let report: Npm = serde_json::from_slice(bytes).map_err(|_| Failure::Malformed)?;
             if !report.problems.is_empty() || report.invalid.is_some() || report.error.is_some() {
@@ -115,45 +90,6 @@ pub(super) fn parse(query: Query, bytes: &[u8]) -> Result<Vec<Installation>, Fai
                 // Global top-level packages only. Never retain resolved URLs, scripts,
                 // transitive trees or provider diagnostic strings.
                 push(&mut entries, &package, &version.version)?;
-            }
-        }
-        Query::DpkgPackages => {
-            let text = std::str::from_utf8(bytes).map_err(|_| Failure::Malformed)?;
-            if !text.is_empty() && !text.ends_with('\n') {
-                return Err(Failure::Malformed);
-            }
-            if text.lines().count() > MAX_RECORDS {
-                return Err(Failure::Malformed);
-            }
-            for line in text.lines() {
-                let parts: Vec<_> = line.splitn(5, '\t').collect();
-                if parts.len() != 4 || !token(parts[0], 256) {
-                    return Err(Failure::Malformed);
-                }
-                if !matches!(
-                    parts[2],
-                    "not-installed"
-                        | "config-files"
-                        | "half-installed"
-                        | "unpacked"
-                        | "half-configured"
-                        | "triggers-awaited"
-                        | "triggers-pending"
-                        | "installed"
-                ) || !matches!(parts[3], "ok" | "reinstreq")
-                {
-                    return Err(Failure::Malformed);
-                }
-                if parts[3] != "ok"
-                    || !matches!(parts[2], "not-installed" | "config-files" | "installed")
-                {
-                    return Err(Failure::IncompletePackages);
-                }
-                if parts[2] == "installed" {
-                    push(&mut entries, parts[0], parts[1])?;
-                } else if !parts[1].is_empty() && !token(parts[1], 256) {
-                    return Err(Failure::Malformed);
-                }
             }
         }
     }

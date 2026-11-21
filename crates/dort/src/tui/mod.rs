@@ -11,12 +11,22 @@ mod appearance_tests;
 #[path = "tests/batch.rs"]
 mod batch_tests;
 mod batch_ui;
+#[cfg(test)]
+#[path = "tests/calm_controls.rs"]
+mod calm_controls_tests;
 mod choice;
 mod components;
 #[cfg(test)]
 #[path = "tests/consistency.rs"]
 mod consistency_tests;
 mod context;
+#[cfg(test)]
+#[path = "tests/declaration_changes.rs"]
+mod declaration_changes_tests;
+mod declared_tools;
+#[cfg(test)]
+#[path = "tests/declared_workflow.rs"]
+mod declared_workflow_tests;
 #[cfg(test)]
 #[path = "tests/design_system.rs"]
 mod design_system_tests;
@@ -53,6 +63,10 @@ mod hints_tests;
 mod ignore_tests;
 mod ignored;
 mod input;
+mod installed_tools;
+#[cfg(test)]
+#[path = "tests/installed_tools.rs"]
+mod installed_tools_tests;
 #[cfg(test)]
 #[path = "tests/interaction.rs"]
 mod interaction_tests;
@@ -95,18 +109,19 @@ mod tool_declaration;
 #[path = "tests/tool_declaration.rs"]
 mod tool_declaration_tests;
 mod tools;
-mod tools_defaults;
 mod tools_install;
 #[cfg(test)]
 #[path = "tests/tools_install.rs"]
 mod tools_install_tests;
-mod tools_reconcile;
 #[cfg(test)]
-#[path = "tests/tools_reconcile.rs"]
-mod tools_reconcile_tests;
+#[path = "tests/tools_provider_fixture.rs"]
+mod tools_provider_fixture;
 #[cfg(test)]
 #[path = "tests/tools.rs"]
 mod tools_tests;
+#[cfg(test)]
+#[path = "tests/tools_ux.rs"]
+mod tools_ux_tests;
 mod tree;
 mod views;
 mod visibility;
@@ -152,7 +167,6 @@ pub fn run(
     reduced_motion: bool,
 ) -> Result<()> {
     let mut app = App::new(dry_run);
-    app.tools_view.platform = Some(host.platform);
     app.appearance = appearance;
     app.reduced_motion = reduced_motion;
     if repository.is_some() {
@@ -223,7 +237,7 @@ fn run_loop(
                 // A deferred quit must not hide a failure before it could be displayed.
                 let output = match output {
                     Err(error) if app.exit_requested => return Err(actions::exit_error(error)),
-                    other => other.map_err(|error| actions::diagnostic(&error)),
+                    other => actions::present(other),
                 };
                 if let Some(task) = app.complete(output) {
                     queued = Some(task);
@@ -321,7 +335,7 @@ fn dispatch(
         // Wait for the owned passive read; never detach or launch a second worker.
         app.start(matches!(
             task,
-            Task::Execute(_) | Task::ToolInstall(_) | Task::ToolClose(_)
+            Task::Execute(_) | Task::ToolClose(_) | Task::ToolsInstallMissing(_)
         ));
         *queued = Some(task);
         Ok(())
@@ -346,7 +360,7 @@ fn launch(
     app.retry = task.retry_intent();
     let writing = matches!(
         task,
-        Task::Execute(_) | Task::ToolInstall(_) | Task::ToolClose(_)
+        Task::Execute(_) | Task::ToolClose(_) | Task::ToolsInstallMissing(_)
     );
     let completed = matches!(task, Task::Refresh) && app.status.starts_with("Operation completed.");
     let activity = task_surfaces::Activity::for_task(&task, app);

@@ -49,7 +49,7 @@ exit 90
             home.clone(),
             None,
             None,
-            Platform::Ubuntu,
+            Platform::Linux,
             Architecture::X86_64,
         )
         .unwrap();
@@ -98,6 +98,7 @@ fn key(app: &mut App, code: KeyCode) -> Option<Task> {
     app.key(KeyEvent::new(code, KeyModifiers::NONE), 80, 24)
 }
 fn text(app: &mut App, value: &str) {
+    super::tests::focus_form(app);
     for c in value.chars() {
         assert!(key(app, KeyCode::Char(c)).is_none());
     }

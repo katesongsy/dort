@@ -1,4 +1,4 @@
-//! Schema 5: one add-only tool declaration, manifest-only; no package ownership.
+//! Schema 5 additions and schema 6 edits/removals; manifest-only, no package ownership.
 use crate::{
     Error, Result,
     context::HostContext,
@@ -19,6 +19,8 @@ pub(crate) struct Header {
     pub transaction_id: String,
     pub approved_plan_sha256: String,
     pub tool: Tool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change: Option<crate::tools::declaration::Change>,
     pub profiles: Vec<String>,
     pub manifest: Entry,
     pub local_config: Entry,
@@ -69,7 +71,7 @@ impl Journal {
         let mut j = Self {
             directory,
             record: Record {
-                schema: 5,
+                schema: if header.change.is_some() { 6 } else { 5 },
                 sequence: 0,
                 previous_sha256: None,
                 header,
@@ -140,7 +142,7 @@ fn verify_backup(dir: &PrivateDir, h: &Header) -> Result<()> {
 }
 fn structure(r: &Record, dir: &Path) -> Result<()> {
     let h = &r.header;
-    if r.schema != 5
+    if !matches!((r.schema, h.change), (5, None) | (6, Some(_)))
         || !journal::valid_id(&h.repository_id)
         || !journal::valid_id(&h.transaction_id)
         || !journal::valid_id(&h.approved_plan_sha256)
@@ -198,7 +200,8 @@ fn transition(a: &Record, b: &Record) -> Result<()> {
         Phase::RollingBack => matches!(b.phase, Phase::RollingBack | Phase::RolledBack),
         Phase::RolledBack => false,
     };
-    if !valid || journal::encode(&a.header)? != journal::encode(&b.header)? {
+    if !valid || a.schema != b.schema || journal::encode(&a.header)? != journal::encode(&b.header)?
+    {
         return Err(Error::Invalid(
             "invalid declaration phase/header transition".into(),
         ));
@@ -240,12 +243,12 @@ fn transition(a: &Record, b: &Record) -> Result<()> {
     Ok(())
 }
 // Hint only; scan independently validates the full chain.
-pub(crate) fn is_schema5(dir: &PrivateDir) -> bool {
+pub(crate) fn is_declaration(dir: &PrivateDir) -> bool {
     journal::read_bytes(dir, "000000.json")
         .ok()
         .and_then(|b| serde_json::from_slice::<Envelope>(&b).ok())
         .and_then(|e| serde_json::from_str::<serde_json::Value>(&e.payload).ok())
-        .is_some_and(|v| v.get("schema").and_then(|v| v.as_u64()) == Some(5))
+        .is_some_and(|v| matches!(v.get("schema").and_then(|v| v.as_u64()), Some(5 | 6)))
 }
 pub(crate) fn scan(
     dir: &PrivateDir,
@@ -284,6 +287,17 @@ pub(crate) fn scan(
             let r: Record = serde_json::from_str(&e.payload).map_err(|_| {
                 Error::Invalid("unsupported or malformed declaration checkpoint".into())
             })?;
+            // Schema 5 retains its original field set, including refusal of null additions.
+            if r.schema == 5
+                && serde_json::from_str::<serde_json::Value>(&e.payload)
+                    .ok()
+                    .and_then(|v| v.get("header")?.get("change").cloned())
+                    .is_some()
+            {
+                return Err(Error::Invalid(
+                    "schema-5 declaration has schema-6 fields".into(),
+                ));
+            }
             if r.sequence != i
                 || r.previous_sha256 != hash
                 || r.header.repository_id != repo
@@ -301,7 +315,7 @@ pub(crate) fn scan(
             }
             d.valid_checkpoints += 1;
             d.phase = Some(r.phase);
-            d.journal_schema = Some(5);
+            d.journal_schema = Some(r.schema);
             hash = Some(e.sha256);
             latest = Some(r);
         }

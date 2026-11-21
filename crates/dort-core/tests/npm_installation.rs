@@ -14,7 +14,7 @@ use std::{
     path::PathBuf,
 };
 
-const MANIFEST: &str = "schema=1\n[[tools]]\nid='node'\nbinary='node'\n[tools.install]\nmacos={provider='mise',package='node',version='20.1.0'}\nubuntu={provider='mise',package='node',version='20.1.0'}\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='npm',package='@demo/pkg',version='1.2.3',runtime_tool='node'}\nubuntu={provider='npm',package='@demo/pkg',version='1.2.3',runtime_tool='node'}\n";
+const MANIFEST: &str = "schema=1\n[[tools]]\nid='node'\nbinary='node'\n[tools.install]\nprovider='brew'\npackage='node'\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nprovider='npm'\npackage='@demo/pkg'\nversion='1.2.3'\nruntime_tool='node'\n";
 const NODE: &str = r##"#!/bin/sh
 [ "$1" = "$HOME/runtime/npm-cli.js" ] || exit 90
 shift
@@ -30,7 +30,7 @@ fi
 shift 4
 [ "$1" = --ignore-scripts ] && [ "$2" = --audit=false ] && [ "$3" = --fund=false ] && [ "$4" = --update-notifier=false ] && [ "$5" = --logs-max=0 ] && [ "$6" = --loglevel=silent ] && [ "$7" = --registry=https://registry.npmjs.org/ ] && [ "$8" = --userconfig=/dev/null ] && [ "$9" = --globalconfig=/dev/null ] || exit 92
 shift 9
-[ "$1" = @demo/pkg@1.2.3 ] && [ "$PWD" = / ] && [ "$XDG_STATE_HOME" = "$HOME/.local/state" ] && [ -z "$NODE_OPTIONS" ] && [ -z "$NPM_CONFIG_USERCONFIG" ] && [ -z "$SSH_AUTH_SOCK" ] && [ -z "$MISE_YES" ] || exit 93
+[ "$1" = @demo/pkg@1.2.3 ] && [ "$PWD" = / ] && [ "$XDG_STATE_HOME" = "$HOME/.local/state" ] && [ -z "$NODE_OPTIONS" ] && [ -z "$NPM_CONFIG_USERCONFIG" ] && [ -z "$SSH_AUTH_SOCK" ] && [ -z "$BREW_YES" ] || exit 93
 printf i >> "$HOME/calls"
 printf PRIVATE_NPM_OUTPUT
 printf PRIVATE_NPM_ERROR >&2
@@ -41,19 +41,19 @@ if [ -f "$HOME/fail" ]; then exit 4; fi
 if [ -f "$HOME/unverified" ]; then exit 0; fi
 printf installed > "$HOME/installed"
 "##;
-const MISE: &str = r##"#!/bin/sh
-[ "$1" = ls ] && [ "$2" = --installed ] && [ "$3" = --json ] || exit 90
+const BREW: &str = r##"#!/bin/sh
+[ "$1" = info ] && [ "$2" = --json=v2 ] && [ "$3" = --installed ] && [ "$4" = --formula ] || exit 90
 printf m >> "$HOME/calls"
 if [ -f "$HOME/change-cli" ]; then printf MUTATED_CLI > "$HOME/runtime/npm-cli.js"; fi
 if [ -f "$HOME/runtime-unavailable" ]; then exit 1; fi
-if [ -f "$HOME/runtime-missing" ]; then printf '{}'; else printf '{"node":[{"version":"20.1.0","installed":true}]}'; fi
+if [ -f "$HOME/runtime-missing" ]; then printf '{"formulae":[]}'; else printf '{"formulae":[{"full_name":"node","installed":[{"version":"20.1.0"}]}]}'; fi
 "##;
 struct Fixture {
     home: support::TestHome,
     repo: PathBuf,
     node: PathBuf,
     cli: PathBuf,
-    mise: PathBuf,
+    brew: PathBuf,
     prefix: PathBuf,
     lock: WriterLock,
 }
@@ -66,8 +66,8 @@ impl Fixture {
         fs::create_dir(&runtime).unwrap();
         let node = runtime.join("node");
         let cli = runtime.join("npm-cli.js");
-        let mise = home.host.home.join("mise");
-        for (path, body) in [(&node, NODE), (&mise, MISE), (&cli, "CLI_METADATA_ONLY")] {
+        let brew = home.host.home.join("brew");
+        for (path, body) in [(&node, NODE), (&brew, BREW), (&cli, "CLI_METADATA_ONLY")] {
             fs::write(path, body).unwrap();
             fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
         }
@@ -79,7 +79,7 @@ impl Fixture {
             repo,
             node,
             cli,
-            mise,
+            brew,
             prefix,
             lock,
         }
@@ -109,8 +109,8 @@ impl Fixture {
             binding: self.binding(),
             catalogs: vec![
                 npm::Catalog {
-                    query: Query::MiseInstalled,
-                    executable: self.mise.clone(),
+                    query: Query::BrewFormulae,
+                    executable: self.brew.clone(),
                     search_dirs: dirs.clone(),
                     npm_binding: None,
                     tools: BTreeSet::from(["node".into()]),
@@ -128,8 +128,8 @@ impl Fixture {
     fn reports(&self) -> Vec<inspection::Report> {
         vec![
             inspection::Preview::new(
-                Query::MiseInstalled,
-                self.mise.clone(),
+                Query::BrewFormulae,
+                self.brew.clone(),
                 self.home.host.home.clone(),
                 self.request().search_dirs.clone(),
             )
@@ -504,7 +504,6 @@ fn historical_npm_closure_does_not_require_current_manifest_or_invent_runtime_tr
     fs::write(f.repo.join("dort.toml"), "changed manifest").unwrap();
     let request = install::CloseRequest {
         brew_prefix: None,
-        apt: false,
         id: id.clone(),
         executable: None,
         search_dirs: vec![],
@@ -527,7 +526,6 @@ fn historical_npm_closure_does_not_require_current_manifest_or_invent_runtime_tr
     assert!(install::diagnose(&f.home.host).unwrap()[0].unresolved);
     let request = install::CloseRequest {
         brew_prefix: None,
-        apt: false,
         id,
         executable: Some(f.node.clone()),
         search_dirs: f.request().search_dirs,
@@ -562,8 +560,8 @@ fn npm_crash_child() {
     let dirs = vec![host.home.join("no-helpers")];
     let reports = [
         inspection::Preview::new(
-            Query::MiseInstalled,
-            host.home.join("mise"),
+            Query::BrewFormulae,
+            host.home.join("brew"),
             host.home.clone(),
             dirs.clone(),
         )
@@ -584,8 +582,8 @@ fn npm_crash_child() {
         binding: binding.clone(),
         catalogs: vec![
             npm::Catalog {
-                query: Query::MiseInstalled,
-                executable: host.home.join("mise"),
+                query: Query::BrewFormulae,
+                executable: host.home.join("brew"),
                 search_dirs: dirs.clone(),
                 npm_binding: None,
                 tools: BTreeSet::from(["node".into()]),
@@ -657,62 +655,45 @@ fn npm_process_exit_preserves_intent_prefix_effects_and_outcome_without_replay()
     }
 }
 #[test]
-fn mixed_legacy_and_npm_attempts_share_only_the_explicit_tools_guard() {
+fn npm_attempts_guard_installations_across_repositories() {
     let f = Fixture::new();
     let id = f.pending();
-    let repo = f.home.repository("legacy");
-    fs::write(repo.join("dort.toml"), "schema=1\n[[tools]]\nid='legacy'\nbinary='legacy'\n[tools.install]\nmacos={provider='mise',package='legacy',version='1.2.3'}\nubuntu={provider='mise',package='legacy',version='1.2.3'}\n").unwrap();
+    let repo = f.home.repository("other");
+    fs::write(repo.join("dort.toml"), MANIFEST).unwrap();
     RepositoryRegistry::register(&f.home.host, &f.lock, &repo).unwrap();
-    let request = install::Request {
-        repository: repo,
-        profiles: vec![],
-        tool: "legacy".into(),
-        executable: f.mise.clone(),
-        search_dirs: f.request().search_dirs,
-        tool_search_dirs: f.request().tool_search_dirs,
-        bound_tools: BTreeSet::from(["legacy".into()]),
+    let mut request = f.request();
+    request.repository = repo;
+    let reports = f.reports();
+    let prepare = || {
+        npm::prepare(
+            &f.home.host,
+            request.clone(),
+            f.scope(),
+            &reports.iter().collect::<Vec<_>>(),
+        )
+        .unwrap()
     };
-    let report = inspection::Preview::new(
-        Query::MiseInstalled,
-        f.mise.clone(),
-        f.home.host.home.clone(),
-        request.search_dirs.clone(),
-    )
-    .unwrap()
-    .approve()
-    .inspect();
-    let preview = install::prepare(&f.home.host, request.clone(), &report).unwrap();
+    let p = prepare();
     let calls = f.calls();
-    assert!(install::execute(&f.home.host, &f.lock, preview.approve(), |_| {}).is_err());
+    assert!(install::execute(&f.home.host, &f.lock, p.approve(), |_| {}).is_err());
     assert_eq!(calls, f.calls());
     let p = install::prepare_close(
         &f.home.host,
         install::CloseRequest {
-            brew_prefix: None,
-            apt: false,
             id,
             executable: None,
             search_dirs: vec![],
             npm_binding: None,
+            brew_prefix: None,
         },
     )
     .unwrap();
     install::close(&f.home.host, &f.lock, p.approve()).unwrap();
-    let p = install::prepare(&f.home.host, request, &report).unwrap();
-    let r = install::execute(&f.home.host, &f.lock, p.approve(), |_| {}).unwrap();
-    let bytes = fs::read_to_string(
-        f.attempt(r.attempt_id.as_ref().unwrap())
-            .join("intent.json"),
-    )
-    .unwrap();
-    let envelope: serde_json::Value = serde_json::from_str(&bytes).unwrap();
-    let payload: serde_json::Value =
-        serde_json::from_str(envelope["payload"].as_str().unwrap()).unwrap();
-    assert_eq!(payload["schema"], 1);
-    assert!(payload["scope"].get("npm").is_none());
-    let a = install::diagnose(&f.home.host).unwrap();
-    assert_eq!(a.len(), 2);
-    assert!(a.iter().all(|a| !a.unresolved));
+    let r = install::execute(&f.home.host, &f.lock, prepare().approve(), |_| {}).unwrap();
+    assert!(r.attempt_id.is_some());
+    let attempts = install::diagnose(&f.home.host).unwrap();
+    assert_eq!(attempts.len(), 2);
+    assert!(attempts.iter().all(|a| !a.unresolved));
 }
 #[test]
 fn damaged_attempt_and_changed_cli_or_head_cannot_be_closed_with_stale_approval() {
@@ -720,7 +701,6 @@ fn damaged_attempt_and_changed_cli_or_head_cannot_be_closed_with_stale_approval(
     let id = f.pending();
     let request = install::CloseRequest {
         brew_prefix: None,
-        apt: false,
         id: id.clone(),
         executable: None,
         search_dirs: vec![],

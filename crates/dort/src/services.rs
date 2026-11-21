@@ -1,9 +1,14 @@
 //! Shared application dispatch; presentation must obtain approval before calling.
 pub mod declaration;
+pub mod declared_tools;
+#[cfg(test)]
+pub(crate) mod declared_tools_tests;
 pub mod inspection_defaults;
 #[cfg(test)]
 mod inspection_defaults_tests;
 pub mod installation;
+pub mod installed_tools;
+pub mod presentation;
 pub mod reconciliation;
 pub mod tools;
 use dort_core::{

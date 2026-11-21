@@ -47,7 +47,7 @@ impl Fixture {
         let home = support::TestHome::new();
         let repo = home.repository("repo");
         let original = if action == Action::Adopt {
-            "# retain comment\nschema=1\n[[files]]\nid='preserved'\nsource='preserved'\ntarget='~/.preserved'\nmode='link'\n# retain nested table\n[files.overrides]\nubuntu='preserved-ubuntu'\n".to_owned()
+            "# retain comment\nschema=1\n[[files]]\nid='preserved'\nsource='preserved'\ntarget='~/.preserved'\nmode='link'\n# retain nested table\n[files.overrides]\nlinux='preserved-linux'\n".to_owned()
         } else {
             {
                 let mut manifest = Manifest::parse("schema=1").unwrap();
@@ -57,7 +57,7 @@ impl Fixture {
         };
         fs::write(repo.join("dort.toml"), &original).unwrap();
         if action == Action::Adopt {
-            for name in ["preserved", "preserved-ubuntu"] {
+            for name in ["preserved", "preserved-linux"] {
                 fs::write(repo.join(name), "ordinary untouched source\n").unwrap();
             }
             fs::write(
@@ -141,7 +141,7 @@ impl Fixture {
         }
         if self.action == Action::Adopt {
             assert!(!self.repo.join("files").exists());
-            for name in ["preserved", "preserved-ubuntu"] {
+            for name in ["preserved", "preserved-linux"] {
                 assert_eq!(
                     fs::read_to_string(self.repo.join(name)).unwrap(),
                     "ordinary untouched source\n"
@@ -189,8 +189,8 @@ fn combined_batches_are_one_transaction_selected_scope_and_guarded_recovery() {
                 std::path::PathBuf::from("preserved")
             );
             assert_eq!(
-                manifest.files[0].overrides[&dort_core::platform::Platform::Ubuntu],
-                std::path::PathBuf::from("preserved-ubuntu")
+                manifest.files[0].overrides[&dort_core::platform::Platform::Linux],
+                std::path::PathBuf::from("preserved-linux")
             );
         }
         if action == Action::Apply {
@@ -221,7 +221,7 @@ fn combined_batches_are_one_transaction_selected_scope_and_guarded_recovery() {
 #[test]
 fn adoption_append_handles_absent_empty_and_inline_files_without_reordering_declarations() {
     for original in [
-        "# absent files\nschema=1\n[profiles]\navailable=['work']\n[profiles.platform]\nubuntu=['work']\n",
+        "# absent files\nschema=1\n[profiles]\navailable=['work']\n[profiles.platform]\nlinux=['work']\n",
         "# empty files\nschema=1\nfiles=[]\n",
         "# inline files\nschema=1\nfiles=[{id='preserved',source='preserved',target='~/.preserved',mode='link'}]\n",
     ] {
@@ -287,51 +287,61 @@ fn adoption_append_handles_absent_empty_and_inline_files_without_reordering_decl
     }
 }
 
-#[test]
-fn every_forward_inverse_error_boundary_is_restartable_and_blocks_new_writes() {
-    for action in actions() {
-        for undo in [false, true] {
-            let count = event_count(action, undo);
-            for stop in 1..=count {
-                let f = Fixture::new(action);
-                if undo {
-                    f.execute(|_| Ok(())).unwrap();
-                }
-                let mut n = 0;
-                let cb = |_: &Event| {
-                    n += 1;
-                    if n == stop {
-                        Err(Error::Invalid("injected stop".into()))
-                    } else {
-                        Ok(())
-                    }
-                };
-                let result = if undo {
-                    f.undo(cb).map(|_| None)
-                } else {
-                    f.execute(cb)
-                };
-                assert!(result.is_err(), "{action:?} {undo} {stop}");
-                if journal::diagnose(&f.home.host)
-                    .unwrap()
-                    .iter()
-                    .any(|d| d.blocks_writes())
-                {
-                    assert!(
-                        RepositoryRegistry::register(
-                            &f.home.host,
-                            f.lock.as_ref().unwrap(),
-                            &f.repo
-                        )
-                        .is_err()
-                    );
-                }
-                f.undo(|_| Ok(()))
-                    .unwrap_or_else(|e| panic!("{action:?} {undo} {stop}: {e}"));
-                f.restored();
-            }
+fn forward_inverse_error_boundaries(action: Action, undo: bool) {
+    let count = event_count(action, undo);
+    for stop in 1..=count {
+        let f = Fixture::new(action);
+        if undo {
+            f.execute(|_| Ok(())).unwrap();
         }
+        let mut n = 0;
+        let cb = |_: &Event| {
+            n += 1;
+            if n == stop {
+                Err(Error::Invalid("injected stop".into()))
+            } else {
+                Ok(())
+            }
+        };
+        let result = if undo {
+            f.undo(cb).map(|_| None)
+        } else {
+            f.execute(cb)
+        };
+        assert!(result.is_err(), "{action:?} {undo} {stop}");
+        if journal::diagnose(&f.home.host)
+            .unwrap()
+            .iter()
+            .any(|d| d.blocks_writes())
+        {
+            assert!(
+                RepositoryRegistry::register(&f.home.host, f.lock.as_ref().unwrap(), &f.repo)
+                    .is_err()
+            );
+        }
+        f.undo(|_| Ok(()))
+            .unwrap_or_else(|e| panic!("{action:?} {undo} {stop}: {e}"));
+        f.restored();
     }
+}
+/// Each action/mode runs in its own test process so boundary coverage can run in parallel.
+macro_rules! boundary_tests {
+    ($($name:ident: $action:expr, $undo:expr;)*) => {$(
+        #[test]
+        fn $name() {
+            forward_inverse_error_boundaries($action, $undo);
+        }
+    )*};
+}
+boundary_tests! {
+    forward_inverse_boundary_adopt_apply: Action::Adopt, false;
+    forward_inverse_boundary_adopt_rollback: Action::Adopt, true;
+    forward_inverse_boundary_apply_forward: Action::Apply, false;
+    forward_inverse_boundary_apply_rollback: Action::Apply, true;
+    forward_inverse_boundary_keep_forward: Action::Keep, false;
+    forward_inverse_boundary_keep_rollback: Action::Keep, true;
+    forward_inverse_boundary_remove_forward: Action::Remove, false;
+    forward_inverse_boundary_remove_rollback: Action::Remove, true;
 }
 fn event_count(action: Action, undo: bool) -> usize {
     let f = Fixture::new(action);
@@ -545,7 +555,7 @@ fn child_crash_probe() {
         home.into(),
         None,
         None,
-        Platform::Ubuntu,
+        Platform::Linux,
         Architecture::X86_64,
     )
     .unwrap();
@@ -581,42 +591,56 @@ fn child_crash_probe() {
     }
     panic!("boundary not reached");
 }
-#[test]
-fn process_exit_at_every_forward_and_inverse_boundary_releases_lock_and_recovers() {
-    for (index, action) in actions().into_iter().enumerate() {
-        for undo in [false, true] {
-            for stop in 1..=event_count(action, undo) {
-                let mut f = Fixture::new(action);
-                let tx = if undo {
-                    f.execute(|_| Ok(())).unwrap().unwrap()
-                } else {
-                    String::new()
-                };
-                drop(f.lock.take());
-                let mut cmd = Command::new(std::env::current_exe().unwrap());
-                cmd.args(["--exact", "child_crash_probe", "--nocapture"])
-                    .env_clear()
-                    .env("PATH", "/no-external-programs")
-                    .env("HOME", &f.home.host.home)
-                    .env("DORT_BATCH_HOME", &f.home.host.home)
-                    .env("DORT_BATCH_REPO", &f.repo)
-                    .env("DORT_BATCH_ACTION", index.to_string())
-                    .env("DORT_BATCH_STOP", stop.to_string());
-                if undo {
-                    cmd.env("DORT_BATCH_TX", tx).env("DORT_BATCH_ID", &f.id);
-                }
-                let out = cmd.output().unwrap();
-                assert_eq!(
-                    out.status.code(),
-                    Some(77),
-                    "{action:?} {undo} {stop}: {}",
-                    String::from_utf8_lossy(&out.stderr)
-                );
-                f.lock = Some(WriterLock::acquire(&f.home.host).unwrap());
-                f.undo(|_| Ok(()))
-                    .unwrap_or_else(|e| panic!("{action:?} {undo} {stop}: {e}"));
-                f.restored();
-            }
+fn process_exit_boundaries(index: usize, undo: bool) {
+    let action = actions()[index];
+    for stop in 1..=event_count(action, undo) {
+        let mut f = Fixture::new(action);
+        let tx = if undo {
+            f.execute(|_| Ok(())).unwrap().unwrap()
+        } else {
+            String::new()
+        };
+        drop(f.lock.take());
+        let mut cmd = Command::new(std::env::current_exe().unwrap());
+        cmd.args(["--exact", "child_crash_probe", "--nocapture"])
+            .env_clear()
+            .env("PATH", "/no-external-programs")
+            .env("HOME", &f.home.host.home)
+            .env("DORT_BATCH_HOME", &f.home.host.home)
+            .env("DORT_BATCH_REPO", &f.repo)
+            .env("DORT_BATCH_ACTION", index.to_string())
+            .env("DORT_BATCH_STOP", stop.to_string());
+        if undo {
+            cmd.env("DORT_BATCH_TX", tx).env("DORT_BATCH_ID", &f.id);
         }
+        let out = cmd.output().unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(77),
+            "{action:?} {undo} {stop}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        f.lock = Some(WriterLock::acquire(&f.home.host).unwrap());
+        f.undo(|_| Ok(()))
+            .unwrap_or_else(|e| panic!("{action:?} {undo} {stop}: {e}"));
+        f.restored();
     }
+}
+macro_rules! process_exit_tests {
+    ($($name:ident: $index:expr, $undo:expr;)*) => {$(
+        #[test]
+        fn $name() {
+            process_exit_boundaries($index, $undo);
+        }
+    )*};
+}
+process_exit_tests! {
+    process_exit_boundary_adopt_forward: 0, false;
+    process_exit_boundary_adopt_rollback: 0, true;
+    process_exit_boundary_apply_forward: 1, false;
+    process_exit_boundary_apply_rollback: 1, true;
+    process_exit_boundary_keep_forward: 2, false;
+    process_exit_boundary_keep_rollback: 2, true;
+    process_exit_boundary_remove_forward: 3, false;
+    process_exit_boundary_remove_rollback: 3, true;
 }

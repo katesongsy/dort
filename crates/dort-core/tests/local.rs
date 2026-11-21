@@ -21,8 +21,8 @@ fn readonly_load_does_not_create_state() {
 }
 
 #[test]
-fn xdg_layout_is_consistent_for_macos_and_ubuntu_and_rejects_relative_roots() {
-    for platform in [Platform::Macos, Platform::Ubuntu] {
+fn xdg_layout_is_consistent_for_macos_and_linux_and_rejects_relative_roots() {
+    for platform in [Platform::Macos, Platform::Linux] {
         let h = HostContext::new(
             "/home/example".into(),
             Some("/config".into()),
@@ -39,7 +39,7 @@ fn xdg_layout_is_consistent_for_macos_and_ubuntu_and_rejects_relative_roots() {
             "relative".into(),
             None,
             None,
-            Platform::Ubuntu,
+            Platform::Linux,
             Architecture::X86_64
         )
         .is_err()
@@ -49,7 +49,7 @@ fn xdg_layout_is_consistent_for_macos_and_ubuntu_and_rejects_relative_roots() {
             "/home/example".into(),
             Some("relative".into()),
             None,
-            Platform::Ubuntu,
+            Platform::Linux,
             Architecture::X86_64
         )
         .is_err()
@@ -59,7 +59,7 @@ fn xdg_layout_is_consistent_for_macos_and_ubuntu_and_rejects_relative_roots() {
             "/home/example".into(),
             Some("/same".into()),
             Some("/same".into()),
-            Platform::Ubuntu,
+            Platform::Linux,
             Architecture::X86_64
         )
         .is_err()
@@ -209,12 +209,13 @@ fn local_configuration_errors_redact_values() {
 }
 
 #[test]
-fn platform_detection_requires_ubuntu_not_ubuntu_like() {
-    assert_eq!(
-        Platform::from_os_release("NAME=Ubuntu\nID=\"ubuntu\"\n").unwrap(),
-        Platform::Ubuntu
-    );
-    assert!(Platform::from_os_release("ID=debian\nID_LIKE=ubuntu").is_err());
+fn platform_detection_uses_the_host_kernel_not_a_distribution_file() {
+    let expected = if cfg!(target_os = "macos") {
+        Platform::Macos
+    } else {
+        Platform::Linux
+    };
+    assert_eq!(Platform::detect().unwrap(), expected);
 }
 
 #[test]

@@ -709,7 +709,7 @@ fn profile_and_platform_sources_are_resolved_before_execution_and_retained() {
         )
         .replace(
             "source = \"files/b\"",
-            "source = \"files/b\"\nprofiles=['dev']\noverrides={ubuntu='files/c'}",
+            "source = \"files/b\"\nprofiles=['dev']\noverrides={linux='files/c'}",
         );
     fs::write(f.repo.join("dort.toml"), &text).unwrap();
     f.execute(|_| Ok(())).unwrap();
@@ -922,7 +922,7 @@ fn child_crash_probe() {
         PathBuf::from(home),
         None,
         None,
-        Platform::Ubuntu,
+        Platform::Linux,
         Architecture::X86_64,
     )
     .unwrap();

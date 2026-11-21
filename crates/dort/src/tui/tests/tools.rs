@@ -1,638 +1,224 @@
+//! Declaration-led Tools: stable navigation and process-free, necessary settings.
 use super::{
     actions::{self, Task},
     app::{App, Tab},
+    shell::Action,
     tests::render,
-    views,
 };
-use dort_core::{
-    context::HostContext,
-    platform::{Architecture, Platform},
-};
-use ratatui::{
-    Terminal,
-    backend::TestBackend,
-    crossterm::event::{KeyCode, KeyEvent, KeyModifiers},
-    style::{Color, Modifier},
-};
-use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
-struct Fixture {
-    _temp: tempfile::TempDir,
-    home: PathBuf,
-    executable: PathBuf,
-    host: HostContext,
-}
-impl Fixture {
-    fn new(response: &str) -> Self {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().canonicalize().unwrap();
-        let home = root.join("home");
-        fs::create_dir(&home).unwrap();
-        let executable = root.join("provider");
-        fs::write(
-            &executable,
-            format!("#!/bin/sh\nprintf ran >> \"$HOME/calls\"\n{response}\n"),
-        )
-        .unwrap();
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
-        let host = HostContext::new(
-            home.clone(),
-            None,
-            None,
-            Platform::Ubuntu,
-            Architecture::X86_64,
-        )
-        .unwrap();
-        Self {
-            _temp: temp,
-            home,
-            executable,
-            host,
-        }
-    }
-    fn app(&self, dry: bool) -> App {
-        let mut app = App::new(dry);
-        app.tab = Tab::Tools;
-        app.tools_view.fields[0] = self.executable.to_str().unwrap().into();
-        app.tools_view.fields[1] = self.home.join("trusted-bin").to_str().unwrap().into();
-        app
-    }
-    fn run(&self, app: &mut App, task: Task) {
-        app.start(false);
-        let out = actions::perform_scoped(task, &self.host, None, &[], |_| Ok(()))
-            .map_err(|e| actions::diagnostic(&e));
-        assert!(app.complete(out).is_none());
-    }
-    fn review(&self, app: &mut App) {
-        let task = key(app, KeyCode::Char('R')).unwrap();
-        assert!(matches!(task, Task::ToolsPrepare(_)));
-        self.run(app, task);
-    }
-}
-fn key(app: &mut App, code: KeyCode) -> Option<Task> {
+use crate::services::declared_tools_tests::Fixture;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+pub(super) fn key(app: &mut App, code: KeyCode) -> Option<Task> {
     app.key(KeyEvent::new(code, KeyModifiers::NONE), 80, 24)
 }
-fn type_text(app: &mut App, text: &str) {
-    for c in text.chars() {
-        assert!(key(app, KeyCode::Char(c)).is_none());
+pub(super) fn run(f: &Fixture, app: &mut App, task: Task) {
+    app.retry = task.retry_intent();
+    app.start(matches!(
+        task,
+        Task::ToolsInstallMissing(_) | Task::Execute(_)
+    ));
+    let output = actions::perform_scoped(task, &f.host, Some(f.repo.clone()), &[], |_| Ok(()));
+    if let Some(refresh) = app.complete(output.map_err(|e| actions::diagnostic(&e))) {
+        run(f, app, refresh);
     }
 }
-
+pub(super) fn app(f: &Fixture, dry: bool) -> App {
+    let mut app = App::new(dry);
+    app.repository = Some(f.repo.clone());
+    run(f, &mut app, Task::Refresh);
+    app.activate(Action::Destination(Tab::Tools));
+    app
+}
+pub(super) fn check(f: &Fixture, app: &mut App) {
+    let Some(Task::ToolsCheckPrepare(mut input)) = key(app, KeyCode::Char('C')) else {
+        panic!("Check action")
+    };
+    input.search_dirs = vec![f.bin.clone()];
+    run(f, app, Task::ToolsCheckPrepare(input));
+    assert!(app.tools_view.declared.check_preview.is_some());
+    let task = key(app, KeyCode::Enter).unwrap();
+    assert!(matches!(task, Task::ToolsCheck(_)));
+    run(f, app, task);
+}
+pub(super) fn settings(f: &Fixture, app: &mut App) {
+    if !app.tools_view.declared_details {
+        key(app, KeyCode::Enter);
+    }
+    let Some(Task::ToolsSettingsDetect { tool, mut inputs }) = key(app, KeyCode::Char('s')) else {
+        panic!("Selected tool settings")
+    };
+    inputs.search_dirs = vec![f.bin.clone()];
+    run(f, app, Task::ToolsSettingsDetect { tool, inputs });
+    assert!(app.tools_view.settings_open && app.tools_view.settings.request.is_some());
+}
 #[test]
-fn selected_inventory_opens_separate_retained_manifest_only_draft() {
-    let f = Fixture::new(
-        "printf '{\"formulae\":[{\"full_name\":\"ripgrep\",\"installed\":[{\"version\":\"14.1.0\"}]}]}'",
-    );
-    let mut app = f.app(false);
-    app.tools_view.platform = Some(Platform::Macos);
-    app.tools_view.declaration.fields[0] = "manual-draft".into();
-    f.review(&mut app);
-    let task = key(&mut app, KeyCode::Enter).unwrap();
-    f.run(&mut app, task);
-    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
-    assert!(
-        super::tests::more_target(&mut app, |target| matches!(
-            target,
-            super::input::Target::InventoryKey(KeyCode::Char('t'))
-        ))
-        .is_none()
-    );
-    assert!(app.tools_view.declaration_open);
-    let fields = &app.tools_view.declaration.fields;
-    assert_eq!((&*fields[0], &*fields[1]), ("", ""));
+fn list_enter_is_always_details_before_and_after_checks_and_installs() {
+    let f = Fixture::new();
+    let mut app = app(&f, false);
+    for stage in 0..3 {
+        assert!(!app.tools_view.declared_details);
+        assert!(key(&mut app, KeyCode::Enter).is_none());
+        assert!(app.tools_view.declared_details);
+        assert!(key(&mut app, KeyCode::Enter).is_none());
+        key(&mut app, KeyCode::Esc);
+        assert!(!app.tools_view.declared_details);
+        if stage == 0 {
+            check(&f, &mut app);
+        }
+        if stage == 1 {
+            let task = key(&mut app, KeyCode::Char('i')).unwrap();
+            run(&f, &mut app, task);
+            assert!(app.tools_view.declared.install_preview.is_some());
+            let task = key(&mut app, KeyCode::Enter).unwrap();
+            run(&f, &mut app, task);
+            key(&mut app, KeyCode::Enter);
+        }
+    }
+    assert_eq!(f.calls().chars().filter(|c| *c == 'A').count(), 1);
+}
+#[test]
+fn settings_detection_and_save_are_process_free_and_only_accepted_values_affect_checks() {
+    let f = Fixture::new();
+    let mut app = app(&f, false);
+    settings(&f, &mut app);
+    assert_eq!(app.tools_view.settings.count(), 2);
     assert_eq!(
-        (&*fields[4], &*fields[5], &*fields[6]),
-        ("brew", "ripgrep", "")
+        app.tools_view.settings.fields[0],
+        f.bin
+            .join("brew")
+            .canonicalize()
+            .unwrap()
+            .display()
+            .to_string()
     );
-    assert!(fields[8..12].iter().all(String::is_empty));
-    assert!(app.tools_view.preview.is_none());
-    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
-    assert!(!f.home.join(".config").exists());
-    type_text(&mut app, "rg");
-    key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Char('a'));
-    assert_eq!(app.tools_view.declaration.fields[0], "manual-draft");
-    key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Char('T'));
-    assert_eq!(app.tools_view.declaration.fields[0], "rg");
-    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
-    key(&mut app, KeyCode::Esc);
-    app.tools_view.platform = Some(Platform::Ubuntu);
-    assert!(
-        !app.tools_view
-            .browse_actions()
-            .iter()
-            .any(|a| a.label == "Add selected to repository"),
-        "Homebrew cannot seed an Ubuntu declaration"
+    assert!(app.tools_view.inspection_inputs().overrides.is_empty());
+    app.tools_view.settings.fields[0] = "relative-program".into();
+    assert!(app.tools_view.inspection_inputs().overrides.is_empty());
+    let task = key(&mut app, KeyCode::Enter).unwrap();
+    assert!(actions::perform_scoped(task, &f.host, Some(f.repo.clone()), &[], |_| Ok(())).is_err());
+    assert!(f.calls().is_empty());
+    app.tools_view.settings.fields[0] = f
+        .bin
+        .join("brew")
+        .canonicalize()
+        .unwrap()
+        .display()
+        .to_string();
+    let task = key(&mut app, KeyCode::Enter).unwrap();
+    run(&f, &mut app, task);
+    assert!(!app.tools_view.settings_open && app.tools_view.declared_details);
+    assert_eq!(app.tools_view.inspection_inputs().overrides.len(), 1);
+    assert!(f.calls().is_empty());
+    check(&f, &mut app);
+    assert_eq!(f.calls(), "Q");
+    settings(&f, &mut app);
+    app.tools_view.settings.fields[0] = String::new();
+    assert_eq!(
+        app.tools_view.inspection_inputs().overrides[0].executable,
+        f.bin.join("brew").canonicalize().unwrap()
     );
 }
-
 #[test]
-fn inventory_has_one_action_strip_and_more_preserves_filter_without_query_replay() {
-    let f = Fixture::new(
-        "printf '{\"formulae\":[{\"full_name\":\"ripgrep\",\"installed\":[{\"version\":\"14.1.0\"}]}]}'",
-    );
-    let mut app = f.app(false);
-    f.review(&mut app);
-    let task = key(&mut app, KeyCode::Enter).unwrap();
-    f.run(&mut app, task);
-    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
-    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
-        let screen = render(&app, w, h);
-        assert_eq!(
-            screen
-                .lines()
-                .take(h as usize - 1)
-                .collect::<Vec<_>>()
-                .join("\n")
-                .matches("Filter packages")
-                .count(),
-            1,
-            "{screen}"
-        );
-        assert_eq!(screen.matches("F1 Help").count(), 1, "{screen}");
-        assert!(
-            screen.lines().last().unwrap().contains("F2 More"),
-            "{screen}"
-        );
-        assert!(!screen.contains("Search metadata") && !screen.contains("configuration/cache"));
-        assert!(
-            screen.contains("PACKAGE") && screen.contains("VERSION") && screen.contains("ripgrep")
-        );
+fn settings_and_declaration_drafts_survive_menus_but_navigation_drops_reviews() {
+    let f = Fixture::new();
+    let mut app = app(&f, false);
+    settings(&f, &mut app);
+    key(&mut app, KeyCode::Tab);
+    for c in "q?;oC3".chars() {
+        assert!(key(&mut app, KeyCode::Char(c)).is_none());
     }
-    app.write_warning = true;
-    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
-        let screen = render(&app, w, h);
-        assert!(
-            screen.contains("Earlier write failed: Possible partial effects"),
-            "{screen}"
-        );
-        assert!(screen.contains("PACKAGE") && screen.lines().last().unwrap().contains("F2 More"));
-        assert_eq!(screen.matches("F1 Help").count(), 1);
-    }
-    app.write_warning = false;
-    key(&mut app, KeyCode::Char('/'));
-    type_text(&mut app, "rip");
-    render(&app, 80, 24);
-    let (shown, _) = super::workbench::strip_actions(&app, 80);
-    assert!(
-        shown
-            .iter()
-            .all(|a| a.key.chars().count() != 1 && a.key != "Space"),
-        "printable keys belong to the filter"
-    );
-    key(&mut app, KeyCode::F(2));
-    assert!(app.more.is_some());
-    assert_eq!(app.dialog_title(), Some("More actions"));
-    let screen = render(&app, 48, 14);
-    assert!(screen.contains("More actions") && screen.lines().last().unwrap().contains("Esc Back"));
-    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-    assert!(
-        app.mouse(
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: 0,
-                row: 0,
-                modifiers: KeyModifiers::NONE
-            },
-            48,
-            14
-        )
-        .is_none()
-    );
-    assert!(app.more.is_some() && app.interaction_notice.is_some());
+    let draft = app.tools_view.settings.fields.clone();
+    key(&mut app, KeyCode::F(1));
     key(&mut app, KeyCode::Esc);
-    assert!(app.tools_view.searching && app.tools_view.search == "rip");
-    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
-    key(&mut app, KeyCode::F(2));
-    let index = app
-        .more
+    app.open_menu(6, 80);
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(app.tools_view.settings.fields, draft);
+    assert!(!app.quit && app.tools_view.settings_open);
+    key(&mut app, KeyCode::Esc); // Stop editing.
+    assert!(app.tools_view.settings_open);
+    key(&mut app, KeyCode::Esc); // Tool details.
+    assert!(app.tools_view.declared_details && !app.tools_view.settings_open);
+    settings(&f, &mut app);
+    assert_eq!(app.tools_view.settings.fields, draft);
+    assert!(f.calls().is_empty());
+    app.activate(Action::Destination(Tab::Files));
+    assert!(!app.tools_view.settings_open);
+}
+#[test]
+fn accepted_settings_invalidate_old_results_and_late_detection_never_reopens_pages() {
+    let f = Fixture::new();
+    let mut app = app(&f, false);
+    check(&f, &mut app);
+    settings(&f, &mut app);
+    let task = key(&mut app, KeyCode::Enter).unwrap();
+    run(&f, &mut app, task);
+    assert!(app.tools_view.declared.checked.is_none());
+    assert_eq!(f.calls(), "Q");
+    let Some(Task::ToolsSettingsDetect { tool, mut inputs }) = key(&mut app, KeyCode::Char('s'))
+    else {
+        panic!("Settings")
+    };
+    inputs.search_dirs = vec![f.bin.clone()];
+    app.activate(Action::Destination(Tab::Git));
+    run(&f, &mut app, Task::ToolsSettingsDetect { tool, inputs });
+    assert!(app.tab == Tab::Git);
+    assert!(!app.tools_view.settings_open && f.calls() == "Q");
+}
+#[test]
+fn needed_settings_are_selected_tool_configuration_not_internal_binding_forms() {
+    let f = Fixture::new();
+    let path = f.repo.join("dort.toml");
+    std::fs::write(&path, "schema=1\n[[tools]]\nid='runtime'\nbinary='node'\n[tools.install]\nprovider='brew'\npackage='node'\n[[tools]]\nid='cli'\nbinary='cli'\n[tools.install]\nprovider='npm'\npackage='cli'\nversion='1.2.3'\nruntime_tool='runtime'\n").unwrap();
+    let mut app = app(&f, false);
+    app.tools_view.declared_selected = app
+        .data
         .as_ref()
         .unwrap()
-        .items
+        .tools
+        .as_ref()
+        .unwrap()
+        .as_ref()
+        .unwrap()
         .iter()
-        .position(|item| item.action.label == "Inspect again")
+        .position(|t| t.id == "cli")
         .unwrap();
-    for _ in 0..index {
-        key(&mut app, KeyCode::Down);
-    } // Fresh review, never a query.
-    let task = key(&mut app, KeyCode::Enter).unwrap();
-    assert!(matches!(task, Task::ToolsPrepare(_)));
-    f.run(&mut app, task);
-    assert!(app.tools_view.preview.is_some());
-    assert_eq!(app.tools_view.snapshots.len(), 1);
-    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
-}
-
-#[test]
-fn entry_configuration_and_preview_never_query_and_printable_shortcuts_remain_text() {
-    let f = Fixture::new("exit 99");
-    let mut app = f.app(false);
-    assert!(super::tests::has_action(&app, "Inspect installed tools"));
-    key(&mut app, KeyCode::Char('e'));
-    app.tools_view.focus = 1;
-    type_text(&mut app, "q?;f");
-    assert!(!app.quit && app.help.is_none() && app.shell.overlay.is_none());
-    assert!(app.tools_view.fields[0].ends_with("q?;f"));
-    app.tools_view.fields[0] = f.executable.to_str().unwrap().into();
-    app.tools_view.focus = 7;
-    let task = key(&mut app, KeyCode::Enter).unwrap();
-    f.run(&mut app, task);
-    assert!(app.tools_view.preview.is_some());
-    assert!(!f.home.join("calls").exists());
-    assert!(app.preview.is_none() && app.confirmation.is_none());
-    let screen = render(&app, 80, 24);
-    assert!(screen.contains("Risk: config/plugins"));
-    assert!(screen.contains("Run query"));
-    key(&mut app, KeyCode::Esc);
-    assert!(app.tools_view.configuring);
-    assert!(!f.home.join("calls").exists());
-}
-
-#[test]
-fn explicit_activation_executes_once_searches_metadata_and_retry_needs_review() {
-    let f = Fixture::new(
-        r#"printf '{"formulae":[{"full_name":"ripgrep","installed":[{"version":"14.1.0"}]},{"full_name":"node","installed":[{"version":"22.0.0"}]}]}'"#,
-    );
-    let mut app = f.app(false);
-    f.review(&mut app);
-    let task = key(&mut app, KeyCode::Enter).unwrap();
-    assert!(matches!(task, Task::ToolsInspect(_)));
-    assert!(app.tools_view.preview.is_none());
-    f.run(&mut app, task);
-    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
-    assert!(render(&app, 80, 24).contains("2/2 reported"));
-    key(&mut app, KeyCode::Char('/'));
-    type_text(&mut app, "RIPGREP");
-    key(&mut app, KeyCode::Enter);
-    assert!(render(&app, 48, 14).contains("1/2 reported"));
-    key(&mut app, KeyCode::Enter);
-    assert!(app.tools_view.details);
-    assert!(
-        render(&app, 80, 24)
-            .lines()
-            .any(|line| line.contains("Package") && line.contains("ripgrep"))
-    );
-    key(&mut app, KeyCode::Esc);
-    f.review(&mut app);
-    assert!(app.tools_view.preview.is_some());
-    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
-}
-
-#[test]
-fn resize_preview_only_and_scope_changes_cannot_reuse_inspection_confirmation() {
-    let f = Fixture::new("exit 99");
-    let mut app = f.app(false);
-    f.review(&mut app);
-    type_text(&mut app, "yes");
-    app.resize(47, 13);
-    assert!(app.tools_view.preview.is_none() || app.dry_run);
-    assert!(
-        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 47, 13)
-            .is_none()
-    );
-    assert!(app.tools_view.preview.is_none());
-    key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Left);
-    assert!(app.tab == Tab::Tools && app.tools_view.preview.is_none());
-    app.activate(super::shell::Action::Destination(Tab::Git));
-    assert!(app.tab == Tab::Git && app.tools_view.preview.is_none());
-    assert!(!f.home.join("calls").exists());
-    let mut app = f.app(true);
-    f.review(&mut app);
-    type_text(&mut app, "yes");
-    assert!(app.tools_view.preview.is_none() || app.dry_run);
-    assert!(key(&mut app, KeyCode::Enter).is_none());
-    render(&app, 48, 14);
-    assert!(
-        !super::workbench::actions(&app)
-            .iter()
-            .any(|action| matches!(action.target, super::input::Target::ProviderConfirm))
-    );
-    assert!(!f.home.join("calls").exists());
-}
-
-#[test]
-fn preparation_finishing_after_navigation_discards_preview_and_approval() {
-    let f = Fixture::new("exit 99");
-    let mut app = f.app(false);
-    let task = key(&mut app, KeyCode::Char('R')).unwrap();
-    app.start(false);
-    key(&mut app, KeyCode::Left);
-    assert!(app.tab == Tab::Tools && app.interaction_notice.is_some());
-    app.go_tab(Tab::Git); // Actual scope change, distinct from refused busy input.
-    let result = actions::perform_scoped(task, &f.host, None, &[], |_| Ok(()))
-        .map_err(|e| actions::diagnostic(&e));
-    app.complete(result);
-    assert!(app.tools_view.preview.is_none());
-    assert!(!f.home.join("calls").exists());
-}
-
-#[test]
-fn unavailable_is_not_empty_and_never_displays_raw_provider_payload() {
-    let f = Fixture::new("printf PRIVATE; printf PRIVATE >&2; exit 7");
-    let mut app = f.app(false);
-    f.review(&mut app);
-    type_text(&mut app, "yes");
-    let task = key(&mut app, KeyCode::Enter).unwrap();
-    f.run(&mut app, task);
-    let text = render(&app, 80, 24);
-    assert!(text.contains("Inspection unavailable"));
-    assert!(text.contains("Not a healthy empty"));
-    assert!(!text.contains("PRIVATE"));
-    assert!(app.tools_view.preview.is_none());
-    f.review(&mut app);
-    assert!(app.tools_view.preview.is_some());
-    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
-}
-
-#[test]
-fn npm_form_exposes_full_explicit_binding_without_repository_or_launcher_discovery() {
-    let f = Fixture::new(r#"printf '{"dependencies":{"@scope/pkg":{"version":"1.2.3"}}}'"#);
-    let manifest = f.home.parent().unwrap().join("dort.toml");
-    fs::write(&manifest, include_str!("../../../examples/dort.toml")).unwrap();
-    let mut app = f.app(false);
-    key(&mut app, KeyCode::Char('e'));
-    key(&mut app, KeyCode::Char(' '));
-    assert!(app.choice.is_some());
-    key(&mut app, KeyCode::Home);
-    for _ in 0..3 {
-        key(&mut app, KeyCode::Down);
+    settings(&f, &mut app);
+    assert_eq!(app.tools_view.settings.count(), 4);
+    let request = app.tools_view.settings.request.as_ref().unwrap();
+    assert_eq!(request.runtime_tool.as_deref(), Some("runtime"));
+    assert_eq!(request.manifest.as_ref(), Some(&path));
+    let text = render(&app, 140, 40);
+    for internal in [
+        "Snapshot ID",
+        "Runtime tool ID",
+        "Manifest path",
+        "Provider choice",
+        "Advanced",
+    ] {
+        assert!(!text.contains(internal), "{text}");
     }
-    key(&mut app, KeyCode::Enter);
-    assert!(app.choice.is_none());
-    assert_eq!(app.tools_view.query, 3);
-    app.tools_view.fields[0] = f.executable.to_str().unwrap().into();
-    app.tools_view.fields[1] = f.home.join("trusted-bin").to_str().unwrap().into();
-    app.tools_view.fields[2] = manifest.to_str().unwrap().into();
-    app.tools_view.fields[3] = "node".into();
-    app.tools_view.fields[4] = f.home.join("npm-cli.js").to_str().unwrap().into();
-    app.tools_view.fields[5] = f.home.join("prefix").to_str().unwrap().into();
-    app.tools_view.focus = 7;
-    let task = key(&mut app, KeyCode::Enter).unwrap();
-    f.run(&mut app, task);
-    assert!(
-        app.tools_view.scope.contains("npm_binding")
-            && app.tools_view.scope.contains("npm-cli.js")
-            && app.tools_view.scope.contains("runtime_tool")
-    );
-    assert!(!f.home.join("calls").exists());
-    type_text(&mut app, "yes");
-    let task = key(&mut app, KeyCode::Enter).unwrap();
-    f.run(&mut app, task);
-    assert_eq!(
-        app.tools_view
-            .report
-            .as_ref()
-            .unwrap()
-            .provider
-            .description
-            .npm_binding
-            .as_ref()
-            .unwrap()
-            .runtime_tool,
-        "node"
-    );
-    assert!(!f.home.join("prefix").exists());
+    assert!(text.contains("Node program") && text.contains("npm CLI") && text.contains("prefix"));
+    assert!(f.calls().is_empty());
 }
-
 #[test]
-fn healthy_empty_observation_is_distinct_and_approved_query_is_not_a_write_receipt() {
-    let f = Fixture::new(r#"printf '{"formulae":[]}'"#);
-    let mut app = f.app(false);
-    f.review(&mut app);
-    type_text(&mut app, "yes");
-    let task = key(&mut app, KeyCode::Enter).unwrap();
-    let activity = super::task_surfaces::Activity::for_task(&task, &app);
-    assert!(activity.provider_inspection);
-    app.activity = Some(activity);
-    app.start(false);
-    let busy = render(&app, 80, 24);
-    assert!(busy.contains("configuration/cache side effects"));
-    key(&mut app, KeyCode::Char('q'));
-    assert!(app.exit_requested && !app.quit);
-    let result = actions::perform_scoped(task, &f.host, None, &[], |_| Ok(()))
-        .map_err(|e| actions::diagnostic(&e));
-    app.complete(result);
-    assert!(app.quit && app.receipt.is_none());
-    app.quit = false;
-    assert!(render(&app, 80, 24).contains("0 packages reported"));
-    assert!(!render(&app, 80, 24).contains("UNAVAILABLE"));
-}
-
-#[test]
-fn compact_wide_forms_keep_focus_and_caret_visible_and_results_have_semantic_selection() {
-    let f = Fixture::new(
-        r#"printf '{"formulae":[{"full_name":"ripgrep","installed":[{"version":"14.1.0"}]}]}'"#,
-    );
-    let mut app = f.app(false);
-    app.tools_view.advanced();
-    app.tools_view.query = 3;
+fn tool_keys_have_no_snapshot_pages_numbered_tasks_or_f3_mode_switches() {
+    let f = Fixture::new();
+    let mut app = app(&f, true);
+    for code in [
+        KeyCode::Char('4'),
+        KeyCode::Char('5'),
+        KeyCode::F(3),
+        KeyCode::F(4),
+    ] {
+        assert!(key(&mut app, code).is_none());
+        assert!(app.tools_view.landing() && !app.tools_view.declared_details);
+    }
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
-        for focus in 0..7 {
-            app.tools_view.focus = focus;
-            let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
-            terminal.draw(|frame| views::draw(frame, &app)).unwrap();
-            let cursor = terminal.get_cursor_position().unwrap();
-            if focus == 0 {
-                assert_eq!(
-                    cursor,
-                    (0, 0).into(),
-                    "A provider choice is not a text field"
-                );
-                assert!(
-                    terminal
-                        .backend()
-                        .buffer()
-                        .content
-                        .iter()
-                        .any(|c| c.symbol() == super::components::glyphs::MENU
-                            && c.fg == Color::Cyan)
-                );
-            } else {
-                super::tests::assert_text_focus(&terminal, (w, h), cursor);
-            }
-            key(&mut app, KeyCode::Tab);
-            assert_eq!(app.tools_view.focus, (focus + 1) % 7);
-        }
-    }
-    app.tools_view.query = 0;
-    app.tools_view.configuring = false;
-    f.review(&mut app);
-    type_text(&mut app, "yes");
-    let task = key(&mut app, KeyCode::Enter).unwrap();
-    f.run(&mut app, task);
-    let mut terminal = Terminal::new(TestBackend::new(48, 14)).unwrap();
-    terminal.draw(|frame| views::draw(frame, &app)).unwrap();
-    assert!(
-        terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .any(|c| c.bg == Color::Reset && c.modifier.contains(Modifier::REVERSED))
-    );
-}
-
-fn detect(f: &Fixture, app: &mut App) {
-    use crate::services::inspection_defaults::Inputs;
-    app.tools_view.setup = true;
-    let bin = f.home.join("bin");
-    fs::create_dir_all(&bin).unwrap();
-    for name in ["brew", "mise"] {
-        fs::copy(&f.executable, bin.join(name)).unwrap();
-    }
-    f.run(
-        app,
-        Task::ToolsDetect(Inputs {
-            search_dirs: vec![bin],
-            ..Default::default()
-        }),
-    );
-}
-
-#[test]
-fn detected_collection_is_process_free_until_one_selected_confirmation() {
-    let f = Fixture::new("printf '{\"formulae\":[]}'");
-    let mut app = f.app(false);
-    detect(&f, &mut app);
-    assert!(!f.home.join("calls").exists());
-    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
-        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
-        terminal.draw(|frame| views::draw(frame, &app)).unwrap();
         let text = render(&app, w, h);
-        assert!(text.contains("Inspect installed tools"), "{text}");
-        assert!(text.contains("Homebrew"), "{text}");
-        super::tests::assert_primary_action(&terminal);
+        assert!(
+            !text.contains("Snapshots") && !text.contains("Advanced") && !text.contains("3 Check")
+        );
+        assert!(text.lines().last().unwrap().contains("F1 Help"));
     }
-    key(&mut app, KeyCode::Char('d'));
-    let hints = super::hints::keys(&app);
-    assert!(hints.contains(&("F3", "Sources")));
-    let before = app.tools_view.scroll;
-    assert!(key(&mut app, KeyCode::PageDown).is_none());
-    assert!(app.tools_view.scroll > before);
-    assert!(
-        !hints
-            .iter()
-            .any(|(key, _)| *key == "Enter" || *key == "Space")
-    );
-    assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(!f.home.join("calls").exists());
-    key(&mut app, KeyCode::Char('d'));
-    // Deselect mise; only the displayed selected real preview is consumed.
-    app.tools_view.default_focus = 2;
-    key(&mut app, KeyCode::Char(' '));
-    app.tools_view.default_focus = 4;
-    let task = key(&mut app, KeyCode::Enter).unwrap();
-    assert!(matches!(task, Task::ToolsInspectSelected(_)));
-    assert!(app.tools_view.defaults.is_none());
-    f.run(&mut app, task);
-    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
-    assert_eq!(app.tools_view.snapshots.len(), 1);
-    assert!(super::hints::keys(&app).contains(&("Enter", "Details")));
-    assert!(key(&mut app, KeyCode::Char('/')).is_none());
-    assert!(super::hints::keys(&app).contains(&("Enter", "Done")));
-    assert!(!super::hints::keys(&app).iter().any(|(k, _)| *k == "r"));
-    assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(super::hints::keys(&app).contains(&("Enter", "Back")));
-    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
-    assert!(matches!(
-        key(&mut app, KeyCode::Char('R')),
-        Some(Task::ToolsDetect(_))
-    ));
-    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ran");
-}
-
-#[test]
-fn collection_keeps_independent_unavailable_results_and_fresh_retry() {
-    let f = Fixture::new("printf '{\"formulae\":[]}'");
-    let mut app = f.app(false);
-    detect(&f, &mut app);
-    let task = key(&mut app, KeyCode::Enter).unwrap();
-    f.run(&mut app, task);
-    assert_eq!(app.tools_view.snapshots.len(), 2);
-    assert!(app.tools_view.snapshots[0].report.available());
-    assert!(!app.tools_view.snapshots[1].report.available());
-    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ranran");
-    detect(&f, &mut app);
-    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ranran");
-    app.tools_view.snapshots = vec![app.tools_view.snapshots[0].clone(); 15];
-    assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(app.tools_view.notice.unwrap().contains("limit"));
-    assert_eq!(fs::read_to_string(f.home.join("calls")).unwrap(), "ranran");
-}
-
-#[test]
-fn default_review_cannot_survive_shrink_navigation_or_preview_only() {
-    let f = Fixture::new("exit 99");
-    for dry in [false, true] {
-        let mut app = f.app(dry);
-        detect(&f, &mut app);
-        if dry {
-            assert!(key(&mut app, KeyCode::Enter).is_none());
-        }
-        app.resize(47, 13);
-        assert!(app.tools_view.defaults.is_none());
-        app.resize(80, 24);
-        assert!(matches!(
-            key(&mut app, KeyCode::Enter),
-            Some(Task::ToolsDetect(_))
-        ));
-        assert!(app.tools_view.preview.is_none());
-        assert!(!f.home.join("calls").exists());
-    }
-    let mut app = f.app(false);
-    app.tools_view.setup = true;
-    app.go_tab(Tab::Git);
-    let defaults = crate::services::inspection_defaults::Inputs {
-        search_dirs: vec![],
-        ..Default::default()
-    }
-    .detect(&f.host, None);
-    app.complete(Ok(actions::Output::ToolsDefaults(defaults)));
-    assert!(app.tools_view.defaults.is_none());
-}
-
-#[test]
-fn advanced_prefills_defaults_and_preserves_overrides_per_provider() {
-    let f = Fixture::new("exit 99");
-    let mut app = App::new(false);
-    app.tab = Tab::Tools;
-    detect(&f, &mut app);
-    app.tools_view.default_focus = 0;
-    key(&mut app, KeyCode::Char('e'));
-    assert!(app.tools_view.configuring);
-    assert!(app.tools_view.fields[0].ends_with("/bin/brew"));
-    app.tools_view.fields[0] = "/custom/brew".into();
-    app.tools_view.focus = 0;
-    key(&mut app, KeyCode::Right);
-    key(&mut app, KeyCode::Left);
-    assert_eq!(app.tools_view.fields[0], "/custom/brew");
-    let Task::ToolsDetect(inputs) = app.tools_view.configure() else {
-        panic!("default review")
-    };
-    assert_eq!(
-        inputs.overrides[0].executable,
-        PathBuf::from("/custom/brew")
-    );
-    assert!(!f.home.join("calls").exists());
-}
-
-#[test]
-fn incomplete_npm_opens_at_the_missing_detail_with_node_and_path_prefilled() {
-    let f = Fixture::new("exit 99");
-    let mut app = App::new(false);
-    app.tab = Tab::Tools;
-    detect(&f, &mut app);
-    fs::copy(&f.executable, f.home.join("bin/node")).unwrap();
-    detect(&f, &mut app);
-    app.tools_view.default_focus = 3;
-    key(&mut app, KeyCode::Char('e'));
-    assert!(app.tools_view.configuring);
-    assert_eq!(app.tools_view.query, 3);
-    assert_eq!(app.tools_view.focus, 3); // Manifest is the first missing detail.
-    assert!(app.tools_view.fields[0].ends_with("/bin/node"));
-    assert!(app.tools_view.fields[1].ends_with("/bin"));
-    assert!(!f.home.join("calls").exists());
+    assert!(f.calls().is_empty());
 }

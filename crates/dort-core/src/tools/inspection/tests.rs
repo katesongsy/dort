@@ -12,76 +12,35 @@ fn catalog_whitelists_metadata_and_preserves_multiple_versions() {
     );
     assert!(!format!("{entries:?}").contains("PRIVATE"));
     assert!(!serde_json::to_string(&entries).unwrap().contains("PRIVATE"));
-    let entries = catalog::parse(Query::MiseInstalled, br#"{"node":[{"version":"22.1.0","installed":true,"active":false,"source":{"path":"PRIVATE"}},{"version":"20.0.0","installed":true,"active":true}]}"#).unwrap();
-    assert_eq!(entries.len(), 2);
-    assert_eq!(entries[0].package, "node");
-    assert!(!serde_json::to_string(&entries).unwrap().contains("PRIVATE"));
-}
-
-#[test]
-fn dpkg_architecture_epochs_and_removed_packages_remain_distinct() {
-    let entries = catalog::parse(Query::DpkgPackages, b"zlib1g:amd64\t1:1.2.13-1~ubuntu1\tinstalled\tok\nold\t2.0\tconfig-files\tok\nmissing\t\tnot-installed\tok\n").unwrap();
-    assert_eq!(
-        entries,
-        [Installation {
-            package: "zlib1g:amd64".into(),
-            version: "1:1.2.13-1~ubuntu1".into()
-        }]
-    );
-    for state in [
-        "unpacked",
-        "half-installed",
-        "half-configured",
-        "triggers-awaited",
-        "triggers-pending",
-    ] {
-        assert_eq!(
-            catalog::parse(
-                Query::DpkgPackages,
-                format!("pkg\t1.0\t{state}\tok\n").as_bytes()
-            ),
-            Err(Failure::IncompletePackages)
-        );
-    }
-    assert_eq!(
-        catalog::parse(Query::DpkgPackages, b"pkg\t1.0\tinstalled\treinstreq\n"),
-        Err(Failure::IncompletePackages)
-    );
 }
 
 #[test]
 fn only_valid_empty_protocols_are_healthy_empty() {
-    for (query, bytes) in [
-        (Query::BrewFormulae, b"{\"formulae\":[]}".as_slice()),
-        (Query::MiseInstalled, b"{}"),
-        (Query::DpkgPackages, b""),
-    ] {
-        assert!(catalog::parse(query, bytes).unwrap().is_empty());
+    for query in [Query::BrewFormulae, Query::NpmGlobals] {
+        let empty: &[u8] = if query == Query::BrewFormulae {
+            br#"{"formulae":[]}"#
+        } else {
+            b"{}"
+        };
+        assert!(catalog::parse(query, empty).unwrap().is_empty());
+        assert_eq!(
+            catalog::parse(query, b"\\xffPRIVATE"),
+            Err(Failure::Malformed)
+        );
+        assert_eq!(
+            catalog::parse(query, &vec![b' '; LIMIT + 1]),
+            Err(Failure::OutputLimit)
+        );
     }
-    for (query, bytes) in [
-        (Query::BrewFormulae, b"{}".as_slice()),
-        (
-            Query::BrewFormulae,
-            b"{\"formulae\":[{\"full_name\":\"foo\",\"installed\":[]}]}",
-        ),
-        (
-            Query::MiseInstalled,
-            b"{\"node\":[{\"version\":\"22\",\"installed\":false}]}",
-        ),
-        (Query::MiseInstalled, b"{\"node\":[{\"version\":\"22\"}]}"),
-        (Query::MiseInstalled, b"{\"node\":[]}"),
-        (Query::DpkgPackages, b"pkg\t1\tinstalled\tok"),
-        (Query::DpkgPackages, b"pkg\t1\tunknown\tok\n"),
-        (Query::DpkgPackages, b"pkg\tPRIVATE\x1b\tinstalled\tok\n"),
-        (Query::DpkgPackages, b"pkg\t1\tinstalled\tok\textra\n"),
-        (Query::BrewFormulae, b"\xffPRIVATE"),
+    for input in [
+        b"{}".as_slice(),
+        br#"{"formulae":[{"full_name":"foo","installed":[]}]}"#,
     ] {
-        assert_eq!(catalog::parse(query, bytes), Err(Failure::Malformed));
+        assert_eq!(
+            catalog::parse(Query::BrewFormulae, input),
+            Err(Failure::Malformed)
+        );
     }
-    assert_eq!(
-        catalog::parse(Query::MiseInstalled, &vec![b' '; LIMIT + 1]),
-        Err(Failure::OutputLimit)
-    );
 }
 
 #[test]
@@ -116,19 +75,15 @@ fn npm_inventory_is_top_level_scoped_and_drops_private_provider_fields() {
 
 #[test]
 fn catalog_rejects_oversized_fields_and_record_counts() {
-    let oversized = "x".repeat(257);
-    assert_eq!(
-        catalog::parse(
-            Query::DpkgPackages,
-            format!("pkg\t{oversized}\tinstalled\tok\n").as_bytes()
-        ),
-        Err(Failure::Malformed)
-    );
-    let many = "pkg\t1\tinstalled\tok\n".repeat(32_769);
-    assert_eq!(
-        catalog::parse(Query::DpkgPackages, many.as_bytes()),
-        Err(Failure::Malformed)
-    );
+    let entry =
+        |version: &str| serde_json::json!({"full_name":"pkg", "installed":[{"version":version}]});
+    for formulae in [vec![entry(&"x".repeat(257))], vec![entry("1"); 32_769]] {
+        let bytes = serde_json::to_vec(&serde_json::json!({"formulae":formulae})).unwrap();
+        assert_eq!(
+            catalog::parse(Query::BrewFormulae, &bytes),
+            Err(Failure::Malformed)
+        );
+    }
 }
 
 fn shell(script: &str) -> Command {

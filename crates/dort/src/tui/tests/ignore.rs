@@ -23,7 +23,7 @@ impl Fixture {
         fs::create_dir_all(home.join(".tool/sub")).unwrap();
         fs::write(home.join(".tool/sub/config"), "ordinary fixture").unwrap();
         let host =
-            HostContext::new(home, None, None, Platform::Ubuntu, Architecture::X86_64).unwrap();
+            HostContext::new(home, None, None, Platform::Linux, Architecture::X86_64).unwrap();
         Self { _temp: temp, host }
     }
     fn finish(&self, app: &mut App, task: Task) -> Option<Task> {
@@ -49,12 +49,7 @@ fn action(app: &mut App, query: &str) -> Task {
     key(app, KeyCode::Enter).expect("action task")
 }
 fn approve(app: &mut App) -> Task {
-    key(app, KeyCode::Enter);
-    assert!(app.confirmation.is_some());
-    for c in "yes".chars() {
-        key(app, KeyCode::Char(c));
-    }
-    key(app, KeyCode::Enter).expect("approved task")
+    key(app, KeyCode::Enter).expect("one explicit preview approval")
 }
 #[test]
 fn ignore_folder_confirm_refresh_manage_and_unignore_are_complete_tui_workflows() {
@@ -280,20 +275,12 @@ fn help_retains_real_preview_confirmation_and_shrink_still_clears_approval() {
     assert!(!render(&app, 140, 40).contains(".tool"));
     key(&mut app, KeyCode::Esc);
     assert_eq!(app.preview.as_ref().unwrap().text, original);
-    key(&mut app, KeyCode::Enter);
-    key(&mut app, KeyCode::Char('y'));
-    key(&mut app, KeyCode::Char('e'));
-    key(&mut app, KeyCode::F(10));
-    assert!(app.navigation.menu.is_none());
-    assert!(app.confirmation.is_some());
+    assert!(app.confirmation.is_none());
     key(&mut app, KeyCode::F(1));
     for code in [KeyCode::Char('s'), KeyCode::Enter] {
         assert!(key(&mut app, code).is_none());
     }
-    assert!(app.confirmation.is_some());
-    key(&mut app, KeyCode::Esc);
-    assert!(app.confirmation.is_some());
-    key(&mut app, KeyCode::F(1));
+    assert!(app.preview.is_some() && app.confirmation.is_none());
     app.resize(47, 13);
     assert!(app.confirmation.is_none() && app.help.is_some() && app.preview.is_some());
     app.resize(80, 24);
@@ -353,11 +340,9 @@ fn ignore_preview_cancel_dry_run_and_small_layout_cannot_write() {
             .is_none()
     );
     assert!(app.confirmation.is_none());
-    key(&mut app, KeyCode::Enter);
     key(&mut app, KeyCode::Char('y'));
-    assert!(app.confirmation.is_some()); // text is not an activation
+    assert!(app.preview.is_some() && app.confirmation.is_none()); // text is not an activation
     assert!(!f.host.config_dir.exists());
-    key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Esc);
     assert!(!f.host.config_dir.exists() && !f.host.state_dir.exists());
     let output = actions::perform(Task::IgnoredPaths, &f.host, None, |_| Ok(())).unwrap();

@@ -8,7 +8,7 @@ use super::{
     tests::render,
     views,
 };
-use crate::services::{CheckReport, ProfileChoices, inspection_defaults};
+use crate::services::{CheckReport, ProfileChoices};
 use dort_core::{
     context::HostContext,
     platform::{Architecture, Platform},
@@ -44,6 +44,7 @@ struct Fixture {
     _temp: tempfile::TempDir,
     host: HostContext,
     bin: PathBuf,
+    repo: PathBuf,
 }
 impl Fixture {
     fn new() -> Self {
@@ -54,7 +55,7 @@ impl Fixture {
         fs::create_dir(&home).unwrap();
         fs::create_dir(&bin).unwrap();
         for (name, body) in [
-            ("mise", "printf '{}';"),
+            ("fake-provider", "printf '{}';"),
             ("brew", "printf '{\"formulae\":[]}';"),
             ("dpkg-query", ":;"),
         ] {
@@ -66,24 +67,33 @@ impl Fixture {
             .unwrap();
             fs::set_permissions(p, fs::Permissions::from_mode(0o700)).unwrap();
         }
+        let host =
+            HostContext::new(home, None, None, Platform::Linux, Architecture::X86_64).unwrap();
+        let repo = root.join("repo");
+        fs::create_dir(&repo).unwrap();
+        fs::create_dir(repo.join(".git")).unwrap();
+        fs::write(repo.join("dort.toml"), "schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nprovider='brew'\npackage='demo'\n").unwrap();
+        let lock = dort_core::state::WriterLock::acquire(&host).unwrap();
+        dort_core::local::RepositoryRegistry::register(&host, &lock, &repo).unwrap();
         Self {
             _temp: temp,
-            host: HostContext::new(home, None, None, Platform::Ubuntu, Architecture::X86_64)
-                .unwrap(),
+            host,
             bin,
+            repo,
         }
     }
     fn app(&self, dry: bool) -> App {
         let mut app = App::new(dry);
         app.tab = Tab::Tools;
-        app.tools_view.setup = true;
-        app.tools_view.defaults_ready(
-            inspection_defaults::Inputs {
-                search_dirs: vec![self.bin.clone()],
-                overrides: vec![],
-            }
-            .detect(&self.host, None),
-        );
+        app.repository = Some(self.repo.clone());
+        app.complete(Ok(actions::perform_scoped(
+            Task::Refresh,
+            &self.host,
+            Some(self.repo.clone()),
+            &[],
+            |_| Ok(()),
+        )
+        .unwrap()));
         app
     }
     fn calls(&self) -> String {
@@ -91,74 +101,83 @@ impl Fixture {
     }
 }
 #[test]
-fn inspection_rows_never_focus_buttons_and_enter_approves_selected_real_queries_once() {
+fn list_enter_opens_details_and_only_explicit_review_approves_checks_once() {
     let f = Fixture::new();
     let mut app = f.app(false);
-    for i in 0..4 {
-        app.tools_view.default_focus = i;
-        if app.tools_view.defaults.as_ref().unwrap().choices[i].selected {
-            assert!(key(&mut app, KeyCode::Char(' '), 80, 24).is_none());
-        }
-    }
-    app.tools_view.default_focus = 2;
-    key(&mut app, KeyCode::Char(' '), 80, 24);
-    for _ in 0..20 {
-        key(&mut app, KeyCode::Down, 80, 24);
-        assert!(app.tools_view.default_focus < 4);
-    }
-    app.tools_view.default_focus = 3;
-    for size in [(48, 14), (80, 24), (140, 40)] {
-        let s = render(&app, size.0, size.1);
+    assert!(key(&mut app, KeyCode::Enter, 80, 24).is_none());
+    assert!(app.tools_view.declared_details && f.calls().is_empty());
+    let Some(Task::ToolsCheckPrepare(mut input)) = key(&mut app, KeyCode::Char('C'), 80, 24) else {
+        panic!("named check action")
+    };
+    input.search_dirs = vec![f.bin.clone()];
+    input.overrides.clear();
+    let out = actions::perform_scoped(
+        Task::ToolsCheckPrepare(input),
+        &f.host,
+        Some(f.repo.clone()),
+        &[],
+        |_| Ok(()),
+    )
+    .unwrap();
+    app.complete(Ok(out));
+    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+        let s = render(&app, w, h);
         assert!(
-            s.contains("Inspect installed tools") && s.contains("caches may change"),
+            s.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .contains("caches may change"),
             "{s}"
         );
-        assert!(!s.contains("\\u{b7}"));
+        assert!(!s.contains("Snapshot") && !s.contains("\\u{b7}"));
     }
-    let task = key(&mut app, KeyCode::Enter, 80, 24).expect("primary action from any row");
-    assert!(matches!(&task,Task::ToolsInspectSelected(v) if v.len()==1));
-    assert_eq!(f.calls(), "");
+    assert!(f.calls().is_empty());
+    let task = key(&mut app, KeyCode::Enter, 80, 24).unwrap();
+    assert!(matches!(task, Task::ToolsCheck(_)));
     app.start(false);
     assert!(key(&mut app, KeyCode::Enter, 80, 24).is_none());
-    let out = actions::perform_scoped(task, &f.host, None, &[], |_| Ok(())).unwrap();
-    app.complete(Ok(out));
+    app.complete(Ok(actions::perform_scoped(
+        task,
+        &f.host,
+        Some(f.repo.clone()),
+        &[],
+        |_| Ok(()),
+    )
+    .unwrap()));
     assert_eq!(f.calls(), "Q");
-    assert_eq!(app.tools_view.snapshots.len(), 1);
-    assert!(app.tools_view.reconciliation.bindings.is_empty());
-    let s = render(&app, 140, 40);
-    assert!(s.contains("mise · Snapshot s1"), "{s}");
-    assert!(!s.contains("\\u{b7}"));
+    assert!(key(&mut app, KeyCode::Enter, 80, 24).is_none());
+    assert_eq!(f.calls(), "Q");
     let mut dry = f.app(true);
     assert!(key(&mut dry, KeyCode::Enter, 48, 14).is_none());
-    assert_eq!(f.calls(), "Q");
+    assert!(dry.tools_view.declared_details);
 }
 #[test]
 fn trusted_separators_render_but_program_path_status_metadata_stays_escaped() {
     let f = Fixture::new();
     let path = f.bin.join("provider·\u{202e}\u{1b}");
-    fs::copy(f.bin.join("mise"), &path).unwrap();
-    let report = crate::services::tools::Request {
-        query: dort_core::tools::inspection::Query::MiseInstalled,
-        executable: path,
+    fs::copy(f.bin.join("fake-provider"), &path).unwrap();
+    let request = crate::services::tools::Request {
+        query: dort_core::tools::inspection::Query::BrewFormulae,
+        executable: path.clone(),
         search_dirs: vec![f.bin.clone()],
         manifest: None,
         runtime_tool: None,
         npm_cli: None,
         prefix: None,
-    }
-    .prepare(&f.host)
-    .unwrap()
-    .approve()
-    .inspect();
+    };
     let mut app = App::new(false);
     app.tab = Tab::Tools;
-    app.tools_view.completed(report);
+    app.tools_view.settings_open = true;
+    app.tools_view.settings.fields[0] = path.display().to_string();
+    app.tools_view.settings.request = Some(request);
     app.status = "Provider metadata: · \u{202e}\u{1b}".to_owned().into();
     let s = render(&app, 320, 40);
-    assert!(s.contains("mise · Snapshot s1"));
-    assert!(!s.contains("provider\\u{b7}")); // Full program identity is deliberately in Details.
-    assert!(key(&mut app, KeyCode::Enter, 320, 40).is_none());
-    let s = render(&app, 320, 40);
+    assert!(s.contains("Tool settings"));
+    assert!(s.contains("provider\\u{b7}"));
+    assert!(
+        f.calls().is_empty(),
+        "Displaying settings never executes programs"
+    );
     assert!(s.contains("\\u{b7}") && s.contains("\\u{202e}") && s.contains("\\u{1b}"));
     assert!(!s.contains('\u{202e}') && !s.contains('\u{1b}'));
     app.tab = Tab::Overview; // Ordinary status still uses the escaped metadata boundary.
@@ -189,6 +208,7 @@ fn workflow_pages_allow_menus_and_keep_field_text_focus_until_actual_navigation(
         ] {
             let mut app = App::new(false);
             app.shell.overlay = Some(Overlay::Form(form));
+            super::tests::focus_form(&mut app);
             app.shell.init_draft = "retained".into();
             assert!(app.menus_available() && app.dialog_title().is_none());
             assert!(render(&app, size.0, size.1).starts_with("Dort /"));
@@ -212,6 +232,7 @@ fn workflow_pages_allow_menus_and_keep_field_text_focus_until_actual_navigation(
         app.tab = Tab::Tools;
         app.tools_view.declaration_open = true;
         app.tools_view.declaration.fields[0] = "retained".into();
+        super::tests::focus_form(&mut app);
         key(&mut app, KeyCode::Char('q'), size.0, size.1);
         assert_eq!(app.tools_view.declaration.fields[0], "retainedq");
         for _ in 0..30 {
@@ -354,9 +375,10 @@ fn direct_field_submission_is_preview_only_and_busy_navigation_explains_joined_w
     assert!(incomplete.preview.is_none() && incomplete.confirmation.is_none());
     let mut app = App::new(false);
     app.shell.overlay = Some(Overlay::Form(Form::Init));
+    super::tests::focus_form(&mut app);
     app.shell.init_draft = "/synthetic/new-repo".into();
     let f = Fixture::new();
-    app.git = Ok(f.bin.join("mise"));
+    app.git = Ok(f.bin.join("fake-provider"));
     assert!(matches!(
         key(&mut app, KeyCode::Enter, 80, 24),
         Some(Task::Init { .. })
@@ -364,6 +386,7 @@ fn direct_field_submission_is_preview_only_and_busy_navigation_explains_joined_w
     assert!(app.preview.is_none() && app.confirmation.is_none());
     let mut app = App::new(false);
     app.shell.overlay = Some(Overlay::Form(Form::Check));
+    super::tests::focus_form(&mut app);
     app.shell.manifest_draft = "/synthetic/dort.toml".into();
     assert!(matches!(
         key(&mut app, KeyCode::Enter, 80, 24),

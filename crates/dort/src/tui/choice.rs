@@ -1,20 +1,15 @@
 //! Choice ownership and application of explicit metadata selections. Never executes a provider.
 use super::{
     app::{App, Tab},
-    components as ui, tools_install, tools_reconcile,
+    components as ui, tools_install,
 };
 use ratatui::{Frame, crossterm::event::KeyCode};
 #[derive(Clone)]
 enum Value {
-    InspectionProvider(usize),
     ClosureProvider(usize),
     DeclarationProvider {
         field: usize,
         provider: &'static str,
-    },
-    Binding {
-        tool: String,
-        snapshot: Option<String>,
     },
 }
 struct Item {
@@ -76,28 +71,13 @@ impl App {
         }
         let tools = &self.tools_view;
         let opening = matches!(code, KeyCode::Char(' ') | KeyCode::Left | KeyCode::Right);
-        let choice = if tools.configuring && !tools.config_details && tools.focus == 0 && opening {
-            Some(Choice::new(
-                "Choose inspection provider",
-                ["Homebrew", "APT", "mise", "npm"]
-                    .iter()
-                    .enumerate()
-                    .map(|(index, label)| Item {
-                        label: (*label).into(),
-                        scope: "Explicit query review required".into(),
-                        value: Value::InspectionProvider(index),
-                    })
-                    .collect(),
-                tools.query,
-            ))
-        } else if tools.install_open
+        let choice = if tools.install_open
             && tools.installation.mode == tools_install::Mode::CloseInputs
-            && !tools.installation.draft_metadata()
             && code == KeyCode::F(4)
         {
             Some(Choice::new(
                 "Choose historical provider",
-                ["mise", "npm", "Homebrew", "APT"]
+                ["npm", "Homebrew"]
                     .iter()
                     .enumerate()
                     .map(|(index, label)| Item {
@@ -108,95 +88,25 @@ impl App {
                     .collect(),
                 tools.installation.closure_provider(),
             ))
-        } else if tools.declaration_open
-            && !tools.declaration.details
-            && [4, 8].contains(&tools.declaration.focus)
-            && opening
-        {
+        } else if tools.declaration_open && tools.declaration.focus == 4 && opening {
             let field = tools.declaration.focus;
-            let options = if field == 4 {
-                [
-                    ("Unsupported", ""),
-                    ("Homebrew", "brew"),
-                    ("mise", "mise"),
-                    ("npm", "npm"),
-                ]
-            } else {
-                [
-                    ("Unsupported", ""),
-                    ("APT", "apt"),
-                    ("mise", "mise"),
-                    ("npm", "npm"),
-                ]
-            };
+            let options = [("Homebrew", "brew"), ("npm", "npm")];
             let selected = options
                 .iter()
                 .position(|(_, value)| *value == tools.declaration.fields[field])
                 .unwrap_or(0);
             Some(Choice::new(
-                if field == 4 {
-                    "macOS declaration provider"
-                } else {
-                    "Ubuntu declaration provider"
-                },
+                "Declaration provider",
                 options
                     .into_iter()
                     .map(|(label, provider)| Item {
                         label: label.into(),
-                        scope: if provider.is_empty() {
-                            "No declaration for this platform"
-                        } else {
-                            "Desired metadata only; no installation"
-                        }
-                        .into(),
+                        scope: "Desired metadata only; no installation".into(),
                         value: Value::DeclarationProvider { field, provider },
                     })
                     .collect(),
                 selected,
             ))
-        } else if tools.recon_open
-            && tools.reconciliation.mode == tools_reconcile::Mode::Bindings
-            && opening
-        {
-            let Some((tool, provider)) = tools.reconciliation.selected_binding_tool() else {
-                return false;
-            };
-            let current = tools.reconciliation.bindings.get(tool);
-            let mut items = vec![Item {
-                label: "Not inspected".into(),
-                scope: "No inspection assigned".into(),
-                value: Value::Binding {
-                    tool: tool.into(),
-                    snapshot: None,
-                },
-            }];
-            let mut selected = 0;
-            for snapshot in tools.snapshots.iter().filter(|snapshot| {
-                Some(snapshot.report.provider.description.query.provider()) == provider
-            }) {
-                if current == Some(&snapshot.id) {
-                    selected = items.len();
-                }
-                items.push(Item {
-                    label: format!("Snapshot {}", snapshot.id),
-                    scope: format!(
-                        "{:?} / {}",
-                        snapshot.report.provider.description.query,
-                        snapshot
-                            .report
-                            .provider
-                            .description
-                            .executable
-                            .to_str()
-                            .unwrap_or("Unavailable path")
-                    ),
-                    value: Value::Binding {
-                        tool: tool.into(),
-                        snapshot: Some(snapshot.id.clone()),
-                    },
-                });
-            }
-            Some(Choice::new("Choose inspection source", items, selected))
         } else {
             None
         };
@@ -258,13 +168,6 @@ impl App {
                 self.choice = None;
                 self.hits.clear();
                 match value {
-                    Value::InspectionProvider(index) if self.tools_view.configuring => {
-                        if index != self.tools_view.query {
-                            self.tools_view.default_focus = index;
-                            self.tools_view.select_advanced();
-                        }
-                        self.tools_view.focus = 0;
-                    }
                     Value::ClosureProvider(index) => {
                         self.tools_view.installation.choose_closure_provider(index)
                     }
@@ -272,15 +175,6 @@ impl App {
                         if self.tools_view.declaration_open =>
                     {
                         self.tools_view.declaration.choose_provider(field, provider)
-                    }
-                    Value::Binding { tool, snapshot }
-                        if snapshot.as_ref().is_none_or(|id| {
-                            self.tools_view.snapshots.iter().any(|s| &s.id == id)
-                        }) =>
-                    {
-                        self.tools_view
-                            .reconciliation
-                            .choose_binding(&tool, snapshot.as_deref())
                     }
                     _ => (),
                 }

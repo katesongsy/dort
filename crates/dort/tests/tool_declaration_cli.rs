@@ -11,7 +11,8 @@ struct Fixture {
     host: HostContext,
     repo: PathBuf,
 }
-const INPUT: &str = r#"{"id":"demo","binary":"demo","install":{"macos":{"provider":"brew","package":"demo"},"ubuntu":{"provider":"apt","package":"demo"}}}"#;
+const INPUT: &str =
+    r#"{"id":"demo","binary":"demo","install":{"provider":"brew","package":"demo"}}"#;
 impl Fixture {
     fn new(register: bool) -> Self {
         let temp = tempfile::tempdir().unwrap();
@@ -210,4 +211,84 @@ fn unregistered_conflicting_and_unknown_fields_are_refused_without_provider_exec
         .assert()
         .code(2);
     assert_eq!(f.history(), history);
+}
+
+#[test]
+fn edit_remove_preview_approval_noop_reference_guards_and_schema6_recovery() {
+    let f = Fixture::new(true);
+    f.cmd()
+        .args(["--yes", "tools", "declare", "--declaration", INPUT])
+        .assert()
+        .success();
+    let edited = INPUT.replace("\"binary\":\"demo\"", "\"binary\":\"new-demo\"");
+    let initial = fs::read(f.repo.join("dort.toml")).unwrap();
+    for (command, arg) in [("edit", edited.as_str()), ("remove", "demo")] {
+        let mut c = f.cmd();
+        c.args(["--json", "--dry-run", "tools", command]);
+        if command == "edit" {
+            c.arg("--declaration");
+        }
+        let out = c.arg(arg).assert().success().get_output().stdout.clone();
+        let p: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(p["change"], command);
+        assert_eq!(p["before"]["id"], "demo");
+        let mut c = f.cmd();
+        c.args(["tools", command]);
+        if command == "edit" {
+            c.arg("--declaration");
+        }
+        c.arg(arg).assert().code(2); // nonterminal needs --yes
+        assert_eq!(fs::read(f.repo.join("dort.toml")).unwrap(), initial);
+    }
+    f.cmd()
+        .args(["--yes", "tools", "edit", "--declaration", &edited])
+        .assert()
+        .success();
+    let n = f.history()["transactions"].as_array().unwrap().len();
+    f.cmd()
+        .args(["--yes", "tools", "edit", "--declaration", &edited])
+        .assert()
+        .success();
+    assert_eq!(f.history()["transactions"].as_array().unwrap().len(), n);
+    let edited_bytes = fs::read(f.repo.join("dort.toml")).unwrap();
+    f.cmd()
+        .args(["--yes", "tools", "remove", "demo"])
+        .assert()
+        .success();
+    assert!(
+        !fs::read_to_string(f.repo.join("dort.toml"))
+            .unwrap()
+            .contains("new-demo")
+    );
+    let history = f.history();
+    let tx = history["transactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| {
+            d["journal_schema"] == 6
+                && d["transaction_id"].as_str().is_some_and(|id| {
+                    let path = dort_core::local::repository_state_path(
+                        &f.host,
+                        d["repository_id"].as_str().unwrap(),
+                    )
+                    .unwrap()
+                    .join("transactions")
+                    .join(id)
+                    .join("manifest.backup");
+                    fs::read(path).unwrap() == edited_bytes
+                })
+        })
+        .unwrap();
+    f.cmd()
+        .args([
+            "--yes",
+            "recovery",
+            "rollback",
+            tx["repository_id"].as_str().unwrap(),
+            tx["transaction_id"].as_str().unwrap(),
+        ])
+        .assert()
+        .success();
+    assert_eq!(fs::read(f.repo.join("dort.toml")).unwrap(), edited_bytes);
 }

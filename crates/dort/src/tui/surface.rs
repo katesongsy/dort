@@ -108,51 +108,43 @@ impl App {
             return Some("Overview / Details");
         }
         if self.tab == Tab::Tools {
+            if let Some(title) = self.tools_view.declared.title() {
+                return Some(title);
+            }
             let t = &self.tools_view;
-            return Some(if t.declaration_open {
-                "Tools / Add tool declaration"
-            } else if t.install_open && t.installation.draft_metadata() {
-                "Tools / Draft input metadata"
-            } else if t.install_open {
-                match t.installation.mode {
-                    super::tools_install::Mode::Attempts => "Tools / Installation attempts",
-                    super::tools_install::Mode::Review => "Tools / Review installation",
-                    super::tools_install::Mode::Result => "Tools / Installation outcome",
-                    super::tools_install::Mode::CloseInputs
-                    | super::tools_install::Mode::LoadingClose
-                    | super::tools_install::Mode::CloseReview => "Tools / Close attempt",
-                    super::tools_install::Mode::PrefixInputs
-                    | super::tools_install::Mode::AptInputs => "Tools / Installation inputs",
-                    super::tools_install::Mode::LoadingInstall => {
-                        "Tools / Prepare installation review"
+            return Some(if t.installed_open {
+                "Tools / Installed tools"
+            } else if t.declaration_open {
+                match t.declaration.change {
+                    None => "Tools / Add tool declaration",
+                    Some(dort_core::tools::declaration::Change::Edit) => {
+                        "Tools / Edit tool declaration"
+                    }
+                    Some(dort_core::tools::declaration::Change::Remove) => {
+                        "Tools / Remove tool declaration"
                     }
                 }
-            } else if t.recon_open {
-                if t.reconciliation.binding_metadata() {
-                    "Tools / Comparison metadata"
-                } else {
-                    "Tools / Compare declarations"
+            } else if t.settings_open {
+                "Tools / Tool settings"
+            } else if t.install_open {
+                match t.installation.mode {
+                    super::tools_install::Mode::Attempts => {
+                        if t.installation.details {
+                            "Tools / Installation details"
+                        } else {
+                            "Tools / Installation history"
+                        }
+                    }
+                    super::tools_install::Mode::CloseInputs => "Tools / Closure settings",
+                    super::tools_install::Mode::LoadingClose
+                    | super::tools_install::Mode::CloseReview => {
+                        "Tools / Close installation record"
+                    }
                 }
-            } else if t.setup {
-                if t.details {
-                    "Tools / Inspection scopes"
-                } else {
-                    "Tools / Inspect installed tools"
-                }
-            } else if t.configuring {
-                if t.config_details {
-                    "Tools / Draft inspection details"
-                } else {
-                    "Tools / Inspection settings"
-                }
-            } else if t.preview.is_some() {
-                "Tools / Review inventory query"
-            } else if t.catalog_browser {
-                "Tools / Session snapshots"
-            } else if t.details {
-                "Tools / Inventory details"
+            } else if t.declared_details {
+                "Tools / Tool details"
             } else {
-                return None;
+                "Tools / Declared tools"
             });
         }
         if self.tab == Tab::Git && self.git_view.editing_root {

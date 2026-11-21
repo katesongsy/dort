@@ -31,7 +31,6 @@ impl Progress {
             FreshInspection => ("Inspecting selected provider catalogs", 2),
             IntentDurable => ("Installation intent durable", 3),
             Installing => ("Installing package · requested 10-minute deadline", 4),
-            SupervisionWaiting => ("Privileged supervisor overdue · still waiting joined", 4),
             PostInspection => ("Inspecting package and binary metadata", 5),
             OutcomeDurable => ("Observed outcome durable", 6),
         };
@@ -64,6 +63,7 @@ pub struct Activity {
 pub struct Failure {
     pub cause: String,
     pub activity: Option<Activity>,
+    pub recovery: Option<Box<dort_core::journal::WriteBlocker>>,
 }
 pub struct Receipt {
     pub operation: &'static str,
@@ -102,6 +102,14 @@ fn batch_label(action: dort_core::batch::Action) -> &'static str {
 impl Activity {
     pub fn for_task(task: &Task, app: &App) -> Self {
         let operation = match task {
+            Task::ToolsInstalledPrepare(_) => "Prepare installed-package inspection (no execution)",
+            Task::ToolsInstalledInspect(_) => "Inspect installed packages",
+            Task::ToolsCheckPrepare(_) => "Prepare declared-tool checks (no execution)",
+            Task::ToolsCheck(_) => "Check declared tools",
+            Task::ToolsInstallMissingPrepare(_) => {
+                "Review missing-tool installations (no execution)"
+            }
+            Task::ToolsInstallMissing(_) => "Install reviewed missing tools serially · quit waits",
             Task::DiscoverContent(_) | Task::DiscoveryTree(_) => {
                 unreachable!("private passive reads have no activity surface")
             }
@@ -120,20 +128,12 @@ impl Activity {
             Task::Rollback(..) => "Preview guarded rollback",
             Task::Bootstrap(..) => "Preview bootstrap recovery",
             Task::Git(_) => "Read Git",
-            Task::ToolInstallPrepare(_) => "Review one package install (no execution)",
-            Task::ToolInstall(_) => "Install one package · quit waits for completion",
             Task::ToolAttempts => "Read installation attempts (no execution)",
             Task::ToolClosePrepare(_) => "Review fresh inspection and attempt closure",
-            Task::ToolClose(_) => "Inspect mise and close unchanged attempt metadata",
-            Task::ToolDeclaration(_) => "Preview add-only tool declaration (no provider)",
-            Task::ToolsDetect(_) => "Find inspection defaults (no execution)",
-            Task::ToolsInspectSelected(_) => "Inspect selected installed tools",
-            Task::ToolsPrepare(_) => "Review provider query (no execution)",
-            Task::ToolsReconcilePrepare(_) => {
-                "Read reconciliation declarations (no provider query)"
-            }
-            Task::ToolsReconcile { .. } => "Reconcile chosen snapshots and binary metadata",
-            Task::ToolsInspect(_) => "Execute explicitly approved provider inspection",
+            Task::ToolClose(_) => "Inspect provider and close unchanged attempt metadata",
+            Task::ToolDeclaration(_) => "Preview manifest-only declaration change",
+            Task::ToolsSettingsDetect { .. } => "Find tool settings (no execution)",
+            Task::ToolsSettingsValidate(_) => "Validate session tool settings (no execution)",
             Task::Execute(approved) => {
                 if let Some(reviewed) = &app.reviewed_activity {
                     return reviewed.clone();
@@ -151,53 +151,68 @@ impl Activity {
         };
         let mut scope = vec![];
         match task {
+            Task::ToolsInstallMissing(approval) => {
+                scope.push(("Manifest", approval.scope().0.display().to_string()));
+                scope.push((
+                    "Profiles",
+                    approval
+                        .scope()
+                        .1
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ));
+                scope.push(("Reviewed tools", approval.tools().join(", ")));
+                scope.push(("Effects", "Serial native package changes; stops on failure, possible partial effects, no rollback".into()));
+            }
+            Task::ToolsInstallMissingPrepare(checked) => scope.push((
+                "Manifest",
+                checked.reconciliation.scope.manifest.display().to_string(),
+            )),
             Task::ToolAttempts => scope.push((
                 "Scope",
                 "All repository Tools attempts in this host state".into(),
             )),
-            Task::ToolInstallPrepare(request) => {
-                scope.push(("Manifest", request.scope().manifest.display().to_string()))
-            }
-            Task::ToolInstall(_) => {
-                if let Some(s) = &app.tools_view.installation.scope {
-                    scope.push(("Package", format!("{}@{}", s.package, s.version)));
-                    scope.push(("Repository", s.repository.display().to_string()));
-                    scope.push(("Provider", s.executable.display().to_string()));
-                }
-                scope.push(("Effects", "Provider/package code, downloads and caches; possible partial effects, no rollback".into()));
-            }
             Task::ToolClosePrepare(request) => scope.push(("Attempt", request.id.clone())),
             Task::ToolClose(_) => scope.push((
                 "Scope",
-                "Fresh fixed mise inspection and unchanged attempt metadata closure only".into(),
+                "Fresh fixed provider inspection and unchanged attempt metadata closure only"
+                    .into(),
             )),
-            Task::ToolsReconcilePrepare(request) => {
-                scope.push(("Manifest", request.manifest.display().to_string()))
-            }
-            Task::ToolsReconcile { prepared, .. } => {
-                scope.push(("Manifest", prepared.scope.manifest.display().to_string()));
+            Task::ToolsInstalledInspect(approval) => {
                 scope.push((
-                    "Tool search dirs",
-                    prepared
-                        .scope
-                        .tool_search_dirs
+                    "Programs",
+                    approval
+                        .review()
+                        .inspections
                         .iter()
-                        .map(|p| p.display().to_string())
+                        .map(|q| q.provider.executable.display().to_string())
                         .collect::<Vec<_>>()
                         .join(", "),
                 ));
-            }
-            Task::ToolsPrepare(request) => {
-                scope.push(("Provider query", format!("{:?}", request.query)));
                 scope.push((
-                    "Trusted executable",
-                    request.executable.display().to_string(),
+                    "Scope",
+                    "Approved package-manager queries; no installation".into(),
                 ));
             }
-            Task::ToolsInspect(_) | Task::ToolsInspectSelected(_) => scope.push((
-                "Scope",
-                "Explicit provider query; no package installation".into(),
-            )),
+            Task::ToolsCheck(approval) => {
+                let review = approval.review();
+                scope.push(("Manifest", review.scope.manifest.display().to_string()));
+                scope.push((
+                    "Reviewed tools",
+                    review
+                        .bindings
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ));
+                scope.push((
+                    "Scope",
+                    "Approved provider checks; no package installation".into(),
+                ));
+            }
             // Only public scope metadata; never inspect Read, disclosure state or Diff.patch.
             Task::Git(_) => {
                 scope.push((
@@ -291,7 +306,7 @@ impl Activity {
             progress: None,
             provider_inspection: matches!(
                 task,
-                Task::ToolsInspect(_) | Task::ToolsInspectSelected(_)
+                Task::ToolsCheck(_) | Task::ToolsInstalledInspect(_)
             ),
         }
     }
@@ -401,7 +416,10 @@ impl Activity {
 }
 fn scope(lines: &mut Vec<Line<'static>>, activity: Option<&Activity>) {
     if let Some(activity) = activity {
-        lines.push(ui::metadata("Operation", activity.operation));
+        lines.push(Line::from(vec![
+            ratatui::text::Span::styled(format!("{:<13} ", "Operation"), ui::muted()),
+            ratatui::text::Span::raw(activity.operation),
+        ]));
         for (label, value) in &activity.scope {
             lines.push(ui::metadata(label, value));
         }
@@ -475,6 +493,34 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
     );
     let actions = Rect::new(area.x, actions.y, width, actions.height);
     if let Some(error) = &app.error {
+        if let Some(blocker) = app.failure.as_ref().and_then(|f| f.recovery.as_ref()) {
+            let mut lines = vec![
+                Line::raw(blocker.reason()),
+                Line::raw("New changes are paused to protect your files."),
+                Line::raw(""),
+                ui::metadata("Operation", blocker.operation()),
+            ];
+            if let Some(root) = &blocker.repository_root {
+                lines.push(ui::metadata("Repository", &root.display().to_string()));
+            }
+            lines.extend([
+                ui::metadata("Repository ID", &blocker.transaction.repository_id),
+                ui::metadata("Operation ID", &blocker.transaction.transaction_id),
+                Line::raw(""),
+                Line::raw("Open Recovery to inspect it and review the available actions."),
+            ]);
+            panel(
+                frame,
+                area,
+                app,
+                "Changes blocked",
+                "An earlier operation needs attention",
+                true,
+                lines,
+            );
+            controls(frame, actions, app, true);
+            return;
+        }
         let mut lines = vec![Line::from(Span::styled("Cause", ui::heading()))];
         let cause = app
             .failure

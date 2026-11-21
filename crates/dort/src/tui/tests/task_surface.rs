@@ -117,6 +117,7 @@ fn activity_keeps_scope_and_real_boundary_through_navigation_and_quit_waits() {
     key(&mut app, KeyCode::Home);
     assert!(render(&app, 48, 14).contains("immutable-root"));
     app.shell.overlay = Some(super::shell::Overlay::Form(super::shell::Form::Adopt));
+    super::tests::focus_form(&mut app);
     key(&mut app, KeyCode::Char('q'));
     assert!(app.exit_requested && !app.quit);
     assert!(render(&app, 48, 14).contains("Exit requested"));
@@ -145,6 +146,7 @@ fn read_failure_buttons_retry_only_retained_intent_and_back_retains_draft() {
     assert_eq!(app.shell.choose_draft, "retained-q?/scope");
     assert!(!app.write_warning);
     app.shell.overlay = Some(super::shell::Overlay::Form(super::shell::Form::Choose));
+    super::tests::focus_form(&mut app);
     begin(&mut app, &Task::Refresh, false);
     app.complete(Err("failure above retained form".into()));
     key(&mut app, KeyCode::Char('q'));
@@ -227,6 +229,57 @@ fn failed_write_pins_risk_after_back_and_reads_and_never_retries_execution() {
     assert!(app.tab == Tab::Recovery);
     assert!(app.preview.is_none() && app.confirmation.is_none());
 }
+#[test]
+fn earlier_operation_blocker_has_its_own_message_scope_and_recovery_action() {
+    for (width, height) in [(48, 14), (80, 24), (140, 40)] {
+        for (damaged, schema) in [(false, Some(6)), (true, Some(6)), (true, None)] {
+            let mut app = App::new(false);
+            app.repository = Some("/synthetic/current-repo".into());
+            app.start(true);
+            let blocker = dort_core::journal::WriteBlocker {
+                transaction: dort_core::journal::Diagnosis {
+                    repository_id: "earlier-repo-id".into(),
+                    transaction_id: "earlier-operation-id".into(),
+                    phase: Some(dort_core::journal::Phase::Preparing),
+                    journal_schema: schema,
+                    valid_checkpoints: 1,
+                    problem: damaged.then(|| "PRIVATE_RECORD_BODY".into()),
+                },
+                repository_root: schema.map(|_| "/synthetic/earlier-repo".into()),
+            };
+            let operation = blocker.operation();
+            assert!(!format!("{blocker:?}").contains("PRIVATE_RECORD_BODY"));
+            let result =
+                super::actions::present(Err(dort_core::Error::RecoveryRequired(Box::new(blocker))));
+            assert!(app.complete(result).is_none());
+            assert!(app.failed_write && !app.write_warning);
+            assert!(app.retry.is_none());
+            let screen = render(&app, width, height);
+            assert!(screen.contains("Changes blocked"));
+            assert!(
+                !screen.contains("Possible partial effects") && !screen.contains("Write failed")
+            );
+            let cells = task_cells(&mut app);
+            for fact in [
+                "New changes are paused",
+                "earlier-repo",
+                "earlier-operation-id",
+                operation,
+            ] {
+                assert!(cells.contains(fact), "{cells}");
+            }
+            assert!(!cells.contains("PRIVATE_RECORD_BODY"));
+            assert!(app.failure.as_ref().unwrap().cause.contains(if damaged {
+                "can't verify"
+            } else {
+                "did not finish"
+            }));
+            assert!(matches!(key(&mut app, KeyCode::Enter), Some(Task::History)));
+            assert!(app.tab == Tab::Recovery && app.error.is_none());
+        }
+    }
+}
+
 #[test]
 fn git_activity_copies_only_public_independent_scope_and_progress_uses_actual_event() {
     let mut app = App::new(false);

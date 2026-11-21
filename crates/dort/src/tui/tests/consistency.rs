@@ -63,6 +63,7 @@ fn form_pages_keep_controls_draft_focus_and_explicit_metadata_at_all_sizes() {
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let mut app = App::new(false);
         app.shell.overlay = Some(Overlay::Form(Form::Adopt));
+        super::tests::focus_form(&mut app);
         app.shell.adoption.target = format!("~/{}", "long-segment/".repeat(35));
         let before = app.shell.adoption.target.clone();
         let screen = render(&app, w, h);
@@ -170,6 +171,7 @@ fn marked_editor_pages_keep_table_review_controls_and_drafts_inline() {
 fn active_task_pages_scroll_activity_instead_of_the_retained_form() {
     let mut app = App::new(false);
     app.shell.overlay = Some(Overlay::Form(Form::Adopt));
+    super::tests::focus_form(&mut app);
     app.shell.adoption.target = "~/.retained".into();
     app.start(false);
     app.shell.scroll = 9;
@@ -212,6 +214,7 @@ fn paging_copy_describes_scrolling_instead_of_opening_details() {
             Form::RemoveId,
         ] {
             app.shell.overlay = Some(Overlay::Form(form));
+            super::tests::focus_form(&mut app);
             key(&mut app, KeyCode::Home, w, h);
             for _ in 0..80 {
                 for line in render(&app, w, h).lines() {

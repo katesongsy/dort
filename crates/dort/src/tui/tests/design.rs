@@ -47,7 +47,7 @@ fn synthetic_host() -> dort_core::context::HostContext {
         "/synthetic/home".into(),
         None,
         None,
-        dort_core::platform::Platform::Ubuntu,
+        dort_core::platform::Platform::Linux,
         dort_core::platform::Architecture::X86_64,
     )
     .unwrap()
@@ -146,6 +146,7 @@ fn workbench_has_semantic_styles_and_selected_identity_at_all_supported_sizes() 
 fn input_has_a_real_visible_caret_and_field_button_hierarchy() {
     let mut app = App::new(false);
     app.shell.overlay = Some(Overlay::Form(Form::Adopt));
+    super::tests::focus_form(&mut app);
     app.shell.adoption.target = "~/.editor".into();
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();

@@ -2,7 +2,6 @@ mod support;
 use dort_core::{
     Manifest,
     model::{InstallSpec, Provider, Tool},
-    platform::Platform,
     tools::{
         binaries::{self, ProbeState},
         planning::BinaryObservation,
@@ -30,16 +29,12 @@ fn manifest(names: &[&str]) -> Manifest {
                 binary: (*name).into(),
                 profiles: vec!["base".into()],
                 requires: vec![],
-                install: [(
-                    Platform::Ubuntu,
-                    InstallSpec {
-                        provider: Provider::Mise,
-                        package: (*name).into(),
-                        version: None,
-                        runtime_tool: None,
-                    },
-                )]
-                .into(),
+                install: InstallSpec {
+                    provider: Provider::Brew,
+                    package: (*name).into(),
+                    version: None,
+                    runtime_tool: None,
+                },
             })
             .collect(),
     }

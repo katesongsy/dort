@@ -38,7 +38,7 @@ mode = "link"
 
 [files.overrides]
 macos = "files/macos/shellrc"
-ubuntu = "files/ubuntu/shellrc"
+linux = "files/linux/shellrc"
 ```
 
 Both source variants must obey the same path restrictions. Foreign/broken links, symlinked source/parent paths, directories, hard links and special files cannot be adopted as ordinary files.
@@ -47,12 +47,12 @@ Both source variants must obey the same path restrictions. Foreign/broken links,
 
 ```toml
 [profiles]
-available = ["dev", "macos", "ubuntu"]
+available = ["dev", "macos", "linux"]
 default = ["base"]
 
 [profiles.platform]
 macos = ["macos"]
-ubuntu = ["ubuntu"]
+linux = ["linux"]
 ```
 
 `base` is built in and always selected. Other names must be declared in `available`. Effective profiles combine base, manifest defaults, platform profiles, local active profiles and repeatable command-line `--profile` selections.
@@ -68,7 +68,7 @@ mode = "link"
 profiles = ["dev", "macos"]
 ```
 
-A dependency must also be active; profiles cannot silently disable a required resource. The active platform must have install definitions for selected tools. Command-line profiles affect only that invocation and do not save preferences.
+A dependency must also be active; profiles cannot silently disable a required resource. Tools use one install specification across macOS, Linux and WSL; only file overrides and profile selection use platform keys. Command-line profiles affect only that invocation and do not save preferences.
 
 ## Tool declarations
 
@@ -78,11 +78,11 @@ id = "git"
 binary = "git"
 
 [tools.install]
-macos = { provider = "brew", package = "git" }
-ubuntu = { provider = "apt", package = "git" }
+provider = "brew"
+package = "git"
 ```
 
-This declares intent only; the declaration itself does not inspect or install Git. Supported provider names in the schema are `brew`, `apt`, `mise` and `npm`. Packages/versions are validated for the provider; brew/apt currently allow only omitted or `latest` versions. See the [example manifest](../../examples/dort.toml) for mise/npm declarations.
+This declares intent only; the declaration itself does not inspect or install Git. Supported providers are `brew` and `npm`, on macOS, Linux and WSL. Homebrew accepts omitted or `latest` versions; npm accepts default/latest or exact semver metadata, while installation requires an exact version and a declared Node runtime. See the [example manifest](../../examples/dort.toml) for Homebrew and npm declarations.
 
 Tool `requires` must name declared tools, and dependency cycles are rejected. An npm install definition must explicitly name its runtime via `runtime_tool`; that runtime also becomes a dependency.
 

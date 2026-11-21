@@ -25,7 +25,7 @@ impl Fixture {
         let home = temp.path().canonicalize().unwrap().join("home");
         std::fs::create_dir(&home).unwrap();
         let host =
-            HostContext::new(home, None, None, Platform::Ubuntu, Architecture::X86_64).unwrap();
+            HostContext::new(home, None, None, Platform::Linux, Architecture::X86_64).unwrap();
         Self { _temp: temp, host }
     }
     fn app(&self, count: usize, nested: bool) -> App {

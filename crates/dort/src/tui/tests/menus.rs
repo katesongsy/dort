@@ -17,6 +17,7 @@ fn ctrl_g_opens_and_closes_navigation_without_losing_a_draft() {
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let mut app = App::new(false);
         app.shell.overlay = Some(Overlay::Form(Form::Adopt));
+        super::tests::focus_form(&mut app);
         app.shell.adoption.target = "retained draft".into();
         render(&app, w, h);
         let shortcut = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL);
@@ -117,63 +118,39 @@ fn navigation_hints_are_consolidated_and_numeric_destination_aliases_are_inert()
     }
 }
 #[test]
-fn local_navigation_is_visible_clickable_and_marks_the_current_destination() {
-    use ratatui::{Terminal, backend::TestBackend, style::Modifier};
+fn tools_navigation_has_only_places_and_forms_keep_their_parent_drafts() {
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let mut app = App::new(false);
+        app.repository = Some("/synthetic/repo".into());
         app.tab = Tab::Tools;
         let screen = render(&app, w, h);
-        for label in ["1 Inventory", "2 Snapshots"] {
-            assert!(screen.contains(label), "{label}: {screen}");
+        assert!(!screen.contains("3 Check") && !screen.contains("Snapshots"));
+        assert_eq!(super::navigation::local_catalog(6).len(), 3);
+        for label in ["1 Declared", "2 Installed", "3 History"] {
+            assert!(screen.contains(label), "{screen}");
         }
-        if w >= 80 {
-            for label in ["3 Reconcile", "4 Attempts"] {
-                assert!(screen.contains(label), "{label}: {screen}");
-            }
-        } else {
-            assert!(screen.contains("More..."));
-            let _ =
-                super::tests::target_position(&app, w, h, |t| matches!(t, Target::MenuGroup(6)));
-        }
-        assert!(
-            click(&mut app, w, h, |t| matches!(
-                t,
-                Target::LocalDestination(6, 3)
-            ))
-            .is_none()
+        let entries = super::navigation::entries(6);
+        assert_eq!(
+            entries.iter().map(|e| e.label).collect::<Vec<_>>(),
+            [
+                "Declared tools [1]",
+                "Installed tools [2]",
+                "Installation history [3]"
+            ]
         );
-        assert!(app.tools_view.catalog_browser && app.navigation.menu.is_none());
-        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
-        terminal.draw(|f| super::views::draw(f, &app)).unwrap();
-        let position = super::tests::target_position(&app, w, h, |t| {
-            matches!(t, Target::LocalDestination(6, 3))
-        });
-        assert!(
-            terminal.backend().buffer()[position]
-                .modifier
-                .contains(Modifier::REVERSED | Modifier::BOLD)
-        );
-        if w < 80 {
-            click(&mut app, w, h, |t| matches!(t, Target::MenuGroup(6)));
-            key(&mut app, KeyCode::Right, w, h);
-            assert!(render(&app, w, h).contains("3 Reconcile"));
-            assert!(click(&mut app, w, h, |t| matches!(t, Target::MenuItem(5))).is_none());
-        } else {
-            assert!(
-                click(&mut app, w, h, |t| matches!(
-                    t,
-                    Target::LocalDestination(6, 5)
-                ))
-                .is_none()
-            );
-        }
-        assert!(app.tools_view.recon_open && !app.tools_view.catalog_browser);
+        app.open_menu(6, w);
+        key(&mut app, KeyCode::Right, w, h);
+        key(&mut app, KeyCode::Right, w, h);
+        let task = click(&mut app, w, h, |t| matches!(t, Target::MenuItem(2)));
+        assert!(matches!(task, Some(Task::ToolAttempts)));
+        assert!(app.tools_view.install_open && app.navigation.menu.is_none());
         app.tools_view.declare();
         render(&app, w, h);
         assert!((0..h).all(|y| {
             (0..w).all(|x| !matches!(app.hits.target(x, y), Some(Target::LocalDestination(_, _))))
         }));
         app.shell.overlay = Some(Overlay::Form(Form::Adopt));
+        super::tests::focus_form(&mut app);
         app.shell.adoption.target = "retained local draft".into();
         app.open_menu(2, w);
         key(&mut app, KeyCode::Right, w, h);
@@ -235,9 +212,9 @@ fn plain_section_shortcuts_are_visible_and_respect_dialog_busy_and_small_guards(
 #[test]
 fn menu_and_wide_rail_share_the_visible_section_order() {
     assert_eq!(
-        &navigation::entry_order(6)[..4],
-        &[0, 3, 5, 4],
-        "Tools numbered destinations match their page order"
+        navigation::entry_order(6),
+        vec![0, 1, 2],
+        "Tools destinations are declared tools, installed tools and installation history"
     );
     let expected = [
         "Overview", "Files", "Tools", "Recovery", "Checks", "Git", "Session",
@@ -296,6 +273,7 @@ fn section_letters_and_contextual_uppercase_remain_literal_in_foreground_fields(
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let mut app = App::new(false);
         app.shell.overlay = Some(Overlay::Form(Form::Adopt));
+        super::tests::focus_form(&mut app);
         for letter in "oftrcgOFTRCP123".chars() {
             app.key(
                 KeyEvent::new(KeyCode::Char(letter), KeyModifiers::NONE),
@@ -321,39 +299,47 @@ fn section_letters_and_contextual_uppercase_remain_literal_in_foreground_fields(
 fn numeric_destinations_are_section_local_and_remain_text_in_inputs() {
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let mut app = App::new(false);
+        app.repository = Some("/synthetic/repo".into());
         app.tab = Tab::Tools;
-        assert!(
-            app.key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE), w, h)
-                .is_none()
-        );
-        assert!(app.tools_view.catalog_browser);
+        assert!(matches!(
+            app.key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE), w, h),
+            Some(Task::ToolsInstalledPrepare(_))
+        ));
+        assert!(app.tools_view.installed_open && app.tools_view.installed.waiting);
         assert!(
             app.key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE), w, h)
                 .is_none()
         );
-        assert!(app.tools_view.recon_open && !app.tools_view.catalog_browser);
-        // The comparison form now owns printable digits rather than navigating.
-        let before = app.tools_view.reconciliation.fields[0].clone();
-        app.key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE), w, h);
-        assert_eq!(app.tools_view.reconciliation.fields[0], before + "4");
-        assert!(!app.tools_view.install_open);
-        app.open_menu(6, w);
+        app.tools_view.leave();
         assert!(matches!(
-            app.key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE), w, h),
+            app.key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE), w, h),
             Some(Task::ToolAttempts)
         ));
-        assert!(app.navigation.menu.is_none());
+        assert!(app.tools_view.install_open && !app.tools_view.declared.check_waiting);
+        app.tools_view.declare();
+        app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), w, h);
+        let before = app.tools_view.declaration.fields[0].clone();
+        app.key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE), w, h);
+        assert_eq!(app.tools_view.declaration.fields[0], before + "4");
+        assert!(!app.tools_view.install_open);
+        app.open_menu(6, w);
+        assert!(
+            app.key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE), w, h)
+                .is_none()
+        );
+        assert!(app.navigation.menu.is_some(), "Tools has no numbered tasks");
         let mut app = App::new(false);
         app.tab = Tab::Files;
         assert!(matches!(
             app.key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE), w, h),
             Some(Task::Discover)
         ));
-        assert!(app.tab == Tab::Files && app.discovering && !app.tools_view.catalog_browser);
+        assert!(app.tab == Tab::Files && app.discovering && !app.tools_view.install_open);
         app.inventory.candidates.editing = true;
         app.key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE), w, h);
         assert!(app.inventory.candidates.query.ends_with('3') && app.discovering);
         app.shell.overlay = Some(Overlay::Form(Form::Adopt));
+        super::tests::focus_form(&mut app);
         app.key(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE), w, h);
         assert!(app.shell.adoption.target.ends_with('1'));
     }
@@ -458,7 +444,13 @@ fn every_menu_group_fits_at_floor_and_navigating_has_no_write_approval() {
         for (index, entry) in navigation::entries(group).iter().enumerate() {
             app.navigation.menu.as_mut().unwrap().selected = index;
             let screen = render(&app, 48, 14);
-            let label = entry.label.split(" [").next().unwrap();
+            let label = navigation::local_catalog(group)
+                .iter()
+                .find(|(raw, _)| *raw == index)
+                .map_or_else(
+                    || entry.label.split(" [").next().unwrap(),
+                    |(_, short)| *short,
+                );
             assert!(screen.contains(label), "{label}: {screen}");
             let _ = super::tests::target_position(
                 &app,
@@ -613,6 +605,7 @@ fn pages_keep_menus_while_tasks_retain_the_joined_navigation_guard() {
     ] {
         let mut app = App::new(false);
         app.shell.overlay = Some(Overlay::Form(form));
+        super::tests::focus_form(&mut app);
         super::tests::click_places(&mut app, 80, 24);
         assert!(app.navigation.menu.is_some() && app.shell.overlay.is_some());
         key(&mut app, KeyCode::Esc, 80, 24);

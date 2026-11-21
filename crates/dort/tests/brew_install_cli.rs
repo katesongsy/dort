@@ -24,7 +24,7 @@ impl Fixture {
             fs::create_dir(p).unwrap();
         }
         fs::create_dir(repo.join(".git")).unwrap();
-        fs::write(repo.join("dort.toml"),"schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='brew',package='demo'}\n").unwrap();
+        fs::write(repo.join("dort.toml"),"schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nprovider='brew'\npackage='demo'\n").unwrap();
         let host = HostContext::new(
             home,
             None,
@@ -78,27 +78,16 @@ esac
         let mut c = Command::new(env!("CARGO_BIN_EXE_dort"));
         c.env_clear()
             .env("HOME", &self.host.home)
-            .env("PATH", "/no-tools")
+            .env(
+                "PATH",
+                std::env::join_paths([self.brew.parent().unwrap(), self.bin.as_path()]).unwrap(),
+            )
             .current_dir(&self.repo);
         c
     }
     fn reconcile(&self) -> Command {
         let mut c = self.cmd();
-        let scope = serde_json::json!({"id":"brew","provider":"brew","executable":self.brew,"search_dirs":[self.bin]});
-        c.args([
-            "--json",
-            "tools",
-            "reconcile",
-            "--install-tool",
-            "demo",
-            "--manifest",
-        ])
-        .arg(self.repo.join("dort.toml"))
-        .arg("--tool-search-dir")
-        .arg(&self.bin)
-        .arg("--scope")
-        .arg(scope.to_string())
-        .args(["--bind", "demo=brew"]);
+        c.args(["--json", "tools", "install-missing"]);
         c
     }
     fn calls(&self) -> String {
@@ -109,32 +98,22 @@ esac
 fn brew_cli_dry_run_does_not_execute_provider_or_create_attempts() {
     let f = Fixture::new();
     let out = f.reconcile().arg("--dry-run").output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let review: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(
-        out.status.code(),
-        Some(if f.host.platform == Platform::Macos {
-            0
-        } else {
-            2
-        })
+        review["check_review"]["inspections"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
     );
     assert!(f.calls().is_empty());
     assert!(!f.host.state_dir.join("tools-attempts").exists());
 }
 #[test]
 fn brew_cli_native_install_uses_current_outcome_and_explicit_expected_prefix() {
-    if Platform::detect().unwrap() != Platform::Macos {
-        println!(
-            "SKIP: Homebrew declarations are macOS-only; core/TUI use explicit macOS fake-provider contexts"
-        );
-        return;
-    }
     let f = Fixture::new();
-    let out = f
-        .reconcile()
-        .args(["--yes", "--brew-prefix"])
-        .arg(f.host.home.join("prefix"))
-        .output()
-        .unwrap();
+    let out = f.reconcile().arg("--yes").output().unwrap();
     assert!(
         out.status.success(),
         "{}",
@@ -142,6 +121,11 @@ fn brew_cli_native_install_uses_current_outcome_and_explicit_expected_prefix() {
     );
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains("provider_current_present") && text.contains("2.7"));
+    let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        report["installation"]["results"][0]["report"]["scope"]["brew"]["prefix"],
+        f.host.home.join("prefix").display().to_string()
+    );
     assert!(!text.contains("exact_present") && !text.contains("PRIVATE"));
     assert_eq!(f.calls().matches("install --formula").count(), 1);
     let out = f

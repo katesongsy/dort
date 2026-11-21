@@ -280,7 +280,7 @@ mod tests {
             std::fs::write(home.join(directory).join("settings"), "ordinary settings").unwrap();
         }
         let host =
-            HostContext::new(home, None, None, Platform::Ubuntu, Architecture::X86_64).unwrap();
+            HostContext::new(home, None, None, Platform::Linux, Architecture::X86_64).unwrap();
         let mut report = discover(&host, None).unwrap();
         assert_eq!(report.candidates.len(), 4);
         report.candidates.clear();

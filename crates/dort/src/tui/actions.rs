@@ -57,6 +57,8 @@ pub struct Data {
     pub profiles: Vec<String>,
     pub files: Vec<(String, String)>,
     pub managed: Vec<ManagedRow>,
+    pub tools: Option<std::result::Result<Vec<dort_core::model::Tool>, String>>,
+    pub tools_source: Option<crate::services::declared_tools::Source>,
     pub files_error: Option<String>,
     pub history: Vec<journal::Diagnosis>,
     pub history_error: Option<String>,
@@ -67,6 +69,14 @@ pub fn diagnostic(error: &Error) -> String {
     match error {
         Error::Parse(_) => "Invalid TOML; manifest source text is not displayed.".into(),
         _ => error.to_string(),
+    }
+}
+
+/// Preserve typed write blockers instead of reconstructing them from message text.
+pub fn present(result: Result<Output>) -> std::result::Result<Output, String> {
+    match result {
+        Err(Error::RecoveryRequired(blocker)) => Ok(Output::RecoveryRequired(blocker)),
+        other => other.map_err(|error| diagnostic(&error)),
     }
 }
 
@@ -106,6 +116,8 @@ pub fn load_scoped(
     let mut known_roots = vec![];
     let mut profiles = vec![];
     let mut selected = None;
+    let mut tools = None;
+    let mut tools_source = None;
     match local {
         Err(error) => {
             let error = diagnostic(&error);
@@ -130,6 +142,16 @@ pub fn load_scoped(
                     let registered = known_roots.contains(&root);
                     overview.registered = Some(registered);
                     selected = Some(root.clone());
+                    tools = Some(
+                        dort_core::observation::read_manifest(&root.join("dort.toml"))
+                            .map(|(manifest, entry)| {
+                                tools_source =
+                                    crate::services::declared_tools::Source::capture(host, &entry)
+                                        .ok();
+                                manifest.tools
+                            })
+                            .map_err(|error| diagnostic(&error)),
+                    );
                     match crate::services::observe(
                         host,
                         &local,
@@ -197,6 +219,8 @@ pub fn load_scoped(
         profiles,
         files,
         managed,
+        tools,
+        tools_source,
         files_error,
         history,
         history_error,
@@ -215,12 +239,7 @@ pub enum Pending {
 impl Pending {
     pub fn report(&self) -> Result<String> {
         Ok(match self {
-            Self::ToolDeclaration(p) => format!(
-                "Add tool declaration\nEdits dort.toml only; does not install packages or adopt binaries.\nAlready declared: {}\n{}\nRecovery can restore the unchanged result. Existing npm snapshots need fresh inspection.",
-                p.no_op,
-                serde_json::to_string_pretty(p)
-                    .map_err(|_| Error::Invalid("cannot encode declaration metadata".into()))?
-            ),
+            Self::ToolDeclaration(p) => crate::services::declaration::report(p),
             Self::Ignore(preview) => preview.human(),
             Self::Batch(plan) => plan.human(),
             Self::Files(plan) => format!(
@@ -405,6 +424,9 @@ pub struct Diagnostics {
 /// Retain intent only, never an approval or an executable preview.
 #[derive(Clone)]
 pub enum Retry {
+    ToolsCheckPrepare(crate::services::inspection_defaults::Inputs),
+    ToolsInstalledPrepare(crate::services::inspection_defaults::Inputs),
+    ToolsInstallMissingPrepare(std::sync::Arc<crate::services::declared_tools::Checked>),
     ToolDeclaration(crate::services::declaration::Request),
     Check(Option<PathBuf>, Vec<String>),
     Profiles(Option<PathBuf>, Vec<String>, bool),
@@ -422,6 +444,9 @@ pub enum Retry {
 impl Retry {
     pub fn task(self) -> Task {
         match self {
+            Self::ToolsCheckPrepare(inputs) => Task::ToolsCheckPrepare(inputs),
+            Self::ToolsInstalledPrepare(inputs) => Task::ToolsInstalledPrepare(inputs),
+            Self::ToolsInstallMissingPrepare(checked) => Task::ToolsInstallMissingPrepare(checked),
             Self::ToolDeclaration(r) => Task::ToolDeclaration(r),
             Self::Check(manifest, requested) => Task::Check {
                 manifest,
@@ -448,6 +473,13 @@ impl Retry {
 impl Task {
     pub fn retry_intent(&self) -> Option<Retry> {
         match self {
+            Self::ToolsCheckPrepare(inputs) => Some(Retry::ToolsCheckPrepare(inputs.clone())),
+            Self::ToolsInstalledPrepare(inputs) => {
+                Some(Retry::ToolsInstalledPrepare(inputs.clone()))
+            }
+            Self::ToolsInstallMissingPrepare(checked) => {
+                Some(Retry::ToolsInstallMissingPrepare(checked.clone()))
+            }
             Self::ToolDeclaration(r) => Some(Retry::ToolDeclaration(r.clone())),
             Self::Check {
                 manifest,
@@ -473,8 +505,13 @@ impl Task {
     }
 }
 pub enum Task {
-    ToolInstallPrepare(Box<crate::services::installation::Request>),
-    ToolInstall(Box<dort_core::tools::install::Approval>),
+    ToolsInstalledPrepare(crate::services::inspection_defaults::Inputs),
+    ToolsInstalledInspect(crate::services::installed_tools::Approval),
+    ToolsCheckPrepare(crate::services::inspection_defaults::Inputs),
+    ToolsCheck(Box<crate::services::declared_tools::CheckApproval>),
+    ToolsInstallMissingPrepare(std::sync::Arc<crate::services::declared_tools::Checked>),
+    ToolsInstallMissing(crate::services::declared_tools::InstallApproval),
+
     ToolAttempts,
     ToolClosePrepare(dort_core::tools::install::CloseRequest),
     ToolClose(Box<dort_core::tools::install::CloseApproval>),
@@ -486,16 +523,11 @@ pub enum Task {
     History,
     Diagnostics,
     Git(super::git::Read),
-    ToolsDetect(crate::services::inspection_defaults::Inputs),
-    ToolsInspectSelected(Vec<crate::services::tools::Approval>),
-    ToolsPrepare(crate::services::tools::Request),
-    ToolsInspect(crate::services::tools::Approval),
-    ToolsReconcilePrepare(crate::services::reconciliation::Request),
-    ToolsReconcile {
-        prepared: Box<crate::services::reconciliation::Prepared>,
-        bindings: std::collections::BTreeMap<String, String>,
-        snapshots: Vec<crate::services::reconciliation::Snapshot>,
+    ToolsSettingsDetect {
+        tool: dort_core::model::Tool,
+        inputs: crate::services::inspection_defaults::Inputs,
     },
+    ToolsSettingsValidate(crate::services::tools::Request),
     Refresh,
     Discover,
     Check {
@@ -519,8 +551,14 @@ pub enum Task {
     Execute(Approved),
 }
 pub enum Output {
-    ToolInstallPreview(Box<dort_core::tools::install::Preview>),
-    ToolInstalled(std::result::Result<dort_core::tools::install::Report, String>),
+    RecoveryRequired(Box<journal::WriteBlocker>),
+    ToolsInstalledPreview(crate::services::installed_tools::Preview),
+    ToolsInstalled(crate::services::installed_tools::Current),
+    ToolsCheckPreview(crate::services::declared_tools::CheckPreview),
+    ToolsChecked(crate::services::declared_tools::Checked),
+    ToolsMissingPreview(crate::services::declared_tools::InstallPreview),
+    ToolsMissingInstalled(crate::services::declared_tools::Installed),
+
     ToolAttempts(std::result::Result<Vec<dort_core::tools::install::Attempt>, String>),
     ToolClosePreview(Box<dort_core::tools::install::ClosePreview>),
     ToolClosed(std::result::Result<dort_core::tools::install::Attempt, String>),
@@ -533,12 +571,8 @@ pub enum Output {
     },
     Diagnostics(Diagnostics),
     Git(super::git::Report),
-    ToolsDefaults(crate::services::inspection_defaults::Defaults),
-    ToolsReports(Vec<crate::services::tools::Report>),
-    ToolsPreview(crate::services::tools::Preview),
-    ToolsReport(crate::services::tools::Report),
-    ToolsReconciliationPrepared(Box<crate::services::reconciliation::Prepared>),
-    ToolsReconciled(std::result::Result<crate::services::reconciliation::Report, String>),
+    ToolsSettingsDetected(String, crate::services::tools::Request),
+    ToolsSettingsSaved(crate::services::tools::Request),
     Data(Data),
     Discovery(crate::services::Discovery),
     Checked {
@@ -583,16 +617,38 @@ pub fn perform_scoped_with_install_progress(
     installation_observer: impl FnMut(dort_core::tools::install::Event),
 ) -> Result<Output> {
     match task {
-        Task::ToolInstallPrepare(request) => request
+        Task::ToolsInstalledPrepare(input) => {
+            let manifest = LocalConfig::load(host)?
+                .select_repository(repository.as_deref())
+                .ok()
+                .map(|r| r.join("dort.toml"));
+            crate::services::installed_tools::prepare(host, manifest, input)
+                .map(Output::ToolsInstalledPreview)
+        }
+        Task::ToolsInstalledInspect(approval) => approval.inspect().map(Output::ToolsInstalled),
+        Task::ToolsCheckPrepare(detection) => {
+            let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
+            crate::services::declared_tools::Input {
+                manifest: root.join("dort.toml"),
+                profiles: requested.to_vec(),
+                detection,
+            }
             .prepare(host)
-            .map(|p| Output::ToolInstallPreview(Box::new(p))),
-        Task::ToolInstall(approval) => Ok(Output::ToolInstalled(
-            (|| {
-                let lock = dort_core::state::WriterLock::acquire(host)?;
-                dort_core::tools::install::execute(host, &lock, *approval, installation_observer)
-            })()
-            .map_err(|e| diagnostic(&e)),
-        )),
+            .map(Output::ToolsCheckPreview)
+        }
+        Task::ToolsCheck(approval) => approval.check(host).map(Output::ToolsChecked),
+        Task::ToolsInstallMissingPrepare(checked) => checked
+            .prepare_missing(host)
+            .map(Output::ToolsMissingPreview),
+        Task::ToolsInstallMissing(approval) => {
+            let lock = dort_core::state::WriterLock::acquire(host)?;
+            Ok(Output::ToolsMissingInstalled(approval.execute(
+                host,
+                &lock,
+                installation_observer,
+            )))
+        }
+
         Task::ToolAttempts => Ok(Output::ToolAttempts(
             dort_core::tools::install::diagnose(host).map_err(|e| diagnostic(&e)),
         )),
@@ -611,33 +667,20 @@ pub fn perform_scoped_with_install_progress(
                 .prepare(host, &repository, requested)
                 .map(|p| Output::Preview(Pending::ToolDeclaration(Box::new(p))))
         }
-        Task::ToolsDetect(inputs) => {
-            let manifest = LocalConfig::load(host)
-                .ok()
-                .and_then(|c| c.select_repository(repository.as_deref()).ok())
-                .map(|p| p.join("dort.toml"));
-            Ok(Output::ToolsDefaults(inputs.detect(host, manifest)))
+        Task::ToolsSettingsDetect { tool, inputs } => {
+            let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
+            crate::services::inspection_defaults::for_tool(
+                host,
+                &root.join("dort.toml"),
+                &tool.id,
+                inputs,
+            )
+            .map(|request| Output::ToolsSettingsDetected(tool.id, request))
         }
-        Task::ToolsInspectSelected(approvals) => Ok(Output::ToolsReports(
-            approvals
-                .into_iter()
-                .map(|approval| approval.inspect())
-                .collect(),
-        )),
-        Task::ToolsPrepare(request) => request.prepare(host).map(Output::ToolsPreview),
-        Task::ToolsReconcilePrepare(request) => request
-            .prepare(host)
-            .map(|p| Output::ToolsReconciliationPrepared(Box::new(p))),
-        Task::ToolsReconcile {
-            prepared,
-            bindings,
-            snapshots,
-        } => Ok(Output::ToolsReconciled(
-            prepared
-                .reconcile(&snapshots, bindings)
-                .map_err(|e| diagnostic(&e)),
-        )),
-        Task::ToolsInspect(approval) => Ok(Output::ToolsReport(approval.inspect())),
+        Task::ToolsSettingsValidate(request) => {
+            request.clone().prepare(host)?;
+            Ok(Output::ToolsSettingsSaved(request))
+        }
         Task::IgnoredPaths => Ok(Output::IgnoredPaths(
             dort_core::discovery_ignore::Rules::load(host)?
                 .paths()

@@ -51,7 +51,7 @@ impl NextStep {
                 "Inspect attempt metadata; unresolved records need fresh-query closure before another install. Closure is not success, repair or proof of root termination."
             }
             Self::FreshReview => {
-                "For another install, separately approve fresh inventories, explicitly bind every necessary snapshot, then approve a new install review. Nothing is replayed."
+                "Check installed again, then review and approve a new installation. Earlier approvals are not replayed."
             }
         }
     }
@@ -355,7 +355,11 @@ mod tests {
                     if package == PackageState::Unavailable && process == ProcessOutcome::Success {
                         assert_eq!(s.status, Status::PackageUnavailable);
                     }
-                    assert!(s.next_step_hint.contains("explicitly bind"));
+                    assert!(s.next_step_hint.contains("Check installed again"));
+                    assert!(
+                        s.next_step_hint
+                            .contains("Earlier approvals are not replayed")
+                    );
                 }
             }
         }

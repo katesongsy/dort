@@ -21,8 +21,6 @@ pub struct CloseRequest {
     /// Damaged-intent npm fallback; never a runtime-satisfaction claim.
     pub npm_binding: Option<inspection::NpmBinding>,
     pub brew_prefix: Option<PathBuf>,
-    /// Damaged-intent dpkg-only fallback; never asks for root authentication.
-    pub apt: bool,
 }
 pub struct ClosePreview {
     id: String,
@@ -57,7 +55,7 @@ impl ClosePreview {
             } else {
                 vec![]
             },
-            explanation: "Freshly inspects this provider scope and closes only the unchanged attempt metadata. It does not prove root termination, replay, verify readiness, repair packages or roll back earlier effects.",
+            explanation: "Freshly inspects this provider scope and closes only the unchanged attempt metadata. It does not replay, verify readiness, repair packages or roll back earlier effects.",
         }
     }
     pub fn approve(self) -> CloseApproval {
@@ -85,8 +83,7 @@ pub fn prepare_close(host: &HostContext, request: CloseRequest) -> Result<CloseP
     }
     let known = a.scope.is_some();
     let scope = if let Some(s) = a.scope {
-        if (request.apt && s.apt.is_none())
-            || s.home != host.home
+        if s.home != host.home
             || request
                 .executable
                 .as_ref()
@@ -111,11 +108,10 @@ pub fn prepare_close(host: &HostContext, request: CloseRequest) -> Result<CloseP
             search_dirs: s.search_dirs,
             npm_binding: s.npm.map(|n| n.binding),
             brew_prefix: s.brew.map(|b| b.prefix),
-            apt: s.apt.is_some(),
         }
     } else {
         ProbeScope { executable: request.executable.ok_or_else(|| invalid("damaged intent needs an explicit trusted provider executable and search directories"))?,
-            home: host.home.clone(), search_dirs: request.search_dirs, npm_binding: request.npm_binding, brew_prefix: request.brew_prefix, apt: request.apt }
+            home: host.home.clone(), search_dirs: request.search_dirs, npm_binding: request.npm_binding, brew_prefix: request.brew_prefix }
     };
     let preview = scope.preview()?;
     let npm_cli = scope

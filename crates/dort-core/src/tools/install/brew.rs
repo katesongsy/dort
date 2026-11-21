@@ -78,8 +78,7 @@ pub(super) fn valid(s: &super::Scope) -> bool {
     let Some(b) = &s.brew else {
         return false;
     };
-    s.apt.is_none()
-        && s.npm.is_none()
+    s.npm.is_none()
         && formula(&s.package)
         && matches!(
             b.policy,
@@ -122,7 +121,7 @@ pub fn prepare(
     brew: Scope,
     reports: &[&inspection::Report],
 ) -> Result<Preview> {
-    let (manifest, scope, sources) = super::sources(host, &request, None, Some(&brew), None)?;
+    let (manifest, scope, sources) = super::sources(host, &request, None, Some(&brew))?;
     super::bounded_metadata(&scope, &sources)?;
     catalogs(&scope, &brew, reports)?;
     let row = super::evaluate_catalogs(host, &manifest, &scope, reports)?;
@@ -171,10 +170,40 @@ pub(super) fn same(a: &Sources, b: &Sources) -> bool {
             a.path == b.path && adoption::parent_identity(&a.fingerprint, &b.fingerprint)
         })
 }
-fn writable_root(owner: u32, mode: u32, uid: u32, prefix: bool) -> bool {
-    mode & 0o022 == 0
-        && ((owner == uid && mode & 0o700 == 0o700)
-            || (prefix && owner == 0 && mode & 0o222 == 0o200))
+/// Homebrew normally shares its prefix with the caller's own admin group.
+/// World-write and foreign-group write are refused; an owner/root prefix must stay
+/// owner-writable. This is hardening, not isolation from other members of those groups.
+fn writable_root(
+    owner: u32,
+    group: u32,
+    mode: u32,
+    uid: u32,
+    groups: &[u32],
+    prefix: bool,
+) -> bool {
+    if mode & 0o002 != 0 || (mode & 0o020 != 0 && !groups.contains(&group)) {
+        return false;
+    }
+    (owner == uid || (prefix && owner == 0)) && mode & 0o200 != 0
+}
+fn safe_parent(fingerprint: &observation::Fingerprint, uid: u32, groups: &[u32]) -> bool {
+    if fingerprint.mode & 0o002 != 0
+        || (fingerprint.mode & 0o020 != 0 && !groups.contains(&fingerprint.gid))
+    {
+        return false;
+    }
+    fingerprint.uid == uid || fingerprint.uid == 0
+}
+fn caller_groups() -> Vec<u32> {
+    let mut groups: Vec<u32> = rustix::process::getgroups()
+        .unwrap_or_default()
+        .iter()
+        .map(|g| g.as_raw())
+        .collect();
+    groups.push(rustix::process::getegid().as_raw());
+    groups.sort_unstable();
+    groups.dedup();
+    groups
 }
 pub(super) fn sources(s: &super::Scope) -> Result<Sources> {
     let b = s.brew.as_ref().expect("brew scope");
@@ -207,17 +236,52 @@ pub(super) fn sources(s: &super::Scope) -> Result<Sources> {
         paths.insert(b.prefix.join(root));
     }
     let uid = rustix::process::geteuid().as_raw();
+    let groups = caller_groups();
     let directories = paths.into_iter().map(|path| {
         let e = observation::inspect(&path, false)?;
-        let safe = e.kind == Kind::Directory && e.fingerprint.as_ref().is_some_and(|f| {
-            writable_root(f.uid, f.mode, uid, path == b.prefix)
-        });
-        if !safe || e.parents.iter().any(|p| {
+        if e.kind != Kind::Directory {
+            return Err(scope_invalid(format!(
+                "Homebrew folder {path:?} is missing or is not a real folder."
+            )));
+        }
+        let Some(fingerprint) = e.fingerprint.as_ref() else {
+            return Err(scope_invalid(format!(
+                "Homebrew folder {path:?} cannot be verified."
+            )));
+        };
+        if fingerprint.mode & 0o002 != 0 {
+            return Err(scope_invalid(format!(
+                "Homebrew folder {path:?} is writable by everyone."
+            )));
+        }
+        if fingerprint.mode & 0o020 != 0 && !groups.contains(&fingerprint.gid) {
+            return Err(scope_invalid(format!(
+                "Homebrew folder {path:?} is writable by a group you are not in."
+            )));
+        }
+        if !writable_root(
+            fingerprint.uid,
+            fingerprint.gid,
+            fingerprint.mode,
+            uid,
+            &groups,
+            path == b.prefix,
+        ) {
+            return Err(scope_invalid(format!(
+                "Homebrew folder {path:?} must belong to you and be writable by you."
+            )));
+        }
+        if let Some(parent) = e.parents.iter().find(|p| {
             // The canonical disposable HOME boundary is already application-owned;
             // outside it, root/user-owned non-writable ancestors are required.
             (!b.prefix.starts_with(&s.home) || p.path.starts_with(&s.home))
-                && (p.fingerprint.mode & 0o022 != 0 || (p.fingerprint.uid != uid && p.fingerprint.uid != 0))
-        }) { return Err(invalid("Homebrew requires existing physical owned native write roots and safe prefix parents; no sudo or group inference")); }
+                && !safe_parent(&p.fingerprint, uid, &groups)
+        }) {
+            return Err(scope_invalid(format!(
+                "Homebrew parent folder {:?} is writable by users outside your account or belongs to another account.",
+                parent.path
+            )));
+        }
         Ok(e)
     }).collect::<Result<Vec<_>>>()?;
     let mut lookup = BTreeSet::new();
@@ -413,13 +477,43 @@ mod tests {
     #[test]
     fn root_owned_prefix_never_grants_permission_to_native_write_roots() {
         use super::writable_root;
-        assert!(writable_root(0, 0o755, 501, true));
-        assert!(!writable_root(0, 0o755, 501, false));
-        assert!(writable_root(501, 0o755, 501, false));
-        for mode in [0o775, 0o777, 0o500, 0o555] {
-            assert!(!writable_root(501, mode, 501, false));
+        let groups = [20];
+        assert!(writable_root(0, 0, 0o755, 501, &groups, true));
+        assert!(!writable_root(0, 0, 0o755, 501, &groups, false));
+        assert!(writable_root(501, 20, 0o755, 501, &groups, false));
+        for mode in [0o777, 0o500, 0o555] {
+            assert!(!writable_root(501, 20, mode, 501, &groups, false));
         }
-        assert!(!writable_root(502, 0o755, 501, false));
+        assert!(!writable_root(502, 20, 0o755, 501, &groups, false));
+    }
+    #[test]
+    fn group_write_is_accepted_only_for_the_callers_own_groups() {
+        use super::{safe_parent, writable_root};
+        let groups = [20, 80];
+        assert!(writable_root(501, 20, 0o775, 501, &groups, false));
+        assert!(writable_root(501, 80, 0o770, 501, &groups, true));
+        assert!(!writable_root(501, 99, 0o770, 501, &groups, false));
+        assert!(!writable_root(501, 20, 0o777, 501, &groups, false));
+        assert!(writable_root(0, 20, 0o775, 501, &groups, true));
+        assert!(!writable_root(0, 99, 0o775, 501, &groups, true));
+        assert!(!writable_root(0, 20, 0o775, 501, &groups, false));
+        assert!(writable_root(0, 20, 0o755, 501, &groups, true));
+        let parent = |uid, gid, mode| crate::observation::Fingerprint {
+            device: 0,
+            inode: 0,
+            links: 0,
+            mode,
+            uid,
+            gid,
+            size: 0,
+            modified: (0, 0),
+            changed: (0, 0),
+        };
+        assert!(safe_parent(&parent(501, 20, 0o775), 501, &groups));
+        assert!(!safe_parent(&parent(501, 99, 0o775), 501, &groups));
+        assert!(!safe_parent(&parent(501, 20, 0o777), 501, &groups));
+        assert!(safe_parent(&parent(0, 0, 0o755), 501, &groups));
+        assert!(!safe_parent(&parent(502, 20, 0o755), 501, &groups));
     }
 }
 #[derive(Deserialize)]

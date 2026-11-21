@@ -2,7 +2,7 @@
 
 [User guide](README.md) · [Getting started](getting-started.md)
 
-Checks, discovery, file inventory, plans, status, history and Git inspection are read-only and never run providers. Separate Tools inspection requires approval: provider configuration/plugins may execute code and caches/logs may change. Explicit mutation commands are experimental and require approval. Only the explicit mise/npm/Homebrew/APT workflows below install packages. APT is root-native: scripts/hooks, dependency upgrades, services and system/config/data effects are possible, with required noninteractive sudo supervision and no rollback. npm/Homebrew native links may expose commands on PATH; Homebrew build/dependency code can execute and dependencies may upgrade. No command configures runtime activation, intentionally upgrades other top-level tools, clones/syncs, stages, commits or pushes. Use `dort --help` and `dort <command> --help` for syntax.
+Manifest checks, discovery, file inventory, plans, status, history and Git inspection are read-only and never run providers. Separate Tools inspection requires approval: provider configuration/plugins may execute code and caches/logs may change. Explicit mutation commands are experimental and require approval. Only the explicit npm/Homebrew workflows below install packages. npm/Homebrew native links may expose commands on PATH; Homebrew build/dependency code can execute and dependencies may upgrade. No command configures runtime activation, intentionally upgrades other top-level tools, clones/syncs, stages, commits or pushes. Use `dort --help` and `dort <command> --help` for syntax.
 
 ## Global options
 
@@ -27,11 +27,13 @@ dort --dry-run tui         # inspection/previews only; confirmation disabled
 
 All three standard streams must be terminals. TUI entry rejects `--json`, `--yes` and `--confirm-remove`; no flags silently approve TUI writes. Use explicit CLI subcommands for automation. Startup observes only: it does not create missing configuration/state, acquire a lock or replay recovery. Without a repository, Welcome offers Choose repository and Create/attach; Recovery still diagnoses all retained local transactions. Discovery and standalone manifest checks work without a repository. Git also accepts an independent session-only working-tree root without a manifest or registration.
 
-**Pages and dialogs:** forms, reviews, results, history and ignored-path management are pages with a breadcrumb and Back. The Menu mouse control remains available while typing; Ctrl-K opens searchable tasks and destinations. Opening/dismissing a menu keeps drafts, focus and reviews; choosing an available destination discards pending approval, even for the same tab. Short repository/profile choices, Actions, Help/About and final confirmation/disclosure gates are dimmed framed dialogs. Dialogs and running work visibly pause navigation; outside clicks do not cancel, approve or disclose. Use Esc or explicit Close/Cancel to leave a dialog. q/Ctrl-C during work waits for completion.
+**Pages and dialogs:** forms, reviews, results, history and ignored-path management are pages with a breadcrumb and Back. The Menu mouse control remains available while typing; Ctrl-K opens searchable tasks and destinations. Opening/dismissing a menu keeps drafts, focus and reviews; choosing an available destination discards pending approval, even for the same tab. Short repository/profile choices, Actions, Help/About and sensitive-content disclosure gates are dimmed framed dialogs. Dialogs and running work visibly pause navigation; outside clicks do not cancel, approve or disclose. Use Esc or explicit Close/Cancel to leave a dialog. q/Ctrl-C during work waits for completion.
 
 **Terminal appearance:** the canvas and essential neutral labels use terminal defaults. Nonempty `NO_COLOR` requests monochrome (including `NO_COLOR=0`); selection keeps reverse/bold and states remain textual. It does not disable Unicode. The first nonempty `LC_ALL`, `LC_CTYPE`, then `LANG` determines character support: UTF-8/UTF8 locales use Unicode borders, menu chevrons and content gutters, others (including missing locale) use ASCII. `TERM=vt100`, `vt102`, `ansi` or `dumb` also selects ASCII; vt100/vt102/dumb/xterm-mono selects monochrome. For example, `LC_ALL=C NO_COLOR=1 dort tui` requests both. No terminal background is guessed or setting saved. Cursor addressing is still required: setting `TERM=dumb` is not a line-mode backend. These fallbacks do not change keys, mouse targets or approval requirements.
 
 **Motion:** active task headings show a bounded liveness indicator, not measured child-process progress or an estimated installation percentage. Set `DORT_REDUCED_MOTION=1` before starting Dort for a static indicator, for example `DORT_REDUCED_MOTION=1 dort tui`. This is independent of `NO_COLOR` and locale/ASCII support; no preference is persisted. Quit during owned work still waits for completion.
+
+**Forms:** forms start outside field editing. Press Tab to enter the first field. Esc stops editing without losing the draft; Tab enters it again. Esc outside editing goes back one page. Enter invokes the page's primary review/load action. Menus preserve the draft and focus.
 
 **Reading reviews:** operation previews emphasize section headings, paths, ordered effects and blockers. Pane titles identify their content. Paging controls say **Scroll**; Help explains which visible content they scroll. File operations pair a summary table with numbered change details; F3 opens the full report. Selected-file content has source line numbers and wrapped continuation gutters, with configuration keys emphasized. Disclosed Git patches emphasize file headers and hunks; `+` marks additions and `-` marks removals, alongside color where supported. Content disclosure and confirmation requirements remain in their dedicated screens.
 
@@ -51,7 +53,12 @@ All three standard streams must be terminals. TUI entry rejects `--json`, `--yes
 | Enter (Files) | Inspect the selected file or directory on a reading page at any width; Esc returns to the list. |
 | `R` | Refresh observations/current check/Diagnostics, independent all-repository history in Recovery, or Git metadata (never a patch). In an error, retry the failed read/fresh preview; after a failed write, refresh only. |
 | `P`, `z`, `u`, `s` (Git content) | Choose exact Git-only root; Status; Unstaged; Staged. |
-| `a` (Tools content) | Add a desired tool declaration to the selected registered repository; no package installation. |
+| Enter (Tools lists) | Open the selected tool, package or installation record; never Check or Install. |
+| `C` / `i` (declared tools/details) | Review Check installed / Install missing. |
+| `v` / `h` (Tools) | Installed tools / Installation history. |
+| `a` (Tools content) | Add a declaration; an installed package prefills known fields. |
+| `s` (declared tool details) | Necessary session settings for this tool. |
+| `e` / `d` (declared tools/details) | Edit / remove the selected declaration; installed packages stay untouched. |
 | `w` (Git content) | View patch content: warning then a View patch action for one whole-comparison read. |
 | Enter (Git metadata) | Inspect selected metadata details; Esc returns to list. |
 | `F`, `O` | Discover file metadata; open retained manual adoption form. Press `e` or click Adopt selected for an eligible regular file; ineligible entries remain inspectable but cannot open a candidate draft. |
@@ -61,7 +68,7 @@ All three standard streams must be terminals. TUI entry rejects `--json`, `--yes
 | `u` (Managed Files) | Review Keep for the selected mapping, retaining an ordinary local file and its repository source. `j`/`k` still navigates rows. |
 | `E` (Discover); `A` / `K` / `D` (Managed Files) | Edit marked adoption drafts; preview selected apply / keep / delete links. |
 | `T` | Temporary repository profile additions; cannot remove mandatory contributors. |
-| `C`, `v` | Check current repository manifest; open standalone manifest check form. |
+| `C`, `v` (Checks) | Check current repository manifest; open standalone manifest check form. |
 | `j`, `m` (Checks) | Read host/registry Diagnostics; return to the manifest result. |
 | Enter (Recovery content) | Full transaction IDs, schema/phase, integrity, checkpoint count and contextual action hints. Esc returns to the list. |
 | `h` (error) | Open and refresh independent all-repository Recovery; no repair or replay. |
@@ -71,7 +78,7 @@ All three standard streams must be terminals. TUI entry rejects `--json`, `--yes
 | `s` / `x` (Recovery) | Preview schema-3 bootstrap resume / abandon. Abandon retains published data/artifacts. |
 | Up / Down (file review); `i` | Select a mapping in the summary; toggle the complete report. Selection never reduces scope. PgUp/PgDn scroll selected effects. |
 | Left / Right (full preview report) | Scroll long report lines horizontally. |
-| Enter (preview) | **Adopt all** approves adoption once, without typed yes. Other writes open confirmation. Blocked/dry-run/below-48×14 previews cannot approve. |
+| Enter (preview) | Approves the reviewed changes once; no additional dialog. Adoption uses **Adopt all**. Blocked/dry-run/below-48×14 previews cannot approve. |
 | Esc | Confirmation → preview → retained form → invoking destination; errors/help return to their prior scope. No execution is started. |
 | Ctrl-U (text field) | Clear current field. Backspace edits; Tab/Shift-Tab moves between fields only. Enter requests the primary Review/Check/Select action from any field. |
 | `q` / Ctrl-C | Quit outside text entry / anywhere; an active worker finishes first. Printable `q`, `?`, `/` are text in forms/search. |
@@ -122,250 +129,103 @@ A batch contains 1–32 explicitly chosen files, one action and one repository. 
 
 **Activity/results:** Reading and Approved execution panels show the task's fixed scope, even if you change destination while it runs. Progress reports only received transaction boundaries/sequences, with no estimated percentage or Cancel control. q/Ctrl-C waits for completion. Result receipts retain the operation and full transaction ID through refresh, or explicitly say no changes were needed and no transaction was created. Use PgUp/PgDn to scroll the activity or receipt; Home returns to its top. Click Refresh (`R`), Recovery (`h`) or Back (Esc); direct destination/action keys also return to the workbench. There is no timed dismissal. Completed results remain inspectable in Overview and Files details after Back.
 
-**Errors/retry:** The error panel separates the cause from retained task scope, with clickable controls. Esc/Back returns to retained input. `R` retries read/preview intent against current state, never replays a consumed approval or disclosed patch. After a failed write, `R` only refreshes observations; `h` opens all-repository Recovery. Possible partial effects stays visible while scrolling, and an earlier-write warning remains for the session after Back or later reads. The warning is not proof of live drift, nor does dismissal repair anything. Retain artifacts and inspect Recovery. Choose an action again for a new preview and a new confirmation; do not assume a failed call made no changes.
+**Errors/retry:** The error panel separates the cause from retained task scope, with clickable controls. Esc/Back returns to retained input. `R` retries read/preview intent against current state, never replays a consumed approval or disclosed patch. After a failed write, `R` only refreshes observations; `h` opens all-repository Recovery. A blocked earlier operation has a separate Changes blocked panel naming its repository, operation and ID. It explains whether the operation is unfinished or its recovery record cannot be verified; Enter opens Recovery. This refusal does not receive a new partial-effects warning. Possible partial effects stays visible while scrolling, and an earlier-write warning remains for the session after Back or later reads. The warning is not proof of live drift, nor does dismissal repair anything. Retain artifacts and inspect Recovery. Choose an action again for a new preview and a new confirmation; do not assume a failed call made no changes.
 
 Actions includes a session preview-only switch; it cannot change mode during a preview/worker. An entry `--dry-run` locks the entire session to preview-only and cannot be switched off.
 
 Esc does **not** interrupt an approved write. q/Ctrl-C requests exit after it finishes, including on a small screen. Input/render errors restore the terminal then wait for the worker; no write is detached or automatically rolled back. A failed write may leave durable partial effects: dismiss the error, refresh Recovery, and explicitly preview the appropriate recovery action. Panics restore the terminal where cleanup is possible; forced termination cannot guarantee this. See [terminal/interruption safety](safety.md#terminal-and-interruption).
 
+## Declared tool workflow
+
+Tools opens the selected repository's declarations. The top tabs are **1 Declared**, **2 Installed**, **3 History**, matching Menu; press the number or click a tab on a collection page. Digits remain text in fields and filters. **Enter always opens the selected tool's details**; Esc returns to the list. Opening details runs no package-manager commands.
+
+Use **Check installed** (`C`) to review detected package-manager checks, then activate **Run checks** once. Dort derives the platform, profiles, programs and command search directories. Results distinguish Installed, Missing, Version differs, Couldn't check and Needs attention. Installed means a matching package-manager claim, not verified command readiness. Unavailable observations never become Missing.
+
+Use **Install missing** (`i`) to review the exact eligible set, then approve it once. Installations run serially and stop on failure; results identify completed attempts and tools not started. Earlier effects remain, with no automatic rollback or retry. Check again before another install review.
+
+npm installation needs an exact version. Homebrew core uses the provider's current version on macOS, Linux and WSL. npm also needs a verified declared Node runtime and a safe global destination. Missing prerequisites and unsuitable scopes are explained with a next step. A review contains at most 32 installs; no-ready-item reviews offer details or declaration editing instead of an install action.
+
+If detection needs help, open the affected tool's details and choose **Tool settings** (`s`). Enter only the necessary program/search directories, or Node/npm CLI/global prefix. Save changes session settings without running a provider; check again to review the new scope. Unsaved drafts do not affect checks.
+
+```sh
+dort tools check --dry-run                 # review without running providers
+dort tools check                           # approve checks and show status
+dort tools install-missing                 # approve checks, then one install set
+dort --yes --json tools install-missing     # explicit automation approval
+
+# Optional settings are keyed by your declared tool name.
+dort tools check --program formatter=/absolute/path/to/node \
+  --npm-cli formatter=/absolute/path/to/npm-cli.js \
+  --npm-prefix formatter=/absolute/path/to/global-packages
+```
+
+Check/install-missing default to the selected repository and accept `--manifest PATH`, `--repo ROOT` and repeated `--profile NAME`. Persistent registered-repository profile additions are included. Installation requires registration. Nonterminal execution needs `--yes`; `--json` selects machine output. Check exits 0 for matching package claims, 4 for missing/version/attention results and 1 for unavailable checks.
+
+## Installed tool discovery
+
+Open **Installed tools** (`v`) to review detected package-manager scopes, then activate **Run inspection**. This can run package-manager configuration/plugins and change caches, but installs nothing. It needs no declarations or selected repository. npm discovered on PATH first reports its configured global prefix, then lists that prefix's packages; both commands are reviewed together. Declared npm checks and installation still require a Node runtime and accepted Node/npm CLI/destination settings.
+
+The list shows only the current inspection result. Enter opens a package's details; `/` filters displayed packages. **Inspect again** (`R`) prepares a fresh approval. Opening, filtering or reading an existing result never queries a provider. Results are point-in-time observations, not a live inventory. Failed checks are unavailable, not healthy empty package lists. There is no inspection-history browser or binding step. Installation history is a separate page.
+
+Select a package and choose **Add declaration** (`a`). Dort prefills its provider and package, an observed exact version for npm, and a known desired npm runtime when available. The install specification is platform-independent. Supply the desired tool ID and bare command name; inspection cannot infer those reliably. Review and confirm the manifest change separately. Saving returns to the installed results without rerunning inspection or installing the package.
+
+```sh
+dort tools inspect --dry-run
+dort tools inspect                         # approve detected package-manager queries
+dort --yes --json tools inspect            # current metadata for automation
+dort tools inspect --manifest /absolute/path/to/dort.toml
+```
+
+Inspection accepts the same optional named program/npm settings when a manifest is available. Ordinary output is readable text; `--json` emits structured metadata. Raw provider output and file contents are withheld.
+
 ## Tool declarations
 
-A declaration records what you want in `dort.toml`; it does **not** install a package or adopt an existing binary. Create or attach the repository first.
+A declaration records desired metadata in `dort.toml`. Create or attach the repository first. **Add declaration** (`a`), **Edit declaration** (`e`) and **Remove declaration** (`d`) leave installed packages untouched.
 
-**TUI:** select the repository through Session, then Tools → **Add tool declaration** (`a`). Fill in the tool ID, bare binary name and at least one platform's provider/package. Profiles default to `base`; prerequisites refer to existing tool IDs. Leave a platform's provider and other fields blank when it is unsupported. Versions are optional; npm definitions also need a declared runtime tool ID. Tab/Shift-Tab moves between the currently relevant controls only; Space on a platform provider opens an explicit choice. F4 reveals optional dependencies and F3 shows full current-draft metadata. Provider drafts, including intentionally empty values, are retained independently. Enter from a field or **Review declaration** opens the preview. Activate **Confirm** with Enter or a click to save. Esc returns to the retained draft.
+The form asks for a tool ID, bare command name, provider and package. Choose Homebrew or npm; the same declaration applies on macOS, Linux and WSL. Profiles default to `base`; prerequisites reference existing tool IDs. Homebrew accepts an omitted or `latest` version. npm accepts default/latest or exact metadata, but installation needs an exact version and a declared Node runtime. Tab enters editing and traverses visible fields; Esc stops editing before going back. Space chooses a provider and F4 reveals optional dependencies. Provider-specific drafts are retained. Enter requests **Review declaration**; the exact preview has one **Confirm changes** action.
 
-**CLI:** replace `/absolute/path/to/environment` below with your registered repository root. The JSON is one Tool declaration, using the [manifest fields and provider rules](manifest.md).
+Editing prefills the selected declaration and keeps its ID fixed. Removal is refused while tool prerequisites, file prerequisites or npm runtimes reference it. It never cascades.
 
 ```sh
 dort --repo /absolute/path/to/environment tools declare --dry-run \
-  --declaration '{"id":"ripgrep","binary":"rg","install":{"macos":{"provider":"brew","package":"ripgrep"},"ubuntu":{"provider":"apt","package":"ripgrep"}}}'
+  --declaration '{"id":"ripgrep","binary":"rg","install":{"provider":"brew","package":"ripgrep"}}'
+
+dort tools edit --declaration '{"id":"ripgrep","binary":"rg","install":{"provider":"brew","package":"ripgrep"}}'
+dort tools remove ripgrep --dry-run
 ```
 
-Remove `--dry-run` and confirm `y/N` to save, or use `--yes` for automation. `--json --dry-run` emits the preview; `--json --yes` emits the completion report. Repeated `--profile NAME` adds request profile scope to persistent additions; the declaration's own profiles belong in its JSON.
+Remove `--dry-run` and confirm to save, or use `--yes` for automation. The JSON describes one complete Tool using the [manifest fields](manifest.md); it is not an approval. `--json` selects structured preview/completion output.
 
-An identical typed declaration is a no-op with no transaction. A conflicting tool ID is refused; updates and removals are not supported. Other declarations and TOML comments are preserved. A changing declaration creates one manifest-only schema-5 transaction. Recovery → **Preview rollback** (`b`) or CLI `recovery rollback` can restore its unchanged result; later manifest edits can prevent rollback. Existing npm snapshots need fresh inspection after a manifest change.
+Identical additions/edits are no-ops with no transaction. Conflicting additions, unknown edit/remove IDs and invalid references are refused. Unrelated declarations, formatting and comments are preserved. Additions retain schema-5 transactions; edits/removals use schema 6. Recovery can restore an unchanged result; later manifest edits can prevent rollback. Manifest changes require fresh tool checks.
 
-## Provider inspection
+## Installation safety
 
-Tools inspection runs a trusted local provider only after approval. Configuration/plugins may execute code; caches/logs may change. Offline/no-update settings are hardening, **not a sandbox or a network guarantee**. No package installation, provider rollback or ownership verification is performed. Startup, navigation, checks, plans and status never query providers automatically.
+All installations use reviewed exact scopes and fresh independent checks under the application lock. No discovered command is executed to test readiness.
 
-In the TUI, open **Tools → Inspect installed tools** (`C` outside Menu), or enter Tools with no retained results. Dort finds available Homebrew, apt (dpkg-query), mise and npm defaults without running commands. Available inventories are selected for you. Review them, then press Enter or click **Inspect installed tools** once. Each selected inventory becomes its own session snapshot; nothing is installed or adopted. Up/Down chooses a manager and Space toggles selection. F3 shows the full executable, arguments, home and search scope; `R` refreshes suggestions without querying providers.
+- **npm:** exact package/version with the declared Node/npm CLI/prefix. Global writes must stay in an accepted HOME destination, separate from the selected Node and npm CLI. Choose another explicit destination in Tool settings if needed; Dort does not silently move it.
+- **Homebrew:** current `homebrew/core` formula with an accepted physical prefix. Native build/dependency code may change prefix contents and external state.
 
-**Advanced** (`e`) lets you change paths for the highlighted manager; Enter on any row inspects the explicitly selected inventories once; unavailable rows explain that `e` opens missing details. Detected values and your overrides are retained. npm defaults need a selected repository declaring exactly one Node runtime and a matching Node/npm CLI installation layout. Its displayed installation root is the proposed global prefix: change it in Advanced if you use a different prefix. Otherwise supply only the missing manifest, runtime ID, Node, npm CLI or prefix details. Node runs the selected CLI script directly; Dort never runs an npm launcher or config query to guess a binding.
+There is no sandbox, atomic package transaction or automatic rollback. Quit waits for the whole active approved batch. See [installation contracts](../tool-installation.md) and [safety](safety.md#bounded-tools-installs-and-unresolved-attempts).
 
-In Advanced, Tab/Shift-Tab moves fields only and Enter requests Review from any field; Space on Provider opens an explicit manager choice. Activate **Review exact query**, inspect the exact executable/arguments/home/runtime scope and warning (PgUp/PgDn scroll), then activate Run query to execute once. Esc returns to retained input. Preview-only and layouts below 48×14 cannot execute; shrinking dismisses the query review. Quit/Ctrl-C during a query waits for the bounded worker. Nothing is automatically undone.
+## Installation history and record closure
 
-Results are provider-reported installed package/version metadata, including inactive mise versions, not proof of which binary PATH selects or what Dort owns. Select a package and choose **Add selected to repository** from the action strip or More to open a declaration draft for the current platform. Dort fills in the provider and package, plus the observed version for mise or npm; Homebrew and APT use provider-current policy. Enter the tool ID and command name yourself, and choose the npm runtime when required. Review and confirm to save the declaration in a registered repository. This does not install, run the command, or claim ownership. The manual draft and inspection-derived drafts remain separate. `/` searches the display, Enter/`d` shows full selected metadata and query scope, and `R` prepares a **fresh review**, never replays approval. Unavailable/malformed/incomplete observations are not healthy empty catalogs. No automatic refresh occurs.
+**Installation history** (`h`) shows durable attempts, including partial effects. Enter opens the selected record's details without querying a provider. Refresh (`R`) rereads records only. This is installation history, not inspection-result history.
 
-CLI equivalents (replace these examples with paths you trust for your installation):
-
-```sh
-# Review only; no provider process, even with --yes.
-dort tools inspect brew --executable /opt/homebrew/bin/brew \
-  --search-dir /opt/homebrew/bin --search-dir /usr/bin --search-dir /bin --dry-run
-
-# Ubuntu package database inspection; requires explicit approval in automation.
-dort tools inspect apt --executable /usr/bin/dpkg-query \
-  --search-dir /usr/bin --search-dir /bin --json --yes
-
-# Independent mise installation catalog, not a repository/profile activation.
-dort tools inspect mise --executable /trusted/bin/mise \
-  --search-dir /trusted/bin --search-dir /usr/bin --search-dir /bin --dry-run
-
-# npm requires all binding fields; runtime ID node must be declared in this manifest.
-dort tools inspect npm --executable /trusted/node/bin/node \
-  --search-dir /trusted/node/bin --search-dir /usr/bin --search-dir /bin \
-  --manifest /absolute/path/dort.toml --runtime-tool node \
-  --npm-cli /trusted/node/lib/node_modules/npm/bin/npm-cli.js \
-  --prefix /trusted/npm-global --dry-run
-```
-
-Remove `--dry-run` to execute after terminal confirmation (`inspect`), or use explicit `--yes` for JSON/nonterminal execution. `--repo` and `--confirm-remove` do not apply; npm-only fields are rejected for other providers. Reports include the exact query scope; stdout/stderr payloads, configuration, resolved URLs, scripts and parser excerpts are withheld. Exit 0 means a completed observation (possibly empty), 1 means an unavailable provider observation, and 2 means invalid input/approval/manifest. The runtime binding records your selection, not proof that the declared runtime owns that Node or prefix.
-
-### Browsing an inspection result
-
-Installed-package results have one location header, a provider/snapshot source line, a one-line **Filter packages** input and aligned PACKAGE/VERSION columns. `/` or clicking the input edits the display filter; Enter/Esc leaves editing with the filter retained. Enter on a result opens full package/inspection Details. Full executable paths and scope stay inspectable there rather than filling the main header. An unavailable inspection, a successful empty report and a filter with no matches are different states.
-
-When shown, **F2 More** opens contextual actions: inspection details/settings, a fresh inspection review, filtering, declared-tool comparison, declaration, previous inspections and attempt history. Opening/dismissing More never queries a provider or replays approval; Esc returns to the retained filter/focus. An outside click does not dismiss it. **Inspect again** still prepares a fresh explicit review, not an automatic query. The single bottom action strip describes only the active foreground. **Menu** shows sections and destinations at every width. F3 opens full metadata; Ctrl-N creates/attaches; closure F4 opens its provider choice.
-
-## Snapshot reconciliation
-
-Tools can retain **multiple independently approved snapshots** for the session, then reconcile declarations against your explicit choices. Snapshots are provider claims, not ownership, trust or proof that a binary is ready. They are not saved across sessions. Reconciliation alone performs no package operation. Separate opt-in mise/npm/Homebrew/APT install reviews are available for eligible missing rows; provider configuration/code risks still apply.
-
-### Interactive workflow
-
-1. In Tools, review detected defaults and activate Inspect installed tools once for the selected inventories, or use Advanced and Run query for a manual scope. Each result gets a session ID (`s1`, `s2`, …). Repeated queries create new snapshots, not replacements or merged inventories.
-2. Press `s` (or **Tools → Session snapshots**) to browse snapshots. Up/Down and Enter select one; `d` on its report shows full scope. `x` **in the snapshot browser** forgets only that metadata, not a package or earlier provider effects. Session limits are 16 snapshots and 65,536 installation records; a limit refusal never replays a query.
-3. Press `p` (or **Tools → Reconcile snapshots**) to enter an absolute manifest, **separate tool-search directories** (colon-separated) and optional temporary profiles (comma-separated). These tool directories are not the provider's child PATH and are never discovered from the process environment. Load declarations with Enter. This step does not query providers.
-4. Each selected tool initially says **Not observed**. Space opens an explicit matching-provider snapshot choice; choose with arrows and Enter. F3 inspects the chosen scope. Nothing is assigned automatically, even when only one snapshot exists. Tab moves tool rows only. Enter on any row or **Compare metadata** calculates the comparison after reviewing the choices.
-5. Up/Down selects a result; Enter/`d` shows full package, scope, blocker and binary-probe metadata. PgUp/PgDn and Home/End inspect the full detail. Esc returns to retained inputs. Reloading/recalculating uses the chosen snapshots as recorded and never queries a provider automatically.
-
-Use existing physical tool-search directories. Symlinked parents/directories (for example `/bin` on some systems), missing/unreadable directories and raced observations are **unavailable**, not healthy empty. Candidate symlink targets are shown but never followed. Lookup reads only metadata for declared bare names: candidates include nonexecutable files, directories, special files and dangling links, and are always unattributed. No candidate is run to obtain a version. Absence means only that the explicit scope was completely inspected and no matching name was found.
-
-A package **no-op is not tool readiness**; binaries may still be missing/unverified and dependencies may be blocked. A missing-package **review proposal is not execution approval**. Default/latest policies do not upgrade existing matching claims. Other providers, unbound tools, version conflicts and ambiguous tap/architecture/backend names remain explicit rather than guessed or silently merged. npm snapshots must come from the same unchanged manifest; changed/different declarations require a fresh, separately approved inspection, never a silent runtime-ID reassociation.
-
-### Install-command descriptions — preview only
-
-For an eligible **Review only** missing-package row, full TUI details and CLI `reconciliation.plan.rows[].install_preview` show proposed executable/argv, cleared-environment controls, version selection and side-effect warnings. **Dort cannot run these descriptions.** The separate mise/npm/Homebrew/APT workflows below reconstruct their own live previews; they never execute these descriptions. Regular reconciliation with `--yes` approves only inspection queries, not installation. No native install or install `--dry-run` operation is invoked to construct this metadata.
-
-Satisfied, ambiguous and blocked tools have no install command. APT command descriptions stay withheld here: a dpkg-query snapshot never authorizes inventing apt-get/sudo. The separate [APT install review](#bounded-apt-installation) requires explicit trusted programs and root-risk approval. Version defaults, prefixes and latest requests are unresolved native selections, not a reproducibility or availability guarantee. A bare mise default can select multiple globally configured versions; the description does not request activation and executes nothing. Homebrew controls do not guarantee that dependencies remain unchanged or unupgraded. npm descriptions use the selected Node/CLI/prefix and disable lifecycle scripts, which can leave packages unusable; provider code/configuration risks still apply. All native effects can include downloads, shared links/caches and partial failures without rollback.
-
-These descriptions require a computed eligible row; reconciliation `--dry-run` still previews only queries/analysis scope and does not invent missing-package facts. Descriptions exceeding metadata limits are explicitly deferred rather than partially emitted. They are not execution approvals, tested provider capabilities, verified tool readiness or a supported manual-install handoff.
-
-### CLI collection and reconciliation
-
-`tools reconcile` combines **explicitly approved collection** with metadata-only analysis. Supply one strict JSON `--scope` per requested inspection and explicit `--bind TOOL=SNAPSHOT` choices. Scope fields are `id`, `provider`, `executable`, `search_dirs`, with `runtime_tool`, `npm_cli` and `prefix` only for npm. There are no arbitrary command/argument/environment fields. Each descriptor constructs a fresh real core preview; JSON is not execution authorization.
-
-```sh
-# Replace paths with your trusted executables and existing physical directories.
-# This only previews the two queries and analysis scope: no provider/binary lookup.
-dort tools reconcile --manifest /absolute/path/dort.toml \
-  --tool-search-dir /trusted/node/bin --tool-search-dir /usr/bin \
-  --scope '{"id":"mise","provider":"mise","executable":"/trusted/bin/mise","search_dirs":["/trusted/bin","/usr/bin"]}' \
-  --scope '{"id":"npm","provider":"npm","executable":"/trusted/node/bin/node","search_dirs":["/trusted/node/bin","/usr/bin"],"runtime_tool":"node","npm_cli":"/trusted/node/lib/node_modules/npm/bin/npm-cli.js","prefix":"/trusted/npm-global"}' \
-  --bind node=mise --bind pi=npm --dry-run
-```
-
-The manifest must declare the bound tools and npm runtime ID. Add `--profile NAME` for temporary profile additions. Other selected tools stay not observed; they can therefore block the package plan. Duplicate/unknown bindings or snapshot IDs are rejected before query execution.
-
-Remove `--dry-run` to review and confirm `y/N` **separately for each identified scope**, or use explicit `--yes --json` for automation. `--yes` does not bypass validation. If you decline a later scope or analysis fails, earlier approved inspections may already have executed configuration/plugins or changed caches/logs; nothing is automatically undone. Metadata reconciliation itself never executes/refetches a provider, writes state or grants installation authority.
-
-Final JSON includes `snapshots` and `reconciliation` (scope, bindings, binary observations and package plan). Exit 1 means an unavailable requested provider/binary observation, 4 means a blocked package plan, 2 means invalid input/approval/changed declarations, and 0 means a completed package analysis—not verified tool readiness. Reports and snapshots are not reusable execution approvals or persisted installation receipts.
-
-## Exact mise installation
-
-Dort can install **one observed missing exact mise version** for a registered repository. The manifest must specify an exact version such as `1.2.3`, with clear prerequisites and no existing/unattributed binary in the separate lookup scope. Default/latest/prefix mise policies, conflicting or unknown inventories, unmanaged binaries and blocked prerequisites are not installable. Homebrew and Ubuntu APT have separate provider-current workflows below. npm has a separate [exact-package workflow](#exact-npm-installation). No activation, force/reinstall, upgrade, uninstall or rollback is provided.
-
-**TUI:**
-
-1. Select the registered repository and profiles through Session. Use Tools → Inspect installed tools to collect a mise inventory.
-2. Press `p`, load that repository's `dort.toml`, existing physical tool-search directories and matching profile additions, then explicitly bind the target and any satisfied prerequisites to the chosen mise snapshot. Reconcile.
-3. On an eligible missing exact mise row, press `i` or click **Review exact mise install**. This review runs no queries. F3 shows full scope/arguments; Esc returns.
-4. Press Enter or click **Install exact version** once. Dort freshly inspects the scope under the writer lock, installs only if still eligible, and inspects afterward. A newly satisfied exact package becomes a no-op. Results distinguish process outcome, package claim and binary metadata; inactive mise versions are normal, not readiness verification.
-
-The installer has a **10-minute deadline**. Provider/backend/package code and downloads can change data and caches; timeout or failure may leave partial effects. Quit/Ctrl-C waits for the worker and terminal restoration. Installer output is discarded, not shown or logged. Historical snapshots are not refreshed: collect a fresh inventory and explicitly bind it before another install review. Recomputing with old snapshots remains read-only; **Collect fresh inventory** (`C` in that comparison) starts a new default review without running commands.
-
-**CLI:** add `--install-tool TOOL` to explicit collection/reconciliation. A registered manifest is required; persistent profiles are included with your explicit additions. Each collection query is approved separately, followed by one installation review/confirmation. `--yes` explicitly approves the selected workflow in automation; JSON/nonterminal execution requires it. Without `--install-tool`, reconciliation remains metadata-only.
-
-```sh
-# Preview requested scope only: no queries, installs, state, locks or prompts.
-# Replace paths and IDs with your registered manifest and trusted physical paths.
-dort --dry-run tools reconcile --manifest /home/alex/dotfiles/dort.toml \
-  --tool-search-dir /home/alex/bin \
-  --scope '{"id":"mise-global","provider":"mise","executable":"/usr/local/bin/mise","search_dirs":["/usr/bin"]}' \
-  --bind demo=mise-global --install-tool demo
-```
-
-Omit `--dry-run` for interactive collection and review. A dry-run cannot invent an installed inventory or prove eligibility; it previews the request, not an executable install approval. Successful exact package observation (or a newly satisfied no-op) exits 0; failed/unverified outcomes exit 1, invalid/stale/refused requests exit 2, and lock contention exits 3. A successful exit does not establish binary readiness. Error exits can still follow partial effects or failed outcome persistence; inspect installation attempts before retrying.
-
-## Exact npm installation
-
-Dort can install **one observed missing exact npm registry package** with lifecycle scripts disabled. The registered manifest must declare its `runtime_tool`, an exact package version, and clear dependencies. The selected Node must be the sole runtime candidate in your separate tool-search directories, with a satisfied package claim in an explicitly selected runtime inventory. Existing/conflicting/unmanaged/unknown packages and default/latest/prefix requests cannot be installed.
-
-Use a **physical, owned prefix strictly inside HOME**, separate from the selected runtime. Existing required parents, including a scoped package's `@scope` directory, cannot be symlinks or group/world writable; absent descendants are created only after approval and durable intent. npm's write roots are `PREFIX/lib/node_modules`, `PREFIX/bin` and `PREFIX/share/man`: selected Node and npm CLI must be outside them. A typical co-located Node/npm default prefix may therefore be unsuitable for installation. Change the prefix deliberately in Advanced, collect that new scope, and bind it explicitly; Dort never silently substitutes another prefix or runtime.
-
-**Important:** native dependencies and bin/man links can expose commands immediately if PREFIX/bin is already on PATH. Dort does not edit PATH or activate/configure Node. Script-disabled packages may not be usable. Effects are not atomic or isolated from other prefix entries; failure/timeout can leave partial changes. Trusted npm/builtin configuration and dependencies may read HOME or contact additional endpoints. No private-auth setup, force, intentional other-top-level upgrade, uninstall or rollback is provided.
-
-**TUI:**
-
-1. Select the registered repository and profiles. Collect a runtime inventory and any prerequisite inventories through **Tools → Inspect installed tools**. These are provider claims, not runtime ownership or readiness proof.
-2. In the npm inventory's **Advanced** form, select the declared runtime ID, physical Node executable, npm CLI script and explicit global prefix. Node runs that CLI directly; no npm launcher, version probe or config query is used. Confirm collection once. Keep the manifest unchanged; changed declarations require fresh collection.
-3. Press `p`, load `dort.toml`, existing physical tool-search directories and matching profiles. Explicitly bind the target to its npm snapshot and runtime/prerequisites to their own chosen snapshots, then reconcile.
-4. Select the eligible target and press `i` or click **Review exact npm install**. Review is process-free; `d` shows the full prefix, trusted programs, fresh query scopes, fixed install arguments and risks.
-5. Enter/click **Install exact version** once. Under the writer lock, Dort revalidates every selected necessary catalog and the runtime candidate, installs only if still missing, and observes afterward. A newly satisfied exact target is a no-op. Quit/Ctrl-C waits; the installer deadline is ten minutes. Results do not verify readiness. Before another install, collect fresh inventories and explicitly rebind all required scopes; old snapshots are retained but cannot authorize another install review.
-
-**CLI:** use the same `--install-tool` opt-in, confirmation and exit codes as mise. This example assumes declared `node` and `prettier` tools, a satisfied runtime, and an exact npm version for `prettier`; replace every path with your physical trusted paths:
-
-```sh
-dort --dry-run tools reconcile --manifest /home/alex/dotfiles/dort.toml \
-  --tool-search-dir /home/alex/runtimes/node/bin \
-  --tool-search-dir /home/alex/bin \
-  --scope '{"id":"runtime","provider":"mise","executable":"/home/alex/bin/mise","search_dirs":["/usr/bin"]}' \
-  --scope '{"id":"npm","provider":"npm","executable":"/home/alex/runtimes/node/bin/node","search_dirs":["/usr/bin"],"runtime_tool":"node","npm_cli":"/home/alex/runtimes/node/lib/node_modules/npm/bin/npm-cli.js","prefix":"/home/alex/.local/npm-global"}' \
-  --bind node=runtime --bind prettier=npm --install-tool prettier
-```
-
-Omit `--dry-run` for interactive collection and review, or explicitly add `--yes` for automation. JSON/nonterminal execution never prompts. The dry-run does not query, create parents/state/locks or establish eligibility. npm uses fixed public-registry, ignore-scripts, audit/fund/notifier/log controls and ignored user/global config; unsupported controls fail without a weaker fallback. Installer output is discarded.
-
-## Homebrew core installation
-
-On macOS, Dort can install **one observed missing canonical Homebrew core formula** with an omitted or `latest` version policy. Use its unqualified canonical name, for example `jq`, not a tap-qualified name or alias. Versioned formula names are identities, not exact patch pins. Casks, aliases/renames, disabled/unknown formulae, HEAD, arbitrary options/URLs/files and privileged layouts are unsupported. Already matching installed claims are no-ops, never upgrade requests.
-
-**Native effects:** formula/build/resource/dependency code **can execute**. Dependencies can install or upgrade, and native links can expose commands on PATH. Skip-post-install skips post-install steps only, not all build code. This is not bottle-only, exact-pinned, atomic, a sandbox, a usability guarantee or isolation of other prefix entries. There is no rollback, PATH/runtime configuration, service operation, manager installation, explicit link/upgrade/cleanup or sudo fallback. Trusted Homebrew may contact endpoints and maintain its native caches/metadata.
-
-Select a physical trusted `REPOSITORY/bin/brew` and the expected native prefix. Supported layouts put the repository at `PREFIX` or `PREFIX/Homebrew`, and Cellar at `PREFIX/Cellar`. Required native write roots must already exist as safe owned directories; a non-writable root-owned `/usr/local` parent is acceptable only when its required write roots are already owned/writable by you. Unsafe, missing or mismatched layouts refuse; do not bypass them with sudo or permission changes. Dort does not create Homebrew layouts for you.
-
-**TUI:** collect the Homebrew inventory and any declared prerequisite inventories, load the registered manifest/profile scope and separate physical tool-search directories, and explicitly bind every necessary tool. On an eligible row, `i` / **Review core formula install** opens a process-free review. `a` edits the retained **Advanced prefix**; `d` shows full scope, fixed probes and arguments. Enter/click **Install core formula** once approves fresh help/layout/canonical-formula probes, necessary installed catalogs, conditional installation and post-observation. Unsupported advertised controls refuse; there is no weaker fallback. The ten-minute installer deadline can leave partial effects; q/Ctrl-C waits. Results report provider-current presence and observed versions, never exact presence or verified readiness. Before another install collect fresh catalogs and explicitly rebind them.
-
-**CLI:** this assumes a registered macOS manifest declaring `jq` with `provider='brew', package='jq'`, without blocked prerequisites. Replace the paths with your physical trusted paths. `--brew-prefix` deliberately overrides the metadata-only layout hint; it never changes an observed mismatch.
-
-```sh
-dort --dry-run tools reconcile --manifest /Users/alex/dotfiles/dort.toml \
-  --tool-search-dir /Users/alex/bin \
-  --scope '{"id":"brew","provider":"brew","executable":"/opt/homebrew/bin/brew","search_dirs":["/usr/bin","/bin"]}' \
-  --bind jq=brew --install-tool jq --brew-prefix /opt/homebrew
-```
-
-Dry-run runs no queries, creates no state and cannot invent absence. Remove `--dry-run` for separate inventory confirmation followed by the single install review, or use explicit `--yes` for automation. A query-only reconciliation never installs. Native installer arguments are fixed: `brew install --formula --no-ask --skip-post-install homebrew/core/FORMULA`. Fixed no-update/no-analytics/no-target-upgrade/no-dependent-check/no-cleanup controls are required; help and layout probes run only as part of this explicit installation approval, not normal inspection collection.
-
-## Bounded APT installation
-
-On Ubuntu, one observed missing literal package with omitted or `latest` policy can be installed at the provider-current version, **not an exact Debian pin**. The repository must be registered; explicitly bind the target and all necessary prerequisites to approved inventories. Complete dpkg inventory is required: any repair-required package blocks installation. Names with periods/regex characters, architecture/version/release qualifiers, paths/options or trailing `+`/`-` refuse. There are no apt update, upgrade, remove, repository-edit or provider-setup workflows.
-
-**Root risk:** root hooks, maintainer scripts, triggers and dependency code can execute. Dependencies can install/upgrade, services can start/restart, and packages, configuration, live links, databases, caches and data outside HOME can change. `--no-upgrade` protects only the named target; `--no-remove` forbids removals, not every other change. Native root configuration/endpoints and sudo policy/PAM remain trusted. Clearing the caller environment is not privileged isolation. There is no sandbox, exact-pin, atomicity, package-isolation, usability/readiness or rollback guarantee.
-
-In Tools comparison choose the eligible row, then `i` / **Review root-risk APT install**. Preparation runs no commands. `a` opens retained **Advanced** fields for physical absolute apt-cache, apt-get and sudo programs; co-located metadata hints are inspectable, never execution or authentication probes. Missing paths require explicit input. Tab/Shift-Tab moves fields only; Enter requests a fresh preview from any field. Printable shortcuts remain text. `d` shows the full scope, fixed argv and root-risk warning. One Enter/click **Install with root risk** confirms fresh necessary catalogs, bounded `apt-cache policy PACKAGE`, conditional privileged installation and post-dpkg observation. This confirmation is separate from inventory approval. Preview-only/below-floor layouts cannot execute; leaving/shrinking drops approval.
-
-The fixed privileged request uses selected sudo with `-n -T 600 -u root`, `DEBIAN_FRONTEND=noninteractive`, selected absolute apt-get, `--assume-yes --no-remove --no-upgrade --no-install-recommends`, disabled dpkg PTY and default/old conffile handling. Sudo refuses prompts; user-specified command timeouts require explicit permission in existing sudo policy. If environment/timeout permission is denied or unsupported, the attempt fails noninteractively. Dort never collects passwords, validates credentials, manipulates the credential cache, changes policy, configures a helper or retries without the timeout. Ask your administrator about policy outside Dort; no policy-changing command is supplied here.
-
-Only trusted sudo owns privileged timeout/termination. At the requested ten-minute deadline, an overdue supervisor receives catchable TERM for sudo's relay and Dort **continues waiting joined**, with an overdue status. A user cannot reliably kill root descendants; no strict OS deadline against a broken supervisor or proof every privileged descendant/service terminated is promised. q/Ctrl-C waits, with no detached work or automatic rollback. Failure/deadline may leave partial or ongoing native effects; inspect the reported outcome and system separately, never assume safe automatic retry. Historical closure proves neither root termination nor repair.
-
-Example process-free CLI preview (replace trusted physical paths as appropriate):
-
-```sh
-dort --dry-run tools reconcile --manifest /physical/dotfiles/dort.toml \
-  --tool-search-dir /usr/bin --install-tool rg \
-  --apt-cache /usr/bin/apt-cache --apt-get /usr/bin/apt-get --sudo /usr/bin/sudo \
-  --scope '{"id":"packages","provider":"apt","executable":"/usr/bin/dpkg-query","search_dirs":["/usr/bin"]}' \
-  --bind rg=packages
-```
-
-Remove `--dry-run` for separate inventory confirmation followed by the root-risk install review; JSON/nonterminal execution needs explicit `--yes`. A newly matching installed target is a no-op, never an upgrade request. Results distinguish process outcome, provider-current package/version claims and binary metadata, not readiness. Inventories remain historical; collect fresh ones and explicitly rebind before another install. No supported step requires a CLI handoff from the TUI.
-
-## Installation attempts and explicit closure
-
-Tools → **Installation attempts** (`i` outside comparison) lists private, all-repository attempt metadata. Enter/`d` shows full IDs, scope and observed outcomes. Textual statuses distinguish an exact/current package report, a failed process even if a package is present, an absent/conflicting/unavailable package observation, unresolved metadata and explicit historical closure. Installer unavailability, an unknown process observation and an elapsed requested deadline are distinguished from a known unsuccessful exit. Binary candidates are metadata only, not readiness or ownership. Complete failed outcomes remain historical results; closure never turns them into successful installs. An unresolved attempt blocks later Tools installs, not unrelated file workflows. Nothing is replayed, cleaned up or rolled back at startup.
-
-From an installation result, attempt list or its details, press `F` / **Start fresh review** to open the inventory review without running a query or installer. Current repository/profile/form drafts are retained; the action does not recreate an old install, close an attempt, refresh old snapshots or bind new ones. Separately approve fresh inventories, press `p` to compare declarations, explicitly bind every necessary new snapshot ID, then review and approve any still-missing package. Old IDs remain available for metadata comparisons but cannot authorize installation through this fresh-review path. Unresolved attempts still require guarded closure before another write. Preview-only and small layouts cannot execute. For CLI retry, repeat the explicit collection/binding/install workflow above with a fresh approval; there is no automatic retry flag.
-
-CLI installation reports and `tools attempts` include a derived `summary` with status, independent process/package/binary facts, explanation, binary uncertainty and next-step guidance. It is report metadata, not an authorization or proof of readiness, ownership, rollback, safe retry or root termination. A failed process with a package present still exits 1 for installation; a successful `tools attempts` command means the metadata was read, not that its listed installations succeeded.
-
-Select an unresolved row and press `C` or click **Review closure**. The preview uses the original trusted provider scope; missing/damaged scope opens retained provider/executable/child-PATH fields, plus Node/npm CLI/prefix for npm or the original prefix for Homebrew. F4 opens an explicit provider choice for mise, npm, Homebrew or APT; each provider's draft is retained. F3 shows full current-input metadata without submitting the form. Known attempts retain their original scope, without needing an unchanged current manifest. Review is process-free. One Enter/click approves a **fresh inventory query for that provider scope and closure of unchanged metadata only**. Homebrew also verifies a fixed fresh prefix query against the displayed original prefix. An unavailable query cannot close the attempt. APT closure queries only complete dpkg inventory, without sudo/root authentication or current manifest requirements. Closure is not proof of root termination, package repair, retry, readiness verification or a successful install. Changed records require a fresh review.
+Unresolved records block later tool installations. On an unresolved record choose **Review record closure** (`x`). A known scope is retained; a damaged record asks only for the necessary package manager and trusted program/search/prefix paths. Confirming the exact review runs a fresh query and closes only the unchanged record. It does not retry, repair, undo or prove the installation succeeded.
 
 ```sh
 dort tools attempts
-dort tools attempts --id ATTEMPT_ID
-dort --dry-run tools close-attempt ATTEMPT_ID
-# Interactive fresh query and metadata closure:
+dort tools attempts ATTEMPT_ID
+dort tools close-attempt ATTEMPT_ID --dry-run
 dort tools close-attempt ATTEMPT_ID
-# For missing/damaged original scope, also supply trusted paths:
-dort tools close-attempt ATTEMPT_ID --executable /usr/local/bin/mise --search-dir /usr/bin
-# Missing/damaged npm scope (no current manifest or runtime claim required):
-dort tools close-attempt ATTEMPT_ID --provider npm \
-  --executable /home/alex/runtimes/node/bin/node --search-dir /usr/bin \
-  --npm-cli /home/alex/runtimes/node/lib/node_modules/npm/bin/npm-cli.js \
-  --prefix /home/alex/.local/npm-global
-# Missing/damaged APT scope (dpkg only; no sudo/authentication):
-dort tools close-attempt ATTEMPT_ID --provider apt \
-  --executable /usr/bin/dpkg-query --search-dir /usr/bin
 
-# Missing/damaged Homebrew scope:
+# For a damaged Homebrew record without a retained scope:
 dort tools close-attempt ATTEMPT_ID --provider brew \
-  --executable /usr/local/Homebrew/bin/brew --search-dir /usr/bin \
-  --prefix /usr/local
+  --executable /absolute/PREFIX/Homebrew/bin/brew \
+  --search-dir /absolute/physical/bin --brew-prefix /absolute/PREFIX
 ```
 
-No literal confirmation phrase or ID must be retyped at confirmation. If attempt storage is unsafe or exhausted, Dort refuses rather than deleting records or silently treating unavailable metadata as empty.
+Damaged npm records also need `--provider npm --node PATH --npm-cli PATH --prefix PATH`; damaged Homebrew records need `--provider brew --executable PATH --brew-prefix PATH`. No current manifest or user-entered runtime ID is required for historical closure. `--yes` is the CLI automation approval alternative.
 
 ## Initialization and approval
 
@@ -386,7 +246,7 @@ Human terminal mode (stdin/stdout/stderr all terminals, no `--json`) presents a 
 dort doctor
 dort --json doctor
 dort manifest check --manifest /path/to/dort.toml
-dort --repo /path/to/dotfiles manifest check --profile dev --profile ubuntu
+dort --repo /path/to/dotfiles manifest check --profile dev --profile linux
 ```
 
 `doctor` shows platform/architecture, configuration/state locations and repository counts. It does not check installed tools or repair configuration.
@@ -494,7 +354,7 @@ dort recovery resume REPOSITORY_ID TRANSACTION_ID --dry-run
 dort recovery abandon REPOSITORY_ID TRANSACTION_ID --dry-run
 ```
 
-`recovery rollback` is an alias route for top-level `rollback`, handling schemas 1/2/4/5. Its preview checks affected guards and conservatively lists inverse paths without mutation. Approved execution independently revalidates the journal head/layout under the lock, then performs restartable guarded inverses. Completed transactions may be rolled back only while guards still match; later transactions/edits can invalidate them. An already-rolled-back transaction has no inverse paths.
+`recovery rollback` is an alias route for top-level `rollback`, handling schemas 1/2/4/5/6. Its preview checks affected guards and conservatively lists inverse paths without mutation. Approved execution independently revalidates the journal head/layout under the lock, then performs restartable guarded inverses. Completed transactions may be rolled back only while guards still match; later transactions/edits can invalidate them. An already-rolled-back transaction has no inverse paths.
 
 For schema 3, remove `--dry-run` and confirm (or add `--yes`) to resume or abandon. Resume recognizes only exact prepared/published identities/content and exact before/after registration; edits/substitutions are refused. Private incomplete preparation can only be abandoned and retried. **Abandon retains published repositories, registration and private artifacts**, merely marking terminal; it never deletes or silently undoes them. If registration never published, a retained repository can be attached later via init.
 

@@ -274,6 +274,7 @@ fn repository_picker_preserves_raw_indices_and_retained_create_adopt_drafts() {
     assert!(text.contains("explicit/session"));
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Char('O'));
+    super::tests::focus_form(&mut app);
     app.shell.adoption.target = "~/.keep-draft".into();
     key(&mut app, KeyCode::Char('p')); // text in target, not navigation
     // Direct nonprinting Choose and Create actions retain the adoption parent.
@@ -349,7 +350,7 @@ fn repository_availability_never_turns_an_unknown_registry_into_zero() {
                     "/synthetic/home".into(),
                     None,
                     None,
-                    Platform::Ubuntu,
+                    Platform::Linux,
                     Architecture::X86_64,
                 )
                 .unwrap(),

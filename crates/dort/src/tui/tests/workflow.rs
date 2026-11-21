@@ -24,7 +24,7 @@ impl Fixture {
         let home = base.join("home");
         fs::create_dir(&home).unwrap();
         let host =
-            HostContext::new(home, None, None, Platform::Ubuntu, Architecture::X86_64).unwrap();
+            HostContext::new(home, None, None, Platform::Linux, Architecture::X86_64).unwrap();
         let root = base.join("repository");
         fs::create_dir_all(root.join(".git")).unwrap();
         fs::write(root.join("source"), "ordinary settings\n").unwrap();
@@ -110,18 +110,15 @@ fn adopt_selected(app: &mut App) {
     key(app, KeyCode::Char('e')); // Separate labeled Adopt selected action.
 }
 fn type_text(app: &mut App, value: &str) {
+    if app.form_page().is_some() && !app.form_has_focus() {
+        key(app, KeyCode::Tab);
+    }
     for c in value.chars() {
         assert!(key(app, KeyCode::Char(c)).is_none());
     }
 }
 fn approve(app: &mut App) -> Task {
-    if app.preview.as_ref().is_some_and(|p| p.pending.adoption()) {
-        return key(app, KeyCode::Enter).expect("one explicit adoption approval");
-    }
-    assert!(key(app, KeyCode::Enter).is_none());
-    assert!(app.confirmation.is_some());
-    key(app, KeyCode::Enter)
-        .expect("explicit confirmation produces approved task without a typed phrase")
+    key(app, KeyCode::Enter).expect("one explicit approval consumes the displayed preview")
 }
 #[test]
 fn welcome_next_steps_are_visible_at_the_floor_without_creating_state() {
@@ -248,7 +245,6 @@ fn approved_apply_remove_and_recovery_use_the_same_guarded_services() {
         id: "editor".into(),
         mode: UnmanageMode::Remove,
     })));
-    key(&mut app, KeyCode::Enter);
     assert!(super::tests::render(&app, 80, 24).contains("editor"));
     let task = key(&mut app, KeyCode::Enter).unwrap();
     fixture.execute(task);
@@ -301,19 +297,19 @@ fn confirmation_snapshots_and_resize_guard() {
     let fixture = Fixture::new(false);
     let mut app = App::new(false);
     app.complete(Ok(fixture.prepare(Request::Apply)));
-    key(&mut app, KeyCode::Enter);
     let screen = super::tests::render(&app, 48, 14);
-    assert!(screen.contains("Proceed with the reviewed changes?"));
+    assert!(screen.contains("Confirm"));
     assert!(screen.contains("Confirm") && !screen.contains("Type literal"));
     assert!(
         app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 40, 10)
             .is_none()
     );
     assert!(app.confirmation.is_none());
-    key(&mut app, KeyCode::Enter);
-    assert!(app.confirmation.is_some());
-    key(&mut app, KeyCode::Esc);
-    assert!(app.confirmation.is_none() && app.preview.is_some());
+    assert!(matches!(
+        key(&mut app, KeyCode::Enter),
+        Some(Task::Execute(_))
+    ));
+    assert!(app.confirmation.is_none() && app.preview.is_none());
     assert!(!fixture.host.state_dir.exists());
 }
 #[test]
@@ -327,11 +323,10 @@ fn mouse_confirmation_binds_displayed_exact_id_without_typing() {
         id: "editor".into(),
         mode: UnmanageMode::Remove,
     })));
-    key(&mut app, KeyCode::Enter);
     let screen = super::tests::render(&app, 48, 14);
     assert!(screen.contains("editor") && !screen.contains("Type exact"));
     let (x, y) = super::tests::target_position(&app, 48, 14, |target| {
-        matches!(target, super::input::Target::ConfirmAction)
+        matches!(target, super::input::Target::Continue)
     });
     let task = app
         .mouse(
@@ -371,14 +366,12 @@ fn ascii_monochrome_real_removal_keeps_consent_and_shrink_guards() {
             mode: UnmanageMode::Remove,
         })));
         let press = |app: &mut App, code| app.key(KeyEvent::new(code, KeyModifiers::NONE), w, h);
-        assert!(press(&mut app, KeyCode::Enter).is_none());
         let screen = super::tests::render(&app, w, h);
         assert!(screen.is_ascii() && screen.contains("editor") && screen.contains("Confirm"));
         app.resize(47, 13);
         assert!(app.confirmation.is_none());
         app.resize(w, h);
         assert!(fixture.host.home.join(".editor").is_symlink());
-        assert!(press(&mut app, KeyCode::Enter).is_none()); // fresh confirmation, not execution
         let task = press(&mut app, KeyCode::Enter).unwrap();
         fixture.execute(task);
         assert!(!fixture.host.home.join(".editor").exists());
@@ -718,13 +711,18 @@ fn shrinking_requires_fresh_removal_confirmation() {
         id: "editor".into(),
         mode: UnmanageMode::Remove,
     })));
-    key(&mut app, KeyCode::Enter);
     app.resize(47, 14);
+    assert!(
+        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 47, 14)
+            .is_none()
+    );
     assert!(app.confirmation.is_none());
     app.resize(80, 24);
-    assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(app.confirmation.is_some());
+    let task = key(&mut app, KeyCode::Enter).expect("fresh deliberate preview approval");
+    assert!(app.confirmation.is_none() && app.preview.is_none());
     assert!(fixture.host.home.join(".editor").is_symlink());
+    fixture.execute(task);
+    assert!(!fixture.host.home.join(".editor").exists());
 }
 
 #[test]
@@ -1150,7 +1148,7 @@ fn standalone_check_is_independent_and_preserves_path_profile_drafts_on_errors()
 fn temporary_profiles_are_mandatory_union_and_drive_full_inventory_and_plans() {
     use super::shell::Overlay;
     let fixture = Fixture::new(true);
-    fs::write(fixture.root.join("dort.toml"), "schema=1\n[profiles]\navailable=['defaults','platform','local','extra']\ndefault=['defaults']\n[profiles.platform]\nubuntu=['platform']\n[[files]]\nid='extra'\nsource='source'\ntarget='~/.extra'\nmode='link'\nprofiles=['extra']\n").unwrap();
+    fs::write(fixture.root.join("dort.toml"), "schema=1\n[profiles]\navailable=['defaults','platform','local','extra']\ndefault=['defaults']\n[profiles.platform]\nlinux=['platform']\n[[files]]\nid='extra'\nsource='source'\ntarget='~/.extra'\nmode='link'\nprofiles=['extra']\n").unwrap();
     let config_path = fixture.host.local_config_path();
     let config = fs::read_to_string(&config_path)
         .unwrap()
@@ -1338,7 +1336,6 @@ fn exact_id_forms_can_keep_or_delete_a_mapping_outside_the_display_filter() {
         key(&mut app, KeyCode::Enter);
         let task = key(&mut app, KeyCode::Enter).unwrap();
         run_task(&mut app, &fixture, task);
-        key(&mut app, KeyCode::Enter);
         assert!(super::tests::render(&app, 80, 24).contains("Confirm"));
         let task = key(&mut app, KeyCode::Enter).unwrap();
         let refresh = run_task(&mut app, &fixture, task).unwrap();
@@ -1810,7 +1807,11 @@ fn selected_schema_one_rollback_withdraws_source_into_private_storage() {
         fs::read_to_string(target).unwrap(),
         "ordinary original settings\n"
     );
-    assert!(!fixture.root.join("files/new-settings").exists());
+    assert!(
+        !fixture.root.join("files/new-settings").exists(),
+        "rollback source withdrawal failed: {:?}",
+        app.error
+    );
     let rows = dort_core::journal::diagnose(&fixture.host).unwrap();
     let transaction = fixture
         .host

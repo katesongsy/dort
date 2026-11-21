@@ -26,7 +26,7 @@ impl Fixture {
         let home = base.join("home");
         fs::create_dir(&home).unwrap();
         let host =
-            HostContext::new(home, None, None, Platform::Ubuntu, Architecture::X86_64).unwrap();
+            HostContext::new(home, None, None, Platform::Linux, Architecture::X86_64).unwrap();
         let repo = base.join("repo");
         fs::create_dir_all(repo.join(".git")).unwrap();
         let mut manifest = "schema=1\n".to_owned();
@@ -71,11 +71,13 @@ fn key(app: &mut App, code: KeyCode) -> Option<Task> {
     app.key(KeyEvent::new(code, KeyModifiers::NONE), SIZE.0, SIZE.1)
 }
 fn text(app: &mut App, s: &str) {
+    super::tests::focus_form(app);
     for c in s.chars() {
         assert!(key(app, KeyCode::Char(c)).is_none());
     }
 }
 fn clear(app: &mut App) {
+    super::tests::focus_form(app);
     assert!(
         app.key(
             KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
@@ -151,11 +153,7 @@ fn click(app: &mut App, label: &str, offset: u16) -> Option<Task> {
     )
 }
 fn approve(app: &mut App) -> Task {
-    if app.preview.as_ref().is_some_and(|p| p.pending.adoption()) {
-        return key(app, KeyCode::Enter).expect("one explicit combined adoption approval");
-    }
-    assert!(key(app, KeyCode::Enter).is_none());
-    key(app, KeyCode::Enter).expect("explicit reviewed approval")
+    key(app, KeyCode::Enter).expect("one explicit combined approval")
 }
 #[test]
 fn separate_item_form_retains_edits_and_only_returns_to_combined_review() {
@@ -178,6 +176,7 @@ fn separate_item_form_retains_edits_and_only_returns_to_combined_review() {
         assert!(!screen.contains("Review all") && screen.contains("Dort / Files /"));
         assert!(!screen.contains("Adopt all") && !screen.contains("Content ·"));
     }
+    super::tests::focus_form(&mut app);
     key(&mut app, KeyCode::Tab); // TARGET -> ID, fields only.
     clear(&mut app);
     text(&mut app, "edited-item"); // e is literal text inside the form.
@@ -191,9 +190,11 @@ fn separate_item_form_retains_edits_and_only_returns_to_combined_review() {
     assert!(app.preview.is_none());
     key(&mut app, KeyCode::Char('k'));
     key(&mut app, KeyCode::Char('e'));
+    super::tests::focus_form(&mut app);
     key(&mut app, KeyCode::Tab);
     clear(&mut app);
     text(&mut app, "retained-on-escape");
+    key(&mut app, KeyCode::Esc); // Stop editing.
     key(&mut app, KeyCode::Esc);
     assert_eq!(
         app.batch_editor.as_ref().unwrap().drafts[0].id,
@@ -311,6 +312,7 @@ fn tree_folds_marks_hidden_items_and_batch_editor_retains_real_fields_at_floor()
     // Enter reviews all defaults from the list; no footer traversal is needed.
     assert_eq!(app.batch_editor.as_ref().unwrap().focused, 6);
     key(&mut app, KeyCode::Char('e')); // Local item page.
+    super::tests::focus_form(&mut app);
     key(&mut app, KeyCode::Tab); // First ID.
     clear(&mut app);
     text(&mut app, "custom-a");
@@ -416,7 +418,7 @@ fn same_named_files_adopt_into_preserved_subtrees_without_moving_existing_mappin
 }
 
 #[test]
-fn selected_apply_keep_delete_are_combined_and_every_delete_id_then_yes_is_required() {
+fn selected_apply_keep_delete_use_one_review_bound_to_every_selected_id() {
     for operation in ['K', 'D'] {
         let f = Fixture::new(true);
         let mut app = f.app(false);
@@ -437,9 +439,8 @@ fn selected_apply_keep_delete_are_combined_and_every_delete_id_then_yes_is_requi
         key(&mut app, KeyCode::Esc);
         let task = key(&mut app, KeyCode::Char(operation)).unwrap();
         f.run(&mut app, task);
-        assert!(key(&mut app, KeyCode::Enter).is_none());
         if operation == 'D' {
-            let screen = render(&app, 48, 14);
+            let screen = render(&app, 140, 40);
             assert!(screen.contains("only-a") && screen.contains("only-b"));
             key(&mut app, KeyCode::F(1));
             assert!(key(&mut app, KeyCode::Enter).is_none());
@@ -448,11 +449,10 @@ fn selected_apply_keep_delete_are_combined_and_every_delete_id_then_yes_is_requi
             assert!(app.confirmation.is_none());
             app.resize(48, 14);
             key(&mut app, KeyCode::Esc);
-            assert!(key(&mut app, KeyCode::Enter).is_none());
-            assert!(app.confirmation.is_some());
+            assert!(app.preview.is_some());
         }
-        text(&mut app, "yes");
         let task = key(&mut app, KeyCode::Enter).unwrap();
+        assert!(app.confirmation.is_none());
         let refresh = f.run(&mut app, task).unwrap();
         f.run(&mut app, refresh);
         assert!(app.inventory.managed_marks.is_empty());

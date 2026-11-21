@@ -15,7 +15,7 @@ use std::{
     os::unix::fs::{PermissionsExt, symlink},
     path::PathBuf,
 };
-const MANIFEST: &str = "schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='brew',package='demo',version='latest'}\n";
+const MANIFEST: &str = "schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nprovider='brew'\npackage='demo'\nversion='latest'\n";
 const BREW: &str = r##"#!/bin/sh
 printf '%s\n' "$*" >> "$HOME/calls"
 [ "$PWD" = / ] && [ -z "$SSH_AUTH_SOCK" ] && [ -z "$MISE_YES" ] && [ "$XDG_STATE_HOME" = "$HOME/.local/state" ] || exit 90
@@ -158,7 +158,6 @@ fn close_request(id: String) -> install::CloseRequest {
         search_dirs: vec![],
         npm_binding: None,
         brew_prefix: None,
-        apt: false,
     }
 }
 #[test]
@@ -255,9 +254,57 @@ fn unsafe_or_missing_native_roots_and_programs_refuse_process_free() {
                 symlink(f.home.host.home.join("nonexistent"), &f.executable).unwrap();
             }
         }
-        assert!(brew::prepare(&f.home.host, f.request(), f.scope(), &[&r]).is_err());
+        let error = brew::prepare(&f.home.host, f.request(), f.scope(), &[&r])
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(!error.contains("native write roots") && !error.contains("correlate the scope"));
+        match case {
+            0..=1 => {
+                assert!(error.contains("prefix/lib"), "{error}");
+                assert!(
+                    error.contains("is missing or is not a real folder"),
+                    "{error}"
+                );
+            }
+            2 => assert!(error.contains("is writable by everyone"), "{error}"),
+            _ => (),
+        }
         assert_eq!(calls, f.calls());
     }
+}
+#[test]
+fn folders_shared_with_the_callers_own_group_are_accepted() {
+    let f = Fixture::new();
+    let r = f.report();
+    let calls = f.calls();
+    for path in ["prefix", "prefix/Cellar", "prefix/lib"] {
+        let path = f.home.host.home.join(path);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o775)).unwrap();
+        // Some shared temporary roots assign their own group; share with ours instead.
+        rustix::fs::chown(&path, None, Some(rustix::process::getegid())).unwrap();
+    }
+    let preview = brew::prepare(&f.home.host, f.request(), f.scope(), &[&r]);
+    assert!(preview.is_ok(), "{:?}", preview.err());
+    assert_eq!(calls, f.calls(), "layout checks run no provider");
+}
+#[test]
+fn unsafe_ancestor_folder_names_the_parent_and_refuses_process_free() {
+    let f = Fixture::new();
+    let r = f.report();
+    let calls = f.calls();
+    let home = f.home.host.home.clone();
+    fs::set_permissions(&home, fs::Permissions::from_mode(0o777)).unwrap();
+    let error = brew::prepare(&f.home.host, f.request(), f.scope(), &[&r])
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(error.contains("Homebrew parent folder"), "{error}");
+    assert!(error.contains(&home.display().to_string()), "{error}");
+    assert!(
+        error.contains("is writable by users outside your account or belongs to another account")
+    );
+    assert_eq!(calls, f.calls());
 }
 #[test]
 fn unapproved_probe_paths_are_never_observed_or_copied_into_errors() {
@@ -283,15 +330,15 @@ fn unapproved_probe_paths_are_never_observed_or_copied_into_errors() {
 #[test]
 fn unsupported_policy_qualified_taps_and_unmanaged_candidates_are_not_installable() {
     for change in [
-        "package='third/tap/demo'",
-        "package='homebrew/core/demo'",
-        "package='demo',version='1.2.3'",
+        "package='third/tap/demo'\nversion='latest'",
+        "package='homebrew/core/demo'\nversion='latest'",
+        "package='demo'\nversion='1.2.3'",
     ] {
         let f = Fixture::new();
         let r = f.report();
         fs::write(
             f.repo.join("dort.toml"),
-            MANIFEST.replace("package='demo',version='latest'", change),
+            MANIFEST.replace("package='demo'\nversion='latest'", change),
         )
         .unwrap();
         assert!(brew::prepare(&f.home.host, f.request(), f.scope(), &[&r]).is_err());
@@ -472,12 +519,12 @@ fn malformed_file_journal_blocks_before_probe_but_not_historical_closure() {
 fn explicit_cross_catalog_prerequisites_are_fresh_and_never_installed() {
     for missing in [false, true] {
         let f = Fixture::new();
-        fs::write(f.repo.join("dort.toml"),MANIFEST.replace("binary='demo'", "binary='demo'\nrequires=['prereq']") + "\n[[tools]]\nid='prereq'\nbinary='prereq'\n[tools.install]\nmacos={provider='mise',package='prereq',version='1.2.3'}\n").unwrap();
-        let exe = f.home.host.home.join("mise");
-        fs::write(&exe,"#!/bin/sh\nprintf m >> \"$HOME/calls\"\nif [ -f \"$HOME/prereq-missing\" ]; then printf '{}'; else printf '{\"prereq\":[{\"version\":\"1.2.3\",\"installed\":true}]}'; fi\n").unwrap();
+        fs::write(f.repo.join("dort.toml"),MANIFEST.replace("binary='demo'", "binary='demo'\nrequires=['prereq']") + "\n[[tools]]\nid='prereq'\nbinary='prereq'\n[tools.install]\nprovider='brew'\npackage='prereq'\n").unwrap();
+        let exe = f.home.host.home.join("prerequisite-brew");
+        fs::write(&exe,"#!/bin/sh\nprintf m >> \"$HOME/calls\"\nif [ -f \"$HOME/prereq-missing\" ]; then printf '{\"formulae\":[]}'; else printf '{\"formulae\":[{\"full_name\":\"prereq\",\"installed\":[{\"version\":\"1.2.3\"}]}]}'; fi\n").unwrap();
         fs::set_permissions(&exe, fs::Permissions::from_mode(0o700)).unwrap();
         let runtime = inspection::Preview::new(
-            Query::MiseInstalled,
+            Query::BrewFormulae,
             exe.clone(),
             f.home.host.home.clone(),
             f.request().search_dirs,
@@ -488,7 +535,7 @@ fn explicit_cross_catalog_prerequisites_are_fresh_and_never_installed() {
         let target = f.report();
         let mut scope = f.scope();
         scope.catalogs.push(npm::Catalog {
-            query: Query::MiseInstalled,
+            query: Query::BrewFormulae,
             executable: exe,
             search_dirs: f.request().search_dirs,
             npm_binding: None,
@@ -538,18 +585,17 @@ fn capability_tokens_canonical_metadata_and_layout_paths_fail_closed() {
     }
 }
 #[test]
-fn mixed_schema_one_two_three_history_is_read_without_reencoding_legacy_artifacts() {
+fn brew_and_npm_history_preserves_independent_outcomes_and_raw_artifacts() {
     let f = Fixture::new();
     let out = f.execute(f.preview()).unwrap();
     let brew_id = out.attempt_id.unwrap();
-    let mise = f.home.host.home.join("mise");
-    fs::write(&mise,"#!/bin/sh\nif [ \"$1\" = ls ]; then\nif [ -f \"$HOME/legacy-installed\" ]; then printf '{\"legacy\":[{\"version\":\"1.2.3\",\"installed\":true}],\"node\":[{\"version\":\"20.1.0\",\"installed\":true}]}'; else printf '{\"node\":[{\"version\":\"20.1.0\",\"installed\":true}]}'; fi\nelse printf installed > \"$HOME/legacy-installed\"; fi\n").unwrap();
-    fs::set_permissions(&mise, fs::Permissions::from_mode(0o700)).unwrap();
-    fs::write(f.repo.join("dort.toml"),"schema=1\n[[tools]]\nid='legacy'\nbinary='legacy'\n[tools.install]\nmacos={provider='mise',package='legacy',version='1.2.3'}\n").unwrap();
+    let runtime_provider = f.home.host.home.join("runtime-provider");
+    fs::write(&runtime_provider, "#!/bin/sh\nprintf '%s' '{\"formulae\":[{\"full_name\":\"node\",\"installed\":[{\"version\":\"24.0.0\"}]}]}'\n").unwrap();
+    fs::set_permissions(&runtime_provider, fs::Permissions::from_mode(0o700)).unwrap();
     let query = || {
         inspection::Preview::new(
-            Query::MiseInstalled,
-            mise.clone(),
+            Query::BrewFormulae,
+            runtime_provider.clone(),
             f.home.host.home.clone(),
             f.request().search_dirs,
         )
@@ -557,12 +603,6 @@ fn mixed_schema_one_two_three_history_is_read_without_reencoding_legacy_artifact
         .approve()
         .inspect()
     };
-    let mut req = f.request();
-    req.executable = mise.clone();
-    req.tool = "legacy".into();
-    req.bound_tools = BTreeSet::from(["legacy".into()]);
-    let p = install::prepare(&f.home.host, req, &query()).unwrap();
-    let legacy = f.execute(p).unwrap().attempt_id.unwrap();
     let bytes = |id: &str, name: &str| {
         fs::read(
             f.home
@@ -574,9 +614,7 @@ fn mixed_schema_one_two_three_history_is_read_without_reencoding_legacy_artifact
         )
         .unwrap()
     };
-    let old_intent = bytes(&legacy, "intent.json");
-    let old_outcome = bytes(&legacy, "outcome.json");
-    fs::write(f.repo.join("dort.toml"),"schema=1\n[[tools]]\nid='node'\nbinary='node'\n[tools.install]\nmacos={provider='mise',package='node',version='20.1.0'}\n[[tools]]\nid='pkg'\nbinary='pkg'\n[tools.install]\nmacos={provider='npm',package='pkg',version='1.2.3',runtime_tool='node'}\n").unwrap();
+    fs::write(f.repo.join("dort.toml"),"schema=1\n[[tools]]\nid='node'\nbinary='node'\n[tools.install]\nprovider='brew'\npackage='node'\n[[tools]]\nid='pkg'\nbinary='pkg'\n[tools.install]\nprovider='npm'\npackage='pkg'\nversion='1.2.3'\nruntime_tool='node'\n").unwrap();
     let node = f.home.host.home.join("lookup/node");
     let cli = f.home.host.home.join("npm-cli.js");
     fs::write(&cli, "METADATA_ONLY").unwrap();
@@ -615,8 +653,8 @@ fn mixed_schema_one_two_three_history_is_read_without_reencoding_legacy_artifact
                 tools: BTreeSet::from(["pkg".into()]),
             },
             npm::Catalog {
-                query: Query::MiseInstalled,
-                executable: mise,
+                query: Query::BrewFormulae,
+                executable: runtime_provider,
                 search_dirs: req.search_dirs.clone(),
                 npm_binding: None,
                 tools: BTreeSet::from(["node".into()]),
@@ -629,60 +667,11 @@ fn mixed_schema_one_two_three_history_is_read_without_reencoding_legacy_artifact
     let npm_outcome = bytes(&npm_id, "outcome.json");
     let brew_intent = bytes(&brew_id, "intent.json");
     let brew_outcome = bytes(&brew_id, "outcome.json");
-    // Schema 4 shares the attempt directory without migrating schemas 1–3.
-    let mut apt_host = f.home.host.clone();
-    apt_host.platform = dort_core::platform::Platform::Ubuntu;
-    fs::write(f.repo.join("dort.toml"), "schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nubuntu={provider='apt',package='demo',version='latest'}\n").unwrap();
-    for (name, body) in [
-        (
-            "dpkg-query",
-            "if [ -f \"$HOME/apt-installed\" ]; then printf 'demo\\t2.7\\tinstalled\\tok\\n'; fi",
-        ),
-        (
-            "apt-cache",
-            "printf 'demo:\\n  Installed: (none)\\n  Candidate: 2.7\\n'",
-        ),
-        ("apt-get", "printf installed > \"$HOME/apt-installed\""),
-        ("sudo", "shift 6; \"$@\""),
-    ] {
-        let path = apt_host.home.join(name);
-        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
-    }
-    let mut req = f.request();
-    req.executable = apt_host.home.join("dpkg-query");
-    let target = inspection::Preview::new(
-        Query::DpkgPackages,
-        req.executable.clone(),
-        apt_host.home.clone(),
-        req.search_dirs.clone(),
-    )
-    .unwrap()
-    .approve()
-    .inspect();
-    let scope = install::apt::Scope {
-        apt_cache: apt_host.home.join("apt-cache"),
-        apt_get: apt_host.home.join("apt-get"),
-        sudo: apt_host.home.join("sudo"),
-        policy: VersionPolicy::Latest {},
-        catalogs: vec![npm::Catalog {
-            query: Query::DpkgPackages,
-            executable: req.executable.clone(),
-            search_dirs: req.search_dirs.clone(),
-            npm_binding: None,
-            tools: req.bound_tools.clone(),
-        }],
-    };
-    let preview = install::apt::prepare(&apt_host, req, scope, &[&target]).unwrap();
-    install::execute(&apt_host, &f.lock, preview.approve(), |_| {}).unwrap();
     let a = install::diagnose(&f.home.host).unwrap();
-    assert_eq!(a.len(), 4);
+    assert_eq!(a.len(), 2);
     for attempt in &a {
         let s = attempt.summary();
-        let current = attempt
-            .scope
-            .as_ref()
-            .is_some_and(|s| s.brew.is_some() || s.apt.is_some());
+        let current = attempt.scope.as_ref().is_some_and(|s| s.brew.is_some());
         assert_eq!(
             s.status,
             if current {
@@ -715,8 +704,6 @@ fn mixed_schema_one_two_three_history_is_read_without_reencoding_legacy_artifact
     assert_eq!(brew_intent, bytes(&brew_id, "intent.json"));
     assert_eq!(brew_outcome, bytes(&brew_id, "outcome.json"));
     assert!(a.iter().all(|a| !a.unresolved));
-    assert_eq!(old_intent, bytes(&legacy, "intent.json"));
-    assert_eq!(old_outcome, bytes(&legacy, "outcome.json"));
     assert_eq!(npm_intent, bytes(&npm_id, "intent.json"));
     assert_eq!(npm_outcome, bytes(&npm_id, "outcome.json"));
     assert!(

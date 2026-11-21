@@ -4,15 +4,7 @@ use super::{
 };
 // Escape all non-ASCII/control metadata before terminal rendering, including bidi controls.
 pub fn safe(text: &str) -> String {
-    let mut escaped = String::with_capacity(text.len());
-    for c in text.chars() {
-        if c == '\n' || c.is_ascii_graphic() || c == ' ' {
-            escaped.push(c);
-        } else {
-            escaped.extend(c.escape_default());
-        }
-    }
-    escaped
+    crate::services::presentation::safe(text)
 }
 pub fn draw(frame: &mut ratatui::Frame, app: &App) {
     super::workbench::draw(frame, app);
@@ -65,7 +57,7 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, _height: u16, _width: u
             )
         }
         Overlay::About => format!(
-            "Version: {}\nLicense: MIT\nSupported hosts: macOS and Ubuntu, ARM64 / x86_64\n\nLocal capabilities:\nGuarded create/attach, file discovery/adoption, apply/unmanage, recovery, structural checks and read-only Git. Tools supports explicit provider inspections, desired declarations, explicit snapshot comparison and bounded missing-package installation.\n\nProvider effects:\nProvider/backend/package code and downloads may change data and caches. Mise stays inactive; npm/Homebrew native links can expose commands. Homebrew build/dependency code can execute and dependencies may upgrade. Unprivileged installation has a requested ten-minute deadline; no rollback.\n\nAPT privilege:\nTrusted noninteractive sudo -n -T 600 supervision requires policy permission. No password handling or untimed fallback. Root scripts, dependencies, services and system/config/data effects are possible. Overdue supervision waits joined; there is no proof every privileged descendant terminated.\n\nApproval and recovery:\nExecution needs a reviewed real approval. Failed writes may have partial or ongoing effects. Tools attempts cover installation metadata; Recovery covers file/bootstrap changes. Closure is not installation success, repair or rollback.\n\nPrivacy and storage:\nGit patch viewing has a separate deliberate content-disclosure gate. Backups are private, not encrypted; keep independent hardware/power-failure backups.\n\nUnsupported operations:\nOther package installations, templates, secret execution, synchronization and Git writes.",
+            "Version: {}\nLicense: MIT\nSupported hosts: macOS, Linux and WSL, ARM64 / x86_64\n\nLocal capabilities:\nGuarded create/attach, file discovery/adoption, apply/unmanage, recovery, structural checks and read-only Git. Tools has Declared, Installed and History pages for brew/npm packages, desired declarations and bounded missing-package installation.\n\nProvider effects:\nProvider/backend/package code and downloads may change data and caches. npm/Homebrew native links can expose commands. Homebrew build/dependency code can execute and dependencies may upgrade. Unprivileged installation has a requested ten-minute deadline; no rollback.\n\nApproval and recovery:\nExecution needs a reviewed real approval. Failed writes may have partial or ongoing effects. Tools attempts cover installation metadata; Recovery covers file/bootstrap changes. Closure is not installation success, repair or rollback.\n\nPrivacy and storage:\nGit patch viewing has a separate deliberate content-disclosure gate. Backups are private, not encrypted; keep independent hardware/power-failure backups.\n\nUnsupported operations:\nOther package installations, templates, secret execution, synchronization and Git writes.",
             env!("CARGO_PKG_VERSION")
         ),
     }

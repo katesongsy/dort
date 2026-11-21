@@ -296,7 +296,7 @@ fn unsupported_modes_and_unverified_requirements_block_before_content_reads() {
         assert!(snapshot.files[0].source.as_ref().unwrap().sha256.is_none());
         assert!(planner::plan(snapshot).has_blockers());
     }
-    fs::write(repo.join("dort.toml"), "schema=1\n[[tools]]\nid='git'\nbinary='git'\n[tools.install.ubuntu]\nprovider='apt'\npackage='git'\n[[files]]\nid='file'\nsource='source'\ntarget='~/.file'\nmode='link'\nrequires=['git']\n").unwrap();
+    fs::write(repo.join("dort.toml"), "schema=1\n[[tools]]\nid='git'\nbinary='git'\n[tools.install]\nprovider='brew'\npackage='git'\n[[files]]\nid='file'\nsource='source'\ntarget='~/.file'\nmode='link'\nrequires=['git']\n").unwrap();
     let snapshot = planner::observe(&home.host, &repo, &[], Request::Apply).unwrap();
     assert!(snapshot.files[0].source.as_ref().unwrap().sha256.is_none());
     assert!(planner::plan(snapshot).has_blockers());
@@ -307,7 +307,7 @@ fn active_profiles_overrides_collisions_and_protected_targets_are_enforced() {
     let home = TestHome::new();
     let repo = home.repository("repo");
     fs::write(repo.join("platform"), "safe").unwrap();
-    fs::write(repo.join("dort.toml"), "schema=1\n[profiles]\navailable=['dev']\n[[files]]\nid='file'\nsource='missing'\ntarget='~/.file'\nmode='link'\nprofiles=['dev']\n[files.overrides]\nubuntu='platform'\n").unwrap();
+    fs::write(repo.join("dort.toml"), "schema=1\n[profiles]\navailable=['dev']\n[[files]]\nid='file'\nsource='missing'\ntarget='~/.file'\nmode='link'\nprofiles=['dev']\n[files.overrides]\nlinux='platform'\n").unwrap();
     assert!(
         planner::observe(&home.host, &repo, &[], Request::Apply)
             .unwrap()

@@ -13,7 +13,7 @@ struct Fixture {
     bin: PathBuf,
     node: PathBuf,
     cli: PathBuf,
-    mise: PathBuf,
+    brew: PathBuf,
     prefix: PathBuf,
 }
 impl Fixture {
@@ -22,12 +22,12 @@ impl Fixture {
         let root = temp.path().canonicalize().unwrap();
         let home = root.join("home");
         let repo = root.join("repo");
-        let bin = root.join("lookup");
+        let bin = root.join("home/runtime/bin");
         for p in [&home, &repo, &bin] {
-            fs::create_dir(p).unwrap();
+            fs::create_dir_all(p).unwrap();
         }
         fs::create_dir(repo.join(".git")).unwrap();
-        fs::write(repo.join("dort.toml"), "schema=1\n[[tools]]\nid='node'\nbinary='node'\n[tools.install]\nmacos={provider='mise',package='node',version='20.1.0'}\nubuntu={provider='mise',package='node',version='20.1.0'}\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='npm',package='demo',version='1.2.3',runtime_tool='node'}\nubuntu={provider='npm',package='demo',version='1.2.3',runtime_tool='node'}\n").unwrap();
+        fs::write(repo.join("dort.toml"), "schema=1\n[[tools]]\nid='node'\nbinary='node'\n[tools.install]\nprovider='brew'\npackage='node'\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nprovider='npm'\npackage='demo'\nversion='1.2.3'\nruntime_tool='node'\n").unwrap();
         let host = HostContext::new(
             home,
             None,
@@ -40,9 +40,13 @@ impl Fixture {
         RepositoryRegistry::register(&host, &lock, &repo).unwrap();
         drop(lock);
         let node = bin.join("node");
-        let cli = root.join("npm-cli.js");
-        let mise = root.join("mise");
-        let prefix = host.home.join("prefix");
+        let cli = bin
+            .parent()
+            .unwrap()
+            .join("lib/node_modules/npm/bin/npm-cli.js");
+        fs::create_dir_all(cli.parent().unwrap()).unwrap();
+        let brew = root.join("brew");
+        let prefix = host.home.join("globals");
         fs::write(&node, r##"#!/bin/sh
 shift
 if [ "$1" = ls ]; then
@@ -59,9 +63,9 @@ if [ -f "$HOME/collision" ]; then
 fi
 printf installed > "$HOME/installed"
 "##).unwrap();
-        fs::write(&mise, "#!/bin/sh\nprintf M >> \"$HOME/calls\"\nprintf '{\"node\":[{\"version\":\"20.1.0\",\"installed\":true}]}'\n").unwrap();
+        fs::write(&brew, "#!/bin/sh\nprintf M >> \"$HOME/calls\"\nprintf '{\"formulae\":[{\"full_name\":\"node\",\"installed\":[{\"version\":\"20.1.0\"}]}]}'\n").unwrap();
         fs::write(&cli, "TRUSTED_SCRIPT_NOT_LAUNCHED_DIRECTLY").unwrap();
-        for p in [&node, &mise] {
+        for p in [&node, &brew] {
             fs::set_permissions(p, fs::Permissions::from_mode(0o700)).unwrap();
         }
         Self {
@@ -71,7 +75,7 @@ printf installed > "$HOME/installed"
             bin,
             node,
             cli,
-            mise,
+            brew,
             prefix,
         }
     }
@@ -79,30 +83,17 @@ printf installed > "$HOME/installed"
         let mut c = Command::new(env!("CARGO_BIN_EXE_dort"));
         c.env_clear()
             .env("HOME", &self.host.home)
-            .env("PATH", "/no-programs")
+            .env(
+                "PATH",
+                std::env::join_paths([self.brew.parent().unwrap(), self.bin.as_path()]).unwrap(),
+            )
             .current_dir(&self.repo);
         c
     }
     fn install(&self) -> Command {
-        let runtime = serde_json::json!({"id":"runtime","provider":"mise","executable":self.mise,"search_dirs":[self.bin]}).to_string();
-        let npm = serde_json::json!({"id":"npm","provider":"npm","executable":self.node,"search_dirs":[self.bin],"runtime_tool":"node","npm_cli":self.cli,"prefix":self.prefix}).to_string();
         let mut c = self.cmd();
-        c.args(["--json", "tools", "reconcile", "--manifest"])
-            .arg(self.repo.join("dort.toml"))
-            .arg("--tool-search-dir")
-            .arg(&self.bin)
-            .args([
-                "--scope",
-                &runtime,
-                "--scope",
-                &npm,
-                "--bind",
-                "node=runtime",
-                "--bind",
-                "demo=npm",
-                "--install-tool",
-                "demo",
-            ]);
+        c.args(["--json", "tools", "install-missing", "--npm-prefix"])
+            .arg(format!("demo={}", self.prefix.display()));
         c
     }
     fn calls(&self) -> String {
@@ -126,7 +117,7 @@ fn npm_dry_run_is_process_free_and_exact_install_uses_independent_runtime_catalo
     let f = Fixture::new();
     f.install().args(["--dry-run", "--yes"]).assert().success();
     assert_eq!(f.calls(), "");
-    assert!(!f.prefix.exists());
+    assert!(!f.host.home.join("installed").exists());
     assert!(!f.host.state_dir.join("tools-attempts").exists());
     f.install().assert().code(2);
     assert_eq!(f.calls(), "");
@@ -138,7 +129,8 @@ fn npm_dry_run_is_process_free_and_exact_install_uses_independent_runtime_catalo
         .get_output()
         .clone();
     let text = String::from_utf8(output.stdout).unwrap();
-    let r: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let decoded: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let r = &decoded["installation"]["results"][0]["report"];
     assert_eq!(r["outcome"]["package"], "exact_present");
     assert_eq!(r["scope"]["npm"]["binding"]["runtime_tool"], "node");
     assert!(
@@ -147,7 +139,7 @@ fn npm_dry_run_is_process_free_and_exact_install_uses_independent_runtime_catalo
                 .unwrap()
                 .contains("PRIVATE_NPM")
     );
-    assert_eq!(f.calls(), "MNNM INM".replace(' ', "")); // Collection M,N; fresh catalogs N,M; install; post N,M.
+    assert_eq!(f.calls(), "MNMNIMN"); // Check M,N; fresh catalogs M,N; install; post M,N.
     let argv = fs::read_to_string(f.host.home.join("argv")).unwrap();
     for arg in [
         "--global",
@@ -165,7 +157,7 @@ fn npm_dry_run_is_process_free_and_exact_install_uses_independent_runtime_catalo
 fn npm_attempts_have_known_and_damaged_scope_closure_without_current_manifest() {
     let f = Fixture::new();
     fs::write(f.host.home.join("collision"), "fixture").unwrap();
-    f.install().arg("--yes").assert().code(2);
+    f.install().arg("--yes").assert().code(1);
     let a = f.attempts();
     let id = a[0]["id"].as_str().unwrap();
     assert_eq!(a[0]["unresolved"], true);

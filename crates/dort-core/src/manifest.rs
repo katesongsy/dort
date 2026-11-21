@@ -83,24 +83,16 @@ impl Manifest {
             }
             check_profiles(&tool.id, &tool.profiles, &known, true, &mut issues);
             check_references(&tool.id, &tool.requires, &tool_ids, &mut issues);
-            if tool.install.is_empty() {
-                issues.push(format!(
-                    "{}: at least one installation definition is required",
-                    tool.id
-                ));
+            if let Err(message) = validate_install(&tool.install) {
+                issues.push(format!("{}: {message}", tool.id));
             }
-            for (platform, install) in &tool.install {
-                if let Err(message) = validate_install(*platform, install) {
-                    issues.push(format!("{} ({platform:?}): {message}", tool.id));
-                }
-                if let Some(runtime) = &install.runtime_tool {
-                    check_references(
-                        &tool.id,
-                        std::slice::from_ref(runtime),
-                        &tool_ids,
-                        &mut issues,
-                    );
-                }
+            if let Some(runtime) = &tool.install.runtime_tool {
+                check_references(
+                    &tool.id,
+                    std::slice::from_ref(runtime),
+                    &tool_ids,
+                    &mut issues,
+                );
             }
         }
         let mut targets: Vec<(&str, &Path)> = vec![];
@@ -149,7 +141,7 @@ impl Manifest {
             }
         }
         // Runtime dependencies may differ by platform; do not combine mutually exclusive edges.
-        for platform in [Platform::Macos, Platform::Ubuntu] {
+        for platform in [Platform::Macos, Platform::Linux] {
             let all: BTreeSet<_> = tool_ids.iter().map(|s| (*s).to_owned()).collect();
             if let Err(e) = self.order(platform, &all) {
                 issues.push(e.to_string());
@@ -227,12 +219,6 @@ impl Manifest {
             .map(|t| t.id.clone())
             .collect();
         for tool in self.tools.iter().filter(|t| ids.contains(&t.id)) {
-            if !tool.install.contains_key(&platform) {
-                return Err(Error::Invalid(format!(
-                    "{}: no installation definition for {platform:?}",
-                    tool.id
-                )));
-            }
             for dependency in self.dependencies(tool, platform) {
                 if !ids.contains(dependency) {
                     return Err(Error::Invalid(format!(
@@ -248,16 +234,12 @@ impl Manifest {
     pub(crate) fn dependencies<'a>(
         &'a self,
         tool: &'a Tool,
-        platform: Platform,
+        _platform: Platform,
     ) -> BTreeSet<&'a str> {
         tool.requires
             .iter()
             .map(String::as_str)
-            .chain(
-                tool.install
-                    .get(&platform)
-                    .and_then(|i| i.runtime_tool.as_deref()),
-            )
+            .chain(tool.install.runtime_tool.as_deref())
             .collect()
     }
 
@@ -378,13 +360,7 @@ fn paths_overlap(a: &Path, b: &Path) -> bool {
     a.starts_with(b) || b.starts_with(a)
 }
 
-fn validate_install(platform: Platform, spec: &InstallSpec) -> std::result::Result<(), String> {
-    if matches!(
-        (platform, spec.provider),
-        (Platform::Macos, Provider::Apt) | (Platform::Ubuntu, Provider::Brew)
-    ) {
-        return Err("provider is unsupported on this platform".into());
-    }
+fn validate_install(spec: &InstallSpec) -> std::result::Result<(), String> {
     let plain = |s: &str| identifier(s) && !s.contains("..");
     let valid_package = match spec.provider {
         Provider::Brew => spec.package.split('/').all(|p| {
@@ -394,17 +370,6 @@ fn validate_install(platform: Platform, spec: &InstallSpec) -> std::result::Resu
                 && !p.starts_with('-')
                 && !p.contains("..")
         }),
-        Provider::Apt => {
-            spec.package.split(':').count() <= 2
-                && spec.package.split(':').all(|p| {
-                    !p.is_empty()
-                        && p.as_bytes()[0].is_ascii_lowercase()
-                        && p.bytes().all(|b| {
-                            b.is_ascii_lowercase() || b.is_ascii_digit() || b"+.-".contains(&b)
-                        })
-                })
-        }
-        Provider::Mise => plain(&spec.package),
         Provider::Npm => {
             if let Some(scoped) = spec.package.strip_prefix('@') {
                 scoped

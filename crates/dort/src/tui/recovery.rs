@@ -11,7 +11,7 @@ use ratatui::{
 
 pub fn rollback(row: &Diagnosis) -> bool {
     row.problem.is_none()
-        && matches!(row.journal_schema, Some(1 | 2 | 4 | 5))
+        && matches!(row.journal_schema, Some(1 | 2 | 4 | 5 | 6))
         && row.phase.is_some_and(|p| p != Phase::RolledBack)
 }
 pub fn abandon(row: &Diagnosis) -> bool {

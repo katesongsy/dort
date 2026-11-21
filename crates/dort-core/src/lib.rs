@@ -1,7 +1,7 @@
 //! UI-independent planning, experimental journalled bootstrap/file lifecycle and guarded recovery.
 //! External package work, remote Git workflows and generated/secret deployment remain deferred.
 #[cfg(not(unix))]
-compile_error!("Dort currently supports macOS and Ubuntu only.");
+compile_error!("Dort supports macOS, Linux and WSL.");
 
 pub mod adoption;
 pub mod batch;

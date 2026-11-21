@@ -69,6 +69,7 @@ fn forms_actions_and_search_keep_exact_drafts_scroll_and_focus() {
     ] {
         let mut app = App::new(false);
         app.shell.overlay = Some(Overlay::Form(form));
+        super::tests::focus_form(&mut app);
         for c in "private-draft-q?/".chars() {
             key(&mut app, KeyCode::Char(c));
         }
@@ -137,6 +138,7 @@ fn batch_item_help_does_not_edit_submit_or_render_private_drafts() {
     inert(&mut app);
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Char('e'));
+    super::tests::focus_form(&mut app);
     key(&mut app, KeyCode::Char('?')); // target field is text
     let e = app.batch_editor.as_ref().unwrap();
     let (target, focused) = (e.drafts[0].target.clone(), e.focused);
@@ -155,6 +157,7 @@ fn batch_item_help_does_not_edit_submit_or_render_private_drafts() {
 fn help_task_error_completion_and_picker_return_without_scope_changes() {
     let mut app = App::new(false);
     app.shell.overlay = Some(Overlay::Form(Form::Init));
+    super::tests::focus_form(&mut app);
     app.shell.init_draft = "private-draft".into();
     app.start(true);
     key(&mut app, KeyCode::Char('?')); // background form is not the active text surface

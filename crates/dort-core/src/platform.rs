@@ -5,35 +5,17 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "lowercase")]
 pub enum Platform {
     Macos,
-    Ubuntu,
+    Linux,
 }
 
 impl Platform {
     pub fn detect() -> Result<Self> {
         match std::env::consts::OS {
             "macos" => Ok(Self::Macos),
-            "linux" => {
-                let text = std::fs::read_to_string("/etc/os-release").map_err(|e| {
-                    crate::error::io_error("read OS identity", "/etc/os-release", e)
-                })?;
-                Self::from_os_release(&text)
-            }
+            "linux" => Ok(Self::Linux),
             other => Err(Error::Invalid(format!(
                 "unsupported operating system: {other}"
             ))),
-        }
-    }
-
-    pub fn from_os_release(text: &str) -> Result<Self> {
-        let id = text.lines().find_map(|line| {
-            line.strip_prefix("ID=")
-                .map(|v| v.trim().trim_matches(['"', '\'']))
-        });
-        match id {
-            Some("ubuntu") => Ok(Self::Ubuntu),
-            _ => Err(Error::Invalid(
-                "only Ubuntu Linux is supported (ID=ubuntu required)".into(),
-            )),
         }
     }
 }

@@ -1,4 +1,4 @@
-//! Add-only desired metadata. No provider, candidate, or package execution/ownership.
+//! Manifest-only desired metadata. No provider, candidate, or package execution/ownership.
 use crate::{
     Error, Manifest, Result,
     adoption::{self, Boundary, Event, anchors, checked_bytes, parent_identity, same},
@@ -12,12 +12,19 @@ use crate::{
     tool_journal::{Header, Journal, Operation},
 };
 use rustix::fs::{self, Mode, OFlags, RenameFlags};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     path::{Path, PathBuf},
 };
 const MAX_TOOLS: usize = 4096;
+/// Schema-6 manifest operations. Absence retains schema-5 add-only semantics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Change {
+    Edit,
+    Remove,
+}
 /// Reports contain typed declarations and identities only, never raw manifest bytes.
 #[derive(Serialize)]
 pub struct Preview {
@@ -26,6 +33,10 @@ pub struct Preview {
     pub repository: PathBuf,
     pub repository_id: String,
     pub tool: Tool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub change: Option<Change>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before: Option<Tool>,
     pub profiles: Vec<String>,
     pub no_op: bool,
     pub effects: Vec<PathBuf>,
@@ -82,30 +93,46 @@ fn clear_positions(table: &mut toml_edit::Table) {
     }
 }
 /// Pure focused edit. Semantic equality includes every unrelated declaration;
-/// comments/formatting stay in the original document. Identical typed input is no-op.
+/// unrelated comments/formatting stay in the original document. Identical edits are no-op.
 fn edit(
     bytes: &[u8],
     tool: &Tool,
     host: &HostContext,
     profiles: &[String],
     repository: &Path,
+    change: Option<Change>,
 ) -> Result<Option<Vec<u8>>> {
     if journal::encode(tool)?.len() > 32 * 1024 {
         return Err(Error::Invalid("tool declaration exceeds 32 KiB".into()));
     }
     let mut expected = parse(bytes)?;
-    if let Some(old) = expected.tools.iter().find(|t| t.id == tool.id) {
-        if journal::encode(old)? == journal::encode(tool)? {
-            return Ok(None);
+    let index = expected.tools.iter().position(|t| t.id == tool.id);
+    match (change, index) {
+        (Some(Change::Remove), Some(i)) => {
+            expected.tools.remove(i);
         }
-        return Err(Error::Invalid(
-            "tool ID already has a different declaration; updates are not supported".into(),
-        ));
+        (Some(Change::Edit), Some(i)) => {
+            if journal::encode(&expected.tools[i])? == journal::encode(tool)? {
+                return Ok(None);
+            }
+            expected.tools[i] = tool.clone();
+        }
+        (Some(_), None) => return Err(Error::Invalid("tool declaration not found".into())),
+        (None, Some(i)) => {
+            if journal::encode(&expected.tools[i])? == journal::encode(tool)? {
+                return Ok(None);
+            }
+            return Err(Error::Invalid(
+                "tool ID already has a different declaration; use edit".into(),
+            ));
+        }
+        (None, None) => {
+            if expected.tools.len() >= MAX_TOOLS {
+                return Err(Error::Invalid("tool declaration limit".into()));
+            }
+            expected.tools.push(tool.clone());
+        }
     }
-    if expected.tools.len() >= MAX_TOOLS {
-        return Err(Error::Invalid("tool declaration limit".into()));
-    }
-    expected.tools.push(tool.clone());
     // The original manifest has already passed structural parsing. These are
     // typed declaration diagnostics, never TOML parser excerpts or file bodies.
     expected.validate_for_host(host, profiles, Some(repository))?;
@@ -130,7 +157,27 @@ fn edit(
     let mut doc = text
         .parse::<toml_edit::DocumentMut>()
         .map_err(|_| Error::Invalid("cannot edit manifest (content withheld)".into()))?;
-    if doc.get("tools").is_none() {
+    if let Some(i) = index.filter(|_| change.is_some()) {
+        if let Some(a) = doc["tools"].as_array_of_tables_mut() {
+            if change == Some(Change::Remove) {
+                a.remove(i);
+            } else {
+                let mut replacement = tables.get(0).unwrap().clone();
+                replacement.set_position(a.get(i).unwrap().position());
+                *a.get_mut(i).unwrap() = replacement;
+            }
+        } else if let Some(a) = doc["tools"].as_array_mut() {
+            if change == Some(Change::Remove) {
+                a.remove(i);
+            } else {
+                a.replace(i, tables.get(0).unwrap().clone().into_inline_table());
+            }
+        } else {
+            return Err(Error::Invalid(
+                "unsupported manifest tools representation".into(),
+            ));
+        }
+    } else if doc.get("tools").is_none() {
         doc["tools"] = toml_edit::Item::ArrayOfTables(tables);
     } else if let Some(a) = doc["tools"].as_array_of_tables_mut() {
         for t in &tables {
@@ -162,6 +209,50 @@ pub fn preview(
     profiles: &[String],
     tool: Tool,
 ) -> Result<Preview> {
+    prepare(host, repository, profiles, tool, None)
+}
+/// Edit an existing declaration without changing its ID.
+pub fn preview_edit(
+    host: &HostContext,
+    repository: &Path,
+    profiles: &[String],
+    tool: Tool,
+) -> Result<Preview> {
+    prepare(host, repository, profiles, tool, Some(Change::Edit))
+}
+/// Remove desired metadata only. References must remain valid.
+pub fn preview_remove(
+    host: &HostContext,
+    repository: &Path,
+    profiles: &[String],
+    id: &str,
+) -> Result<Preview> {
+    crate::context::validate_absolute(repository)?;
+    observation::validate_output_path(repository)?;
+    if !LocalConfig::load(host)?
+        .repositories
+        .values()
+        .any(|r| r.root == repository)
+    {
+        return Err(Error::Invalid(
+            "tool declarations require an already registered repository".into(),
+        ));
+    }
+    let manifest = entry(&repository.join("dort.toml"))?;
+    let tool = parse(&checked_bytes(&manifest)?)?
+        .tools
+        .into_iter()
+        .find(|t| t.id == id)
+        .ok_or_else(|| Error::Invalid("tool declaration not found".into()))?;
+    prepare(host, repository, profiles, tool, Some(Change::Remove))
+}
+fn prepare(
+    host: &HostContext,
+    repository: &Path,
+    profiles: &[String],
+    tool: Tool,
+    change: Option<Change>,
+) -> Result<Preview> {
     crate::context::validate_absolute(repository)?;
     observation::validate_output_path(repository)?;
     let local = LocalConfig::load(host)?;
@@ -175,14 +266,30 @@ pub fn preview(
         })?;
     let manifest = entry(&repository.join("dort.toml"))?;
     let bytes = checked_bytes(&manifest)?;
-    let no_op = edit(&bytes, &tool, host, profiles, repository)?.is_none();
+    let before = change.and_then(|_| {
+        parse(&bytes)
+            .ok()?
+            .tools
+            .into_iter()
+            .find(|t| t.id == tool.id)
+    });
+    if change == Some(Change::Remove)
+        && before.as_ref().map(journal::encode).transpose()? != Some(journal::encode(&tool)?)
+    {
+        return Err(Error::Invalid(
+            "declaration changed during preparation; review again".into(),
+        ));
+    }
+    let no_op = edit(&bytes, &tool, host, profiles, repository, change)?.is_none();
     let local_config = observation::inspect(&host.local_config_path(), false)?;
     let mut p = Preview {
-        schema: 1,
+        schema: if change.is_some() { 2 } else { 1 },
         preview_only: true,
         repository: repository.to_owned(),
         repository_id,
         tool,
+        change,
+        before,
         profiles: profiles.to_vec(),
         no_op,
         effects: if no_op {
@@ -270,7 +377,7 @@ fn validate_scope(host: &HostContext, j: &Journal) -> Result<()> {
     }
     j.verify_backup()?;
     let bytes = journal::read_bytes(&j.directory, "manifest.backup")?;
-    if edit(&bytes, &h.tool, host, &h.profiles, &h.repository)?
+    if edit(&bytes, &h.tool, host, &h.profiles, &h.repository, h.change)?
         .as_ref()
         .map(|b| journal::digest(b))
         .as_ref()
@@ -349,7 +456,13 @@ pub fn execute(
             "declaration approval belongs to another host".into(),
         ));
     }
-    let fresh = preview(host, &old.repository, &old.profiles, old.tool.clone())?;
+    let fresh = prepare(
+        host,
+        &old.repository,
+        &old.profiles,
+        old.tool.clone(),
+        old.change,
+    )?;
     if old.binding != fresh.binding {
         return Err(Error::Invalid(
             "stale declaration preview; inspect and approve again".into(),
@@ -365,6 +478,7 @@ pub fn execute(
         host,
         &fresh.profiles,
         &fresh.repository,
+        fresh.change,
     )?
     .ok_or_else(|| Error::Invalid("declaration unexpectedly became no-op".into()))?;
     let h = Header {
@@ -373,6 +487,7 @@ pub fn execute(
         transaction_id: adoption::transaction_id(),
         approved_plan_sha256: old.binding,
         tool: fresh.tool,
+        change: fresh.change,
         profiles: fresh.profiles,
         anchors: anchors(&[&fresh.manifest, &fresh.local_config]),
         manifest: fresh.manifest,

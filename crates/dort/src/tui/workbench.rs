@@ -11,6 +11,12 @@ use ratatui::{Frame, layout::Rect, text::Text, widgets::Paragraph};
 
 pub fn shortcut(action: Action) -> &'static str {
     match action {
+        Action::ToolsCheck => "C",
+        Action::ToolsInstallMissing => "i",
+        Action::ToolsConfigure => "s",
+        Action::ToolsInstalled => "v",
+        Action::ToolDeclaration => "a",
+        Action::ToolAttempts => "h",
         Action::Init => "n",
         Action::Choose => "p",
         Action::Discover => "f",
@@ -162,12 +168,34 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
     }
     if !app.busy
         && (app.page_title().is_some() || app.dialog_title().is_some())
+        && !(app.tab == Tab::Tools
+            && app.tools_view.at_root()
+            && app.error.is_none()
+            && !app.show_result)
         && !result.iter().any(|a| a.key == "Esc")
     {
         result.push(ui::ActionButton {
-            label: "Back",
+            label: if app.form_page().is_some() && app.form_has_focus() {
+                "Stop editing"
+            } else {
+                "Back"
+            },
             key: "Esc",
             target: Target::Back,
+        });
+    }
+    if app.form_page().is_some() && app.form_has_focus() {
+        for action in &mut result {
+            if action.key == "Esc" {
+                action.label = "Stop editing";
+            }
+        }
+    }
+    if app.form_page().is_some() && !app.form_has_focus() {
+        result.push(ui::ActionButton {
+            label: "Edit fields",
+            key: "Tab",
+            target: Target::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
         });
     }
     if app.shell.overlay.is_none()
@@ -193,20 +221,30 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
             }
         }
     }
-    if app.tab == Tab::Tools && app.tools_view.browsing_inventory() {
-        for action in app.tools_view.browse_actions() {
-            if !result.iter().any(|a| a.label == action.label) {
-                result.push(action);
-            }
-        }
-    }
     for action in &mut result {
         action.key = super::navigation::context_key(action.key);
     }
     result
 }
 fn compact(label: &'static str) -> &'static str {
-    if label.starts_with("Review") {
+    if matches!(
+        label,
+        "First tool details" | "Tool details" | "Installation details" | "Package details"
+    ) {
+        "Details"
+    } else if label == "Run inspection" {
+        "Inspect"
+    } else if label == "Installation history" {
+        "History"
+    } else if matches!(label, "Edit first declaration" | "Edit declaration") {
+        "Edit"
+    } else if label == "Add declaration" {
+        "Add"
+    } else if label == "Remove declaration" {
+        "Remove"
+    } else if label == "Tool settings" {
+        "Settings"
+    } else if label.starts_with("Review") {
         "Review"
     } else if label.starts_with("Install") {
         "Install"
@@ -218,9 +256,15 @@ fn compact(label: &'static str) -> &'static str {
         "Find sources"
     } else if label.starts_with("Load") {
         "Load"
+    } else if label.starts_with("Done") {
+        "Done"
+    } else if label == "Stop editing" {
+        "Unfocus"
+    } else if label.starts_with("Confirm") {
+        "Confirm"
     } else if label.starts_with("Continue") {
         "Continue"
-    } else if label.starts_with("Check") {
+    } else if label == "Run checks" || label.starts_with("Check") {
         "Check"
     } else if label.starts_with("Apply") {
         "Apply"
@@ -260,13 +304,26 @@ pub(super) fn strip_actions(
             target: Target::Action(Action::Help),
         });
     }
-    // Keep the primary and Back visible before secondary controls.
-    available.sort_by_key(|a| match a.key {
-        "Enter" => 0,
-        "Esc" => 1,
-        "F1" => 2,
-        _ => 3,
-    });
+    // Controllers supply relevance order; navigation keeps reserved trailing positions.
+    available.sort_by_key(|a| usize::from(a.key != "Enter"));
+    let mut anchors: Vec<_> = available
+        .iter()
+        .copied()
+        .filter(|a| matches!(a.key, "Esc" | "F1"))
+        .collect();
+    anchors.sort_by_key(|a| usize::from(a.key == "F1"));
+    available.retain(|a| !matches!(a.key, "Esc" | "F1"));
+    let reserved: usize = anchors
+        .iter()
+        .map(|a| {
+            let label = if width < 80 {
+                compact(a.label)
+            } else {
+                a.label
+            };
+            ratatui::text::Line::raw(format!(" {} {} ", a.key, label)).width() + 1
+        })
+        .sum();
     let more_allowed = app.more.is_none()
         && app.choice.is_none()
         && app.help.is_none()
@@ -275,6 +332,7 @@ pub(super) fn strip_actions(
     let mut shown: Vec<ui::ActionButton> = Vec::new();
     let mut hidden: Vec<ui::ActionButton> = Vec::new();
     let mut used = 0usize;
+    let mut overflowed = false;
     for action in available {
         if shown.iter().chain(&hidden).any(|a| a.label == action.label) {
             continue;
@@ -291,19 +349,23 @@ pub(super) fn strip_actions(
         if !action.key.is_empty()
             && !(app.text_entry() && (action.key.chars().count() == 1 || action.key == "Space"))
             && enabled
-            && shown.len() < 8
+            && !overflowed
+            && shown.len() + anchors.len() < 8
             && !shown.iter().any(|a| a.key == action.key)
-            && used + cells <= usize::from(width)
+            && used + cells + reserved <= usize::from(width)
         {
             used += cells;
             shown.push(action);
         } else if more_allowed && super::more::eligible(app, &action) {
+            overflowed |= enabled && !action.key.is_empty();
             hidden.push(action);
         }
     }
     if !hidden.is_empty() {
         let more_width = " F2 More ".len();
-        while !shown.is_empty() && (shown.len() >= 8 || used + 1 + more_width > usize::from(width))
+        while !shown.is_empty()
+            && (shown.len() + anchors.len() >= 8
+                || used + reserved + 1 + more_width > usize::from(width))
         {
             let action = shown.pop().expect("nonempty");
             let label = if width < 80 {
@@ -341,6 +403,16 @@ pub(super) fn strip_actions(
             primary: false,
         });
     }
+    output.extend(anchors.into_iter().map(|a| StripAction {
+        key: a.key,
+        label: if width < 80 {
+            compact(a.label)
+        } else {
+            a.label
+        },
+        target: a.target,
+        primary: false,
+    }));
     (output, hidden)
 }
 fn strip(frame: &mut Frame, area: Rect, app: &App) {
@@ -359,7 +431,6 @@ fn title(app: &App) -> &'static str {
         Tab::Checks if app.showing_diagnostics => "Checks / Diagnostics",
         Tab::Checks => "Checks / Manifest",
         Tab::Git => super::navigation::location(app),
-        Tab::Tools if app.tools_view.browsing_inventory() => "Tools / Installed packages",
         Tab::Tools => "Tools",
     }
 }
@@ -391,7 +462,7 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
             if preview.pending.adoption() {
                 "Adopt all"
             } else {
-                "Continue"
+                "Confirm changes"
             },
             "Enter",
             Target::Continue,
@@ -457,8 +528,9 @@ fn overlay(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
     app.hits.begin(area);
-    app.hits
-        .input_focus(app.dialog_title().is_none() && app.navigation.menu.is_none());
+    app.hits.input_focus(
+        app.dialog_title().is_none() && app.navigation.menu.is_none() && app.form_has_focus(),
+    );
     if area.width < 48 || area.height < 14 {
         ui::prose(
             frame,
@@ -578,6 +650,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
             match app.tab {
                 Tab::Files => super::files::draw(frame, body, app),
                 Tab::Git => app.git_view.draw(frame, body, app.busy, &app.hits),
+                Tab::Tools if app.tools_view.landing() => {
+                    super::declared_tools::draw(frame, body, app)
+                }
                 Tab::Tools => app.tools_view.draw(frame, body, app.dry_run, &app.hits),
                 Tab::Overview => super::observations::overview(frame, body, app),
                 Tab::Checks => super::observations::checks(frame, body, app),

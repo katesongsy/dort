@@ -26,7 +26,8 @@ fn shared_outcomes_distinguish_native_failure_present_absent_conflict_and_unknow
         let f = Fixture::new(mode);
         let out = f.install().arg("--yes").output().unwrap();
         assert_eq!(out.status.code(), Some(1));
-        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let decoded: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let report = &decoded["installation"]["results"][0]["report"];
         assert_eq!(report["summary"]["status"], status);
         assert_eq!(report["outcome"]["process"], process);
         assert_eq!(report["outcome"]["package"], package);
@@ -38,7 +39,7 @@ fn shared_outcomes_distinguish_native_failure_present_absent_conflict_and_unknow
             report["summary"]["next_step_hint"]
                 .as_str()
                 .unwrap()
-                .contains("explicitly bind")
+                .contains("Check installed again")
         );
         let root = f.host.state_dir.join("tools-attempts");
         let before = artifacts(&root);

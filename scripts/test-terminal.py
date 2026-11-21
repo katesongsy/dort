@@ -18,6 +18,8 @@ import tempfile
 import termios
 import time
 
+from terminal_tools import tools_workflows, interaction_surface_workflows
+
 ROOT = Path(__file__).resolve().parent.parent
 TIMEOUT = 20
 
@@ -205,6 +207,12 @@ class Session:
                 return
         raise AssertionError("Click target was not visible")
 
+    def edit_fields(self, label):
+        self.wait(label.encode())
+        self.settle()
+        self.send(b'\t')  # Forms start outside editing.
+        self.focused_field(label)
+
     def focused_field(self, label):
         self.wait(label.encode())
         self.settle()
@@ -230,7 +238,7 @@ class Session:
             'Recovery': ['All repositories'],
             'Checks': ['Manifest checks', 'Diagnostics'],
             'Git': ['Status', 'Unstaged', 'Staged', 'Choose Git scope', 'Follow selected repository'],
-            'Tools': ['Inventory', 'Session snapshots', 'Reconcile snapshots', 'Installation attempts', 'Add tool declaration', 'Inspect installed tools'],
+            'Tools': ['Declared tools', 'Installed tools', 'Installation history'],
         }
         rows, columns = len(self.screen.cells), len(self.screen.cells[0])
         modal_width, modal_height = min(columns - 2, 72), min(rows - 3, 16)
@@ -244,7 +252,7 @@ class Session:
         self.settle()
 
     def destination(self, group):
-        items = {"Overview": "Overview", "Files": "Managed",
+        items = {"Overview": "Overview", "Files": "Managed", "Tools": "Declared tools",
                  "Recovery": "All repositories", "Checks": "Manifest checks [m]"}
         if group == "Git":
             self.navigate("Git", "Choose Git scope [g]")
@@ -272,14 +280,6 @@ class Session:
                 return
             self.send(b'\x1b[B')
         raise AssertionError('More action was not keyboard reachable: ' + label)
-
-    def choose_snapshot(self, number):
-        self.wait(b'Enter Compare')  # The binding page, not its retained loading title.
-        self.settle()
-        self.send(b' ')
-        self.wait(b'Choose inspection')
-        self.send(b'\x1b[H' + b'\x1b[B' * number + b'\r')
-        self.settle()
 
     def closure_provider(self, number):
         self.send(b'\x1bOS')  # F4 opens an explicit choice, never a provider cycle.
@@ -330,827 +330,6 @@ def has_color_sgr(data):
                for value in [int(part or b"0") for part in match[1].split(b";")])
 
 
-def tools_workflows(binary, base, env):
-    home = base / 'tools-home'
-    home.mkdir(mode=0o700)
-    tools_env = dict(env, HOME=str(home), PATH='/no-external-programs', XDG_CONFIG_HOME=str(home / '.config'),
-                     XDG_STATE_HOME=str(home / '.local/state'))
-    executable = base / 'fake-provider'
-    executable.write_text('#!/bin/sh\nprintf ran >> "$HOME/calls"\n'
-                          "printf '{\"formulae\":[{\"full_name\":\"ripgrep\",\"installed\":[{\"version\":\"14.1.0\"}]}]}'\n")
-    executable.chmod(0o700)
-    auto_home, auto_bin = base / 'defaults-home', base / 'defaults-bin'
-    auto_home.mkdir(mode=0o700)
-    auto_bin.mkdir(mode=0o700)
-    (auto_bin / 'brew').write_bytes(executable.read_bytes())
-    (auto_bin / 'brew').chmod(0o700)
-    auto_env = dict(tools_env, HOME=str(auto_home), PATH=str(auto_bin),
-                    XDG_CONFIG_HOME=str(auto_home / '.config'),
-                    XDG_STATE_HOME=str(auto_home / '.local/state'))
-    with Session([binary, 'tui'], auto_env) as session:
-        session.wait(b'loaded.')
-        session.navigate('Tools', 'Inspect installed tools [c]')
-        session.wait(b'[x] Homebrew')
-        assert not (auto_home / 'calls').exists(), 'Default discovery executed a provider'
-        session.send(b'd')
-        session.wait(b'Exact inspection scopes')
-        assert not (auto_home / 'calls').exists(), 'Scope details executed a provider'
-        session.send(b'd')
-        session.click_action('Inspect installed tools')
-        session.wait(b'Snapshot s1')
-        assert (auto_home / 'calls').read_text() == 'ran', 'Collection did not execute exactly once'
-        session.send(b'C')
-        session.wait(b'[x] Homebrew')
-        assert (auto_home / 'calls').read_text() == 'ran', 'Refresh replayed approval'
-        session.send(b'q')
-        session.finish()
-    with Session([binary, '--dry-run', 'tui'], auto_env, (14, 48)) as session:
-        session.wait(b'loaded.')
-        session.navigate('Tools', 'Inspect installed tools [c]')
-        session.wait(b'[x] Homebrew')
-        session.send(b'\r')
-        session.settle()
-        assert (auto_home / 'calls').read_text() == 'ran', 'Preview-only defaults executed'
-        session.send(b'q')
-        session.finish()
-    print('PASS default discovery, exact scopes, one-click collection and compact preview-only guard')
-    with Session([binary, 'tui'], tools_env) as session:
-        session.wait(b'loaded.')
-        session.navigate('Tools', 'Inspect installed tools [c]')
-        session.wait(b'Inspect installed tools')
-        session.send(b'e' + str(executable).encode() + b'\t\x15/no-external-programs\t\r')
-        session.wait(b'Run query')
-        assert not (home / 'calls').exists(), 'Provider executed during review'
-        session.resize((13, 47))
-        session.wait(b'terminal too small')
-        session.resize((24, 80))
-        session.wait(b'Review exact query')
-        assert not (home / 'calls').exists(), 'Resize executed inspection'
-        session.send(b'\r')
-        session.wait(b'Run query')
-        session.send(b'\r')
-        session.wait(b'1/1 reported')
-        session.settle()
-        assert b'Search metadata' not in session.screen.text()
-        assert session.screen.text().count(b'F1 Help') == 1, 'Inventory has duplicate action hints'
-        session.send(b'\x1bOQ')  # F2 is contextual More on the migrated inventory surface.
-        session.wait(b'More actions')
-        assert (home / 'calls').read_text() == 'ran', 'Opening More ran a provider'
-        session.mouse(0, 0, 0)
-        session.settle()
-        assert b'More actions' in session.screen.text(), 'Outside click dismissed More'
-        session.send(b'\x1b')
-        session.settle()
-        session.wait(b'Filter packages')
-        assert (home / 'calls').read_text() == 'ran', 'Dismissing More replayed approval'
-        session.send(b'/RIPGREP\r')
-        session.wait(b'ripgrep')
-        session.send(b'R')
-        session.wait(b'Run query')
-        session.settle()
-        assert (home / 'calls').read_text() == 'ran', 'Retry replayed inspection approval'
-        session.send(b'\x1b')
-        session.wait(b'Trusted executable')
-        session.send(b'\x1b')
-        session.wait(b'Filter packages')
-        session.send(b'q')
-        session.finish()
-    assert sorted(p.name for p in home.iterdir()) == ['calls'], 'Inspection created Dort state'
-    print('PASS Tools query review, explicit activation, resize, search and fresh retry')
-    with Session([binary, '--dry-run', 'tui'], tools_env, (14, 48)) as session:
-        session.wait(b'loaded.')
-        session.navigate('Tools', 'Inspect installed tools [c]')
-        session.wait(b'Homebrew')
-        session.send(b'e' + str(executable).encode() + b'\t\x15/no-external-programs\t\r')
-        session.wait(b'execution disabled')
-        session.send(b'\r')
-        session.settle()
-        assert (home / 'calls').read_text() == 'ran'
-        session.send(b'\x1b')
-        session.wait(b'Enter Review')
-        session.settle()
-        session.send(b'\x1b')
-        session.wait(b'No inspection collected yet.')
-        session.send(b'q')
-        session.finish()
-    print('PASS compact preview-only Tools cannot execute providers')
-    with Session([binary, 'tools', 'inspect', 'brew', '--executable', str(executable),
-                  '--search-dir', '/no-external-programs'], tools_env) as session:
-        session.wait(b'Run query? [y/N]')
-        assert (home / 'calls').read_text() == 'ran'
-        session.send(b'y\n')
-        session.finish(tui=False)
-    assert (home / 'calls').read_text() == 'ranran'
-    assert sorted(p.name for p in home.iterdir()) == ['calls']
-    print('PASS interactive CLI provider inspection uses simple y/N confirmation')
-
-
-def tool_declaration_workflows(binary, base, env):
-    home, repo, bin_dir = (base / name for name in ('declaration-home', 'declaration-repo', 'declaration-bin'))
-    for directory in (home, repo, bin_dir):
-        directory.mkdir(mode=0o700)
-    (repo / '.git').mkdir()
-    original = '# retained declaration fixture\nschema=1\n'
-    (repo / 'dort.toml').write_text(original)
-    git = bin_dir / 'git'
-    git.write_text('#!/bin/sh\nfor arg do\ncase "$arg" in\nconfig) exit 1;;\nrev-parse) pwd -P; exit 0;;\nstatus) printf "# branch.head main\\000"; exit 0;;\nesac\ndone\nexit 94\n')
-    git.chmod(0o700)
-    provider = bin_dir / 'demo'
-    provider.write_text('#!/bin/sh\nprintf ran > "$HOME/PROVIDER-RAN"\n')
-    provider.chmod(0o700)
-    scoped = dict(env, HOME=str(home), PATH=str(bin_dir), XDG_CONFIG_HOME=str(home / '.config'),
-                  XDG_STATE_HOME=str(home / '.local/state'))
-    subprocess.run([binary, '--json', '--yes', 'init', str(repo)], env=scoped,
-                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    with Session([binary, 'tui'], scoped) as session:
-        session.wait(b'loaded.')
-        session.navigate('Tools', 'Inspect installed tools [c]')
-        session.wait(b'Homebrew formulae')
-        session.send(b'a')
-        session.wait(b'Add tool declaration')
-        session.send(b'demo\tdemo\t\t ')
-        session.wait(b'macOS declaration provider')
-        session.send(b'\x1b[H\x1b[B\r\tdemo\t\t ')
-        session.wait(b'Ubuntu declaration provider')
-        session.send(b'\x1b[H\x1b[B\r\tdemo')
-        session.wait(b'Review declaration')
-        session.send(b'\x1b')
-        session.wait(b'No inspection collected yet.')
-        session.send(b'a\r')  # Retained complete draft, not typed confirmation.
-        session.wait(b'Already declared: false')
-        assert (repo / 'dort.toml').read_text() == original
-        session.send(b'\r')
-        session.wait(b'Confirm')
-        assert (repo / 'dort.toml').read_text() == original
-        session.click_action('Confirm')
-        session.wait(b'Tool declaration completed.')
-        session.send(b'q')
-        session.finish()
-    assert '[[tools]]' in (repo / 'dort.toml').read_text()
-    output = subprocess.run([binary, '--json', 'history'], env=scoped,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    row = next(r for r in json.loads(output.stdout)['transactions'] if r['journal_schema'] == 5)
-    with Session([binary, 'tui'], scoped, (14, 48)) as session:
-        session.wait(b'loaded.')
-        session.destination('Recovery')
-        session.send(b'/' + row['transaction_id'][:16].encode() + b'\rb')
-        session.wait(b'Rollback schema 5')
-        session.send(b'\r')
-        session.wait(b'Confirm')
-        session.send(b'\r')
-        session.wait(b'Operation result')
-        session.send(b'q')
-        session.finish()
-    assert (repo / 'dort.toml').read_text() == original
-    assert not (home / 'PROVIDER-RAN').exists()
-    print('PASS retained multi-platform tool declaration, click confirmation and compact schema-5 Recovery')
-
-    mise = bin_dir / 'mise'
-    mise.write_text('#!/bin/sh\nprintf Q >> "$HOME/inspection-calls"\nprintf \'{"observed":[{"version":"1.2.3","installed":true}]}\'\n')
-    mise.chmod(0o700)
-    with Session([binary, 'tui'], scoped, (14, 48)) as session:
-        session.wait(b'loaded.')
-        session.navigate('Tools', 'Inspect installed tools [c]')
-        session.wait(b'[x] mise')
-        assert not (home / 'inspection-calls').exists()
-        session.send(b'\r')
-        session.wait(b'1/1 reported')
-        session.more_action('Add selected to repository')
-        session.focused_field('Tool ID')
-        assert (home / 'inspection-calls').read_text() == 'Q'
-        session.send(b'observed\tobserved\r')
-        session.wait(b'Already declared: false')
-        assert (repo / 'dort.toml').read_text() == original
-        session.send(b'\r')
-        session.wait(b'Confirm')
-        session.send(b'\r')
-        session.wait(b'Tool declaration completed.')
-        session.send(b'q')
-        session.finish()
-    declared = (repo / 'dort.toml').read_text()
-    assert '[[tools]]' in declared and 'observed' in declared and '1.2.3' in declared
-    assert (home / 'inspection-calls').read_text() == 'Q', 'Declaration replayed inspection'
-    assert not (home / 'PROVIDER-RAN').exists(), 'Declaration executed a candidate'
-    print('PASS observed package to retained declaration with one inspection and explicit save')
-
-
-def tools_reconciliation_workflows(binary, base, env):
-    home = base / 'reconciliation-home'
-    home.mkdir(mode=0o700)
-    lookup = base / 'reconciliation-bin'
-    lookup.mkdir(mode=0o700)
-    scoped_env = dict(env, HOME=str(home), PATH='/no-external-programs', XDG_CONFIG_HOME=str(home / '.config'),
-                      XDG_STATE_HOME=str(home / '.local/state'))
-    manifest = base / 'reconciliation.toml'
-    manifest.write_text("schema=1\n[[tools]]\nid='node'\nbinary='node'\n[tools.install]\n"
-                        "macos={provider='mise',package='node',version='22'}\nubuntu={provider='mise',package='node',version='22'}\n"
-                        "[[tools]]\nid='rg'\nbinary='rg'\n[tools.install]\n"
-                        "macos={provider='mise',package='rg'}\nubuntu={provider='mise',package='rg'}\n")
-    scopes = []
-    for name, package, version in [('first', 'node', '22.1.0'), ('second', 'rg', '14.1.0')]:
-        executable = base / ('reconciliation-' + name)
-        payload = json.dumps({package: [{'version': version, 'installed': True}]})
-        executable.write_text('#!/bin/sh\nif [ "$1" = install ]; then printf ran > "$HOME/INSTALL-RAN"; fi\nprintf "' + name + '\\n" >> "$HOME/calls"\nprintf \'%s\' \'' + payload + "'\n")
-        executable.chmod(0o700)
-        scopes.append({'id': name, 'provider': 'mise', 'executable': str(executable),
-                       'search_dirs': ['/no-external-programs']})
-    candidate = lookup / 'node'
-    candidate.write_text('#!/bin/sh\nprintf PRIVATE > "$HOME/candidate-executed"\n')
-    candidate.chmod(0o700)
-    with Session([binary, 'tui'], scoped_env) as session:
-        session.wait(b'loaded.')
-        session.navigate('Tools', 'Inspect installed tools [c]')
-        session.wait(b'Inspect installed tools')
-        session.send(b'e\x1b[Z ')
-        session.wait(b'Choose inspection provider')
-        session.send(b'\x1b[H\x1b[B\x1b[B\r\t' + scopes[0]['executable'].encode() + b'\t\x15/no-external-programs\r')
-        session.wait(b'Run query')
-        session.send(b'\r')
-        session.wait(b'Snapshot s1')
-        session.send(b'e\t\x15' + scopes[1]['executable'].encode() + b'\t\t\r')
-        session.wait(b'Run query')
-        session.send(b'\r')
-        session.wait(b'Snapshot s2')
-        assert (home / 'calls').read_text() == 'first\nsecond\n'
-        session.send(b's')
-        session.wait(b'Session snapshots')
-        session.send(b'\x1b[A\r')
-        session.wait(b'Snapshot s1')
-        session.send(b'p' + str(manifest).encode() + b'\t' + str(lookup).encode() + b'\t\t\r')
-        session.wait(b'Not observed')
-        session.choose_snapshot(1)
-        session.send(b'\t')
-        session.choose_snapshot(2)
-        session.send(b'\r')  # node=s1, rg=s2, then compare.
-        session.wait(b'Package proposals/no-ops only')
-        session.send(b'\r')
-        session.wait(b'analysis_scope')
-        session.send(b'\x1b[6~\x1b[H')
-        session.wait(b'analysis_scope')
-        session.send(b'\x1b')
-        session.wait(b'Package proposals/no-ops only')
-        session.send(b'\x1b')
-        session.wait(b'Load declarations')
-        session.send(b'\r')
-        session.wait(b'Enter Compare')
-        session.click_label('rg (rg)')
-        session.choose_snapshot(1)  # rg=s1 explicitly (package absent there).
-        session.send(b'\r')
-        session.wait(b'Review only')
-        session.send(b'\x1b[B\r')
-        for _ in range(100):
-            session.settle()
-            if b'PREVIEW ONLY' in session.screen.text():
-                break
-            session.send(b'\x1b[6~')
-        session.wait(b'PREVIEW ONLY')
-        assert not (home / 'INSTALL-RAN').exists()
-        session.send(b'\x1b')
-        session.wait(b'Review only')
-        session.send(b'\x1b')
-        session.wait(b'Load declarations')
-        session.send(b'\x1b')
-        session.wait(b'Filter packages')
-        session.send(b's')
-        session.wait(b'Session snapshots')
-        session.send(b'x')
-        session.settle()
-        assert b's1 |' not in session.screen.text() and b's2 |' in session.screen.text()
-        assert (home / 'calls').read_text() == 'first\nsecond\n'
-        assert not (home / 'candidate-executed').exists()
-        session.send(b'\x1b')
-        session.wait(b'Filter packages')
-        session.send(b'q')
-        session.finish()
-    print('PASS multiple snapshots, explicit bindings, non-executable command previews and forget without queries')
-    cli = [binary, 'tools', 'reconcile', '--manifest', str(manifest), '--tool-search-dir', str(lookup),
-           '--bind', 'node=first', '--bind', 'rg=second']
-    for scope in scopes:
-        cli.extend(['--scope', json.dumps(scope)])
-    before = (home / 'calls').read_text()
-    with Session(cli, scoped_env) as session:
-        session.wait(b'Snapshot first:')
-        assert (home / 'calls').read_text() == before
-        session.send(b'y\n')
-        session.wait(b'Snapshot second:')
-        assert (home / 'calls').read_text() == before + 'first\n'
-        session.send(b'y\n')
-        session.finish(tui=False)
-    assert (home / 'calls').read_text() == before + 'first\nsecond\n'
-    assert not (home / 'candidate-executed').exists()
-    assert sorted(p.name for p in home.iterdir()) == ['calls']
-    print('PASS CLI reconciliation separately confirms each fixed inspection scope')
-
-
-def tool_install_workflows(binary, base, env):
-    home, repo, bin_dir, lookup = (base / name for name in ('install-home', 'install-repo', 'install-bin', 'install-lookup'))
-    for directory in (home, repo, bin_dir, lookup):
-        directory.mkdir(mode=0o700)
-    (repo / '.git').mkdir()
-    (repo / 'dort.toml').write_text("schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='mise',package='demo',version='1.2.3'}\nubuntu={provider='mise',package='demo',version='1.2.3'}\n")
-    git = bin_dir / 'git'
-    git.write_text('#!/bin/sh\nfor arg do\ncase "$arg" in\nconfig) exit 1;;\nrev-parse) pwd -P; exit 0;;\nstatus) printf "# branch.head main\\000"; exit 0;;\nesac\ndone\nexit 94\n')
-    git.chmod(0o700)
-    mise = bin_dir / 'mise'
-    mise.write_text('#!/bin/sh\nif [ "$1" = ls ]; then\nprintf Q >> "$HOME/calls"\nif [ -f "$HOME/installed" ]; then printf \'{"demo":[{"version":"1.2.3","installed":true}]}\'; else printf "{}"; fi\nexit 0\nfi\nprintf I >> "$HOME/calls"\nprintf started > "$HOME/started"\nprintf PRIVATE_INSTALL_OUTPUT; printf PRIVATE_INSTALL_ERROR >&2\nn=0\nwhile [ ! -f "$HOME/release" ] && [ "$n" -lt 2000000 ]; do n=$((n+1)); done\nprintf installed > "$HOME/installed"\n')
-    mise.chmod(0o700)
-    scoped = dict(env, HOME=str(home), PATH=str(bin_dir), XDG_CONFIG_HOME=str(home / '.config'),
-                  XDG_STATE_HOME=str(home / '.local/state'))
-    subprocess.run([binary, '--json', '--yes', 'init', str(repo)], env=scoped,
-                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    with Session([binary, 'tui'], scoped) as session:
-        session.wait(b'loaded.')
-        session.navigate('Tools', 'Inspect installed tools [c]')
-        session.wait(b'[x] mise')
-        assert not (home / 'calls').exists(), 'Defaults executed mise'
-        session.send(b'\r')
-        session.wait(b'0 packages reported')
-        session.send(b'p' + str(repo / 'dort.toml').encode() + b'\t' + str(lookup).encode() + b'\t\t\r')
-        session.wait(b'Compare')
-        session.choose_snapshot(1)
-        session.send(b'\r')
-        session.wait(b'Package proposals/no-ops only')
-        session.more_action('Review exact mise')
-        session.wait(b'Enter Install')
-        assert (home / 'calls').read_text() == 'Q', 'Review executed a new query or install'
-        session.resize((14, 48))
-        session.wait(b'Enter Install')
-        session.send(b'd')
-        session.wait(b'Tools installation details')
-        session.send(b'd')
-        session.click_action('Install')
-        session.wait(b'Installing package')
-        session.send(b'q')
-        session.wait(b'waiting for worker')
-        (home / 'release').write_text('release fixture')
-        session.finish()
-        assert b'PRIVATE_INSTALL' not in session.data, 'Raw provider output reached terminal'
-    assert (home / 'calls').read_text() == 'QQIQ'
-    assert (home / 'installed').exists(), 'Quit did not join the approved install'
-    print('PASS exact mise review, compact scope, one-click install, typed progress and joined quit')
-    attempts = home / '.local/state/dort/tools-attempts'
-    damaged = attempts / ('0' * 64)
-    damaged.mkdir(mode=0o700)
-    before = (home / 'calls').read_text()
-    with Session([binary, 'tui'], scoped, (14, 48)) as session:
-        session.wait(b'loaded.')
-        session.navigate('Tools', 'Installation attempts [i]')
-        session.wait(b'UNRESOLVED')
-        session.send(b'C')
-        session.wait(b'Trusted mise executable')
-        session.send(str(mise).encode() + b'\t' + str(bin_dir).encode() + b'\t\r')
-        session.wait(b'Enter Inspect')
-        assert (home / 'calls').read_text() == before, 'Closure review executed mise'
-        session.send(b'\r')
-        session.wait(b'Explicitly closed')
-        session.send(b'\x1b')
-        session.wait(b'Tools /')
-        session.send(b'q')
-        session.finish()
-    assert (home / 'calls').read_text() == before + 'Q'
-    print('PASS compact all-repository attempt inspection, missing-scope draft and one-activation closure')
-
-
-def npm_install_workflows(binary, base, env):
-    home, repo, bin_dir = (base / name for name in ('npm-home', 'npm-repo', 'npm-bin'))
-    for directory in (home, repo, bin_dir):
-        directory.mkdir(mode=0o700)
-    (repo / '.git').mkdir()
-    manifest = repo / 'dort.toml'
-    manifest.write_text("schema=1\n[[tools]]\nid='node'\nbinary='node'\n[tools.install]\nmacos={provider='mise',package='node',version='20.1.0'}\nubuntu={provider='mise',package='node',version='20.1.0'}\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='npm',package='demo',version='1.2.3',runtime_tool='node'}\nubuntu={provider='npm',package='demo',version='1.2.3',runtime_tool='node'}\n")
-    git = bin_dir / 'git'
-    git.write_text('#!/bin/sh\nfor arg do\ncase "$arg" in\nconfig) exit 1;;\nrev-parse) pwd -P; exit 0;;\nstatus) printf "# branch.head main\\000"; exit 0;;\nesac\ndone\nexit 94\n')
-    mise = bin_dir / 'mise'
-    mise.write_text('#!/bin/sh\nprintf M >> "$HOME/calls"\nprintf \'{"node":[{"version":"20.1.0","installed":true}]}\'\n')
-    node = bin_dir / 'node'
-    node.write_text('#!/bin/sh\nshift\nif [ "$1" = ls ]; then\nprintf N >> "$HOME/calls"\nif [ -f "$HOME/installed" ]; then printf \'{"dependencies":{"demo":{"version":"1.2.3"}}}\'; else printf \'{"dependencies":{}}\'; fi\nexit 0\nfi\nprintf I >> "$HOME/calls"\nprintf started > "$HOME/started"\nprintf PRIVATE_NPM_OUTPUT; printf PRIVATE_NPM_ERROR >&2\nn=0\nwhile [ ! -f "$HOME/release" ] && [ "$n" -lt 10000000 ]; do n=$((n+1)); done\nprintf installed > "$HOME/installed"\n')
-    for program in (git, mise, node):
-        program.chmod(0o700)
-    cli = home / 'npm-cli.js'
-    cli.write_text('TRUSTED_CLI_NOT_EXECUTED_DIRECTLY')
-    prefix = home / 'global-prefix'
-    scoped = dict(env, HOME=str(home), PATH=str(bin_dir), XDG_CONFIG_HOME=str(home / '.config'),
-                  XDG_STATE_HOME=str(home / '.local/state'))
-    subprocess.run([binary, '--json', '--yes', 'init', str(repo)], env=scoped,
-                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    with Session([binary, 'tui'], scoped, (40, 120)) as session:
-        session.wait(b'loaded.')
-        session.navigate('Tools', 'Inspect installed tools [c]')
-        session.wait(b'[x] mise')
-        session.send(b'\r')
-        session.wait(b'node')
-        assert (home / 'calls').read_text() == 'M'
-        session.send(b'C')
-        session.wait(b'Inspect installed tools')
-        session.send(b'\x1b[Be')  # Move from mise to npm, then Advanced.
-        session.wait(b'Global npm prefix')
-        session.click_label('Trusted executable')
-        for value in (node, bin_dir, manifest, 'node', cli, prefix):
-            session.send(b'\x15' + str(value).encode() + b'\t')
-        session.send(b'\r')
-        session.wait(b'Run query')
-        assert (home / 'calls').read_text() == 'M', 'npm review executed a query'
-        session.send(b'\r')
-        session.wait(b'0 packages reported')
-        session.send(b'p' + str(manifest).encode() + b'\t' + str(bin_dir).encode() + b'\t\t\r')
-        session.wait(b'Compare')
-        session.choose_snapshot(1)
-        session.send(b'\t')
-        session.choose_snapshot(1)
-        session.send(b'\r')
-        session.wait(b'Package proposals/no-ops only')
-        session.send(b'\x1b[B')
-        session.more_action('Review exact npm')
-        session.wait(b'scripts off')
-        assert (home / 'calls').read_text() == 'MN', 'Install review executed a query'
-        assert not prefix.exists(), 'Install review created prefix'
-        session.resize((14, 48))
-        session.wait(b'bin/man')
-        session.wait(b'No rollback')
-        session.send(b'\r')
-        session.wait(b'Installing package')
-        session.send(b'\x03')
-        session.wait(b'waiting for worker')
-        (home / 'release').write_text('fixture')
-        session.finish()
-        assert b'PRIVATE_NPM' not in session.data, 'Raw npm output reached terminal'
-    assert (home / 'calls').read_text() == 'MNMNIMN'
-    assert (home / 'installed').exists() and prefix.is_dir()
-    print('PASS npm Advanced scope, explicit runtime catalog binding, compact native-effects warning and joined Ctrl-C')
-    damaged = home / '.local/state/dort/tools-attempts' / ('0' * 64)
-    damaged.mkdir(mode=0o700)
-    before = (home / 'calls').read_text()
-    with Session([binary, 'tui'], scoped, (40, 120)) as session:
-        session.wait(b'loaded.')
-        session.navigate('Tools', 'Installation attempts [i]')
-        session.wait(b'UNRESOLVED')
-        session.send(b'C')
-        session.wait(b'Trusted mise executable')
-        session.closure_provider(1)
-        session.wait(b'Trusted Node executable')
-        session.click_label('Trusted Node executable')
-        for value in (node, bin_dir, cli, prefix):
-            session.send(b'\x15' + str(value).encode() + b'\t')
-        session.send(b'\r')
-        session.wait(b'Enter Inspect')
-        assert (home / 'calls').read_text() == before, 'Closure preview ran Node'
-        session.resize((14, 48))
-        session.wait(b'Enter Inspect')
-        session.send(b'\r')
-        session.wait(b'Explicitly closed')
-        session.send(b'\x1bq')
-        session.finish()
-    assert (home / 'calls').read_text() == before + 'N'
-    print('PASS damaged npm attempt provider/Node/CLI/prefix form and compact one-activation closure')
-
-
-def brew_install_workflows(binary, base, env):
-    home, repo, bin_dir = (base / name for name in ('brew-home', 'brew-repo', 'brew-bin'))
-    for directory in (home, repo, bin_dir):
-        directory.mkdir(mode=0o700)
-    (repo / '.git').mkdir()
-    manifest = repo / 'dort.toml'
-    manifest.write_text("schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='brew',package='demo'}\nubuntu={provider='mise',package='demo',version='1.2.3'}\n")
-    prefix = home / 'prefix'
-    for name in ('Homebrew/bin', 'Homebrew/Library', 'Cellar', 'bin', 'etc', 'include', 'lib', 'opt', 'sbin', 'share', 'var/homebrew'):
-        (prefix / name).mkdir(parents=True, exist_ok=True)
-    git = bin_dir / 'git'
-    git.write_text('#!/bin/sh\nfor arg do\ncase "$arg" in\nconfig) exit 1;;\nrev-parse) pwd -P; exit 0;;\nstatus) printf "# branch.head main\\000"; exit 0;;\nesac\ndone\nexit 94\n')
-    git.chmod(0o700)
-    brew = prefix / 'Homebrew/bin/brew'
-    brew.write_text('''#!/bin/sh
-printf '%s\\n' "$*" >> "$HOME/calls"
-case "$*" in
-'help install') printf '%s' '--formula --no-ask --skip-post-install HOMEBREW_NO_INSTALL_UPGRADE HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK HOMEBREW_NO_INSTALL_CLEANUP';;
-'--prefix') printf '%s\\n' "$HOME/prefix";;
-'--repository') printf '%s\\n' "$HOME/prefix/Homebrew";;
-'--cellar') printf '%s\\n' "$HOME/prefix/Cellar";;
-'info --json=v2 --formula homebrew/core/demo') printf '{"formulae":[{"name":"demo","full_name":"demo","tap":"homebrew/core","disabled":false,"versions":{"stable":"2.7"},"installed":['; if [ -f "$HOME/installed" ]; then printf '{"version":"2.7"}'; fi; printf ']}]}';;
-'info --json=v2 --installed --formula') if [ -f "$HOME/installed" ]; then printf '{"formulae":[{"full_name":"demo","installed":[{"version":"2.7"}]}]}'; else printf '{"formulae":[]}'; fi;;
-'install --formula --no-ask --skip-post-install homebrew/core/demo')
-printf started > "$HOME/started"
-printf PRIVATE_BREW_OUTPUT; printf PRIVATE_BREW_ERROR >&2
-n=0
-while [ ! -f "$HOME/release" ] && [ "$n" -lt 10000000 ]; do n=$((n+1)); done
-printf installed > "$HOME/installed";;
-*) exit 99;;
-esac
-''')
-    brew.chmod(0o700)
-    scoped = dict(env, HOME=str(home), PATH=str(bin_dir), XDG_CONFIG_HOME=str(home / '.config'),
-                  XDG_STATE_HOME=str(home / '.local/state'))
-    subprocess.run([binary, '--json', '--yes', 'init', str(repo)], env=scoped,
-                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    if sys.platform == 'darwin':
-        with Session([binary, 'tui'], scoped, (40, 120)) as session:
-            session.wait(b'loaded.')
-            session.navigate('Tools', 'Inspect installed tools [c]')
-            session.wait(b'Homebrew')
-            session.send(b'e' + str(brew).encode() + b'\t\x15' + str(bin_dir).encode() + b'\t\r')
-            session.wait(b'Run query')
-            assert not (home / 'calls').exists(), 'Brew review executed a query'
-            session.send(b'\r')
-            session.wait(b'0 packages reported')
-            session.send(b'p' + str(manifest).encode() + b'\t' + str(bin_dir).encode() + b'\t\t\r')
-            session.wait(b'Compare')
-            session.choose_snapshot(1)
-            session.send(b'\r')
-            session.wait(b'Package proposals/no-ops only')
-            before = (home / 'calls').read_text()
-            session.more_action('Review core formula')
-            session.wait(b'CAN EXECUTE')
-            assert (home / 'calls').read_text() == before
-            session.send(b'a')
-            session.wait(b'Expected physical Homebrew prefix')
-            session.send(b'\r')
-            session.wait(b'Install core formula')
-            session.resize((14, 48))
-            session.wait(b'native links')
-            session.wait(b'No rollback')
-            session.send(b'\r')
-            session.wait(b'Installing package')
-            session.send(b'\x03')
-            session.wait(b'waiting for worker')
-            (home / 'release').write_text('fixture')
-            session.finish()
-            assert b'PRIVATE_BREW' not in session.data
-        assert (home / 'installed').exists()
-        print('PASS Homebrew current-version/native-effects review, retained prefix and joined Ctrl-C')
-    else:
-        print('SKIP Homebrew installation PTY: declarations are macOS-only; explicit macOS fake-host core/TUI tests remain portable')
-    damaged = home / '.local/state/dort/tools-attempts' / ('0' * 64)
-    damaged.parent.mkdir(mode=0o700, exist_ok=True)
-    damaged.mkdir(mode=0o700)
-    before = (home / 'calls').read_text() if (home / 'calls').exists() else ''
-    with Session([binary, 'tui'], scoped, (40, 120)) as session:
-        session.wait(b'loaded.')
-        session.navigate('Tools', 'Installation attempts [i]')
-        session.wait(b'UNRESOLVED')
-        session.send(b'C')
-        session.wait(b'Trusted mise executable')
-        session.closure_provider(2)
-        session.wait(b'Trusted Homebrew executable')
-        session.click_label('Trusted Homebrew executable')
-        for value in (brew, bin_dir, prefix):
-            session.send(b'\x15' + str(value).encode() + b'\t')
-        session.send(b'\r')
-        session.wait(b'Enter Inspect')
-        assert ((home / 'calls').read_text() if (home / 'calls').exists() else '') == before
-        session.resize((14, 48))
-        session.wait(b'Enter Inspect')
-        session.send(b'\r')
-        session.wait(b'Explicitly closed')
-        session.send(b'\x1bq')
-        session.finish()
-    assert (home / 'calls').read_text() == before + '--prefix\ninfo --json=v2 --installed --formula\n'
-    print('PASS damaged Homebrew attempt retained three-field scope and compact fresh closure')
-
-
-def tool_outcome_workflows(binary, base, env):
-    home, repo, bin_dir, lookup = (base / name for name in ('outcome-home', 'outcome-repo', 'outcome-bin', 'outcome-lookup'))
-    for directory in (home, repo, bin_dir, lookup):
-        directory.mkdir(mode=0o700)
-    (repo / '.git').mkdir()
-    manifest = repo / 'dort.toml'
-    manifest.write_text("schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='mise',package='demo',version='1.2.3'}\nubuntu={provider='mise',package='demo',version='1.2.3'}\n")
-    git = bin_dir / 'git'
-    git.write_text('#!/bin/sh\nfor arg do\ncase "$arg" in\nconfig) exit 1;;\nrev-parse) pwd -P; exit 0;;\nstatus) printf "# branch.head main\\000"; exit 0;;\nesac\ndone\nexit 94\n')
-    git.chmod(0o700)
-    mise = bin_dir / 'mise'
-    mise.write_text('''#!/bin/sh
-if [ "$1" = ls ]; then
-printf Q >> "$HOME/calls"
-if [ -f "$HOME/installed" ]; then printf '{"demo":[{"version":"1.2.3","installed":true}]}'; else printf '{}'; fi
-exit 0
-fi
-printf I >> "$HOME/calls"
-printf PRIVATE_OUTCOME; printf PRIVATE_ERROR >&2
-printf installed > "$HOME/installed"
-exit 9
-''')
-    mise.chmod(0o700)
-    scoped = dict(env, HOME=str(home), PATH=str(bin_dir), XDG_CONFIG_HOME=str(home / '.config'), XDG_STATE_HOME=str(home / '.local/state'))
-    subprocess.run([binary, '--json', '--yes', 'init', str(repo)], env=scoped, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    with Session([binary, 'tui'], scoped) as session:
-        session.wait(b'loaded.')
-        session.navigate('Tools', 'Inspect installed tools [c]')
-        session.wait(b'[x] mise')
-        session.send(b'\r')
-        session.wait(b'0 packages reported')
-        session.send(b'p' + str(manifest).encode() + b'\t' + str(lookup).encode() + b'\t\t\r')
-        session.wait(b'Compare')
-        session.choose_snapshot(1)
-        session.send(b'\r')
-        session.wait(b'Package proposals/no-ops only')
-        session.more_action('Review exact mise')
-        session.wait(b'Enter Install')
-        session.send(b'\r')
-        session.wait(b'Process failed')
-        session.wait(b'Package: exact version reported present')
-        assert (home / 'calls').read_text() == 'QQIQ'
-        attempts = home / '.local/state/dort/tools-attempts'
-        before = {p.relative_to(attempts): p.read_bytes() for p in attempts.glob('*/*.json')}
-        session.resize((14, 48))
-        session.wait(b'Process failed')
-        session.wait(b'reported present')
-        session.click_action('Fresh review')
-        session.wait(b'Fresh review')
-        session.wait(b'no replay')
-        assert (home / 'calls').read_text() == 'QQIQ', 'Fresh review ran an unapproved query'
-        assert before == {p.relative_to(attempts): p.read_bytes() for p in attempts.glob('*/*.json')}
-        session.send(b'\r')
-        session.wait(b'Snapshot s2')
-        assert (home / 'calls').read_text() == 'QQIQQ'
-        session.resize((40, 120))
-        session.wait(b'Snapshot s2')  # Wait for the grown frame, not stale pre-resize geometry.
-        session.send(b'p')
-        session.wait(b'Load declarations')
-        session.click_action('Load declarations')
-        session.wait(b'Compare')
-        session.wait(b's1')  # A new catalog must not silently replace the old binding.
-        session.click_label('demo (demo)')
-        session.choose_snapshot(2)
-        session.wait(b's2')
-        session.send(b'\r')
-        session.wait(b'Package no-op')
-        session.send(b'i')  # A matching package is not an upgrade/reinstall request.
-        assert (home / 'calls').read_text() == 'QQIQQ'
-        session.send(b'\x1bq')
-        session.finish()
-        assert b'PRIVATE_OUTCOME' not in session.data and b'PRIVATE_ERROR' not in session.data
-    assert before == {p.relative_to(attempts): p.read_bytes() for p in attempts.glob('*/*.json')}
-    print('PASS failed process with package present, compact fresh-review click, new query approval and explicit new-ID binding without replay')
-
-
-def apt_install_workflows(binary, base, env):
-    home, repo, bin_dir, programs = (base / name for name in ('apt-home', 'apt-repo', 'apt-bin', 'apt-programs'))
-    for directory in (home, repo, bin_dir, programs):
-        directory.mkdir(mode=0o700)
-    (repo / '.git').mkdir()
-    manifest = repo / 'dort.toml'
-    manifest.write_text("schema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nubuntu={provider='apt',package='demo'}\nmacos={provider='mise',package='demo',version='1.2.3'}\n")
-    git = bin_dir / 'git'
-    git.write_text('#!/bin/sh\nfor arg do\ncase "$arg" in\nconfig) exit 1;;\nrev-parse) pwd -P; exit 0;;\nstatus) printf "# branch.head main\\000"; exit 0;;\nesac\ndone\nexit 94\n')
-    git.chmod(0o700)
-    bodies = {
-        'dpkg-query': 'printf D >> "$HOME/calls"; if [ -f "$HOME/installed" ]; then printf "demo\\t2.7\\tinstalled\\tok\\n"; fi',
-        'apt-cache': 'printf C >> "$HOME/calls"; printf "demo:\\n  Installed: (none)\\n  Candidate: 2.7\\n"',
-        'sudo': 'printf S >> "$HOME/calls"; shift 6; "$@"',
-        'apt-get': '''printf I >> "$HOME/calls"
-printf started > "$HOME/started"
-printf PRIVATE_APT_OUTPUT; printf PRIVATE_APT_ERROR >&2
-n=0
-while [ ! -f "$HOME/release" ] && [ "$n" -lt 10000000 ]; do n=$((n+1)); done
-printf installed > "$HOME/installed"''',
-    }
-    for name, body in bodies.items():
-        program = programs / name
-        program.write_text('#!/bin/sh\n' + body + '\n')
-        program.chmod(0o700)
-    scoped = dict(env, HOME=str(home), PATH=str(bin_dir), XDG_CONFIG_HOME=str(home / '.config'),
-                  XDG_STATE_HOME=str(home / '.local/state'))
-    subprocess.run([binary, '--json', '--yes', 'init', str(repo)], env=scoped,
-                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    if sys.platform == 'linux':
-        with Session([binary, 'tui'], scoped, (40, 120)) as session:
-            session.wait(b'loaded.')
-            session.navigate('Tools', 'Inspect installed tools [c]')
-            session.wait(b'apt / dpkg packages')
-            session.click_label('apt / dpkg packages')
-            session.send(b'e')
-            session.wait(b'Trusted executable')
-            session.send(str(programs / 'dpkg-query').encode() + b'\t\x15' + str(bin_dir).encode() + b'\t\r')
-            session.wait(b'Run query')
-            assert not (home / 'calls').exists(), 'APT review executed a query'
-            session.send(b'\r')
-            session.wait(b'0 packages reported')
-            session.send(b'p' + str(manifest).encode() + b'\t' + str(bin_dir).encode() + b'\t\t\r')
-            session.wait(b'Compare')
-            session.choose_snapshot(1)
-            session.send(b'\r')
-            session.wait(b'Package proposals/no-ops only')
-            before = (home / 'calls').read_text()
-            session.more_action('Review root-risk')
-            session.wait(b'ROOT RISK')
-            assert (home / 'calls').read_text() == before
-            session.send(b'a')
-            session.wait(b'Trusted sudo')
-            session.send(b'\r')
-            session.wait(b'Install with root risk')
-            session.resize((14, 48))
-            session.wait(b'CAN EXECUTE')
-            session.send(b'\r')
-            session.wait(b'Installing package')
-            session.send(b'\x03')
-            session.wait(b'waiting for worker')
-            (home / 'release').write_text('fixture')
-            session.finish()
-            assert b'PRIVATE_APT' not in session.data
-        assert (home / 'installed').exists()
-        print('PASS APT root-risk review, retained explicit programs and joined Ctrl-C (fake nonprivileged supervisor)')
-    else:
-        print('SKIP APT installation PTY: declarations are Ubuntu-only; portable core/TUI use explicit Ubuntu fake-host contexts')
-    damaged = home / '.local/state/dort/tools-attempts' / ('0' * 64)
-    damaged.parent.mkdir(mode=0o700, exist_ok=True)
-    damaged.mkdir(mode=0o700)
-    before = (home / 'calls').read_text() if (home / 'calls').exists() else ''
-    with Session([binary, 'tui'], scoped, (40, 120)) as session:
-        session.wait(b'loaded.')
-        session.navigate('Tools', 'Installation attempts [i]')
-        session.wait(b'UNRESOLVED')
-        session.send(b'C')
-        session.wait(b'Trusted mise executable')
-        session.closure_provider(3)
-        session.wait(b'Trusted dpkg-query')
-        session.click_label('Trusted dpkg-query')
-        for value in (programs / 'dpkg-query', bin_dir):
-            session.send(b'\x15' + str(value).encode() + b'\t')
-        session.send(b'\r')
-        session.wait(b'Enter Inspect')
-        assert ((home / 'calls').read_text() if (home / 'calls').exists() else '') == before
-        session.resize((14, 48))
-        session.wait(b'Enter Inspect')
-        session.send(b'\r')
-        session.wait(b'Explicitly closed')
-        session.send(b'\x1bq')
-        session.finish()
-    assert (home / 'calls').read_text() == before + 'D'
-    print('PASS damaged APT closure uses only retained dpkg/PATH fields, never sudo authentication')
-
-
-def interaction_surface_workflows(binary, base, env):
-    for size in ((14, 48), (24, 80), (40, 140)):
-        home = base / ('interaction-home-' + str(size[1]))
-        home.mkdir(mode=0o700)
-        scoped = dict(env, HOME=str(home), XDG_CONFIG_HOME=str(home / '.config'),
-                      XDG_STATE_HOME=str(home / '.local/state'))
-        with Session([binary, 'tui'], scoped, size) as session:
-            session.wait(b'loaded.')
-            session.send(b't')  # Plain t directly opens Tools outside text entry.
-            session.wait(b'Inspect installed tools')
-            session.settle()
-            assert b'\\u{b7}' not in session.screen.text(), 'Trusted decoration was metadata-escaped'
-            assert '·'.encode() in session.screen.text(), 'UTF-8 chrome lost its actual separator'
-            session.send(b'2')  # Tools-local 2 is Snapshots, not Files Discover.
-            session.wait(b'Tools / Session snapshots')
-            session.send(b't')
-            session.wait(b'Inspect installed tools')
-            session.settle()
-            # A foreground-changing event and F2 arrive in one input burst.
-            # More must use the newly rendered declaration, not cached Tools actions.
-            session.send(b'a\x1bOQ')
-            session.settle()
-            if b'ACTION' in session.screen.text():
-                session.wait(b'Dependencies')
-                assert b'Inspect selected' not in session.screen.text()
-                session.send(b'\x1b')
-            session.wait(b'Tool ID')
-            session.send(b'q?/')
-            session.wait(b'Tool ID')
-            session.wait(b'q?/')
-            session.settle()
-            footer = session.screen.text().splitlines()[-1]
-            assert b'Review' in footer and b'Help' in footer, 'Declaration strip describes the underlying Tools page'
-            assert b'Inspect tools' not in footer and b'Snapshots' not in footer
-            session.send(b'\x07')  # Ctrl-G opens navigation during text entry.
-            session.wait(b'Left/Right destination')
-            session.wait(b'Overview')
-            session.settle()
-            session.send(b'\x1b')
-            session.settle()
-            session.wait(b'Tool ID')
-            session.wait(b'q?/')
-            session.send(b'\x1bOP')
-            session.wait(b'Explicit provider inspection')
-            session.settle()
-            footer = session.screen.text().splitlines()[-1]
-            assert b'Back' in footer and b'Review' not in footer, 'Help strip describes the background page'
-            assert b'Review' not in footer
-            session.mouse(0, size[1] - 2, 0)
-            session.mouse(0, 0, 0)  # Outside click cannot navigate or dismiss Help.
-            session.settle()
-            assert b'Explicit provider inspection' in session.screen.text() and b'Keys in this context' in session.screen.text(), 'Outside click dismissed the dialog'
-            session.send(b'\x1b')
-            session.settle()
-            session.wait(b'Tool ID')
-            session.wait(b'q?/')
-            session.destination('Checks')  # A real menu destination is not silently ignored.
-            session.wait(b'Checks')
-            session.navigate('Tools', 'Inspect installed tools [c]')
-            session.wait(b'Homebrew formulae')  # Join metadata discovery before input.
-            session.settle()
-            session.send(b'a')
-            session.wait(b'Tool ID')
-            session.wait(b'q?/')  # Actual navigation retains drafts, not approvals.
-            session.send(b'\x1b')
-            session.wait(b'No inspection collected yet.')
-            session.settle()
-            session.send(b'q')
-            session.finish()
-        assert not list(home.iterdir()), 'Page/dialog navigation created state'
-        print('PASS page menus during text entry, retained draft, dialog feedback/outside capture and UTF-8 chrome', size)
-
-
 def run():
     screen = Screen((2, 20))
     screen.feed(b"Git executes\x1b[")
@@ -1177,15 +356,8 @@ def run():
             assert not list(home.iterdir()), "Read-only TUI startup created state"
             print("PASS entry/exit", args, size)
 
-        interaction_surface_workflows(binary, base, env)
-        tools_workflows(binary, base, env)
-        tool_install_workflows(binary, base, env)
-        npm_install_workflows(binary, base, env)
-        brew_install_workflows(binary, base, env)
-        apt_install_workflows(binary, base, env)
-        tool_outcome_workflows(binary, base, env)
-        tools_reconciliation_workflows(binary, base, env)
-        tool_declaration_workflows(binary, base, env)
+        tools_workflows(Session, binary, base, env)
+        interaction_surface_workflows(Session, binary, base, env)
 
         # Text carries navigation/state meaning even with a low-color terminal.
         with Session([binary, "--dry-run", "tui"], dict(env, TERM="vt100", NO_COLOR="1"), (14, 48)) as session:
@@ -1264,7 +436,7 @@ def run():
                 session.wait(b"Files / Managed")
                 session.send(b"O")
                 session.wait(b"TARGET")
-                session.send(b"~/.editor")
+                session.send(b"\t~/.editor")
                 session.wait(b"~/.editor")
                 session.send(b"\tq")
                 session.settle()
@@ -1366,15 +538,13 @@ def run():
             assert not ignore_store.exists(), 'Help approved a preview'
             session.send(b'\x1b')
             session.wait(b'Ignore discovery path')
-            session.send(b'\r')
-            session.wait(b'Confirm reviewed changes')
             session.send(b'ye\x1bOP')
             session.wait(b'Keys in this context')
             session.send(b's\r')
             session.settle()
             assert not ignore_store.exists(), 'Help submitted confirmation input'
             session.send(b'\x1b')
-            session.wait(b'Confirm reviewed changes')
+            session.wait(b'Ignore discovery path')
             session.send(b's')  # Printable text alone cannot approve.
             session.send(b'\x1bOP')
             session.wait(b'Keys in this context')
@@ -1384,8 +554,6 @@ def run():
             session.wait(b'Keys in this context')
             session.send(b'\x1b')  # Help closes to preview; fresh confirmation required
             session.wait(b'Ignore discovery path')
-            session.send(b'\r')
-            session.wait(b'Confirm reviewed changes')
             session.send(b'\r')
             session.wait(b'Filter files')
             session.send(b'q')
@@ -1404,7 +572,6 @@ def run():
             assert b'Enter' in session.screen.text().splitlines()[-1]
             session.send(b'\r')
             session.wait(b'Unignore discovery path')
-            session.send(b'\r')
             session.wait(b'Confirm')
             session.send(b'\r')
             session.wait(b'Filter files')
@@ -1419,7 +586,7 @@ def run():
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"n")
-            session.focused_field('Path')
+            session.edit_fields('Path')
             session.send(b"q?/\r")
             session.wait(b"Git executable not found")
             session.send(b"\x1b")
@@ -1435,7 +602,7 @@ def run():
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"p\r")
-            session.focused_field('Path')
+            session.edit_fields('Path')
             session.send(os.fsencode(unregistered) + b"\r")
             session.wait(b"configuration unchanged.")
             session.send(b"q")
@@ -1448,7 +615,7 @@ def run():
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"v")
-            session.focused_field('Manifest path')
+            session.edit_fields('Manifest path')
             session.send(os.fsencode(standalone) + b"\r")
             session.wait(b"Declarations validated")
             session.wait(b"Checks / Manifest")
@@ -1465,7 +632,7 @@ def run():
             session.send(b"v\x10")  # Open Profiles directly without a footer focus stop.
             session.wait(b"PROFILE")
             session.send(b"\x1b[B \r")  # Toggle dev explicitly, then apply from that row.
-            session.focused_field('Manifest path')
+            session.edit_fields('Manifest path')
             session.send(b"\r")  # Validate directly from the retained path field.
             session.wait(b"Declarations validated")
             session.send(b"q")
@@ -1485,11 +652,13 @@ def run():
             session.send(b"\x1b")
             session.wait(b"REPOSITORY")
             session.send(b"\x0e")  # Ctrl-N opens Create/attach; no footer focus.
-            session.focused_field('Path')
-            session.send(b"\x1b")
+            session.edit_fields('Path')
+            session.send(b"\x1b")  # Stop editing.
+            session.settle()
+            session.send(b"\x1b")  # Leave the form.
             session.settle()
             session.send(b"v")
-            session.focused_field('Manifest path')
+            session.edit_fields('Manifest path')
             session.send(os.fsencode(standalone) + b"\x10")
             session.wait(b"PROFILE")
             session.wait(b"Mandatory")
@@ -1510,7 +679,7 @@ def run():
             session.send(b"\x1b")
             session.wait(b"PROFILE")
             session.send(b"\x1b[B \r")  # Toggle dev, then apply without a footer focus stop.
-            session.focused_field('Manifest path')
+            session.edit_fields('Manifest path')
             session.send(b"\x1b")
             session.settle()
             session.send(b"q")
@@ -1635,11 +804,13 @@ def run():
             session.send(b"\x1b[H")
             session.wait(b"Eligible hint")
             session.more_action('Adopt selected')  # The real contextual action, not explanatory prose.
-            session.focused_field('TARGET')
+            session.edit_fields('TARGET')
             session.click_label("ID")
             session.send(b"\x15mouse-id")
             session.wait(b"mouse-id")
-            session.send(b"\x1b")
+            session.send(b"\x1b")  # Stop editing.
+            session.settle()
+            session.send(b"\x1b")  # Return to the selected file.
             session.settle()
             session.send(b"\r")  # Explicit inspection, independent of earlier paging/focus
             session.resize((14, 48))
@@ -1705,7 +876,7 @@ def run():
             session.send(b"\r")
             session.wait(b"Selected content")
             session.send(b"e")  # direct, separate Adopt selected action
-            session.focused_field('TARGET')
+            session.edit_fields('TARGET')
             session.send(b"\t\t\t\r")  # fields -> Review, no repository selected
             session.wait(b"Read failed:")
             session.click_action('Retry read')  # Fresh read/preview intent, never execution.
@@ -1746,6 +917,7 @@ def run():
         with Session([binary, "tui"], dict(env, PATH=str(bin_dir))) as session:
             session.wait(b"loaded.")
             session.navigate("Git", "Choose Git scope [g]")
+            session.edit_fields('Exact Git root')
             session.send(os.fsencode(git_only) + b"\r")
             session.wait(b"PATH")
             session.wait(b"q?name")
@@ -1794,6 +966,7 @@ def run():
         with Session([binary, "tui"], dict(env, PATH=str(bin_dir)), (14, 48)) as session:
             session.wait(b"loaded.")
             session.navigate("Git", "Choose Git scope [g]")
+            session.edit_fields('Exact Git root')
             session.send(os.fsencode(git_only) + b"\r")
             session.wait(b"PATH")
             for column in [b"PATH", b"KIND", b"XY"]:
@@ -1831,6 +1004,7 @@ def run():
         with Session([binary, "tui"], dict(env, PATH=str(bin_dir)), (24, 110)) as session:
             session.wait(b"loaded.")
             session.navigate("Git", "Choose Git scope [g]")
+            session.edit_fields('Exact Git root')
             session.send(os.fsencode(git_only) + b"\r")
             session.wait(b"PATH")
             session.click_label("q?name")
@@ -1884,7 +1058,7 @@ def run():
             with Session([binary, "tui"], onboarding_env) as session:
                 session.wait(b"loaded.")
                 session.send(b"n")
-                session.focused_field('Path')
+                session.edit_fields('Path')
                 session.send(os.fsencode(created) + b"\r")
                 session.wait(b"Review effects before confirming")
                 session.send(b"\x1b")
@@ -1894,7 +1068,6 @@ def run():
                     assert not created.exists(), "Preview created repository"
                 session.send(b"\r")  # retained draft -> fresh preview
                 session.settle()
-                session.send(b"\r")
                 session.wait(b"Confirm")
                 session.send(b"\r")
                 session.wait(b"Operation result")
@@ -1930,7 +1103,6 @@ def run():
             session.wait(b"loaded.")
             session.send(b"a")
             session.wait(b"Review effects before confirming")
-            session.send(b"\r")
             session.wait(b"Confirm")
             session.send(b"yes\x1b")
             session.settle()
@@ -1957,7 +1129,6 @@ def run():
             session.wait(b"loaded.")
             session.send(b"a")
             session.wait(b"Review effects before confirming")
-            session.send(b"\r")
             session.wait(b"Confirm")
             session.send(b"\r")
             deadline = time.monotonic() + TIMEOUT
@@ -1978,7 +1149,6 @@ def run():
             session.wait(b"loaded.")
             session.send(b"a")
             session.wait(b"Review effects before confirming")
-            session.send(b"\r")
             session.wait(b"Confirm")
             session.send(b"\r")
             session.wait(b"Operation result")
@@ -2002,7 +1172,6 @@ def run():
                 session.wait(b"loaded.")
                 session.send(b"a")
                 session.wait(b"Review effects before confirming")
-                session.send(b"\r")
                 session.wait(b"Confirm")
                 session.send(b"\r")
                 session.wait(b"Possible partial effects")
@@ -2040,7 +1209,6 @@ def run():
             assert target.is_symlink(), "Preview/back performed rollback"
             session.send(b"b")
             session.wait(b"Rollback schema 2")
-            session.send(b"\r")
             session.wait(b"Confirm")
             session.send(b"\r")
             session.wait(b"Operation result")
@@ -2051,7 +1219,6 @@ def run():
             session.destination("Overview")
             session.send(b"a")
             session.wait(b"Review effects before confirming")
-            session.send(b"\r")
             session.wait(b"Confirm")
             session.send(b"\r")
             session.wait(b"Operation result")
@@ -2129,7 +1296,7 @@ def run():
             session.settle()
             session.wait(b"No matches")
             session.send(b"a")
-            session.wait(b"Enter Continue")
+            session.wait(b"Enter Confirm")
             session.wait(b"display filters never narrow")
             session.send(b"\x1b")
             session.settle()
@@ -2143,7 +1310,7 @@ def run():
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"O")
-            session.focused_field('TARGET')
+            session.edit_fields('TARGET')
             session.send(b"~/.q?config\tconfig\tfiles/config\r")  # Fields only; Enter previews.
             session.wait(b"Enter Adopt all")
             session.send(b"\x1b")
@@ -2165,12 +1332,11 @@ def run():
             session.send(b"/notconfig\x1b")
             session.settle()
             session.send(b";delete managed link: enter\r")
-            session.focused_field('Exact ID')
+            session.edit_fields('Exact ID')
             session.send(b"config\r")
-            session.wait(b"Enter Continue")
-            session.send(b"\r")
-            session.wait(b"Delete managed link for ID:")
-            assert candidate.is_symlink(), "Confirmation executed without activation"
+            session.wait(b"Enter Confirm")
+            session.wait(b"config")
+            assert candidate.is_symlink(), "Preview executed without activation"
             session.send(b"\r")
             session.wait(b"Operation result")
             session.send(b"q")
@@ -2238,7 +1404,7 @@ def run():
             session.wait(b'All editable defaults')
             session.send(b'je')  # Select only-b and open a separate item form.
             session.wait(b'Edit item')
-            session.send(b'\t\x15edited-b\r')  # TARGET -> ID; Enter retains edits and returns to the list.
+            session.send(b'\t\t\x15edited-b\r')  # Enter fields, TARGET -> ID; Enter retains edits.
             session.wait(b'Review all')
             session.send(b'e')
             session.wait(b'edited-b')
@@ -2255,7 +1421,6 @@ def run():
             session.destination("Recovery")
             session.send(b'b')
             session.wait(b'Rollback schema 4')
-            session.send(b'\r')
             session.wait(b'Confirm')
             session.send(b'\r')
             session.wait(b'Operation result')
@@ -2278,7 +1443,6 @@ def run():
                 session.click_label('[ ] only-b')
                 session.send(b'/only-a\rA')  # Hidden only-b remains explicitly included.
                 session.wait(b'Exact marked set')
-                session.send(b'\r')
                 session.wait(b'Confirm')
                 session.send(b'\r')
                 session.wait(b'Operation result')
@@ -2289,7 +1453,6 @@ def run():
                 session.settle()
                 session.send(operation.encode())
                 session.wait(b'Exact marked set')
-                session.send(b'\r')
                 session.wait(b'Confirm')
                 if operation == 'D':
                     session.wait(b'only-a')
@@ -2300,8 +1463,7 @@ def run():
                     session.resize((24, 80))
                     session.wait(b'Exact marked set')
                     session.settle()
-                    session.send(b'\r')  # Fresh confirmation, not execution.
-                    session.wait(b'Confirm')
+                    assert all((targets / name).is_symlink() for name in ('only-a', 'only-b')), 'Resize executed changes'
                 session.send(b'\r')
                 session.wait(b'Batch file operation completed.')
                 session.send(b'q')
@@ -2324,8 +1486,7 @@ def run():
             session.wait(b'loaded.')
             session.destination('Files')
             session.send(b'a')
-            session.wait(b"Enter Continue")
-            session.send(b'\r')
+            session.wait(b"Enter Confirm")
             session.wait(b'Confirm')
             session.send(b'\r')
             session.wait(b'Operation result')
@@ -2334,8 +1495,7 @@ def run():
             session.send(b'ljlj')
             session.click_label('only-a')
             session.send(b' u')  # Mark A, then Keep selected with the advertised key.
-            session.wait(b"Enter Continue")
-            session.send(b'\r')
+            session.wait(b"Enter Confirm")
             session.wait(b'Confirm')
             session.send(b'\r')
             session.wait(b'File operation completed.')
@@ -2346,7 +1506,6 @@ def run():
             session.send(b' K')
             session.wait(b'Exact marked set')
             assert b'only-a' not in session.screen.text(), 'Completed Keep leaked into a later batch'
-            session.send(b'\r')
             session.wait(b'Confirm')
             session.send(b'\r')
             session.wait(b'Batch file operation completed.')

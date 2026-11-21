@@ -8,8 +8,6 @@ Dort is a Git-native developer environment manager. It is designed to reconcile 
 
 **Experimental CLI and TUI — development after v0.1.0.** Dort provides strict manifest validation, profile/dependency resolution, bounded discovery, descriptor-safe observation, pure previews, hardened read-only Git status/diff, local repository init/attach, and approved adoption, link apply, unmanage and guarded recovery with immutable journals.
 
-A Ratatui interface provides Overview, session repository selection, guided local create/attach, temporary profiles, Files discovery/adoption, manifest checks, host Diagnostics/About, searchable all-repository Recovery, read-only Git inspection, previews, explicit approval and responsive progress over the same core services. Tools offers [explicitly approved provider inspection](docs/user/commands.md#provider-inspection): automatically detected Homebrew/dpkg/mise/npm inventory defaults, one confirmation for selected scopes, Advanced path overrides, bounded execution and searchable metadata-only results. Default discovery runs no commands; unresolved npm bindings remain explicit. Provider configuration/plugins may execute code and caches/logs may change; this is not a sandbox. Passive checks/plans/status remain provider-free. [Snapshot-based reconciliation](docs/user/commands.md#snapshot-reconciliation) collects separately approved scopes, explicitly binds tools to session snapshots and observes candidate metadata in independent no-follow tool-search directories. The [pure planner](docs/tools-planning.md) reports package claims, uncertainty and dependency/version proposals—not tool readiness, ownership or execution authority. Eligible missing-package rows also show [preview-only argv/control descriptions](docs/install-command-previews.md) and native dependency/script risks; these cannot be executed by Dort. Tools also provides [add-only tool declarations](docs/user/commands.md#tool-declarations) for registered repositories, with manifest-only schema-5 transactions and guarded rollback. Separate [exact mise](docs/user/commands.md#exact-mise-installation) and [exact npm](docs/user/commands.md#exact-npm-installation) install reviews can approve one still-missing exact version with fresh checks, a ten-minute deadline, post-inspection and private attempt metadata. npm requires an explicitly observed runtime and an owned prefix inside HOME; native dependencies and bin/man links can expose commands on PATH. A separate [Homebrew core formula workflow](docs/user/commands.md#homebrew-core-installation) on macOS installs one missing canonical formula at provider-current default/latest policy, with approved help/layout/formula probes and an explicit safe native prefix. Formula/build/dependency code can execute, dependencies may upgrade and native links can expose commands on PATH; there is no exact pin, sandbox or rollback. No candidate is executed; runtime configuration and intentional other top-level upgrades remain unsupported. [Bounded Ubuntu APT installation](docs/user/commands.md#bounded-apt-installation) separately reviews explicit dpkg/apt-cache/apt-get/sudo paths and root-native risks; sudo refuses prompts and requires policy-permitted timeout supervision. Root scripts/hooks, dependency upgrades, services and system/configuration/data writes are possible. Overdue supervision keeps waiting joined; no password handling, policy changes, untimed fallback or rollback is offered. These Tools workflows are in the current source build, not the published v0.1.0 binaries. Remote cloning/sync, Git staging/commit/push, templates and secrets are **not implemented**. A successful preview is not permission or an executable artifact for a later write. The executor is tested only against disposable homes; this is not yet a production-ready dotfile manager.
-
 ## Documentation
 
 - [User guide](docs/user/README.md): [getting started](docs/user/getting-started.md), [manifest guide](docs/user/manifest.md), [commands](docs/user/commands.md), and [safety/troubleshooting](docs/user/safety.md).
@@ -20,8 +18,6 @@ A Ratatui interface provides Overview, session repository selection, guided loca
 - [Contributor/agent instructions](AGENTS.md): development checks and documentation-maintenance rules.
 - [Changelog](CHANGLOG.md): generated with git-cliff from committed Git history (uncommitted work is excluded).
 - [MIT license](LICENSE).
-
-Tools installation results and attempt history distinguish process failure from package presence and unavailable observations, without claiming binary readiness or ownership. **Start fresh review** (`F`) opens inventory review only; new queries, snapshot bindings and installation still require explicit approval. Historical attempt schemas remain unchanged.
 
 ## Install, build and run
 
@@ -75,198 +71,13 @@ Without `--manifest` or `--repo`, repository commands use the active repository 
 
 JSON reports go to stdout; JSON errors go to stderr. Exit codes are 0 for success, 1 for I/O failure or unavailable provider/binary observation, 2 for invalid input/configuration or unsupported hosts, 3 for a held writer lock, and **4 for a blocked plan or recovery diagnosis reporting write blockers**. Those reports are still emitted in full on stdout (not as a separate stderr error). Mutations require confirmation or `--yes`; JSON/nonterminal writes require `--yes` and never prompt. `--dry-run` never creates state or locks.
 
-## Interactive interface
-
-Start with the [TUI-only disposable-HOME walkthrough](docs/user/getting-started.md#start-in-a-disposable-home): create, discover/adopt, inspect, keep and review recovery without a CLI handoff.
-
-Run `dort` (no arguments) or `dort tui` in a terminal. `--repo PATH` overrides the active repository; `--dry-run` disables approval without creating state. Nonterminal invocation, `--json`, `--yes` and `--confirm-remove` are rejected for TUI entry, never interpreted as automatic approval. Use explicit CLI commands for automation.
-
-Overview shows repository registration, active file counts and global journal write blockers in summary cards, with full scope/profile/drift metadata in scrollable sections. Unavailable observations are unknown, not zero. Files supports searchable metadata inventories, adoption, full-scope apply and both unmanage modes; Recovery has a typed transaction table with schema, phase and integrity/write-block state, unfiltered global blockers, and full-ID details. Its page buttons offer eligible schema-1/2/4 rollback or schema-3 resume/abandon previews; Preparing offers Abandon, not Resume. Checks shows structural validity and selected file/tool counts separately from capability limits; read-only host/registry Diagnostics (`j`) has independent registry/history summaries. Session menus include About/version. The workbench uses one location header, a destination rail on wide layouts, a Ctrl-G Menu with sections and local destinations at every width and one foreground action strip. Neutral inverse selection, independent fact colors, text-field carets and caret-free choices distinguish each role. Ctrl-K opens the global Actions launcher with search focused: type a label immediately, use Up/Down to choose and Enter to request it. Actions includes supported tasks and destinations; F2 More contains the current foreground's secondary actions. Menu opens navigation/session choices; Files offers Managed, Discover and Ignored paths, Checks offers Manifest and Diagnostics, and Git offers Status, Unstaged and Staged. Mouse and arrow/Enter/Esc menu navigation supplements the existing shortcuts. Other-view workflows stay in their views. Scope and effect (draft, mutation preview or content warning) are labeled separately. The foreground strip keeps the contextual primary action, More and Help available; Discover offers Ignore selected (`I`) through More even at 48×14; Files → Ignored paths (`U` in Discover) offers confirmed Unignore. Compact layouts expose navigation through the visible Menu control. Unavailable rows explain prerequisites and do not dispatch; Inline details show the full label/reason; PgUp/PgDn scrolls them and Home returns to their top, keeping controls visible. Controls remain visible while details scroll. Arrows choose results; `/` edits search; Esc closes Actions directly; F3 opens scrollable action metadata. Press F1 anywhere for contextual Help, or `?` outside text/search. Esc returns to the retained screen, draft and focus without submitting anything; shrink still clears approval/disclosure input. Help hides private content and never copies it. Use Menu or Ctrl-G: Up/Down selects a section, Left/Right selects a destination and Enter opens it; Ctrl-K searches across tasks. F3 opens full metadata where offered. Outside Menu, Left/Right does not change destinations; use Menu, clickable local destinations or Ctrl-K. Files folders start folded. `j`/`k` selects rows, `h`/`l` folds/unfolds, Ctrl-F/B pages, Ctrl-D/U moves half a page, and Home/`G` selects first/last. Space or a double-click toggles marks; `u` or Keep local file reviews Keep for the selected mapping; single-file Delete is in Actions. Up/Down selects rows; Enter inspects and PgUp/PgDn scrolls visible details independently. Tab/Shift-Tab moves among form controls only; Enter opens inspection and Esc returns to the list. Enter invokes the primary action directly; footer buttons are not focus stops. Workflow forms/reviews/results are pages with Back and available menus. Short choices, Actions, Help/About and final gates are dimmed dialogs; blocked navigation explains why, and outside clicks never dismiss or approve them. Click tabs, rows, filters and action buttons; the wheel operates on the hovered list/details/dialog. Mouse input can activate labeled confirmation controls after review. Wide lists may show passive inspectors; explicit Files, Recovery and Git inspection is a full reading page at every width. Reader arrows and paging never select hidden rows; Esc returns to the retained list. `p` chooses a repository for the session, `n` opens create/attach, `a` previews apply, and `q` exits outside text entry. Menu exposes every destination at 48 columns. PgUp/PgDn scroll ordinary metadata in overlapping steps, including at compact sizes; Home returns to the start (both axes in previews), and preview scrolling stays within escaped metadata bounds. File reviews show typed change counts and per-mapping effects; Up/Down selects a mapping and F3 toggles its complete report, including permissions and warnings. Review the effects; adoption uses one **Adopt all** activation (Enter/click) without typed `yes`. Other writes use a Confirm action (Enter/click); deletion confirmation shows and binds the exact selected IDs without typing challenges. Esc dismisses previews/confirmations without writing. Approved writes finish before q/Ctrl-C exits; terminal errors wait for the worker, never detach it or auto-undo. Errors and panics restore mouse capture and the terminal where the OS still permits cleanup.
-
-Rendering uses the terminal-default canvas with ANSI accents, textual states and reverse/bold selection. Nonempty `NO_COLOR` enables monochrome without removing Unicode. Borders/separators fall back to ASCII when the effective locale (first nonempty `LC_ALL`, `LC_CTYPE`, `LANG`) is not UTF-8, or `TERM` is `vt100`, `vt102`, `ansi` or `dumb`. Known colorless terminals also use monochrome. Use `LC_ALL=C NO_COLOR=1 dort tui` for both fallbacks. A cursor-addressable terminal is still required; `TERM=dumb` does not provide a line-mode interface.
-
-Task panels distinguish reads from approved execution and retain the task's scope while destinations change. Progress shows only real transaction boundaries/sequences, never an estimated percentage or a cancellation control. Completion receipts retain transaction IDs or explicit no-op outcomes through refresh, with Refresh, Recovery and Back buttons. Adoption returns directly to refreshed Discover instead of blocking the list with a receipt panel; its receipt remains in details. Errors separate the cause from retained scope; failed writes pin Possible partial effects and offer only read-only refresh, Recovery or Back. An earlier-write warning remains for the session even after dismissal or later reads; it is not a live-drift diagnosis.
-
-Folders start folded; individual folds update only their subtree without refreshing or blanking the list. Large Discover lists prepare new filters and hierarchies on the background worker; Updating list replaces stale rows while Search, Help and Quit remain available. Cached navigation and viewport-only row rendering avoid rebuilding the inventory on each key or idle poll.
-
-The interface requires 48×14 for approval. `F` discovers candidates without a repository and automatically previews only the selected eligible file (up to 64 KiB, escaped text; sensitive/binary/oversized files are withheld). Wide Discover shows content above details; compact Enter opens them. Enter opens the selected Discover reader; Esc returns to the list. Content accepts j/k, Home/G, Ctrl-F/B and Ctrl-D/U without moving the file selection; Esc returns to the list. PgUp/PgDn scrolls content; Alt+PgUp/PgDn scrolls metadata. Preview content is ephemeral, not secret-proof, and disabled in preview-only sessions or below 48×14. Directories and other ineligible entries are labeled and cannot open a candidate adoption draft. Enter inspects any row; `h`/`l` folds/unfolds directories. `e` or clicking Adopt selected opens editable fields for eligible regular files without a prior inspection step. Manual entry remains available through Actions or `O`, not as a Discover page button. Eligibility is only a hint, not approval. `T` selects temporary repository profile additions; `C` checks its manifest and `v` checks a standalone manifest with independent additions. In Files, `/` filters display only; Enter inspects full details and Actions accepts exact mapping IDs outside the filter. Lowercase `a` Apply always covers the full active scope. Files is a foldable metadata tree (`h`/`l`, or click chevrons), with state labels/colors and Space-toggled checkboxes. Marks survive filters/folding; the header counts hidden marks. `E` shows every marked file's editable TARGET/ID/SOURCE defaults together. Select with j/k or arrows and press `e` / Edit item for a separate form; Tab/Shift-Tab moves fields only; Enter/Done or Esc returns with edits retained. Enter on any batch row / **Review all** requests one combined preview, then **Adopt all** approves it once. Success returns to refreshed Discover with receipt details retained. `A`/`K`/`D` preview selected apply/keep/delete. Each batch includes 1–32 explicit files in one repository, uses one combined preview/approval and schema-4 transaction, and never skips blocked items. Batch deletion separately acknowledges every exact ID before one final `yes`. Failures can leave partial effects and require explicit guarded whole-transaction rollback; there is no global atomicity or automatic undo. The Git menu has an independent session root, typed Status/Unstaged/Staged metadata tables, search and refresh. Status separates path/kind/XY; diffs separate path/change/modes. Full root, branch and rename-path details remain scrollable, with Home returning to the start. `w` opens a content warning; activating View patch requests one bounded escaped patch view. Esc, scope change, resize below the floor or exit drops its reference, without promising secure memory erasure. No patch prefetch, automatic refresh, history or export is provided. Repository and temporary-profile pickers use typed choice/membership tables and separate Create/attach or Apply buttons. F3 opens full selected-path/profile-contributor metadata, with inline details also available in wide dialogs. PgUp/PgDn scrolls metadata; Home returns to its top. Known-root indices retain raw paths, and mandatory profile contributors cannot be unchecked. Choose a known root or enter an exact path without persisting selection. Create/attach retains its path draft; Enter requests a preview directly from the path field; Tab stays among fields, not footer actions. It resolves relative paths from the launch directory and uses the same guarded bootstrap as `init`; only explicit approval publishes registration. Without a selected repository, Welcome offers these actions and Recovery remains accessible. Shrinking below the approval floor dismisses confirmation. Error `R` retries a read/fresh preview, never an approval; after a failed write it only refreshes. Error `h` opens independent Recovery. New execution always needs a new preview and confirmation. No startup replay occurs. See [keys and behavior](docs/user/commands.md#interactive-interface) and [terminal safety](docs/user/safety.md#terminal-and-interruption).
-
-Outside text entry, direct section shortcuts are o Overview, f Files, t Tools, r Recovery, c Checks and g Git. Menu and the wide rail use this order, with Session last in Menu. Workflow actions use contextual uppercase O/F/T/R/C for adoption/discovery/profiles/refresh/inspection, P chooses Git scope, and Home selects the first Files row. Their labels appear in Menu and the wide navigation rail. Numbered local destinations use 1/2/3 (Tools also 4), scoped to the current section outside text entry; fields and filters retain digits as text.
-
-Tools inventory browsing uses one location header, source summary, a one-line package filter, aligned columns and a single foreground action strip. The foreground strip shows up to eight context-relevant actions; **F2 More** appears when additional actions do not fit. More exposes current-foreground actions; **F3** opens full metadata and **Menu** opens section/destination navigation. Stable section pages show clickable local destinations with the current one marked; compact overflow opens the same Menu. Ctrl-N opens Create/attach; declaration/closure F4 exposes dependencies or explicit provider choice. Other workflows retain their documented controls. Active task headings use a bounded liveness spinner, not estimated installation percentages; `DORT_REDUCED_MOTION=1 dort tui` selects a static indicator independently of color/Unicode.
-
-## Read-only Git inspection
-
-An installed, trusted Git executable must be available through an absolute PATH entry; initialization and Git inspection do not install it for you. Initialization/attachment also needs Git; other commands do not.
-
-```sh
-dort --repo /path/to/dotfiles git status
-dort --repo /path/to/dotfiles --json git status
-dort --repo /path/to/dotfiles git diff
-dort --repo /path/to/dotfiles git diff --staged
-# Explicit CONTENT disclosure: may expose secrets; review privately.
-dort --repo /path/to/dotfiles git diff --patch
-```
-
-Status and default diff reports contain metadata only. Diff compares tracked worktree changes to the index, or the index to HEAD with `--staged` (including unborn repositories). Untracked names appear in status; their contents are never included in diff. Diff summaries use change codes, modes and paths, without rename detection; status can report renames. Only explicit CLI `--patch` or the TUI's separately confirmed View patch content action discloses content, escaping control/non-ASCII bytes and backslashes; binary files get a change marker, not binary payloads. Patches are display reports, not directly applicable patch files, and are **not secret-proof**.
-
-Git runs with a cleared environment, fixed safe arguments, no optional locks/index refresh, hooks, external diff/textconv, fsmonitor or submodule recursion. Configured content filters and partial-clone/promisor settings are conservatively refused, even when unused/false. Each child has a 10-second deadline and a combined 4 MiB stdout/stderr limit; errors never echo Git stderr or partial output. These inspection commands have no fallback, network, merge or write operation. This is hardening, **not OS sandboxing or protection from a malicious same-user configuration race**. Git reads repository-controlled configuration/includes/attributes/object paths using Git's own filesystem access, not Dort's no-follow observer.
-
-`--repo` must identify the exact non-bare working-tree root (linked worktrees supported), with no manifest/registration requirement. Reports are not globally atomic; summary and explicit patch are separate reads. See [command details](docs/user/commands.md#git-inspection) and [Git safety/troubleshooting](docs/user/safety.md#git-inspection-boundary).
-
-In Discover, **Ignore selected** (`I`) previews a persistent local exclusion. Activate Confirm; **Ignored paths** (`U`) offers confirmed Unignore. Ignore selected is a contextual page action; Files → Ignored paths is reachable from the Menu control even at 48×14. The `I`/`U` shortcuts remain available in Discover. These preferences affect both CLI and TUI discovery, never live files or repository mappings, and cannot be changed in preview-only mode.
-
-New single/batch adoption suggestions mirror HOME-relative paths under `files/` (for example, `~/.config/nvim/init.lua` → `files/.config/nvim/init.lua`). IDs derive from that relative path; all fields remain editable and existing mappings are not moved. The marked-adoption editor covers Discover completely until dismissed.
-
-## File discovery and previews
-
-```bash
-# Metadata only: hidden HOME entries and bounded descendants, no directory symlinks
-cargo run -p dort -- files discover
-cargo run -p dort -- --json files discover
-
-# Inspect active mappings and preview link effects; --profile is optional
-cargo run -p dort -- --repo /path/to/dotfiles files list
-cargo run -p dort -- --repo /path/to/dotfiles files plan apply --profile dev
-cargo run -p dort -- --repo /path/to/dotfiles --json files plan apply
-
-# Preview ONLY: no source copy, manifest edit, link replacement or backup occurs
-cargo run -p dort -- --repo /path/to/dotfiles files plan adopt '~/.zshrc' \
-  --id zshrc --source files/common/zshrc
-
-# Keep would materialize an ordinary file; remove would delete the managed link.
-# Both would remove the mapping, retaining the repository source.
-cargo run -p dort -- --repo /path/to/dotfiles files plan unmanage zshrc --mode keep
-cargo run -p dort -- --repo /path/to/dotfiles files plan unmanage zshrc --mode remove
-```
-
-Discovery traverses nonexcluded hidden HOME directories to depth 8 (HOME is depth 0), with a 100,000-entry total budget and a 100,000-name per-directory limit; ordinary nonhidden HOME directories are not traversed. Known key/credential/authentication/session locations, browser stores, caches, history, and generated data are excluded. Protected Dort/repository containers are not candidates. Reports may contain unsupported directories, links, and special files; a metadata candidate is **not** an assurance that content is safe. Unreadable/raced subtrees produce warnings; an oversized root directory fails with a limit diagnostic.
-
-`files list` observes active mappings; `files plan` makes the safety/conflict decision. Plans are schema-versioned, deterministically ordered by file ID, and contain parent/file metadata fingerprints and safe regular-file SHA-256 hashes, never file contents. Human output shows source/destination paths, permissions, proposed backups and effects, conflicts, and destructiveness. Identical saved snapshots yield identical plans without further filesystem reads. Correct managed links are no-ops.
-
-Initial adoption supports only owned, single-link regular files into a new repository source and a new active mapping. CLI/TUI adoption previews create a base-profile mapping; core callers can use other declared active profiles. It refuses existing sources, mapping/source collisions, directories, special files, foreign/broken links, detected sensitive content/paths, and special permission bits. Applying links can preview replacement of an ordinary regular destination only with an explicit backup effect. Unmanage requires the currently correct managed link; drift is blocked. Destructive removal requires a separate matching acknowledgement; CLI previews never collect it. Template/secret mappings and files with unverified tool prerequisites are always blocked, never silently treated as links.
-
-Filename/content sensitivity checks are deliberately conservative heuristics, not secret detection guarantees; false positives are possible. Review content privately before adoption. Only the explicit mutation commands below can execute after approval; previews themselves never write.
-
-## Approved local mutations (experimental)
-
-Try these only in a [disposable HOME](docs/user/getting-started.md) first:
-
-```sh
-# Explicit path: absent destination under an existing safe parent, or valid Git+dort.toml root.
-dort init /absolute/path/to/dotfiles --dry-run
-dort init /absolute/path/to/dotfiles --yes
-# Preview first; nonterminal/JSON writes always need --yes.
-dort files add '~/.editorrc' --id editor --source files/editorrc --dry-run
-dort files add '~/.editorrc' --id editor --source files/editorrc --yes
-dort status
-dort plan
-dort files apply --dry-run
-dort files apply --yes
-dort files remove editor --mode keep --yes
-# Alternative destructive mode (requires the correct managed link):
-# dort files remove editor --mode remove --yes
-dort history
-# dort rollback REPOSITORY_ID TRANSACTION_ID --dry-run
-```
-
-`files adopt`/`files unmanage` alias `add`/`remove`. Both unmanage modes retain sources. Interactive confirmation is available only with terminal stdin/stdout/stderr and without `--json`; `--yes` bypasses it, not validation or separate link-removal acknowledgement. Dry runs never prompt or create state, locks or artifacts. See [commands](docs/user/commands.md) for recovery and JSON details. On any failed write, inspect `history`: effects may be partially published, never automatically undone.
-
-## Manifest basics
-
-`dort.toml` uses schema 1 and rejects unknown fields. Tool/file IDs are unique within their respective namespaces. Tool dependencies must reference declared tools and cannot form cycles.
-
-```toml
-schema = 1
-
-[profiles]
-available = ["dev", "macos", "ubuntu"]
-default = ["base"]
-
-[profiles.platform]
-macos = ["macos"]
-ubuntu = ["ubuntu"]
-
-[[files]]
-id = "zshrc"
-source = "files/common/zshrc"
-target = "~/.zshrc"
-mode = "link"
-```
-
-`base` is built in and always active. Other profiles must appear in `profiles.available`. Effective profiles are the union of base, defaults, platform selections, and explicit local/requested profiles. Multiple profiles on a resource use OR semantics; an explicit empty resource profile list is invalid.
-
-See [examples/dort.toml](examples/dort.toml) for tool and future file-mode declarations. The checker validates these declarations but explicitly reports unsupported runtime capabilities. `manifest check` does not inspect provider availability, source contents, live symlinks, or installed versions. Use the separate file observation/preview commands for live-file diagnostics; tools remain unverified. Separate Tools inspection reports provider claims, not ownership or proof that a declared binary satisfies its policy.
-
-## Local state and safety
-
-Both macOS and Ubuntu use the same XDG-compatible layout:
-
-- Configuration: `${XDG_CONFIG_HOME:-$HOME/.config}/dort/local.toml`
-- Local discovery exclusions: `${XDG_CONFIG_HOME:-$HOME/.config}/dort/discovery-ignore.toml`
-- State: `${XDG_STATE_HOME:-$HOME/.local/state}/dort/`
-- Repository state: `repositories/<local-repository-id>/` below the state directory
-
-Empty XDG overrides are ignored; relative overrides are rejected. Core APIs receive an explicit host context, so tests do not change the process's HOME. Missing local state is not created by read-only commands.
-
-Write-capable registry and filesystem lifecycle APIs require a single advisory application lock. Registry updates use no-follow descriptor-relative state access and synced atomic configuration replacement. Incomplete or malformed transactions block registry updates and all new filesystem transactions. Existing state paths must not traverse symlinks; private state directories use 0700 and configuration/checkpoints/backups use 0600, owned by the current user without hard links. Prepared files and retained originals preserve their live modes inside private transaction directories. Paths such as macOS `/var` may need their real, non-symlink spelling when used as explicit state overrides.
-
-Live-file observation also walks absolute paths descriptor-relatively with no-follow directory opens and no-follow terminal inspection. Symlinked parents (including aliases such as macOS `/var`), source symlinks/escapes, hard links, directories, and special files cannot enter regular-file deployment plans. Terminal links can be classified as broken, looping, or unsafe without reading their referents. Regular-file reads are bounded to 16 MiB, check descriptor/named-file identity and metadata before/after reading, and hash only owned, single-link files. Non-UTF-8 report paths/link targets fail explicitly rather than being lossily serialized.
-
-Snapshots are not globally atomic and do not authorize later writes. The experimental executors below independently revalidate approval and journal changes. No automatic Git merge may edit live-linked sources. No destructive real-home testing is permitted.
-
-## Core filesystem execution and recovery (experimental)
-
-The CLI exposes the shared core services through explicit approval boundaries. Core callers must register the repository, present and privately review an unblocked adoption preview, explicitly construct `adoption::Approval::from_plan`, then call `adoption::execute` while holding `WriterLock`. Approval is opaque and cannot be deserialized from preview JSON. Execution independently re-observes and compares the approved manifest, relevant configuration, mapping/effects, source/destination fingerprints and parent identities. Unrelated directory timestamp churn does not invalidate approval; identity, ownership and permissions still must match.
-
-One transaction includes new source-parent directories (0700), source copy, manifest addition and destination link. The source and manifest preserve permission bits and group; the manifest addition preserves existing comments/text and is fully revalidated. Adoption copies file bytes, not ACLs or extended attributes. It supports only the regular-file link subset described above. **Repository, destination and transaction state must be on one filesystem supporting atomic exchange/no-replace renames**; there is no cross-device copy fallback. Individual publications are atomic, not the entire multi-path transaction. Other readers may see intermediate states.
-
-`lifecycle::Approval::from_plan` and `lifecycle::execute` support link apply and unmanage-and-keep under the same lock/revalidation constraints. Removal instead requires `Approval::from_removal_plan` plus a separate `RemovalAcknowledgement::confirm` for the matching mapping ID. These are explicit caller approval boundaries, not interactive prompts or deserializable preview authorizations.
-
-Apply groups all changed active mappings into **one recoverable transaction per approved request**, sharing newly needed destination parents (0700). Correct mappings stay untouched; an entirely correct or empty apply returns `None` with no journal/backups. Unmanage first materializes source bytes/mode/group at the destination (`keep`) or moves the managed link into private storage (`remove`), then removes only its manifest mapping using a focused, fully revalidated TOML edit. Both modes retain repository sources unchanged. All selected sources—including no-op apply mappings—are watched for edits during execution/rollback. These prototype APIs are bounded to 128 selected mappings and 256 operations per transaction; file reads remain bounded to 16 MiB.
-
-### Journal schema 1
-
-Transaction state lives under `repositories/<repository-id>/transactions/<transaction-id>/` (both IDs are 64 lowercase hexadecimal characters). It retains:
-
-- Immutable, exclusively created `000000.json`, `000001.json`, … checkpoint envelopes. Each contains the exact JSON payload string and its SHA-256 checksum; the payload binds schema, sequence and previous checksum, repository/root/transaction IDs, approved-plan digest, input fingerprints, backup hashes, ordered operation IDs and observed postconditions.
-- Private, synced `manifest.backup` and `destination.backup` files with verified SHA-256 hashes. No file contents or local variable values appear in checkpoints or diagnosis output. Ordinary backups are **not encrypted**; sensitive adoption is refused heuristically, not proven secret-free.
-- `op-0000`, … prepared objects/retained originals. New files/directories are published with no-replace renames; manifest/destination replacements exchange the prepared object with the original. Both directories are synced. Originals and copied sources remain available in private transaction storage after rollback; there is no garbage collector yet.
-
-### Journal schema 2
-
-Apply/unmanage use a separate schema-2 payload in the same private transaction layout; schema-1 adoption records and recovery stay unchanged, with no migration. Schema 2 binds the action (`apply`, `keep`, `remove`), separate removal acknowledgement, approved-plan digest, profiles, original manifest/configuration, mapping/source/destination watches, parent anchors and backup hashes.
-
-Ordered operations explicitly distinguish directory/destination/manifest roles and `publish` (no-replace), `exchange` (retain original) or `withdraw` (move link into private storage) mutations. `op-0000`, … holds prepared objects or originals; a withdrawal starts with an absent slot. `backup-0000`, … contains verified private byte copies of replaced regular files/manifests, or the exact raw link target text for replaced/removed links. No file contents enter checkpoint metadata. Apply never edits the manifest or sources; unmanage publishes the destination change before exchanging the edited manifest. Diagnosis independently validates each format's full chain and fails closed on unsupported versions or malformed tails.
-
-### Journal schema 3: local bootstrap
-
-`init PATH` creates a minimal `schema = 1` manifest and local Git repository in a private 0700 stage, or attaches an already-valid repository. Git initialization uses no templates, fixed `main`/SHA-1, no global/system configuration or inherited environment, and the existing bounded runner. It never clones, contacts a remote, stages or commits files. A missing destination requires an existing owned, non-group/world-writable physical parent; arbitrary existing directories are refused.
-
-Schema 3 uses the same immutable checkpoint envelope/layout, but a dedicated bootstrap payload: `preparing → publish_intent → published → register_intent → completed`, or explicit `abandoned`. Intent precedes each no-replace repository publication and atomic registration publication/exchange. A synced bounded tree snapshot, parent/configuration identities and hashes bind recovery; configuration values/bodies stay only in private `config.new`/`config.backup`, never checkpoints. Original configuration inodes are retained after exchange. Repository/configuration/state must share a filesystem. Private configuration directories may be created during preparation.
-
-Incomplete bootstrap blocks other writes. Inspect `recovery resume REPOSITORY_ID TRANSACTION_ID --dry-run` or `recovery abandon … --dry-run`, then approve explicitly. Resume recognizes only the exact prepared/published repository and before/after registration, refusing edits/substitutions. Incomplete private preparation can only be abandoned and retried. Abandon marks terminal without deleting a published repository, undoing registration or removing private artifacts. Malformed chains require manual diagnosis, not speculative recovery.
-
-### Journal schema 5: tool declarations
-
-Tools → **Add tool declaration** (`a`) and `tools declare` add one validated desired tool to a registered repository. An inspected package can also seed a separate editable declaration draft through **Add selected to repository** in the action strip or More; review the command name and version policy before saving. They edit only `dort.toml`, preserve unrelated TOML/comments, return a no-op for an identical declaration and refuse conflicting IDs. A private manifest backup and immutable schema-5 intent precede secure same-filesystem replacement; guarded rollback restores only an unchanged result. This never installs packages or adopts existing binaries. See [declaration contracts](docs/tool-declarations.md).
-
-### Shared durability and recovery
-
-For file lifecycle (schemas 1/2/4/5), durable phases are `preparing → running → verifying → completed`, with explicit `rolling_back → rolled_back`. Preparing may create only private artifacts, never live effects. Intent is checkpointed and synced **before each live mutation and each inverse**; postconditions get a separate immutable checkpoint. A torn final write cannot overwrite earlier durable intent. Missing records, truncated/malformed records, unsupported schemas, checksum/backup mismatches and invalid transitions fail closed. Diagnosis reports the valid prefix but never silently ignores a damaged tail. Checksums detect corruption; they do not authenticate against a malicious owner/root.
-
-`recovery list` inspects all local repositories without creating state, acquiring a lock or replaying anything. It reports incomplete/malformed transactions as write blockers (exit 4). Use `rollback REPOSITORY_ID TRANSACTION_ID --dry-run` to inspect guarded schema-1/2/4 inverse paths; omit `--dry-run` and confirm to execute. Core callers can use `recovery::preview`/opaque approval/`execute`, dispatching to the existing schema-specific rollback with a fresh head/layout check under the matching lock. `history` and `lifecycle::history` return content-free retained history across all four formats; `recovery list` includes the last validated `journal_schema` (or null when none is valid). History diagnoses journal integrity, not live drift; a completed record does not guarantee rollback guards still match. There is **no automatic startup rollback**. Malformed journals require manual diagnosis/repair rather than speculative execution.
-
-Rollback preflights all source, manifest, destination, staged-object and parent guards before changing anything, then rechecks around each inverse. Edits through the live source link, replacement files, changed parent identities/permissions, extra files in newly created directories or damaged backups stop recovery instead of overwriting user work. An interrupted rename can be recognized from the persisted intent and retained object identity/content; uncertain states are refused. Interrupted rollback can itself be resumed explicitly. Failed calls leave durable state for diagnosis, never silently auto-undo.
-
-The lock coordinates Dort writers, not arbitrary editors or a malicious same-user process. Descriptor-relative no-follow operations avoid traversing substituted symlink parents, but these checks are not filesystem-wide isolation. The ordinary tests exercise process exits at durable boundaries and simulated torn records. A separately approved, opt-in Linux VM harness additionally exercises real ENOSPC and partial checkpoint writes, **not failing fsync or real power loss**. Retention/scan bounds and lack of garbage collection are further prototype limits.
 
 ## Development
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked -- --test-threads=1
+python3 scripts/test.py full
 cargo build --workspace --locked
 python3 scripts/check-docs.py --self-test
 python3 scripts/check-docs.py
@@ -281,6 +92,8 @@ cargo package --workspace --locked
 python3 scripts/check-crates.py --archives
 git diff --check
 ```
+
+For faster development checks, run `python3 scripts/test.py` (units), or choose `npm`, `tools` or `ui`. Use `--list` to inspect a suite. `python3 scripts/test.py full` builds once, then runs every test in its own process with private `TMPDIR`, up to 8 concurrently; use `--jobs` and `--timeout` to tune it. Focused runs do not replace milestone durability validation. Each test keeps its own assertions, deadlines and filesystem durability; the runner only changes process isolation and scheduling.
 
 The Python gates require Python 3 (standard library only). PTY tests use disposable child environments and do not require installed Git. CI requires non-root permission fixtures and distinct Linux cross-device fixture filesystems; optional skips are visible in test output.
 

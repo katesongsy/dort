@@ -273,11 +273,42 @@ fn failed_bootstrap_blocks_writes_until_explicit_abandon_and_dry_runs_stay_reado
     assert_eq!(d["journal_schema"], 3);
     let rid = d["repository_id"].as_str().unwrap();
     let tid = d["transaction_id"].as_str().unwrap();
-    s.cmd()
+    let blocked = s
+        .cmd()
         .args(["--json", "--yes", "init"])
         .arg(&s.repo)
         .assert()
-        .code(2);
+        .code(2)
+        .get_output()
+        .stderr
+        .clone();
+    let blocked: serde_json::Value = serde_json::from_slice(&blocked).unwrap();
+    assert_eq!(blocked["kind"], "validation");
+    let message = blocked["error"].as_str().unwrap();
+    for fact in [
+        "An earlier operation did not finish",
+        "New changes are paused",
+        "Repository setup",
+        rid,
+        tid,
+        "dort recovery list",
+    ] {
+        assert!(message.contains(fact), "{message}");
+    }
+    let human = s
+        .cmd()
+        .args(["--yes", "init"])
+        .arg(&s.repo)
+        .assert()
+        .code(2)
+        .get_output()
+        .stderr
+        .clone();
+    let human = String::from_utf8(human).unwrap();
+    assert!(human.contains(tid) && human.contains("Open Recovery"));
+    assert!(
+        !human.contains("incomplete or malformed") && !human.contains("Possible partial effects")
+    );
     s.cmd()
         .args(["--json", "--dry-run", "recovery", "resume", rid, tid])
         .assert()
@@ -323,7 +354,7 @@ fn blocked_plans_and_lock_contention_do_not_execute() {
         s.home.clone(),
         None,
         None,
-        dort_core::platform::Platform::Ubuntu,
+        dort_core::platform::Platform::Linux,
         dort_core::platform::Architecture::X86_64,
     )
     .unwrap();

@@ -18,16 +18,16 @@ Dort helps describe a development environment in a Git repository. The experimen
 | Inspect declared active files | Yes: `files list`. |
 | Preview links, adoption and unmanage effects | Yes: `files plan …`; no changes are made. |
 | Inspect Git status/diff | Yes: metadata-only `git status` / `git diff`; explicit `--patch` discloses bounded escaped content. |
-| Inspect retained transaction history/integrity | Yes: `history` / `recovery list`, all five journal formats, no replay. |
+| Inspect retained transaction history/integrity | Yes: `history` / `recovery list`, all supported journal formats, no replay. |
 | Create/attach a local repository | Experimental: interactive Actions → Create/attach, or `init PATH`. |
 | Adopt/deploy/unmanage regular-file links | Experimental: `files add`, `files apply`, `files remove`. |
 | Guarded rollback / bootstrap recovery | Experimental: `rollback`, `recovery resume` / `abandon`. |
-| Inspect provider-reported installed packages | Yes: Tools or `tools inspect`; [explicit approval and config/cache risks](commands.md#provider-inspection). No ownership inference. |
-| Reconcile declarations against explicit snapshots | Yes: Tools `s`/`p` or `tools reconcile`; [scope and binary-metadata limits](commands.md#snapshot-reconciliation). Reconciliation alone does not install or verify tool readiness. |
-| Inspect proposed install argv/effects | Eligible reconciliation rows show preview-only command metadata; no command can be run by Dort. |
-| Install one missing supported package | Tools comparison → Review install or `tools reconcile --install-tool`; [exact mise](commands.md#exact-mise-installation), [exact npm](commands.md#exact-npm-installation), [provider-current Homebrew core](commands.md#homebrew-core-installation), deadline and attempts. npm/Homebrew links may expose commands; Homebrew build/dependency code can execute and dependencies may upgrade. No rollback. |
-| Add desired tool declarations | Tools → Add tool declaration or `tools declare`; edits the manifest only, with guarded recovery. |
-| Install tools or Git staging/commit/push | Not yet. |
+| Inspect installed packages and seed a declaration | Tools → Installed tools or `tools inspect`; [explicit query approval](commands.md#installed-tool-discovery), one current result and no ownership inference. |
+| Check declared tools | Tools **Check installed** (`C`) or `tools check`; [derived scopes and per-tool status](commands.md#declared-tool-workflow). |
+| Review exact query/install effects | Human-readable reviews show programs, arguments, destinations and risks before approval. |
+| Install missing supported packages | Tools **Install missing** (`i`) or `tools install-missing`; [exact npm and provider-current Homebrew](commands.md#installation-safety), serial stop-on-failure, durable attempts and no rollback. |
+| Add, edit or remove desired declarations | Tools `a` / `e` / `d`, or CLI `tools declare` / `edit` / `remove`; manifest-only changes with guarded recovery. |
+| General package upgrades, runtime configuration or Git staging/commit/push | Not yet. |
 | Interactive onboarding, Files, profiles/checks/diagnostics, Recovery, Tools and read-only Git | Experimental: terminal `dort` or `dort tui`; [keys and limitations](commands.md#interactive-interface). |
 | Templates, secrets or Git clone/sync | Not yet. |
 

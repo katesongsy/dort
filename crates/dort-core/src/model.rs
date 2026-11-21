@@ -15,15 +15,13 @@ pub struct Tool {
     pub profiles: Vec<String>,
     #[serde(default)]
     pub requires: Vec<String>,
-    pub install: BTreeMap<Platform, InstallSpec>,
+    pub install: InstallSpec,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     Brew,
-    Apt,
-    Mise,
     Npm,
 }
 

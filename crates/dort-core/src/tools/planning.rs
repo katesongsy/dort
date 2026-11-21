@@ -51,7 +51,6 @@ pub struct VersionClaim {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum PackageFinding {
-    UnsupportedPlatform,
     NotObserved,
     Unavailable {
         reason: inspection::Failure,
@@ -71,7 +70,6 @@ pub enum PackageFinding {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "reason", rename_all = "snake_case")]
 pub enum Blocker {
-    UnsupportedPlatform,
     ProviderNotObserved,
     ProviderUnavailable,
     ProviderScopeMismatch,
@@ -195,23 +193,19 @@ pub fn plan(
             .collect();
         let binary = observed.binaries.get(&id).cloned().unwrap_or_default();
         let report = observed.catalogs.get(&id).copied();
-        let declaration = tool
-            .install
-            .get(&platform)
-            .map(|spec| -> Result<Declaration> {
-                Ok(Declaration {
-                    provider: spec.provider,
-                    package: spec.package.clone(),
-                    policy: VersionPolicy::parse(spec.provider, spec.version.as_deref())
-                        .map_err(|_| invalid("unsupported tool version policy"))?,
-                    runtime_tool: spec.runtime_tool.clone(),
-                })
-            })
-            .transpose()?;
-        let package = match (&declaration, tool.install.get(&platform)) {
-            (Some(d), Some(spec)) => classify(spec, &d.policy, report),
-            _ => PackageFinding::UnsupportedPlatform,
-        };
+        let spec = &tool.install;
+        let declaration = Some(Declaration {
+            provider: spec.provider,
+            package: spec.package.clone(),
+            policy: VersionPolicy::parse(spec.provider, spec.version.as_deref())
+                .map_err(|_| invalid("unsupported tool version policy"))?,
+            runtime_tool: spec.runtime_tool.clone(),
+        });
+        let package = classify(
+            spec,
+            &declaration.as_ref().expect("declared tool").policy,
+            report,
+        );
         if let PackageFinding::Present { versions } = &package {
             claim_count += versions.len();
             if claim_count > MAX_VERSION_CLAIMS {
@@ -238,11 +232,7 @@ pub fn plan(
                 }
                 BinaryObservation::Missing => (),
             }
-            if let Some(spec) = tool
-                .install
-                .get(&platform)
-                .filter(|s| s.provider == Provider::Npm)
-                && !runtime_candidate_matches(spec, report, observed)
+            if spec.provider == Provider::Npm && !runtime_candidate_matches(spec, report, observed)
             {
                 blockers.push(Blocker::RuntimeBindingUnverified);
             }
@@ -401,8 +391,6 @@ fn classify(
 fn related_identity(provider: Provider, requested: &str, reported: &str) -> bool {
     match provider {
         Provider::Brew => requested.rsplit('/').next() == reported.rsplit('/').next(),
-        Provider::Apt => requested.split(':').next() == reported.split(':').next(),
-        Provider::Mise => requested.rsplit(':').next() == reported.rsplit(':').next(),
         Provider::Npm => false,
     }
 }
@@ -410,18 +398,11 @@ fn comparable_policy(policy: &VersionPolicy) -> bool {
     match policy {
         VersionPolicy::ProviderDefault {} | VersionPolicy::Latest {} => true,
         VersionPolicy::Exact { version } => super::valid_observed_version(version),
-        VersionPolicy::MisePrefix { major, minor } => {
-            super::canonical_component(major).is_some()
-                && minor
-                    .as_deref()
-                    .is_none_or(|m| super::canonical_component(m).is_some())
-        }
     }
 }
 fn package_blockers(package: &PackageFinding) -> Vec<Blocker> {
     use PackageFinding::*;
     match package {
-        UnsupportedPlatform => vec![Blocker::UnsupportedPlatform],
         NotObserved => vec![Blocker::ProviderNotObserved],
         Unavailable { .. } => vec![Blocker::ProviderUnavailable],
         ScopeMismatch { .. } => vec![Blocker::ProviderScopeMismatch],

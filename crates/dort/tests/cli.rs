@@ -477,7 +477,7 @@ fn schema2_history_is_reported_without_locking_replaying_or_creating_checkpoints
         sandbox.home.clone(),
         None,
         None,
-        Platform::Ubuntu,
+        Platform::Linux,
         Architecture::X86_64,
     )
     .unwrap();

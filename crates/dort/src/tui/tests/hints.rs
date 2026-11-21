@@ -64,13 +64,17 @@ fn declaration_footer_describes_fields_and_review_not_underlying_tools_shortcuts
     let mut app = App::new(false);
     app.tab = Tab::Tools;
     app.tools_view.declare();
+    key(&mut app, KeyCode::Tab);
     for c in "cspqr".chars() {
         key(&mut app, KeyCode::Char(c));
     }
     assert_eq!(app.tools_view.declaration.fields[0], "cspqr");
     let keys = hints::keys(&app);
     assert!(keys.contains(&("Enter", "Review declaration")));
-    assert!(keys.contains(&("F3", "Metadata")));
+    assert!(
+        !keys.iter().any(|(key, _)| *key == "F3"),
+        "Tools has no alternate metadata mode"
+    );
     assert!(!keys.iter().any(|(k, _)| *k == "Tab"));
     assert!(!keys.iter().any(|(k, _)| ["c", "s", "p", "r"].contains(k)));
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {

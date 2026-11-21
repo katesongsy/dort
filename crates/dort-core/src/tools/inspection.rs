@@ -12,39 +12,31 @@ use std::{
 };
 
 mod catalog;
+mod npm_discovery;
 
 const LIMIT: usize = 4 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(10);
 pub const WARNING: &str = "Provider inspection executes a trusted local program. Global configuration and plugins may execute code; caches/logs may change. Offline settings are hardening, not an OS sandbox or a guarantee against network access. No packages are installed by Dort. Results are provider claims, not Dort ownership or verified binary identity.";
 
-/// Only these fixed query protocols are implemented. Apt uses dpkg-query, not apt.
-/// npm requires an explicit declared-runtime/Node/CLI/prefix binding.
+/// Fixed provider inventory protocols.
+/// Managed npm checks require an explicit runtime/Node/CLI/prefix binding.
+/// Standalone npm inventory has a separate read-only PATH-based capability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Query {
     BrewFormulae,
-    DpkgPackages,
-    MiseInstalled,
     NpmGlobals,
 }
 impl Query {
     pub fn provider(self) -> Provider {
         match self {
             Self::BrewFormulae => Provider::Brew,
-            Self::DpkgPackages => Provider::Apt,
-            Self::MiseInstalled => Provider::Mise,
             Self::NpmGlobals => Provider::Npm,
         }
     }
     fn arguments(self) -> Vec<String> {
         let args: &[&str] = match self {
             Self::BrewFormulae => &["info", "--json=v2", "--installed", "--formula"],
-            Self::DpkgPackages => &[
-                "--no-pager",
-                "--show",
-                "--showformat=${binary:Package}\\t${Version}\\t${db:Status-Status}\\t${db:Status-Eflag}\\n",
-            ],
-            Self::MiseInstalled => &["ls", "--installed", "--json"],
             Self::NpmGlobals => &[
                 "ls",
                 "--global",
@@ -132,6 +124,9 @@ pub struct Description {
     pub home: PathBuf,
     pub trusted_search_path: Vec<PathBuf>,
     pub npm_binding: Option<NpmBinding>,
+    /// Reported global prefix for standalone inventory, never a runtime binding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub npm_global_prefix: Option<PathBuf>,
     pub warning: &'static str,
     pub output_limit_bytes: usize,
     pub timeout_seconds: u64,
@@ -140,6 +135,7 @@ pub struct Description {
 /// Constructing/describing it does not discover paths, read files or start a process.
 pub struct Preview {
     description: Description,
+    prefix_probe: Option<Description>,
 }
 /// Single-use authority, deliberately not Clone/Debug/Serialize/Deserialize.
 pub struct Approval(Preview);
@@ -166,6 +162,28 @@ impl Preview {
             return Err(Failure::InvalidNpmBinding);
         }
         Self::with_binding(query, executable, home, trusted_search_path, None)
+    }
+    /// Standalone inventory through a trusted npm program from the application PATH.
+    /// Approval covers prefix discovery and a global list scoped to that reported prefix.
+    /// It grants no declared-runtime or installation authority.
+    pub fn npm_inventory(
+        executable: PathBuf,
+        home: PathBuf,
+        trusted_search_path: Vec<PathBuf>,
+    ) -> Result<Self, Failure> {
+        let mut preview = Self::with_binding(
+            Query::NpmGlobals,
+            executable,
+            home,
+            trusted_search_path,
+            None,
+        )?;
+        preview.description.warning = npm_discovery::WARNING;
+        let mut probe = preview.description.clone();
+        probe.arguments = npm_discovery::prefix_arguments();
+        probe.output_limit_bytes = npm_discovery::PREFIX_LIMIT;
+        preview.prefix_probe = Some(probe);
+        Ok(preview)
     }
     /// The binding must name a runtime declared in this manifest. No version,
     /// executable identity or installed-runtime association is inferred from it.
@@ -243,6 +261,7 @@ impl Preview {
             );
         }
         Ok(Self {
+            prefix_probe: None,
             description: Description {
                 query,
                 executable,
@@ -251,6 +270,7 @@ impl Preview {
                 home,
                 trusted_search_path,
                 npm_binding,
+                npm_global_prefix: None,
                 warning: WARNING,
                 output_limit_bytes: LIMIT,
                 timeout_seconds: TIMEOUT.as_secs(),
@@ -260,6 +280,9 @@ impl Preview {
     pub fn description(&self) -> &Description {
         &self.description
     }
+    pub fn prefix_probe(&self) -> Option<&Description> {
+        self.prefix_probe.as_ref()
+    }
     /// Presentation calls this only after deliberate approval of this exact live preview.
     /// This is inspection authority only, never installation/mutation approval.
     pub fn approve(self) -> Approval {
@@ -268,53 +291,54 @@ impl Preview {
 }
 impl Approval {
     pub fn inspect(self) -> Report {
-        let d = self.0.description;
-        let mut command = Command::new(&d.executable);
-        command
-            .env_clear()
-            .env("HOME", &d.home)
-            .env("XDG_CONFIG_HOME", d.home.join(".config"))
-            .env("XDG_CACHE_HOME", d.home.join(".cache"))
-            .env("XDG_DATA_HOME", d.home.join(".local/share"))
-            .env("XDG_STATE_HOME", d.home.join(".local/state"))
-            .env(
-                "PATH",
-                std::env::join_paths(&d.trusted_search_path).expect("validated search path"),
-            )
-            .env("LC_ALL", "C")
-            .env("LANG", "C")
-            .env("NO_COLOR", "1")
-            .current_dir(d.working_directory)
-            .args(&d.arguments);
-        match d.query {
-            Query::BrewFormulae => {
-                command
-                    .env("HOMEBREW_NO_AUTO_UPDATE", "1")
-                    .env("HOMEBREW_NO_ANALYTICS", "1")
-                    .env("HOMEBREW_NO_ENV_HINTS", "1")
-                    .env("HOMEBREW_NO_INSTALL_FROM_API", "1");
-            }
-            Query::MiseInstalled => {
-                command
-                    .env("MISE_OFFLINE", "1")
-                    .env("MISE_AUTO_INSTALL", "0")
-                    .env("MISE_YES", "0");
-            }
-            Query::DpkgPackages => {
-                command.env("DPKG_PAGER", "");
-            }
-            Query::NpmGlobals => {}
-        }
-        let result =
-            run_bounded(command, LIMIT, TIMEOUT).and_then(|bytes| catalog::parse(d.query, &bytes));
+        let Preview {
+            mut description,
+            prefix_probe,
+        } = self.0;
+        let result = if let Some(probe) = prefix_probe {
+            npm_discovery::inspect(&probe, &mut description)
+        } else {
+            run_bounded(command(&description), LIMIT, TIMEOUT)
+                .and_then(|bytes| catalog::parse(description.query, &bytes))
+        };
         Report {
-            description: d,
+            description,
             observation: match result {
                 Ok(installations) => Observation::Complete { installations },
                 Err(reason) => Observation::Unavailable { reason },
             },
         }
     }
+}
+fn command(d: &Description) -> Command {
+    let mut command = Command::new(&d.executable);
+    command
+        .env_clear()
+        .env("HOME", &d.home)
+        .env("XDG_CONFIG_HOME", d.home.join(".config"))
+        .env("XDG_CACHE_HOME", d.home.join(".cache"))
+        .env("XDG_DATA_HOME", d.home.join(".local/share"))
+        .env("XDG_STATE_HOME", d.home.join(".local/state"))
+        .env(
+            "PATH",
+            std::env::join_paths(&d.trusted_search_path).expect("validated search path"),
+        )
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .env("NO_COLOR", "1")
+        .current_dir(d.working_directory)
+        .args(&d.arguments);
+    match d.query {
+        Query::BrewFormulae => {
+            command
+                .env("HOMEBREW_NO_AUTO_UPDATE", "1")
+                .env("HOMEBREW_NO_ANALYTICS", "1")
+                .env("HOMEBREW_NO_ENV_HINTS", "1")
+                .env("HOMEBREW_NO_INSTALL_FROM_API", "1");
+        }
+        Query::NpmGlobals => {}
+    }
+    command
 }
 
 // Private raw payloads never implement Debug/Serialize or escape on errors. Concurrent,

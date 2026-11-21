@@ -126,7 +126,7 @@ fn contextual_catalog_is_unique_and_separates_scope_from_effect() {
         }
     }
     assert!(!union.contains(&Action::Inspect)); // Enter exposes details directly.
-    assert_eq!(union.len(), 52); // Every advertised typed command has a home.
+    assert_eq!(union.len(), 49); // Every advertised typed command has a home.
 }
 #[test]
 fn search_first_has_real_caret_semantic_selection_and_literal_shortcut_input() {
@@ -275,6 +275,7 @@ fn filtered_entry_identity_dispatches_a_draft_not_a_filtered_file_or_approval() 
         app.shell.overlay,
         Some(Overlay::Form(Form::KeepId))
     ));
+    super::tests::focus_form(&mut app);
     text(&mut app, "raw-q?");
     let Some(Task::Files(dort_core::planner::Request::Unmanage { id, mode })) =
         key(&mut app, KeyCode::Enter)

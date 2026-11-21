@@ -29,7 +29,6 @@ pub enum Preview {
 pub enum Deferred {
     MissingScope,
     InvalidScope,
-    ExplicitPrivilegedProgramsRequired,
     UnsupportedPolicy,
     DescriptionLimit,
 }
@@ -39,7 +38,6 @@ pub enum VersionSelection {
     ProviderDefaultUnresolved,
     LatestUnresolved,
     ExactRequested,
-    MisePrefixUnresolved,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -49,8 +47,6 @@ pub enum Effect {
     DependencyChangesMayIncludeUpgrades,
     SharedLinksCachesAndData,
     NoAutomaticRollback,
-    GlobalConfigurationMaySelectMultipleVersions,
-    MiseActivationNotRequested,
     NpmLifecycleScriptsDisabled,
     SkippedScriptsMayLeavePackageUnusable,
 }
@@ -103,12 +99,6 @@ pub(super) fn describe(
             reason: Deferred::InvalidScope,
         };
     }
-    // A trusted dpkg-query path is not a trusted apt-get/sudo capability.
-    if declaration.provider == Provider::Apt {
-        return Preview::Deferred {
-            reason: Deferred::ExplicitPrivilegedProgramsRequired,
-        };
-    }
     let Ok(path) = std::env::join_paths(trusted_search_path) else {
         return Preview::Deferred {
             reason: Deferred::InvalidScope,
@@ -146,7 +136,6 @@ pub(super) fn describe(
         VersionPolicy::ProviderDefault {} => VersionSelection::ProviderDefaultUnresolved,
         VersionPolicy::Latest {} => VersionSelection::LatestUnresolved,
         VersionPolicy::Exact { .. } => VersionSelection::ExactRequested,
-        VersionPolicy::MisePrefix { .. } => VersionSelection::MisePrefixUnresolved,
     };
     let mut effects = vec![
         Effect::NetworkAndDownloads,
@@ -184,24 +173,6 @@ pub(super) fn describe(
                 declaration.package.clone(),
             ]
         }
-        Provider::Mise => {
-            let package = match &declaration.policy {
-                VersionPolicy::ProviderDefault {} => {
-                    effects.push(Effect::GlobalConfigurationMaySelectMultipleVersions);
-                    declaration.package.clone()
-                }
-                VersionPolicy::Latest {} => format!("{}@latest", declaration.package),
-                VersionPolicy::Exact { version } => format!("{}@{version}", declaration.package),
-                VersionPolicy::MisePrefix { major, minor } => format!(
-                    "{}@{major}{}",
-                    declaration.package,
-                    minor.as_ref().map_or(String::new(), |m| format!(".{m}"))
-                ),
-            };
-            effects.push(Effect::MiseActivationNotRequested);
-            environment.insert("MISE_AUTO_INSTALL".into(), "0".into());
-            vec!["install".into(), "--jobs=1".into(), package]
-        }
         Provider::Npm => {
             let Some(binding) = scope.npm_binding.as_ref().filter(|b| {
                 b.node == scope.executable
@@ -217,11 +188,6 @@ pub(super) fn describe(
                 VersionPolicy::ProviderDefault {} => declaration.package.clone(),
                 VersionPolicy::Latest {} => format!("{}@latest", declaration.package),
                 VersionPolicy::Exact { version } => format!("{}@{version}", declaration.package),
-                VersionPolicy::MisePrefix { .. } => {
-                    return Preview::Deferred {
-                        reason: Deferred::UnsupportedPolicy,
-                    };
-                }
             };
             effects.push(Effect::NpmLifecycleScriptsDisabled);
             effects.push(Effect::SkippedScriptsMayLeavePackageUnusable);
@@ -247,7 +213,6 @@ pub(super) fn describe(
                 package,
             ]
         }
-        Provider::Apt => unreachable!("apt deferred above"),
     };
     let preview = Preview::PreviewOnly {
         command: Command {

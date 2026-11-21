@@ -125,6 +125,61 @@ impl Diagnosis {
     }
 }
 
+/// A previous operation blocks new writes; no new recovery authority is granted.
+pub struct WriteBlocker {
+    pub transaction: Diagnosis,
+    /// Display metadata only; unavailable registration leaves the stable ID visible.
+    pub repository_root: Option<std::path::PathBuf>,
+}
+impl WriteBlocker {
+    pub fn reason(&self) -> &'static str {
+        if self.transaction.problem.is_some() {
+            "Dort can't verify an earlier operation's recovery record."
+        } else {
+            "An earlier operation did not finish."
+        }
+    }
+    pub fn operation(&self) -> &'static str {
+        match self.transaction.journal_schema {
+            Some(1) => "File adoption",
+            Some(2 | 4) => "File changes",
+            Some(3) => "Repository setup",
+            Some(5 | 6) => "Tool declaration change",
+            _ => "Unknown operation",
+        }
+    }
+}
+impl std::fmt::Debug for WriteBlocker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WriteBlocker")
+            .field("repository_id", &self.transaction.repository_id)
+            .field("transaction_id", &self.transaction.transaction_id)
+            .field("repository_root", &self.repository_root)
+            .field("operation", &self.operation())
+            .field("reason", &self.reason())
+            .finish()
+    }
+}
+impl std::fmt::Display for WriteBlocker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "{} New changes are paused to protect your files.",
+            self.reason()
+        )?;
+        writeln!(f, "Operation: {}", self.operation())?;
+        if let Some(root) = &self.repository_root {
+            writeln!(f, "Repository: {root:?}")?;
+        }
+        writeln!(f, "Repository ID: {}", self.transaction.repository_id)?;
+        writeln!(f, "Operation ID: {}", self.transaction.transaction_id)?;
+        write!(
+            f,
+            "Open Recovery, or run `dort recovery list`, to inspect it."
+        )
+    }
+}
+
 pub(crate) struct Journal {
     pub directory: PrivateDir,
     pub record: Record,
@@ -585,7 +640,7 @@ pub fn diagnose(host: &HostContext) -> Result<Vec<Diagnosis>> {
             match PrivateDir::open(&path.join(txid), false) {
                 Ok(Some(directory)) => reports.push(if crate::bootstrap::is_schema3(&directory) {
                     crate::bootstrap::scan(&directory, id, txid).0
-                } else if crate::tool_journal::is_schema5(&directory) {
+                } else if crate::tool_journal::is_declaration(&directory) {
                     crate::tool_journal::scan(&directory, id, txid).0
                 } else if crate::batch_journal::is_schema4(&directory) {
                     crate::batch_journal::scan(&directory, id, txid).0
@@ -610,10 +665,19 @@ pub fn diagnose(host: &HostContext) -> Result<Vec<Diagnosis>> {
 
 /// Registry and executor writes fail closed on every incomplete/malformed transaction.
 pub(crate) fn ensure_writable(host: &HostContext) -> Result<()> {
-    if diagnose(host)?.iter().any(Diagnosis::blocks_writes) {
-        return Err(Error::Invalid(
-            "incomplete or malformed transaction blocks writes; explicit recovery required".into(),
-        ));
+    if let Some(transaction) = diagnose(host)?.into_iter().find(Diagnosis::blocks_writes) {
+        let repository_root = crate::local::LocalConfig::load(host)
+            .ok()
+            .and_then(|config| {
+                config
+                    .repositories
+                    .get(&transaction.repository_id)
+                    .map(|r| r.root.clone())
+            });
+        return Err(Error::RecoveryRequired(Box::new(WriteBlocker {
+            transaction,
+            repository_root,
+        })));
     }
     Ok(())
 }

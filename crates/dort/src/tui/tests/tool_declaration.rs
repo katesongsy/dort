@@ -1,34 +1,6 @@
 #[path = "declaration_choices.rs"]
 mod choices;
 
-#[test]
-fn inspection_seed_uses_only_observed_platform_and_version_policy() {
-    use dort_core::{platform::Platform, tools::inspection::Query};
-    for (platform, query, provider, index, version) in [
-        (Platform::Macos, Query::BrewFormulae, "brew", 4, ""),
-        (Platform::Ubuntu, Query::DpkgPackages, "apt", 8, ""),
-        (Platform::Macos, Query::MiseInstalled, "mise", 4, "1.2.3"),
-        (Platform::Ubuntu, Query::NpmGlobals, "npm", 8, "1.2.3"),
-    ] {
-        let mut draft = super::tool_declaration::State::default();
-        draft.seed_inspection(platform, query, "package".into(), "1.2.3".into());
-        assert_eq!(&draft.fields[index], provider);
-        assert_eq!(&draft.fields[index + 1], "package");
-        assert_eq!(&draft.fields[index + 2], version);
-        assert!(
-            draft.fields[index + 3].is_empty(),
-            "npm runtime must be chosen explicitly"
-        );
-        assert!(draft.fields[0].is_empty() && draft.fields[1].is_empty());
-        let other = if index == 4 { 8 } else { 4 };
-        assert!(draft.fields[other..other + 4].iter().all(String::is_empty));
-        assert!(
-            draft.request().is_err(),
-            "package observations never authorize a declaration"
-        );
-    }
-}
-
 use super::{
     actions::{self, Output, Task},
     app::{App, Tab},
@@ -61,7 +33,7 @@ impl Fixture {
         let home = root.join("home");
         fs::create_dir(&home).unwrap();
         let host =
-            HostContext::new(home, None, None, Platform::Ubuntu, Architecture::X86_64).unwrap();
+            HostContext::new(home, None, None, Platform::Linux, Architecture::X86_64).unwrap();
         let repo = root.join("repo");
         fs::create_dir(&repo).unwrap();
         fs::create_dir(repo.join(".git")).unwrap();
@@ -83,8 +55,7 @@ impl Fixture {
         f[1] = "demo".into();
         f[4] = "brew".into();
         f[5] = "demo".into();
-        f[8] = "apt".into();
-        f[9] = "demo".into();
+        super::tests::focus_form(&mut app);
         app
     }
     fn output(&self, task: Task) -> dort_core::Result<Output> {
@@ -111,9 +82,8 @@ fn declaration_real_preview_confirm_noop_and_all_repository_recovery_without_pro
         fs::read_to_string(f.repo.join("dort.toml")).unwrap(),
         "# retained\nschema=1\n"
     );
-    assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(app.confirmation.is_some());
     let task = key(&mut app, KeyCode::Enter).unwrap();
+    assert!(app.confirmation.is_none() && app.preview.is_none());
     app.start(true);
     let refresh = app
         .complete(f.output(task).map_err(|e| actions::diagnostic(&e)))
@@ -125,14 +95,18 @@ fn declaration_real_preview_confirm_noop_and_all_repository_recovery_without_pro
             .contains("[[tools]]")
     );
     assert_eq!(app.receipt.as_ref().unwrap().operation, "Tool declaration");
-    app.show_result = false;
+    key(&mut app, KeyCode::Enter); // Done returns to declared tools.
+    assert!(app.tools_view.landing() && !app.tools_view.declaration_open);
+    assert!(render(&app, 80, 24).contains("demo"));
+    app.tools_view.declare();
+    app.tools_view.declaration.fields = f.app(false).tools_view.declaration.fields;
     f.review(&mut app);
     assert!(
         app.preview
             .as_ref()
             .unwrap()
             .text
-            .contains("Already declared: true")
+            .contains("No changes are needed.")
     );
     key(&mut app, KeyCode::Esc);
     app.activate(Action::Destination(Tab::Recovery));
@@ -141,7 +115,6 @@ fn declaration_real_preview_confirm_noop_and_all_repository_recovery_without_pro
     assert!(app.page_actions().contains(&Action::Rollback));
     let task = app.activate(Action::Rollback).unwrap();
     app.complete(f.output(task).map_err(|e| actions::diagnostic(&e)));
-    key(&mut app, KeyCode::Enter);
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.output(task).unwrap();
     assert_eq!(
@@ -158,7 +131,7 @@ fn declaration_draft_focus_caret_and_buttons_survive_compact_wide_navigation() {
             app.tools_view.declaration.focus = focus;
             let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
             terminal.draw(|frame| views::draw(frame, &app)).unwrap();
-            if ![4, 8].contains(&focus) {
+            if focus != 4 {
                 let cursor = terminal.get_cursor_position().unwrap();
                 super::tests::assert_text_focus(&terminal, (w, h), cursor);
             } else {
@@ -210,15 +183,12 @@ fn dry_run_shrink_cancel_and_late_preparation_cannot_approve_declaration() {
     assert!(app.tools_view.declaration_open);
     let mut app = f.app(false);
     f.review(&mut app);
-    key(&mut app, KeyCode::Enter);
     app.resize(47, 13);
     assert!(app.confirmation.is_none());
     app.resize(80, 24);
-    assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(app.confirmation.is_some());
+    assert!(app.preview.is_some());
     key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Esc);
-    app.tools_view.declaration.focus = 12;
+    app.tools_view.declaration.focus = 8;
     let task = key(&mut app, KeyCode::Enter).unwrap();
     app.start(false);
     key(&mut app, KeyCode::Left);
@@ -238,7 +208,6 @@ fn stale_declaration_write_discards_approval_and_retry_only_prepares_new_preview
     let f = Fixture::new();
     let mut app = f.app(false);
     f.review(&mut app);
-    key(&mut app, KeyCode::Enter);
     let task = key(&mut app, KeyCode::Enter).unwrap();
     fs::write(f.repo.join("dort.toml"), "# later\nschema=1\n").unwrap();
     app.start(true);

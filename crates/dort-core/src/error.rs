@@ -17,6 +17,8 @@ pub enum Error {
     Validation(Vec<String>),
     #[error("{0}")]
     Invalid(String),
+    #[error("{0}")]
+    RecoveryRequired(Box<crate::journal::WriteBlocker>),
     #[error("another Dort writer holds the application lock")]
     Locked,
     #[error("no active repository; use --repo or --manifest")]

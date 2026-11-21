@@ -10,8 +10,9 @@ const TOOL: &str = r#"
 id = "node"
 binary = "node"
 [tools.install]
-macos = { provider = "mise", package = "node", version = "24" }
-ubuntu = { provider = "mise", package = "node", version = "24" }
+provider = "brew"
+ package = "node"
+ version = "latest"
 "#;
 const FILE: &str = r#"
 [[files]]
@@ -45,7 +46,7 @@ fn minimal_manifest_defaults_to_base() {
 #[test]
 fn versioned_example_is_valid_on_both_platforms() {
     let manifest = Manifest::parse(include_str!("../examples/dort.toml")).unwrap();
-    for platform in [Platform::Macos, Platform::Ubuntu] {
+    for platform in [Platform::Macos, Platform::Linux] {
         let host = HostContext::new(
             "/home/example".into(),
             None,
@@ -66,7 +67,7 @@ fn strict_schema_and_nested_fields() {
     invalid("schema=1\nsurprise=true", "unknown field");
     invalid("schema=1\n[profiles]\nunknown=[]", "unknown field");
     invalid(
-        &format!("schema=1\n{TOOL}").replace("version = \"24\"", "command = \"anything\""),
+        &format!("schema=1\n{TOOL}").replace("version = \"latest\"", "command = \"anything\""),
         "unknown field",
     );
     invalid(
@@ -74,7 +75,7 @@ fn strict_schema_and_nested_fields() {
         "unknown variant",
     );
     invalid(
-        &format!("schema=1\n{TOOL}").replace("ubuntu =", "windows ="),
+        &format!("schema=1\n{FILE}\n[files.overrides]\nwindows=\"other\""),
         "unknown variant",
     );
 }
@@ -113,10 +114,10 @@ fn profile_union_is_deterministic_and_base_cannot_be_disabled() {
     let m = Manifest::parse(
         r#"schema=1
 [profiles]
-available=["work","dev","ubuntu"]
+available=["work","dev","linux"]
 default=["dev"]
 [profiles.platform]
-ubuntu=["ubuntu"]
+linux=["linux"]
 "#,
     )
     .unwrap();
@@ -124,7 +125,7 @@ ubuntu=["ubuntu"]
     let active = m.active_profiles(&fixture.host, &["work".into()]).unwrap();
     assert_eq!(
         active.into_iter().collect::<Vec<_>>(),
-        ["base", "dev", "ubuntu", "work"]
+        ["base", "dev", "linux", "work"]
     );
     assert!(m.active_profiles(&fixture.host, &["typo".into()]).is_err());
 }
@@ -154,14 +155,15 @@ fn npm_runtime_is_an_implicit_ordered_dependency_and_cannot_create_cycles() {
 id="pi"
 binary="pi"
 [tools.install]
-ubuntu={provider="npm", package="@scope/cli", runtime_tool="node"}
-macos={provider="npm", package="@scope/cli", runtime_tool="node"}
+provider="npm"
+ package="@scope/cli"
+ runtime_tool="node"
 "#;
     let m = Manifest::parse(&format!("schema=1\n{TOOL}{npm}")).unwrap();
     let fixture = support::TestHome::new();
     let active = m.active_profiles(&fixture.host, &[]).unwrap();
     assert_eq!(
-        m.dependency_order(Platform::Ubuntu, &active).unwrap(),
+        m.dependency_order(Platform::Linux, &active).unwrap(),
         ["node", "pi"]
     );
     invalid(
@@ -177,7 +179,7 @@ macos={provider="npm", package="@scope/cli", runtime_tool="node"}
 }
 
 #[test]
-fn inactive_dependencies_and_missing_platform_definitions_block_selection() {
+fn inactive_dependencies_block_selection_but_tools_work_on_all_hosts() {
     let text = format!("schema=1\n[profiles]\navailable=[\"dev\"]\n{TOOL}{FILE}")
         .replace("binary = \"node\"", "binary = \"node\"\nprofiles=[\"dev\"]")
         .replace("mode = \"link\"", "mode = \"link\"\nrequires=[\"node\"]");
@@ -191,45 +193,36 @@ fn inactive_dependencies_and_missing_platform_definitions_block_selection() {
     );
     m.validate_for_host(&fixture.host, &["dev".into()], None)
         .unwrap();
-    let m = Manifest::parse(&format!("schema=1\n{TOOL}").replace(
-        "ubuntu = { provider = \"mise\", package = \"node\", version = \"24\" }",
-        "",
-    ))
-    .unwrap();
-    assert!(
-        m.validate_for_host(&fixture.host, &[], None)
-            .unwrap_err()
-            .to_string()
-            .contains("no installation definition")
-    );
+    let m = Manifest::parse(&format!("schema=1\n{TOOL}")).unwrap();
+    for platform in [Platform::Macos, Platform::Linux] {
+        let mut host = fixture.host.clone();
+        host.platform = platform;
+        m.validate_for_host(&host, &[], None).unwrap();
+    }
 }
 
 #[test]
-fn provider_policy_rejects_unenforceable_versions_platforms_and_injection() {
+fn provider_policy_rejects_unenforceable_versions_and_injection() {
+    let base = format!("schema=1\n{TOOL}");
+    for version in ["24", "^24", "24.0.0"] {
+        invalid(
+            &base.replace("version = \"latest\"", &format!("version = {version:?}")),
+            "cannot enforce this version",
+        );
+    }
     invalid(
-        &format!("schema=1\n{TOOL}").replace("provider = \"mise\"", "provider = \"brew\""),
-        "cannot enforce this version",
+        &base.replace("provider = \"brew\"", "provider = \"other\""),
+        "unknown variant",
     );
+    for package in ["--run-command", "node; touch /tmp/x"] {
+        invalid(
+            &base.replace("package = \"node\"", &format!("package = {package:?}")),
+            "invalid provider package",
+        );
+    }
     invalid(
-        &format!("schema=1\n{TOOL}").replace("provider = \"mise\"", "provider = \"apt\""),
-        "unsupported on this platform",
-    );
-    invalid(
-        &format!("schema=1\n{TOOL}").replace("package = \"node\"", "package = \"--run-command\""),
-        "invalid provider package",
-    );
-    invalid(
-        &format!("schema=1\n{TOOL}")
-            .replace("package = \"node\"", "package = \"node; touch /tmp/x\""),
-        "invalid provider package",
-    );
-    invalid(
-        &format!("schema=1\n{TOOL}").replace("provider = \"mise\"", "provider = \"npm\""),
+        &base.replace("provider = \"brew\"", "provider = \"npm\""),
         "npm requires an explicit runtime_tool",
-    );
-    invalid(
-        &format!("schema=1\n{TOOL}").replace("version = \"24\"", "version = \"^24\""),
-        "cannot enforce this version",
     );
 }
 

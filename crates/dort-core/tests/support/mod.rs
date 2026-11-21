@@ -73,7 +73,7 @@ impl TestHome {
         let home = root.join("home");
         std::fs::create_dir(&home).unwrap();
         let host =
-            HostContext::new(home, None, None, Platform::Ubuntu, Architecture::X86_64).unwrap();
+            HostContext::new(home, None, None, Platform::Linux, Architecture::X86_64).unwrap();
         Self { sandbox, host }
     }
 

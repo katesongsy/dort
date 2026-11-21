@@ -173,6 +173,7 @@ fn compatible_forms_keep_caret_tab_and_mouse_controls_at_all_sizes() {
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let mut app = App::new(false);
         key(&mut app, KeyCode::Char('O'), w, h);
+        super::tests::focus_form(&mut app);
         for c in "~/.editor".chars() {
             key(&mut app, KeyCode::Char(c), w, h);
         }

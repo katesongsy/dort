@@ -17,18 +17,19 @@ use std::{
     process::{Command, Stdio},
 };
 
-const MANIFEST: &str = "# PRIVATE_MANIFEST_BODY\nschema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nmacos={provider='mise',package='demo',version='1.2.3'}\nubuntu={provider='mise',package='demo',version='1.2.3'}\n";
+const MANIFEST: &str = "# PRIVATE_MANIFEST_BODY\nschema=1\n[[tools]]\nid='demo'\nbinary='demo'\n[tools.install]\nprovider='npm'\npackage='demo'\nversion='1.2.3'\nruntime_tool='node'\n[[tools]]\nid='node'\nbinary='node'\n[tools.install]\nprovider='brew'\npackage='node'\n";
 const PROGRAM: &str = r##"#!/bin/sh
+[ "$1" = "$HOME/npm-cli.js" ] || exit 90
+shift
 if [ "$1" = ls ]; then
   printf q >> "$HOME/calls"
   if [ -f "$HOME/unavailable" ]; then printf PRIVATE_PROVIDER_OUTPUT; exit 1; fi
-  if [ -f "$HOME/installed" ]; then printf '{"demo":[{"version":"1.2.3","installed":true}]}'
-  elif [ -f "$HOME/conflict" ]; then printf '{"demo":[{"version":"9.0.0","installed":true}]}'
+  if [ -f "$HOME/installed" ]; then printf '{"dependencies":{"demo":{"version":"1.2.3"}}}'
+  elif [ -f "$HOME/conflict" ]; then printf '{"dependencies":{"demo":{"version":"9.0.0"}}}'
   else printf '{}'; fi
   exit 0
 fi
-[ "$#" = 6 ] && [ "$1" = --no-config ] && [ "$2" = --no-env ] && [ "$3" = --no-hooks ] && [ "$4" = install ] && [ "$5" = --jobs=1 ] && [ "$6" = demo@1.2.3 ] || exit 90
-[ "$MISE_NO_CONFIG" = 1 ] && [ "$MISE_NO_ENV" = 1 ] && [ "$MISE_NO_HOOKS" = 1 ] && [ "$MISE_YES" = 1 ] || exit 91
+[ "$#" = 14 ] && [ "$1" = install ] && [ "$2" = --global ] && [ "$3" = --prefix ] && [ "$4" = "$HOME/prefix" ] || exit 91
 [ "$PWD" = / ] && [ "$XDG_DATA_HOME" = "$HOME/.local/share" ] && [ -z "$DORT_TEST_PRIVATE_PARENT_SENTINEL" ] && [ -z "$NODE_OPTIONS" ] || exit 92
 printf i >> "$HOME/calls"
 printf PRIVATE_PROVIDER_OUTPUT
@@ -37,6 +38,54 @@ if [ -f "$HOME/fail" ]; then exit 3; fi
 if [ -f "$HOME/unverified" ]; then exit 0; fi
 printf installed > "$HOME/installed"
 "##;
+fn binding(host: &HostContext) -> inspection::NpmBinding {
+    inspection::NpmBinding {
+        runtime_tool: "node".into(),
+        node: host.home.join("bin/node"),
+        npm_cli: host.home.join("npm-cli.js"),
+        prefix: host.home.join("prefix"),
+    }
+}
+fn prepare(
+    host: &HostContext,
+    request: Request,
+    target: &inspection::Report,
+) -> dort_core::Result<install::Preview> {
+    let runtime = inspection::Preview::new(
+        inspection::Query::BrewFormulae,
+        host.home.join("brew"),
+        host.home.clone(),
+        request.search_dirs.clone(),
+    )
+    .unwrap()
+    .approve()
+    .inspect();
+    let catalogs = vec![
+        install::npm::Catalog {
+            tools: BTreeSet::from(["demo".into()]),
+            query: inspection::Query::NpmGlobals,
+            executable: request.executable.clone(),
+            search_dirs: request.search_dirs.clone(),
+            npm_binding: Some(binding(host)),
+        },
+        install::npm::Catalog {
+            tools: BTreeSet::from(["node".into()]),
+            query: inspection::Query::BrewFormulae,
+            executable: host.home.join("brew"),
+            search_dirs: request.search_dirs.clone(),
+            npm_binding: None,
+        },
+    ];
+    install::npm::prepare(
+        host,
+        request,
+        install::npm::Scope {
+            binding: binding(host),
+            catalogs,
+        },
+        &[target, &runtime],
+    )
+}
 struct Fixture {
     home: support::TestHome,
     repo: PathBuf,
@@ -49,7 +98,11 @@ impl Fixture {
         let repo = home.repository("repo");
         fs::write(repo.join("dort.toml"), MANIFEST).unwrap();
         fs::create_dir(home.host.home.join("bin")).unwrap();
-        let executable = home.host.home.join("mise");
+        let executable = home.host.home.join("bin/node");
+        fs::write(home.host.home.join("npm-cli.js"), "PRIVATE_CLI_BODY").unwrap();
+        let runtime = home.host.home.join("brew");
+        fs::write(&runtime, "#!/bin/sh\nprintf '%s' '{\"formulae\":[{\"full_name\":\"node\",\"installed\":[{\"version\":\"24.0.0\"}]}]}'\n").unwrap();
+        fs::set_permissions(runtime, fs::Permissions::from_mode(0o700)).unwrap();
         fs::write(&executable, PROGRAM).unwrap();
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
         let lock = WriterLock::acquire(&home.host).unwrap();
@@ -69,14 +122,15 @@ impl Fixture {
             executable: self.executable.clone(),
             search_dirs: vec![self.home.host.home.join("no-helper-programs")],
             tool_search_dirs: vec![self.home.host.home.join("bin")],
-            bound_tools: BTreeSet::from(["demo".into()]),
+            bound_tools: BTreeSet::from(["demo".into(), "node".into()]),
         }
     }
     fn inspect(&self) -> inspection::Report {
         let r = self.request();
-        inspection::Preview::new(
-            inspection::Query::MiseInstalled,
-            r.executable,
+        let manifest = dort_core::Manifest::parse(MANIFEST).unwrap();
+        inspection::Preview::npm(
+            &manifest,
+            binding(&self.home.host),
             self.home.host.home.clone(),
             r.search_dirs,
         )
@@ -85,7 +139,7 @@ impl Fixture {
         .inspect()
     }
     fn preview(&self) -> install::Preview {
-        install::prepare(&self.home.host, self.request(), &self.inspect()).unwrap()
+        prepare(&self.home.host, self.request(), &self.inspect()).unwrap()
     }
     fn execute(&self) -> install::Report {
         install::execute(
@@ -123,7 +177,6 @@ impl Fixture {
             &self.home.host,
             install::CloseRequest {
                 brew_prefix: None,
-                apt: false,
                 id: id.into(),
                 npm_binding: None,
                 executable: None,
@@ -156,7 +209,7 @@ fn process_free_prepare_and_fixed_install_have_private_durable_metadata_only() {
     let f = Fixture::new();
     assert!(install::diagnose(&f.home.host).unwrap().is_empty());
     let before = f.inspect();
-    let p = install::prepare(&f.home.host, f.request(), &before).unwrap();
+    let p = prepare(&f.home.host, f.request(), &before).unwrap();
     assert_eq!(f.calls(), "q");
     assert!(!f.home.host.state_dir.join("tools-attempts").exists());
     assert_eq!(p.review().timeout_seconds, 600);
@@ -205,7 +258,7 @@ fn process_free_prepare_and_fixed_install_have_private_durable_metadata_only() {
     }
 }
 #[test]
-fn schema_one_raw_payload_checksums_and_head_bound_closures_are_not_migrated() {
+fn raw_payload_checksums_and_head_bound_closures_are_preserved() {
     let f = Fixture::new();
     let id = f.incomplete();
     let path = f.attempt_dir(&id).join("intent.json");
@@ -213,13 +266,18 @@ fn schema_one_raw_payload_checksums_and_head_bound_closures_are_not_migrated() {
         serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     let payload: serde_json::Value =
         serde_json::from_str(envelope["payload"].as_str().unwrap()).unwrap();
-    assert_eq!(payload["schema"], 1);
-    assert!(payload["scope"].get("npm").is_none() && payload["sources"].get("npm").is_none());
-    let raw = format!(" \n{}\n ", serde_json::to_string_pretty(&payload).unwrap());
+    assert_eq!(payload["schema"], 2);
+    assert!(payload["scope"].get("npm").is_some() && payload["sources"].get("npm").is_some());
+    let raw = format!(" \n{}\n ", serde_json::to_string(&payload).unwrap());
     use sha2::{Digest, Sha256};
     envelope["sha256"] = format!("{:x}", Sha256::digest(raw.as_bytes())).into();
     envelope["payload"] = raw.clone().into();
     let bytes = serde_json::to_vec(&envelope).unwrap();
+    assert!(
+        bytes.len() <= 64 * 1024,
+        "fixture envelope: {} bytes",
+        bytes.len()
+    );
     fs::write(&path, &bytes).unwrap();
     assert!(install::diagnose(&f.home.host).unwrap()[0].scope.is_some());
     assert!(f.close(&id).explicitly_closed);
@@ -343,7 +401,6 @@ fn unresolved_attempt_blocks_only_tools_installs_and_closure_is_guarded_and_fres
         &f.home.host,
         install::CloseRequest {
             brew_prefix: None,
-            apt: false,
             id: id.clone(),
             npm_binding: None,
             executable: None,
@@ -361,7 +418,6 @@ fn unresolved_attempt_blocks_only_tools_installs_and_closure_is_guarded_and_fres
             &f.home.host,
             install::CloseRequest {
                 brew_prefix: None,
-                apt: false,
                 id: id.clone(),
                 npm_binding: None,
                 executable: None,
@@ -395,7 +451,6 @@ fn damaged_intent_needs_explicit_scope_and_changed_head_or_failed_query_cannot_c
             &f.home.host,
             install::CloseRequest {
                 brew_prefix: None,
-                apt: false,
                 id: id.clone(),
                 npm_binding: None,
                 executable: None,
@@ -406,9 +461,8 @@ fn damaged_intent_needs_explicit_scope_and_changed_head_or_failed_query_cannot_c
     );
     let request = install::CloseRequest {
         brew_prefix: None,
-        apt: false,
         id: id.clone(),
-        npm_binding: None,
+        npm_binding: Some(binding(&f.home.host)),
         executable: Some(f.executable.clone()),
         search_dirs: f.request().search_dirs,
     };
@@ -434,21 +488,21 @@ fn damaged_intent_needs_explicit_scope_and_changed_head_or_failed_query_cannot_c
 fn unsafe_provider_paths_and_unavailable_tool_directories_are_never_absence() {
     let f = Fixture::new();
     let report = f.inspect();
-    let link = f.home.host.home.join("mise-link");
+    let link = f.home.host.home.join("node-link");
     symlink(&f.executable, &link).unwrap();
     let mut request = f.request();
     request.executable = link;
-    assert!(install::prepare(&f.home.host, request, &report).is_err());
+    assert!(prepare(&f.home.host, request, &report).is_err());
     let mut request = f.request();
     request.tool_search_dirs = vec![f.home.host.home.join("missing-directory")];
-    assert!(install::prepare(&f.home.host, request, &report).is_err());
+    assert!(prepare(&f.home.host, request, &report).is_err());
     let mut request = f.request();
     request.bound_tools.clear();
-    assert!(install::prepare(&f.home.host, request, &report).is_err());
+    assert!(prepare(&f.home.host, request, &report).is_err());
     assert_eq!(f.calls(), "q");
 }
 #[test]
-fn missing_latest_prefix_mismatch_and_prerequisite_blocked_are_non_executable() {
+fn unenforceable_requests_mismatch_and_prerequisite_blocked_are_non_executable() {
     for replacement in ["version='latest'", "version='1'", "version='1.2'", ""] {
         let f = Fixture::new();
         fs::write(
@@ -458,15 +512,15 @@ fn missing_latest_prefix_mismatch_and_prerequisite_blocked_are_non_executable() 
                 .replace(",}", "}"),
         )
         .unwrap();
-        assert!(install::prepare(&f.home.host, f.request(), &f.inspect()).is_err());
+        assert!(prepare(&f.home.host, f.request(), &f.inspect()).is_err());
     }
     let f = Fixture::new();
     f.mark("conflict");
-    assert!(install::prepare(&f.home.host, f.request(), &f.inspect()).is_err());
+    assert!(prepare(&f.home.host, f.request(), &f.inspect()).is_err());
     fs::remove_file(f.home.host.home.join("conflict")).unwrap();
     let manifest = MANIFEST.replace("binary='demo'", "binary='demo'\nrequires=['dependency']");
-    fs::write(f.repo.join("dort.toml"), format!("{manifest}\n[[tools]]\nid='dependency'\nbinary='dependency'\n[tools.install]\nmacos={{provider='mise',package='dependency',version='1.2.3'}}\nubuntu={{provider='mise',package='dependency',version='1.2.3'}}\n")).unwrap();
-    assert!(install::prepare(&f.home.host, f.request(), &f.inspect()).is_err());
+    fs::write(f.repo.join("dort.toml"), format!("{manifest}\n[[tools]]\nid='dependency'\nbinary='dependency'\n[tools.install]\nprovider='brew'\npackage='dependency'\n")).unwrap();
+    assert!(prepare(&f.home.host, f.request(), &f.inspect()).is_err());
 }
 
 #[test]
@@ -563,7 +617,7 @@ fn install_crash_child() {
     let platform = if cfg!(target_os = "macos") {
         dort_core::platform::Platform::Macos
     } else {
-        dort_core::platform::Platform::Ubuntu
+        dort_core::platform::Platform::Linux
     };
     let host = HostContext::new(
         base.join("home"),
@@ -577,22 +631,22 @@ fn install_crash_child() {
         repository: base.join("repo"),
         profiles: vec![],
         tool: "demo".into(),
-        executable: host.home.join("mise"),
+        executable: host.home.join("bin/node"),
         search_dirs: vec![host.home.join("no-helper-programs")],
         tool_search_dirs: vec![host.home.join("bin")],
-        bound_tools: BTreeSet::from(["demo".into()]),
+        bound_tools: BTreeSet::from(["demo".into(), "node".into()]),
     };
     let lock = WriterLock::acquire(&host).unwrap();
-    let report = inspection::Preview::new(
-        inspection::Query::MiseInstalled,
-        request.executable.clone(),
+    let report = inspection::Preview::npm(
+        &dort_core::Manifest::parse(MANIFEST).unwrap(),
+        binding(&host),
         host.home.clone(),
         request.search_dirs.clone(),
     )
     .unwrap()
     .approve()
     .inspect();
-    let p = install::prepare(&host, request, &report).unwrap();
+    let p = prepare(&host, request, &report).unwrap();
     let goal = std::env::var("DORT_INSTALL_CRASH_AT").unwrap();
     install::execute(&host, &lock, p.approve(), |event| {
         if format!("{event:?}") == goal {
