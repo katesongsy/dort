@@ -51,7 +51,10 @@ jobs:
               with tempfile.TemporaryDirectory() as ordinary, tempfile.TemporaryDirectory(dir="/dev/shm") as other:
                   assert os.stat(ordinary).st_dev != os.stat(other).st_dev, "Cross-device tests require distinct filesystems"
           PY
-      - run: cargo test --workspace --locked -- --test-threads=1 --nocapture
+      - name: Workspace tests, one process per test
+        run: |
+          python3 scripts/test.py --self-test
+          python3 scripts/test.py full --jobs 4
       - run: cargo build --workspace --locked
       - name: Public documentation gate
         run: |
