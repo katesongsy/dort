@@ -6,3 +6,13 @@
 - Keep internal documents minimal, concise and high-level. Do not restate implemented behavior from the code. Keep details only when they are not evident in the code and need human attention.
 - Write `docs/user` for end users, not developers: user-friendly language, no internal implementation details.
 - Put design and implementation contracts in ignored `specs/` only. They are obsolete once implemented; do not maintain them as documentation.
+
+## Code principles
+
+Architecture: Separate business logic from UI, persistence and external systems. Prefer high cohesion, low coupling and consistent dependency direction.
+
+Readability: Use descriptive names, focused functions, explicit error handling and simple control flow.
+
+Maintainability: Reuse existing patterns, avoid premature abstraction and keep changes localized.
+
+Verification: Run formatting, linting, type checks and tests. Review the final diff for design problems.
