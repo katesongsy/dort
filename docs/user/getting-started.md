@@ -16,17 +16,6 @@ brew install katesongsy/tap/dort
 
 This supports macOS 15+ and Ubuntu 24.04+ (glibc 2.39+).
 
-### Mise
-
-Mise can install the pinned GitHub release:
-
-```sh
-mise use --global github:katesongsy/dort@0.1.0
-mise exec github:katesongsy/dort@0.1.0 -- dort --version
-```
-
-Configure mise's PATH/shims, or use `mise exec` each time.
-
 ### Prebuilt archives
 
 Download the archive for your host from [GitHub Releases](https://github.com/katesongsy/dort/releases):

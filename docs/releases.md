@@ -30,7 +30,6 @@ Tag-triggered publication uses only successful exact-commit CI artifacts. It ver
 ## Distribution
 
 - Homebrew: the separate [tap](https://github.com/katesongsy/homebrew-tap) installs release archives and keeps its own validation.
-- Mise: the built-in GitHub backend installs the pinned release.
 - Cargo: `dort` and `dort-core` are published separately after approval.
 
 These channels own packaging. They do not change Dort behavior or supported hosts.

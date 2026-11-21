@@ -11,7 +11,7 @@ Experimental, pre-1.0. Supported hosts: **macOS, Linux and WSL** on x86_64 or AR
 Working today:
 
 - Local repository create/attach, manifest checks and profiles.
-- Discover, adopt, link, keep and remove regular files with guarded history and recovery.
+- Discover, adopt, link, keep and remove regular files with history and recovery.
 - Read-only Git status and diff, with explicit patch disclosure.
 - Homebrew and npm tool checks, missing-tool installs and declaration editing.
 - CLI and TUI workflows for the supported tasks.
@@ -26,12 +26,6 @@ Homebrew:
 
 ```sh
 brew install katesongsy/tap/dort
-```
-
-Mise:
-
-```sh
-mise use --global github:katesongsy/dort@0.1.0
 ```
 
 Cargo:
