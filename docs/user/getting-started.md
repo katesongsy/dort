@@ -6,6 +6,33 @@ Dort runs on macOS, Linux and WSL. It needs a trusted Git executable on PATH for
 
 ## Installation
 
+### Script
+
+Install the latest release with one command:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/katesongsy/dort/main/install.sh | bash
+```
+
+The script detects your host, offers to install missing prerequisites, verifies the release SHA-256 and installs `dort` into `/usr/local/bin` when that is writable, otherwise `~/.local/bin`. It prints the export line when the install directory is missing from PATH. Answers come from the terminal, so piping the script into `bash` works.
+
+| Option | Effect |
+| --- | --- |
+| `--tag TAG` | Install a specific release, for example `v0.1.0`. Default: the latest release. |
+| `--install-dir DIR` | Install `dort` into `DIR`. |
+| `--yes` | Accept every prerequisite install. |
+| `--skip-deps` | Leave Homebrew, Git and Node.js alone. |
+| `--version` | Print the installer version. |
+| `--help` | Print usage. |
+
+Pass options through the pipe with `bash -s --`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/katesongsy/dort/main/install.sh | bash -s -- --tag v0.1.0
+```
+
+The install needs `curl` or `wget`, and `sha256sum` or `shasum`. The checksum matches the archive against the release `SHA256SUMS` file, which detects a corrupt download.
+
 ### Homebrew
 
 The [Dort tap](https://github.com/katesongsy/homebrew-tap) installs a verified release:

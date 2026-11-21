@@ -22,6 +22,14 @@ Not implemented: templates, secrets, Git clone/sync, staging/commit/push, and ge
 
 [GitHub Releases](https://github.com/katesongsy/dort/releases) provide native archives with SHA-256 checksums. Rust is not required.
 
+Script:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/katesongsy/dort/main/install.sh | bash
+```
+
+The script picks the archive for your host, checks its SHA-256, offers to install missing Homebrew, Git and Node.js, and installs `dort` into `/usr/local/bin` or `~/.local/bin`.
+
 Homebrew:
 
 ```sh
@@ -34,7 +42,7 @@ Cargo:
 cargo install dort --locked
 ```
 
-Cargo builds need Rust **1.99.1**. See [getting started](docs/user/getting-started.md#installation) for archive selection, checksum verification and a disposable-HOME walkthrough.
+Cargo builds need Rust **1.99.1**. See [getting started](docs/user/getting-started.md#installation) for installer options, archive selection, checksum verification and a disposable-HOME walkthrough.
 
 ## Documentation
 

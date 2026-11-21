@@ -82,6 +82,10 @@ jobs:
           python3 scripts/check-crates.py --archives
       - name: Release packaging guard tests
         run: python3 scripts/release.py --self-test
+      - name: Installer fixture checks
+        run: |
+          python3 scripts/test-install.py --self-test
+          python3 scripts/test-install.py
       - name: Package stable-version native binary
         id: package
         env:
