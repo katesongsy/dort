@@ -1,0 +1,33 @@
+---
+# How to use this map
+# Pick the feature you changed. Each file names the user path, the harness
+# steps, and the observable end state that proves it. One proof per change is
+# enough; check the index so you know which entry points you left uncovered.
+---
+
+# Dort feature map
+
+Every feature below is reachable from both the CLI and the TUI. A change to a service usually reaches both, so state which surface you proved.
+
+| Feature | TUI | CLI |
+| --- | --- | --- |
+| [Repository create and attach](repository.md) | `o` Overview, `F2` More → Create or attach | `dort init PATH` |
+| [Files: discover, adopt, apply, keep, remove](files.md) | `f` Files | `dort files ...` |
+| [Tools: declared, installed, history](tools.md) | `t` Tools | `dort tools ...` |
+| [Checks: manifest and diagnostics](checks.md) | `c` Checks | `dort manifest check`, `dort doctor` |
+| [Git: read-only status and diff](git.md) | `g` Git | `dort git status`, `dort git diff` |
+| [Recovery and history](recovery.md) | `r` Recovery | `dort history`, `dort recovery list` |
+
+## Common setup
+
+```sh
+python3 .pi/skills/verify-dort/drive.py build
+python3 .pi/skills/verify-dort/drive.py new <name>
+eval "$(python3 /abs/path/to/repo/.pi/skills/verify-dort/drive.py env <name>)"
+```
+
+`new` already runs `dort --yes init` against `$DORT_REPO` and drops a `demo.txt` in it. Sections use these names throughout.
+
+## Not covered here
+
+Templates, secrets, Git clone/sync, staging/commit/push and general package upgrades are declared but not implemented. A journey that needs them fails at the declaration, not at a bug — record the block in that feature's Gotchas instead of weakening the journey.
