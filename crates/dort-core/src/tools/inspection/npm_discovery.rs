@@ -1,4 +1,4 @@
-//! Read-only npm inventory; no declaration, runtime claim or install capability.
+//! Read-only npm package inventory.
 use super::{
     Description, Failure, Installation, LIMIT, TIMEOUT, absolute, catalog, command, run_bounded,
 };
@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 pub(super) const PREFIX_LIMIT: usize = 8192;
-pub(super) const WARNING: &str = "Runs the selected npm program to find its global prefix, then list packages at that prefix. Its launcher selects Node from the displayed PATH; npm configuration may run code or change caches/logs. Prefix discovery and listing share a 10-second/4-MiB limit. No packages are installed. This inventory does not bind a declared Node runtime or authorize installation.";
+pub(super) const WARNING: &str = "Finds the npm global prefix, then lists packages there. npm uses Node from the displayed PATH. Configuration can run code and change caches or logs. Queries stop after 10 seconds or 4 MiB. No packages are installed.";
 pub(super) fn prefix_arguments() -> Vec<String> {
     [
         "prefix",

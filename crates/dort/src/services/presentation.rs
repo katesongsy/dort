@@ -76,7 +76,7 @@ pub fn installed_review(review: &super::installed_tools::Review<'_>) -> String {
     text
 }
 pub fn installed(current: &super::installed_tools::Current) -> String {
-    let mut text = String::from("Installed packages reported by this inspection:\n");
+    let mut text = String::from("Packages reported by this check:\n");
     for report in &current.reports {
         text.push_str(&format!(
             "{}\n",
@@ -102,7 +102,7 @@ pub fn installed(current: &super::installed_tools::Current) -> String {
                 }
             }
             inspection::Observation::Unavailable { reason } => {
-                text.push_str(&format!("  Inspection unavailable: {reason}\n"))
+                text.push_str(&format!("  Check unavailable: {reason}\n"))
             }
         }
     }
@@ -114,7 +114,7 @@ pub fn installed(current: &super::installed_tools::Current) -> String {
         ));
     }
     text.push_str(
-        "Results describe this inspection, not live package state or command readiness.\n",
+        "From this check. Packages may change; a package does not prove its command works.\n",
     );
     text
 }
@@ -154,7 +154,7 @@ pub fn install_review(review: &super::declared_tools::InstallReview<'_>) -> Stri
     );
     for (tool, install) in &review.installations {
         let s = install.scope;
-        text.push_str(&format!("{}: {} {}\n  Installer: {}\n  Arguments: {}\n  Repository: {}\n  HOME: {}\n  Provider command paths: {}\n  Tool command paths: {}\n{}\n", inline(tool), inline(&s.package), inline(&s.version), inline(&install.installer.display().to_string()), install.arguments.iter().map(|a| inline(a)).collect::<Vec<_>>().join(" "), inline(&s.repository.display().to_string()), inline(&s.home.display().to_string()), paths(&s.search_dirs), paths(&s.tool_search_dirs), install.warning));
+        text.push_str(&format!("{}: {} {}\n  Installer: {}\n  Arguments: {}\n  Repository: {}\n  HOME: {}\n  Package manager paths: {}\n  Tool command paths: {}\n{}\n", inline(tool), inline(&s.package), inline(&s.version), inline(&install.installer.display().to_string()), install.arguments.iter().map(|a| inline(a)).collect::<Vec<_>>().join(" "), inline(&s.repository.display().to_string()), inline(&s.home.display().to_string()), paths(&s.search_dirs), paths(&s.tool_search_dirs), install.warning));
         if let Some(brew) = &s.brew {
             text.push_str(&format!(
                 "  Homebrew prefix: {}\n  Homebrew repository: {}\n  Cellar: {}\n",

@@ -1,4 +1,4 @@
-//! Protocol-specific whitelist parsers. No raw parser diagnostics leave this module.
+//! Package-manager output parsers.
 use super::{Failure, Installation, LIMIT, Query};
 use serde::Deserialize;
 use std::collections::BTreeMap;

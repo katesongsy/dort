@@ -1,4 +1,4 @@
-//! Metadata-only suggestions. Inputs are captured by the application boundary.
+//! Read-only suggested paths and defaults. The application captures inputs.
 use super::tools::Request;
 use dort_core::{context::HostContext, observation, tools::inspection::Query};
 use std::{os::unix::fs::PermissionsExt, path::PathBuf};

@@ -437,7 +437,7 @@ fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_ta
         .is_none()
     );
     assert!(matches!(app.shell.overlay, Some(Overlay::Actions { .. })));
-    assert!(render(&app, size.0, size.1).contains("Rollback unavailable"));
+    assert!(render(&app, size.0, size.1).contains("Rollback is unavailable"));
     press(&mut app, KeyCode::Esc, size); // clicked results, no hidden input focus
     app.start(false);
     render(&app, size.0, size.1);
@@ -473,7 +473,7 @@ fn wide_full_paths_and_ids_are_reachable_in_cells_using_only_detail_page_keys() 
                 long_path("source")
             )
         } else if tab == Tab::Recovery {
-            format!("Transaction ID: {}", "a".repeat(64))
+            format!("Operation ID: {}", "a".repeat(64))
         } else {
             format!(
                 "Original path: Some(\"{}/original-end\")",
@@ -490,11 +490,11 @@ fn wide_full_paths_and_ids_are_reachable_in_cells_using_only_detail_page_keys() 
                 .iter()
                 .position(|line| {
                     line.contains("Selected item")
-                        || line.contains("Journal facts")
+                        || line.contains("Operation details")
                         || line.contains("Git details")
                 })
                 .unwrap();
-            let title = ["Selected item", "Journal facts", "Git details"]
+            let title = ["Selected item", "Operation details", "Git details"]
                 .into_iter()
                 .find(|title| rows[top].contains(title))
                 .unwrap();

@@ -1,5 +1,4 @@
-//! Pure tool-policy primitives and separately approved provider inspection.
-//! Policy parsing/comparison never inspects or executes providers.
+//! Tool version policy and package planning.
 pub mod binaries;
 pub mod declaration;
 pub mod inspection;
@@ -33,7 +32,7 @@ pub enum VersionMatch {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("provider cannot enforce this version policy")]
+#[error("this package manager cannot install that version rule")]
 pub struct UnsupportedVersionPolicy;
 
 impl VersionPolicy {

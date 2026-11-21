@@ -14,7 +14,7 @@ One preview creates one approval. Navigation, resizing below 48×14, or a failed
 
 ## Sensitive content
 
-Dort reports metadata, paths and package facts. It does not print file bodies.
+Dort reports names, paths and package facts. It does not print file bodies.
 
 Two deliberate exceptions:
 
@@ -95,6 +95,6 @@ Include:
 - Host, platform and terminal size.
 - The command or TUI path.
 - The visible error text.
-- Relevant `--dry-run` or metadata output.
+- Relevant `--dry-run` or read-only output.
 
 Remove paths, tokens and secrets before sharing. Do not attach state directories or full patches.

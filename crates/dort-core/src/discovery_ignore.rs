@@ -1,5 +1,4 @@
-//! Local discovery preferences, separate from repository configuration and journals.
-//! These paths only suppress discovery; they never authorize access to live files.
+//! Local discovery preferences, separate from repository config.
 use crate::{
     Error, Result,
     context::HostContext,

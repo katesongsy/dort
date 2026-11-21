@@ -1,4 +1,4 @@
-//! Schema-3 staged local initialization. No network, automatic replay or repository deletion.
+//! Staged local repository setup. No network or automatic replay.
 use crate::{
     Error, Manifest, Result,
     adoption::{self, Boundary, Event, parent_identity, same},

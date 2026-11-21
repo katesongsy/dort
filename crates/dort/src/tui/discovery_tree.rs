@@ -1,4 +1,4 @@
-//! Immutable metadata-only Discover views. Folding only updates a local range index.
+//! Read-only Discover tree. Folding changes only the view.
 use super::{
     actions::Task,
     app::{App, Tab},

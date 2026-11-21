@@ -1,4 +1,4 @@
-//! Typed content-free history presentation. Eligibility is advisory; core previews decide.
+//! Content-free history presentation. Recovery previews make the final decision.
 use super::{app::App, components as ui};
 use dort_core::journal::{Diagnosis, Phase};
 use ratatui::{
@@ -26,17 +26,27 @@ pub fn matches(search: &super::inventory::Search, row: &Diagnosis) -> bool {
     search.matches(&row.repository_id)
         || search.matches(&row.transaction_id)
         || search.matches(&format!(
-            "schema {:?} phase {:?} checkpoints {} {} {}",
-            row.journal_schema,
-            row.phase,
+            "{} {} steps {} {} {}",
+            kind(row),
+            phase(row),
             row.valid_checkpoints,
             if row.blocks_writes() {
                 "blocks writes"
             } else {
-                "terminal"
+                "finished"
             },
-            row.problem.as_deref().unwrap_or("validated")
+            row.problem.as_deref().unwrap_or("valid")
         ))
+}
+fn kind(row: &Diagnosis) -> &'static str {
+    match row.journal_schema {
+        Some(1) => "File adoption",
+        Some(2) => "File change",
+        Some(3) => "Repository setup",
+        Some(4) => "File batch",
+        Some(5 | 6) => "Tool declaration",
+        _ => "Unknown",
+    }
 }
 fn phase(row: &Diagnosis) -> &'static str {
     match row.phase {
@@ -51,12 +61,11 @@ fn phase(row: &Diagnosis) -> &'static str {
 }
 fn state(row: &Diagnosis) -> (&'static str, Style) {
     if row.problem.is_some() {
-        ("INTEGRITY!", ui::danger())
+        ("Damaged", ui::danger())
     } else if row.blocks_writes() {
         ("Blocks writes", ui::warning())
     } else {
-        // Terminal journal state is not a claim about live paths or rollback safety.
-        ("Terminal", ui::muted())
+        ("Finished", ui::muted())
     }
 }
 fn field(label: &str, value: impl ToString) -> Line<'static> {
@@ -70,31 +79,21 @@ fn note(value: &str, style: Style) -> Line<'static> {
 }
 fn details(app: &App) -> Text<'static> {
     let Some(row) = app.history_selection() else {
-        return Text::raw("No displayed transaction selected. Clear the filter.");
+        return Text::raw("No operation record selected. Clear the filter.");
     };
     let (status, style) = state(row);
     let mut lines = vec![
         Line::styled(format!("[{status}]"), style),
-        Line::styled("Transaction identity", ui::heading()),
+        Line::styled("Operation", ui::heading()),
         field("Repository ID", &row.repository_id),
-        field("Transaction ID", &row.transaction_id),
-        field(
-            "Schema",
-            row.journal_schema
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "Unknown".into()),
-        ),
-        field("Phase", phase(row)),
-        field("Validated checkpoints", row.valid_checkpoints),
-        field(
-            "Integrity",
-            row.problem
-                .as_deref()
-                .unwrap_or("validated journal; preview checks live drift"),
-        ),
-        field("Blocks new writes", row.blocks_writes()),
+        field("Operation ID", &row.transaction_id),
+        field("Type", kind(row)),
+        field("State", phase(row)),
+        field("Saved steps", row.valid_checkpoints),
+        field("Integrity", row.problem.as_deref().unwrap_or("Valid")),
+        field("Blocks writes", row.blocks_writes()),
         Line::default(),
-        Line::styled("Recovery eligibility", ui::heading()),
+        Line::styled("Recovery options", ui::heading()),
     ];
     if rollback(row) {
         app.presented(
@@ -102,10 +101,10 @@ fn details(app: &App) -> Text<'static> {
             "b",
             super::input::Target::Action(super::shell::Action::Rollback),
         );
-        lines.push(field("Rollback", "Available for guarded review"));
+        lines.push(field("Rollback", "Available for review"));
     } else {
         lines.push(note(
-            "Rollback unavailable for this diagnosis.",
+            "Rollback is unavailable for this record.",
             ui::muted(),
         ));
     }
@@ -115,12 +114,15 @@ fn details(app: &App) -> Text<'static> {
             "s",
             super::input::Target::Action(super::shell::Action::Resume),
         );
-        lines.push(field("Resume", "Available for guarded review"));
+        lines.push(field("Resume", "Available for review"));
     } else if abandon(row) && row.phase == Some(Phase::Preparing) {
-        lines.push(note("Resume unavailable: incomplete preparation; abandon, then create/attach a new transaction.", ui::warning()));
+        lines.push(note(
+            "Resume is unavailable: setup is incomplete. Abandon it, then create or attach again.",
+            ui::warning(),
+        ));
     } else {
         lines.push(note(
-            "Resume unavailable: not an intact Running bootstrap.",
+            "Resume is unavailable: setup is not intact.",
             ui::muted(),
         ));
     }
@@ -130,21 +132,35 @@ fn details(app: &App) -> Text<'static> {
             "x",
             super::input::Target::Action(super::shell::Action::Abandon),
         );
-        lines.push(field("Abandon", "Available for guarded review"));
+        lines.push(field("Abandon", "Available for review"));
         lines.push(note(
-            "Abandon retains published repository, registration and private artifacts.",
+            "Keeps the published repository, registration and private files.",
             ui::warning(),
         ));
     } else {
         lines.push(note(
-            "Abandon unavailable: not an intact nonterminal bootstrap.",
+            "Abandon is unavailable: setup is incomplete or not intact.",
             ui::muted(),
         ));
     }
     lines.push(Line::default());
-    lines.push(Line::styled("Guards & retained artifacts", ui::heading()));
-    lines.push(note("Core preview independently checks live paths and artifacts. Each requested recovery action obtains a fresh, guarded preview.", Style::default()));
-    lines.push(note("Adoption rollback (schema 1 or 4) withdraws new sources into private storage; lifecycle rollback (schema 2 or 4) leaves repository sources unchanged. Schema-5 rollback restores only an unchanged declaration manifest; it never undoes packages. Backups/private artifacts are retained; no garbage collection.", ui::warning()));
+    lines.push(Line::styled("What recovery keeps", ui::heading()));
+    lines.push(note(
+        "Recovery checks current paths and files before each action.",
+        Style::default(),
+    ));
+    lines.push(note(
+        "Rollback restores files only when they still match.",
+        ui::warning(),
+    ));
+    lines.push(note(
+        "Tool declarations restore only an unchanged manifest.",
+        ui::warning(),
+    ));
+    lines.push(note(
+        "Packages are not removed. Private backups stay.",
+        ui::warning(),
+    ));
     Text::from(lines)
 }
 
@@ -185,7 +201,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                 ui::heading(),
             ),
             Span::styled(
-                format!(" | Global blockers: {blockers}"),
+                format!(" | Blocked writes: {blockers}"),
                 if available.is_some_and(|d| !d.history.iter().any(|r| r.blocks_writes())) {
                     ui::muted()
                 } else {
@@ -222,7 +238,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             frame,
             content,
             "Recovery | Not loaded",
-            Text::raw("Recovery diagnosis not loaded."),
+            Text::raw("Recovery has not loaded yet."),
             0,
             focused,
         );
@@ -232,10 +248,10 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         ui::report(
             frame,
             content,
-            "Recovery diagnosis unavailable",
+            "Recovery unavailable",
             Text::from(vec![
                 note(error, ui::warning()),
-                Line::raw("Global write safety is unavailable until diagnosis succeeds."),
+                Line::raw("Writes stay blocked until recovery loads."),
             ]),
             app.details_scroll,
             focused,
@@ -247,7 +263,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         ui::report(
             frame,
             content,
-            "Journal facts",
+            "Operation details",
             details(app),
             app.details_scroll,
             focused,
@@ -261,7 +277,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     };
     let visible = app.visible_history_rows();
     let title = format!(
-        "Transactions | {} / {} shown",
+        "Operations | {} / {} shown",
         visible.len(),
         data.history.len()
     );
@@ -275,7 +291,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             Text::raw(if data.history.is_empty() {
                 "History is empty."
             } else {
-                "No matches. Global blockers remain visible above."
+                "No matches. Blocks stay visible above."
             }),
             0,
         );
@@ -285,11 +301,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             let (status, style) = state(row);
             Row::new(vec![
                 Cell::from(ui::inline(row.transaction_id.get(..8).unwrap_or("invalid"))),
-                Cell::from(
-                    row.journal_schema
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| "?".into()),
-                ),
+                Cell::from(kind(row)),
                 Cell::from(phase(row)),
                 Cell::from(status).style(style),
             ])
@@ -298,12 +310,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             table_rows,
             [
                 Constraint::Min(8),
-                Constraint::Length(3),
+                Constraint::Length(16),
                 Constraint::Length(12),
                 Constraint::Length(13),
             ],
         )
-        .header(Row::new(["TX ID", "SCM", "PHASE", "STATE"]).style(ui::heading()))
+        .header(Row::new(["OP ID", "TYPE", "STATE", "STATUS"]).style(ui::heading()))
         .block(block)
         .row_highlight_style(ui::selected())
         .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
@@ -316,7 +328,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         ui::report(
             frame,
             panes[1],
-            "Transaction details",
+            "Operation details",
             details(app),
             app.details_scroll,
             true,

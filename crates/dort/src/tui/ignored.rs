@@ -1,4 +1,4 @@
-//! Read-only preference picker. Enter requests a preview, never approval.
+//! Ignore picker. Enter previews; approval is separate.
 use super::components as ui;
 use ratatui::{
     Frame,
@@ -37,14 +37,12 @@ pub fn draw(
                     .and_then(|p| p.to_str())
                     .unwrap_or("No selection"),
             ),
-            Line::raw(
-                "Removing this preference does not override ancestor rules or safety exclusions.",
-            ),
+            Line::raw("Parent rules and safety limits still apply."),
         ];
         ui::report(
             frame,
             area,
-            "Ignored path metadata",
+            "Ignored path details",
             lines.into(),
             app.shell.scroll,
             false,

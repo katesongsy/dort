@@ -1,4 +1,4 @@
-//! Render-owned hit regions. Never derive requests from displayed text.
+//! Render-owned hit regions.
 use super::shell::Action;
 use ratatui::layout::{Position, Rect};
 use std::cell::{Cell, RefCell};

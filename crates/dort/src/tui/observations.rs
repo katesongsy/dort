@@ -1,4 +1,4 @@
-//! Typed read-only dashboards. Presentation never derives identity or policy from prose.
+//! Read-only dashboards built from typed data.
 use super::{app::App, components as ui, input::Target, shell::Action};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -13,7 +13,7 @@ fn metric(label: &'static str, value: impl ToString, style: Style) -> Metric {
     let value = value.to_string();
     let compact = match label {
         "Repository" | "Manifest" => value.clone(),
-        "History blockers" | "Blockers" => format!("Blocks: {value}"),
+        "History blockers" | "Blockers" => format!("Blocked writes: {value}"),
         _ => format!("{label} {value}"),
     };
     Metric {
@@ -91,8 +91,8 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
         ui::report(
             frame,
             area,
-            "Repository observations",
-            Text::raw("Loading read-only observations..."),
+            "Repository details",
+            Text::raw("Loading read-only data..."),
             0,
             true,
         );
@@ -163,21 +163,21 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
             ui::muted(),
         ));
         lines.push(note(
-            "Discovery and standalone manifest checks need no registered repository.",
+            "Discovery and standalone checks need no repository.",
             ui::muted(),
         ));
         lines.push(note(
-            "Recovery and Diagnostics are available independently of repository selection.",
+            "Recovery and Diagnostics work without a repository.",
             Style::default(),
         ));
     }
-    section(&mut lines, "Repository & scope");
+    section(&mut lines, "Repository and profiles");
     lines.push(field(
         "Repository",
         root.map(|p| format!("{p:?}"))
             .unwrap_or_else(|| "Not selected".into()),
     ));
-    lines.push(field("Selection origin", app.origin));
+    lines.push(field("Selected by", app.origin));
     lines.push(field("Registration", registration));
     if observation.and_then(|o| o.registered) == Some(false) {
         lines.push(note(
@@ -190,28 +190,25 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
         count(observation.and_then(|o| o.registry_count)),
     ));
     if let Some(error) = observation.and_then(|o| o.configuration_error.as_ref()) {
-        lines.push(field("Configuration unavailable", error));
+        lines.push(field("Config unavailable", error));
         lines.push(note(
-            "Registry metadata unavailable; counts and active selection unresolved.",
+            "Repository list unavailable. Counts and the active repository are unknown.",
             ui::warning(),
         ));
     }
     if files.is_some() {
         lines.push(field("Effective profiles", format!("{:?}", data.profiles)));
     } else {
-        lines.push(field(
-            "Effective profiles",
-            "Unknown (file observation unavailable)",
-        ));
+        lines.push(field("Effective profiles", "Unknown (files unavailable)"));
     }
-    section(&mut lines, "Active file observations");
+    section(&mut lines, "Active files");
     if let Some(files) = files {
         lines.push(field("Linked", files.linked));
         lines.push(field("Needs apply", files.changes));
         lines.push(field("Blocked mappings", files.blocked));
-        lines.push(field("Plan blockers", files.plan_blocked));
+        lines.push(field("Plan blocks", files.plan_blocked));
         lines.push(note(
-            "Files contains full source/target metadata. Apply uses the full active scope.",
+            "Files shows source and target. Apply covers every active file.",
             Style::default(),
         ));
     } else {
@@ -220,20 +217,20 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
     if let Some(error) = &data.files_error {
         lines.extend(error.lines().map(|line| note(line, ui::warning())));
     }
-    section(&mut lines, "All-repository history");
+    section(&mut lines, "History");
     lines.push(field(
-        "Transactions",
+        "Operations",
         count(data.history_error.is_none().then_some(data.history.len())),
     ));
-    lines.push(field("Global write blockers", count(blockers)));
+    lines.push(field("Blocked writes", count(blockers)));
     if let Some(error) = &data.history_error {
         lines.push(field("History unavailable", error));
         lines.push(note(
-            "Global write safety unknown. Recovery remains independently refreshable.",
+            "Write status unknown. Recovery can still refresh.",
             ui::warning(),
         ));
     }
-    section(&mut lines, "Host & limits");
+    section(&mut lines, "Host and limits");
     if let Some(observation) = observation {
         lines.push(field(
             "Host",
@@ -244,11 +241,11 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
         ));
     }
     lines.push(note(
-        "Unsupported templates, secret execution, synchronization and Git writes need separate tools.",
+        "Templates, secrets, sync and Git writes need other tools.",
         ui::muted(),
     ));
     lines.push(note(
-        "Execution requires explicit approval of a fresh preview. Failed writes may retain partial effects.",
+        "Writes need a fresh review. A failed write may leave partial effects.",
         ui::warning(),
     ));
     if !app.overview_details {
@@ -272,7 +269,7 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
                     ),
                 ));
             } else {
-                summary.push(field("Files", "Unknown observation"));
+                summary.push(field("Files", "Unknown"));
             }
             if observation.and_then(|o| o.registered) == Some(false) {
                 summary.push(note(
@@ -308,7 +305,7 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
         }
         lines = summary;
     }
-    dashboard(frame, area, app, "Repository observations", metrics, lines);
+    dashboard(frame, area, app, "Repository details", metrics, lines);
 }
 
 pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
@@ -335,22 +332,22 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
             metric("Files", report.selected_files, ui::heading()),
             metric("Tools", report.selected_tools, ui::heading()),
         ];
-        section(&mut lines, "Structural check only");
+        section(&mut lines, "Manifest check");
         lines.push(note(
-            "Declarations validated; inspect Files for live state and verify installed tools separately.",
+            "Declarations are valid. Files shows live state; check tools separately.",
             ui::warning(),
         ));
         lines.push(field(
             "Scope",
             if *standalone {
-                "standalone manifest (independent of file repository)"
+                "standalone manifest"
             } else {
                 "current repository"
             },
         ));
         lines.push(field("Valid manifest", format!("{:?}", report.manifest)));
-        lines.push(field("Schema", report.schema));
-        section(&mut lines, "Effective profiles | combined contributors");
+        lines.push(field("Format", report.schema));
+        section(&mut lines, "Active profiles");
         lines.push(field(
             "Effective profiles",
             format!("{:?}", report.active_profiles),
@@ -364,26 +361,26 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
             .active_profiles
             .difference(&report.choices.mandatory)
             .collect();
-        lines.push(field("Optional additions", format!("{additions:?}")));
-        section(&mut lines, "Selected declarations");
+        lines.push(field("Extra profiles", format!("{additions:?}")));
+        section(&mut lines, "Selected");
         lines.push(field("Selected files", report.selected_files));
         lines.push(field("Selected tools", report.selected_tools));
         lines.push(field(
             "Tool dependency order",
             format!("{:?}", report.tool_dependency_order),
         ));
-        section(&mut lines, "Capability limits");
+        section(&mut lines, "Limits");
         if report.unsupported_capabilities.is_empty() {
             lines.push(note(
-                "Selected declarations are supported. Files shows live state.",
+                "These declarations are supported. Files shows live state.",
                 Style::default(),
             ));
         }
         for capability in &report.unsupported_capabilities {
-            lines.push(field("Not implemented", capability));
+            lines.push(field("Unavailable", capability));
         }
         lines.push(note(
-            "Verify tool readiness and prerequisites separately.",
+            "Check tools and prerequisites separately.",
             ui::muted(),
         ));
     } else {
@@ -404,11 +401,11 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
             Target::Action(Action::CheckStandalone),
         );
         lines.push(note(
-            "Standalone needs no repository, registration or Git.",
+            "A standalone manifest needs no repository or Git.",
             Style::default(),
         ));
         lines.push(note(
-            "Checks validate declarations. Files inspects live state; verify installed tools separately.",
+            "Checks validate declarations. Files shows live state; check tools separately.",
             ui::warning(),
         ));
     }
@@ -424,7 +421,7 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
         match &app.check {
             Some((_, true)) => "Standalone manifest",
             Some((_, false)) => "Repository manifest",
-            None => "Manifest observations",
+            None => "Manifest check",
         },
         metrics,
         lines,
@@ -437,7 +434,7 @@ fn diagnostics(frame: &mut Frame, area: Rect, app: &App) {
             frame,
             area,
             "Diagnostics",
-            Text::raw("Host, path and registry diagnostics not loaded."),
+            Text::raw("Diagnostics not loaded."),
             0,
             true,
         );
@@ -485,11 +482,8 @@ fn diagnostics(frame: &mut Frame, area: Rect, app: &App) {
         "Registered repositories",
         count(registry.map(|r| r.registered_repositories)),
     ));
-    lines.push(field(
-        "All-repository transactions",
-        count(history.map(|h| h.0)),
-    ));
-    lines.push(field("Global write blockers", count(history.map(|h| h.1))));
+    lines.push(field("Operations", count(history.map(|h| h.0))));
+    lines.push(field("Blocked writes", count(history.map(|h| h.1))));
     if let Some(registry) = registry {
         lines.push(field(
             "Registered active ID",
@@ -497,15 +491,15 @@ fn diagnostics(frame: &mut Frame, area: Rect, app: &App) {
         ));
     }
     if let Err(error) = &report.registry {
-        lines.push(field("Configuration unavailable", error));
+        lines.push(field("Config unavailable", error));
         lines.push(note(
-            "Registry metadata unavailable; counts and active selection unresolved.",
+            "Repository list unavailable. Counts and the active repository are unknown.",
             ui::warning(),
         ));
     }
     if let Err(error) = &report.history {
         lines.push(field("History unavailable", error));
-        lines.push(note("Global write safety unknown.", ui::warning()));
+        lines.push(note("Write status unknown.", ui::warning()));
     }
     section(&mut lines, "Host & paths");
     let host = &report.host;
@@ -526,30 +520,36 @@ fn diagnostics(frame: &mut Frame, area: Rect, app: &App) {
                 .or(app.repository.as_ref())
         ),
     ));
-    lines.push(field("Selection origin", app.origin));
+    lines.push(field("Selected by", app.origin));
     lines.push(field("Git executable", format!("{:?}", app.git)));
     lines.push(field(
         "Git session root",
         format!("{:?}", app.git_view.root),
     ));
-    lines.push(field("Git follows file root", app.git_view.follows_files));
-    section(&mut lines, "Capability limits");
+    lines.push(field("Uses file repository", app.git_view.follows_files));
+    section(&mut lines, "Limits");
     lines.push(note(
-        "Files inspects live state; verify installed tools separately.",
+        "Files shows live state; check tools separately.",
         ui::warning(),
     ));
     lines.push(note(
-        "Diagnostics shows host and path metadata.",
+        "Diagnostics shows host and path details.",
         Style::default(),
     ));
-    lines.push(note("Supported: guarded local file workflows and recovery; structural checks; hardened read-only Git.", Style::default()));
     lines.push(note(
-        "Unsupported: templates, secret execution, cloning/sync, Git writes and broader package installation.",
+        "Supported: local files, recovery, manifest checks and read-only Git.",
+        Style::default(),
+    ));
+    lines.push(note(
+        "Not supported: templates, secrets, cloning/sync, Git writes and other package managers.",
         ui::muted(),
     ));
-    lines.push(note("Git requires separately installed trusted Git; other workflows remain available when Git is missing.", Style::default()));
     lines.push(note(
-        "Correct configuration errors privately before refreshing. Recovery remains independent.",
+        "Git needs a trusted Git executable. Other workflows still work.",
+        Style::default(),
+    ));
+    lines.push(note(
+        "Fix configuration errors, then refresh. Recovery still works.",
         Style::default(),
     ));
     app.presented(
@@ -557,5 +557,5 @@ fn diagnostics(frame: &mut Frame, area: Rect, app: &App) {
         "r",
         Target::Action(Action::Diagnostics),
     );
-    dashboard(frame, area, app, "Host observations", metrics, lines);
+    dashboard(frame, area, app, "Host details", metrics, lines);
 }

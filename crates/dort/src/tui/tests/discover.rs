@@ -304,7 +304,7 @@ fn selected_content_is_passive_escaped_ephemeral_and_late_results_are_dropped() 
         .unwrap();
     let details_row = screen
         .lines()
-        .position(|l| l.contains("Metadata") && l.contains('─'))
+        .position(|l| l.contains("Details") && l.contains('─'))
         .unwrap();
     assert!(details_row > content_row + 10);
     key(&mut app, KeyCode::Up);

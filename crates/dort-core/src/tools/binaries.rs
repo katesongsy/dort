@@ -1,4 +1,4 @@
-//! Explicit, bounded metadata-only binary-name observation. Never executes a candidate.
+//! Metadata-only command lookup.
 use super::{
     inspection,
     planning::{BinaryObservation, MAX_SELECTED_TOOLS},

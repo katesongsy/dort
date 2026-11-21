@@ -1,4 +1,4 @@
-//! Presentation-only hierarchy over existing typed observations. No filesystem reads.
+//! Read-only tree over typed discovery rows.
 use super::app::App;
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 #[derive(Clone)]
@@ -213,7 +213,8 @@ pub fn toggle(app: &mut App) {
         })
         .collect();
     if eligible.is_empty() {
-        let reason = "Cannot mark: no eligible files. Directories/links, unowned files, hard links and special modes cannot be adopted.";
+        let reason =
+            "Cannot mark: no eligible files. Only owned, single-link regular files can be adopted.";
         app.inventory.mark_refusal = Some(reason.into());
         app.status = reason.into();
         return;
@@ -248,5 +249,5 @@ pub fn toggle(app: &mut App) {
             }
         }
     }
-    app.status="Marks retained across filters/folds. Group marking includes matching descendants, even folded rows; adoption uses eligible regular files. E reviews discovery marks; A/K/D preview managed marks.".into();
+    app.status="Marks stay through filters and folded folders. Marking a folder marks its eligible files. E reviews discovery marks; A, K and D preview managed files.".into();
 }

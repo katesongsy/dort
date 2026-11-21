@@ -208,7 +208,7 @@ fn task_actions_are_not_menu_destinations_and_shell_keys_remain_global() {
         places.iter().map(|e| e.label).collect::<Vec<_>>(),
         [
             "Declared tools [1]",
-            "Installed tools [2]",
+            "Installed packages [2]",
             "Installation history [3]"
         ]
     );

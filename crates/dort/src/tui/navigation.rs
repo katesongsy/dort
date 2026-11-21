@@ -1,4 +1,4 @@
-//! Session-local menu navigation. Typed menu items request existing guarded actions.
+//! Session menu navigation over typed actions.
 use super::{
     app::{App, Tab},
     components as ui,
@@ -130,7 +130,7 @@ pub fn entries(group: usize) -> Vec<Entry> {
         ],
         _ => vec![
             action("Declared tools [1]", Destination(Tab::Tools)),
-            action("Installed tools [2]", ToolsInstalled),
+            action("Installed packages [2]", ToolsInstalled),
             action("Installation history [3]", ToolAttempts),
         ],
     }
@@ -205,12 +205,12 @@ pub fn group(app: &App) -> usize {
 pub fn location(app: &App) -> &'static str {
     match app.tab {
         Tab::Overview => "Overview",
-        Tab::Tools if app.tools_view.installed_open => "Tools / Installed tools",
+        Tab::Tools if app.tools_view.installed_open => "Tools / Installed packages",
         Tab::Tools if app.tools_view.install_open => match app.tools_view.installation.mode {
             super::tools_install::Mode::Attempts => "Tools / Installation history",
             super::tools_install::Mode::CloseInputs
             | super::tools_install::Mode::LoadingClose
-            | super::tools_install::Mode::CloseReview => "Tools / Close attempt",
+            | super::tools_install::Mode::CloseReview => "Tools / Close record",
         },
         Tab::Tools => "Tools / Declared tools",
         Tab::Files if app.discovering => "Files / Discover",

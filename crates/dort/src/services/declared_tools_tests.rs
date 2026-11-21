@@ -207,7 +207,11 @@ fn unmanaged_commands_have_specific_reason_next_step_and_no_execution_warning() 
     assert!(preview.is_empty());
     assert_eq!(preview.deferred.len(), 2);
     for issue in &preview.deferred {
-        assert!(issue.reason.contains("command already exists"));
+        assert!(
+            issue
+                .reason
+                .contains("command exists, but no package owns it")
+        );
         assert!(issue.next_step.contains("Review the command candidates"));
     }
     assert!(

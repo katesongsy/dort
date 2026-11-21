@@ -1,5 +1,4 @@
-//! Pure, conservative package-claim classification. No I/O or execution authority.
-//! Package policy matches never establish binary identity, activation or ownership.
+//! Package-claim matching and install planning.
 use super::{VersionMatch, VersionPolicy, inspection};
 use crate::{
     Error, Manifest, Result,
@@ -176,9 +175,7 @@ pub fn plan(
         .chain(observed.binaries.keys())
         .any(|id| !tools.contains_key(id))
     {
-        return Err(invalid(
-            "tool observation must refer to a selected manifest tool",
-        ));
+        return Err(invalid("The checked tool is not in the manifest."));
     }
     validate_observations(observed)?;
     let order = manifest.order(platform, &tools.keys().cloned().collect())?;
@@ -309,7 +306,7 @@ fn validate_observations(observed: &Observations<'_>) -> Result<()> {
         if let inspection::Observation::Complete { installations } = &report.observation
             && installations.len() > MAX_CATALOG_RECORDS
         {
-            return Err(invalid("catalog record limit exceeded"));
+            return Err(invalid("Too many package records."));
         }
         let d = &report.description;
         if !valid(&d.executable)
@@ -322,7 +319,7 @@ fn validate_observations(observed: &Observations<'_>) -> Result<()> {
                 .is_some_and(|b| !valid(&b.node) || !valid(&b.npm_cli) || !valid(&b.prefix))
         {
             return Err(invalid(
-                "catalog scope requires explicit absolute UTF-8 paths without dot components",
+                "Package-manager settings need absolute UTF-8 paths without dot components.",
             ));
         }
     }

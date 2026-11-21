@@ -1,4 +1,4 @@
-//! One bounded selection surface for providers and explicit inspection bindings.
+//! Selection surface for package managers and explicit check settings.
 use super::{
     self as ui,
     design::{self, PairRow, PairTable},

@@ -1,4 +1,4 @@
-//! Shared presentation catalog. Scope is independent of effect; neither grants authority.
+//! Presentation catalog for scopes and effects.
 use super::{
     app::{App, Tab},
     shell::Action,

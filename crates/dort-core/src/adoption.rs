@@ -1,5 +1,4 @@
-//! Recoverable ONE-file regular-file adoption. No package work, apply or unmanage executor.
-//! Caller approval is opaque, fresh observation is mandatory, recovery is explicit.
+//! Recoverable one-file adoption. Apply and unmanage live in lifecycle.
 use crate::{
     Error, Manifest, Result,
     context::HostContext,

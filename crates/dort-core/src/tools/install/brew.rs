@@ -1,8 +1,8 @@
-//! One missing canonical core formula; native build/dependency/link effects are explicit.
+//! Installs one Homebrew core formula. Build and dependency effects are shown first.
 use super::*;
 use std::{collections::BTreeMap, path::Path, process::Command, time::Duration};
 
-pub const WARNING: &str = "Installs one missing Homebrew core formula at the provider-current version, not an exact pin. Formula/build/dependency code CAN EXECUTE; dependencies can be installed or upgraded and native links can expose commands on PATH. Skip-post-install is not a sandbox or a ban on build code. No atomicity, prefix-entry isolation, readiness or rollback guarantee. Trusted Homebrew can maintain caches and contact endpoints. A 10-minute deadline can leave partial effects.";
+pub const WARNING: &str = "Installs one Homebrew core formula at its current version, not a fixed version. Formula, build and dependency code can run. Dependencies can be installed or upgraded, and links can add commands to PATH. No sandbox or rollback. A 10-minute deadline can leave partial effects.";
 const CONTROLS: &[&str] = &[
     "HOMEBREW_NO_AUTO_UPDATE",
     "HOMEBREW_NO_ANALYTICS",

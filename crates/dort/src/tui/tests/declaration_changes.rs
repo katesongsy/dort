@@ -54,7 +54,7 @@ fn selected_declaration_edit_remove_use_one_exact_approval_and_refresh_list() {
         let report = &app.preview.as_ref().unwrap().text;
         assert!(
             report.contains("Edit tool declaration")
-                && report.contains("Provider default")
+                && report.contains("Default")
                 && report.contains("latest")
         );
         assert!(f.calls().is_empty());

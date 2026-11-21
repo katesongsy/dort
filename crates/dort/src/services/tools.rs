@@ -1,4 +1,4 @@
-//! Shared explicit inspection workflow. No provider discovery or automatic execution.
+//! Shared check workflow. Detection and execution need explicit approval.
 use dort_core::{Error, Result, context::HostContext, observation, tools::inspection};
 use serde::Serialize;
 use std::path::{Path, PathBuf};

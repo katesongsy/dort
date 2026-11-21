@@ -1,4 +1,4 @@
-//! Combined adoption is a page; editing one draft never approves or reviews a write.
+//! Batch adoption pages. Editing a draft does not approve a write.
 use super::{actions::Task, app::App, components as ui, input::Target, shell::AdoptionDraft};
 use ratatui::{
     Frame,
@@ -171,7 +171,7 @@ impl Editor {
             return Text::raw("No selected draft.");
         };
         Text::from(vec![
-            Line::styled("Selected draft metadata", ui::heading()),
+            Line::styled("Selected draft", ui::heading()),
             ui::metadata("TARGET: ", &d.target),
             ui::metadata("ID: ", &d.id),
             ui::metadata("SOURCE: ", &d.source),
@@ -225,7 +225,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
                         target: Target::BatchControl(editor.item * 3, true),
                     },
                     ui::ActionButton {
-                        label: "Metadata",
+                        label: "Details",
                         key: "F3",
                         target: Target::BatchDetails,
                     },
@@ -253,7 +253,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
                     target: Target::BatchEdit,
                 },
                 ui::ActionButton {
-                    label: "Metadata",
+                    label: "Details",
                     key: "F3",
                     target: Target::BatchDetails,
                 },

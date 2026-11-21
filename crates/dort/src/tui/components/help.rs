@@ -1,4 +1,4 @@
-//! A metadata-only reading document, not another set of active controls.
+//! Read-only Help document.
 use super::{heading, metadata};
 use ratatui::text::{Line, Text};
 pub fn document(

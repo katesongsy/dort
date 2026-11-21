@@ -1,4 +1,4 @@
-//! Explicit fresh-inspection closure, never installer replay or package rollback.
+//! Fresh check and record close.
 use super::{
     attempts::{self, ProbeScope},
     inspection, invalid, same_source,
@@ -15,7 +15,7 @@ use std::path::PathBuf;
 #[derive(Clone)]
 pub struct CloseRequest {
     pub id: String,
-    /// Only needed when the original intent has no trustworthy provider scope.
+    /// Only needed when the original record has no trustworthy package-manager settings.
     pub executable: Option<PathBuf>,
     pub search_dirs: Vec<PathBuf>,
     /// Damaged-intent npm fallback; never a runtime-satisfaction claim.
@@ -55,7 +55,7 @@ impl ClosePreview {
             } else {
                 vec![]
             },
-            explanation: "Freshly inspects this provider scope and closes only the unchanged attempt metadata. It does not replay, verify readiness, repair packages or roll back earlier effects.",
+            explanation: "Checks the current package-manager scope, then closes the record if it is unchanged. It does not retry, repair packages or roll back earlier effects.",
         }
     }
     pub fn approve(self) -> CloseApproval {

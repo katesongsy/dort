@@ -38,7 +38,7 @@ fn declaration_list_checks_and_installs_without_internal_choices_or_contextual_e
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let text = render(&app, w, h);
         assert!(text.contains("2 ready to install"));
-        assert!(text.contains("CAN EXECUTE") && text.contains("no rollback"));
+        assert!(text.contains("Runs package-manager") && text.contains("no rollback"));
         assert!(!text.contains("root hooks"));
     }
     let task = key(&mut app, KeyCode::Enter).unwrap();
@@ -72,9 +72,9 @@ fn empty_review_explains_why_and_opens_affected_details_or_edit_without_executio
         for (w, h) in [(48, 14), (80, 24), (140, 40)] {
             let text = render(&app, w, h);
             assert!(text.contains("Installation needs attention"));
-            assert!(text.contains("command already exists"));
+            assert!(text.contains("A command exists"), "{text}");
             assert!(
-                !text.contains("CAN EXECUTE")
+                !text.contains("Runs package-manager")
                     && !text.contains("root hooks")
                     && !text.contains("0 missing")
             );
@@ -266,7 +266,7 @@ fn declared_workflow_gallery_export_probe() {
     let mut discovery = super::tools_tests::app(&discovered, false);
     let Some(Task::ToolsInstalledPrepare(mut inputs)) = discovery.activate(Action::ToolsInstalled)
     else {
-        panic!("Installed tools")
+        panic!("Installed packages")
     };
     inputs.search_dirs = vec![discovered.bin.clone()];
     run(

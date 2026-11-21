@@ -1,4 +1,4 @@
-//! Ephemeral selected-file content, isolated from reports, receipts and retry metadata.
+//! Temporary selected-file content, kept out of reports.
 use super::{
     actions::Task,
     app::{App, Tab},
@@ -123,7 +123,7 @@ impl State {
             Some(Err(reason)) => reason,
             None if self.selected.is_some() => "Reading selected file...",
             None => {
-                "Select an eligible regular file. Sensitive, binary and oversized content is withheld. Preview heuristics are not proof of secrecy."
+                "Select a regular file. Sensitive, binary and oversized content is withheld. Preview checks are not proof of secrecy."
             }
         }
     }

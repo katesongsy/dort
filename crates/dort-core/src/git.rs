@@ -1,5 +1,4 @@
-//! Bounded, read-only Git executable adapter. This is hardening, not OS sandboxing.
-//! The caller supplies a trusted absolute executable; no environment is discovered here.
+//! Read-only Git adapter with a trusted absolute executable.
 use crate::{Error, Result};
 use serde::Serialize;
 use std::{

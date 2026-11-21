@@ -1,4 +1,4 @@
-//! Fixed installer protocol. Both pipes are drained fairly and discarded.
+//! Installer process protocol with bounded output.
 #[cfg(test)]
 #[path = "process_tests.rs"]
 mod tests;

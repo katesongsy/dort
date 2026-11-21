@@ -1,4 +1,4 @@
-//! Schema 2 is separate from the immutable schema-1 adoption wire format.
+//! File operation records, separate from adoption.
 use crate::{
     Error, Result,
     context::HostContext,

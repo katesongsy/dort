@@ -83,7 +83,7 @@ fn paged_cells(app: &mut App, modal: bool) -> String {
         terminal.draw(|f| views::draw(f, app)).unwrap();
         let b = terminal.backend().buffer();
         let title = if modal {
-            "Selection metadata"
+            "Selection details"
         } else if app.error.is_some() {
             "Read failed"
         } else {

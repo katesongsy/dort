@@ -1,4 +1,4 @@
-//! Whole-app shell. Shared components own appearance; App retains real approval ownership.
+//! Whole-app shell. App owns approvals.
 use super::{
     app::{App, Tab},
     components as ui,

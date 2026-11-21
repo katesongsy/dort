@@ -1,4 +1,4 @@
-//! Presentation-only task metadata. Never retain an approval or a Git payload here.
+//! Task progress and result views.
 use super::{
     actions::{Approved, Pending, Task},
     app::App,
@@ -28,11 +28,11 @@ impl Progress {
         use dort_core::tools::install::Event::*;
         let (boundary, sequence) = match event {
             FreshValidation => ("Checking fresh install scope", 1),
-            FreshInspection => ("Inspecting selected provider catalogs", 2),
-            IntentDurable => ("Installation intent durable", 3),
-            Installing => ("Installing package · requested 10-minute deadline", 4),
-            PostInspection => ("Inspecting package and binary metadata", 5),
-            OutcomeDurable => ("Observed outcome durable", 6),
+            FreshInspection => ("Checking selected package managers", 2),
+            IntentDurable => ("Saving install record", 3),
+            Installing => ("Installing package · 10-minute limit", 4),
+            PostInspection => ("Checking package and command details", 5),
+            OutcomeDurable => ("Saving result", 6),
         };
         Self {
             installation: true,
@@ -115,10 +115,10 @@ impl Activity {
             }
             Task::IgnoredPaths => "Manage ignored paths",
             Task::Ignore(..) => "Preview discovery preferences",
-            Task::Refresh => "Refresh observations",
+            Task::Refresh => "Refresh data",
             Task::History => "Inspect Recovery",
             Task::Diagnostics => "Read Diagnostics",
-            Task::Discover => "Discover file metadata",
+            Task::Discover => "Discover files",
             Task::Check { .. } => "Check manifest",
             Task::Profiles { .. } => "Read profile selection",
             Task::Select(_) => "Select session repository",
@@ -126,12 +126,12 @@ impl Activity {
             Task::Files(request) => request_label(request),
             Task::Batch(request) => batch_label(request.action()),
             Task::Rollback(..) => "Preview guarded rollback",
-            Task::Bootstrap(..) => "Preview bootstrap recovery",
+            Task::Bootstrap(..) => "Preview repository setup recovery",
             Task::Git(_) => "Read Git",
-            Task::ToolAttempts => "Read installation attempts (no execution)",
-            Task::ToolClosePrepare(_) => "Review fresh inspection and attempt closure",
-            Task::ToolClose(_) => "Inspect provider and close unchanged attempt metadata",
-            Task::ToolDeclaration(_) => "Preview manifest-only declaration change",
+            Task::ToolAttempts => "Read install records (no execution)",
+            Task::ToolClosePrepare(_) => "Review fresh check and record close",
+            Task::ToolClose(_) => "Check package manager and close an unchanged record",
+            Task::ToolDeclaration(_) => "Preview declaration change (manifest only)",
             Task::ToolsSettingsDetect { .. } => "Find tool settings (no execution)",
             Task::ToolsSettingsValidate(_) => "Validate session tool settings (no execution)",
             Task::Execute(approved) => {
@@ -145,7 +145,7 @@ impl Activity {
                     Approved::Batch(_) => "Batch file operation",
                     Approved::Init(..) => "Create/attach",
                     Approved::Rollback(..) => "Rollback",
-                    Approved::Bootstrap(..) => "Bootstrap recovery",
+                    Approved::Bootstrap(..) => "Repository setup recovery",
                 }
             }
         };
@@ -170,15 +170,11 @@ impl Activity {
                 "Manifest",
                 checked.reconciliation.scope.manifest.display().to_string(),
             )),
-            Task::ToolAttempts => scope.push((
-                "Scope",
-                "All repository Tools attempts in this host state".into(),
-            )),
-            Task::ToolClosePrepare(request) => scope.push(("Attempt", request.id.clone())),
+            Task::ToolAttempts => scope.push(("Scope", "All install records on this host".into())),
+            Task::ToolClosePrepare(request) => scope.push(("Record", request.id.clone())),
             Task::ToolClose(_) => scope.push((
                 "Scope",
-                "Fresh fixed provider inspection and unchanged attempt metadata closure only"
-                    .into(),
+                "Fresh package-manager check; closes an unchanged record only".into(),
             )),
             Task::ToolsInstalledInspect(approval) => {
                 scope.push((
@@ -210,7 +206,7 @@ impl Activity {
                 ));
                 scope.push((
                     "Scope",
-                    "Approved provider checks; no package installation".into(),
+                    "Approved package-manager checks; no installs".into(),
                 ));
             }
             // Only public scope metadata; never inspect Read, disclosure state or Diff.patch.
@@ -243,7 +239,7 @@ impl Activity {
             Task::Rollback(repository, transaction)
             | Task::Bootstrap(repository, transaction, _) => {
                 scope.push(("Repository ID", repository.clone()));
-                scope.push(("Transaction", transaction.clone()));
+                scope.push(("Operation ID", transaction.clone()));
             }
             _ => {
                 let root = match task {
@@ -392,17 +388,17 @@ impl Activity {
                 "Rollback",
                 vec![
                     ("Repository ID", preview.repository_id.clone()),
-                    ("Transaction", preview.transaction_id.clone()),
+                    ("Operation ID", preview.transaction_id.clone()),
                 ],
             ),
             Pending::Bootstrap(preview) => (
                 match preview.action {
-                    dort_core::bootstrap::RecoveryAction::Resume => "Resume bootstrap",
-                    dort_core::bootstrap::RecoveryAction::Abandon => "Abandon bootstrap",
+                    dort_core::bootstrap::RecoveryAction::Resume => "Resume setup",
+                    dort_core::bootstrap::RecoveryAction::Abandon => "Abandon setup",
                 },
                 vec![
                     ("Repository", preview.repository.display().to_string()),
-                    ("Transaction", preview.transaction_id.clone()),
+                    ("Operation ID", preview.transaction_id.clone()),
                 ],
             ),
         };
@@ -462,7 +458,7 @@ fn controls(_frame: &mut Frame, _area: Rect, app: &App, failed_write: bool) {
     let choices = if failed_write {
         vec![
             ("Recovery", "Enter", Control::Recovery),
-            ("Refresh observations", "r", Control::Retry),
+            ("Refresh data", "r", Control::Retry),
             ("Back", "Esc", Control::Back),
         ]
     } else if app.error.is_some() {
@@ -474,7 +470,7 @@ fn controls(_frame: &mut Frame, _area: Rect, app: &App, failed_write: bool) {
     } else {
         vec![
             ("Done", "Enter", Control::Back),
-            ("Refresh observations", "r", Control::Retry),
+            ("Refresh data", "r", Control::Retry),
             ("Recovery", "h", Control::Recovery),
             ("Back", "Esc", Control::Back),
         ]
@@ -541,7 +537,7 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
             &mut lines,
             app.failure.as_ref().and_then(|f| f.activity.as_ref()),
         );
-        lines.push(Line::raw(if app.failed_write { "Inspect Recovery before another write. Refresh rereads observations." } else { "Input and scope retained. Retry repeats a read or requests a fresh preview. Back returns to retained input." }));
+        lines.push(Line::raw(if app.failed_write { "Open Recovery before trying another write. Refresh rereads current state." } else { "Your input is kept. Retry runs the read again or asks for a new preview. Back returns to it." }));
         panel(
             frame,
             area,
@@ -549,12 +545,12 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
             if app.failed_write {
                 "Write failed"
             } else {
-                "Read failed: Input retained"
+                "Read failed"
             },
             if app.failed_write {
-                "Possible partial effects"
+                "Some changes may have been made"
             } else {
-                "Read failed: no write approved by this read"
+                "No changes were made"
             },
             app.failed_write,
             lines,
@@ -565,17 +561,15 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
     {
         let mut lines = vec![Line::raw(format!("{} completed.", receipt.operation))];
         if let Some(id) = &receipt.transaction_id {
-            lines.push(ui::metadata("Transaction ID", id));
+            lines.push(ui::metadata("Operation ID", id));
         } else {
             lines.push(Line::raw("Everything is up to date."));
         }
         scope(&mut lines, receipt.activity.as_ref());
         if app.busy {
-            lines.push(Line::raw(
-                "Refreshing read-only observations; result retained.",
-            ));
+            lines.push(Line::raw("Refreshing read-only data. Result kept."));
         }
-        lines.push(Line::raw("Inspect Recovery for retained history. Back returns to the workbench; no automatic undo."));
+        lines.push(Line::raw("Open Recovery for history. Rollback is manual."));
         panel(
             frame,
             area,
@@ -597,21 +591,21 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
         scope(&mut lines, app.activity.as_ref());
         if let Some(progress) = progress {
             if !progress.installation {
-                lines.push(ui::metadata("Transaction", &progress.transaction_id));
-                lines.push(ui::metadata("Boundary", progress.boundary));
-                lines.push(ui::metadata("Sequence", &progress.sequence.to_string()));
+                lines.push(ui::metadata("Operation ID", &progress.transaction_id));
+                lines.push(ui::metadata("Step", progress.boundary));
+                lines.push(ui::metadata("Step number", &progress.sequence.to_string()));
             }
         } else {
-            lines.push(Line::raw(
-                "Waiting for service metadata; no percentage is estimated.",
-            ));
+            lines.push(Line::raw("Waiting for progress."));
         }
-        lines.push(Line::raw("Scope above is fixed for this task. Navigation preserves this scope. Observations update when the read finishes."));
+        lines.push(Line::raw(
+            "This task keeps its scope while you navigate. Results update when it finishes.",
+        ));
         let title = format!(
             "{} {}",
             app.motion.symbol(app.appearance.ascii()),
             if app.writing {
-                "Approved execution"
+                "Approved work"
             } else {
                 "Reading"
             }
@@ -622,11 +616,11 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
             app,
             &title,
             if app.exit_requested {
-                "Exit requested; waiting for worker"
+                "Exit requested; waiting for the worker"
             } else if app.writing {
-                "Approved work; quit waits for completion"
+                "Approved work. Quit waits for it to finish."
             } else if app.activity.as_ref().is_some_and(|a| a.provider_inspection) {
-                "Approved provider query; configuration/cache side effects possible"
+                "Approved package-manager query. It can read configuration and change caches."
             } else {
                 "Read-only task in progress"
             },

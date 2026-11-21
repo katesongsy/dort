@@ -93,7 +93,7 @@ fn all_providers_use_one_real_review_show_exact_scope_and_revalidate_without_rep
         for (w, h) in [(48, 14), (80, 24), (140, 40)] {
             let text = render(&app, w, h);
             assert!(
-                text.contains("CAN EXECUTE") && text.contains("no rollback"),
+                text.contains("Runs package-manager") && text.contains("no rollback"),
                 "{provider:?}: {text}"
             );
             assert!(text.lines().last().unwrap().contains("F1 Help"));

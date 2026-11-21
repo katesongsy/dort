@@ -27,7 +27,16 @@ pub fn draw(
         .or(feedback);
     if details {
         let item = items.get(selected);
-        let body = item.map(|item| format!("{}\n\n{}", item.action.label, item.reason.unwrap_or("Available in this foreground. Choosing it uses the original guarded action."))).unwrap_or_else(|| "No additional actions.".into());
+        let body = item
+            .map(|item| {
+                format!(
+                    "{}\n\n{}",
+                    item.action.label,
+                    item.reason
+                        .unwrap_or("Available here. Choosing it runs the same action.")
+                )
+            })
+            .unwrap_or_else(|| "No additional actions.".into());
         ui::report(
             frame,
             area,

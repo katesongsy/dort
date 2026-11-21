@@ -299,7 +299,7 @@ fn commands(app: &App) {
         app.presented("Tool settings", "s", Target::Action(Action::ToolsConfigure));
     }
     app.presented(
-        "Installed tools",
+        "Installed packages",
         "v",
         Target::Action(Action::ToolsInstalled),
     );
@@ -341,7 +341,7 @@ fn review(frame: &mut Frame, area: Rect, app: &App) -> bool {
         for scope in &review.inspections {
             body.push(ui::metadata("Tools", &scope.tools.join(", ")));
             body.push(ui::metadata(
-                "Provider",
+                "Package manager",
                 crate::services::installed_tools::label(scope.query.provider.query),
             ));
             inspection_lines(&mut body, scope.query.provider);
@@ -352,7 +352,7 @@ fn review(frame: &mut Frame, area: Rect, app: &App) -> bool {
         }
         (
             "Check installed",
-            "Provider configuration/plugins may run; caches may change. No packages installed.",
+            "Checks can run package-manager configuration and plugins, and change caches. No packages are installed.",
             "Run checks",
             false,
             body,
@@ -369,7 +369,7 @@ fn review(frame: &mut Frame, area: Rect, app: &App) -> bool {
                 &format!("{} {}", install.scope.package, install.scope.version),
             ));
             body.push(ui::metadata(
-                "Provider",
+                "Package manager",
                 &install.scope.executable.display().to_string(),
             ));
             body.push(ui::metadata(
@@ -413,7 +413,9 @@ fn review(frame: &mut Frame, area: Rect, app: &App) -> bool {
         if !review.deferred.is_empty() {
             body.push(Line::raw("Needs attention (not included):"));
         } else if preview.is_empty() {
-            body.push(Line::raw("No confirmed missing packages in this check. Return to tool details for version differences or unavailable checks."));
+            body.push(Line::raw(
+                "No missing packages. Open a tool for version or check problems.",
+            ));
         }
         for issue in review.deferred {
             body.push(ui::metadata("Tool", &issue.tool));
@@ -490,7 +492,7 @@ fn result(frame: &mut Frame, area: Rect, app: &App) -> bool {
     let mut lines = vec![Line::raw(if installed.succeeded() {
         "Reviewed installations finished."
     } else {
-        "Stopped. Earlier changes may remain; no automatic rollback."
+        "Stopped. Earlier installs may remain. No rollback."
     })];
     for result in &installed.results {
         lines.push(ui::metadata("Tool", &result.tool));
@@ -503,7 +505,7 @@ fn result(frame: &mut Frame, area: Rect, app: &App) -> bool {
             lines.push(ui::metadata("Package", summary.package_note()));
             lines.push(ui::metadata("Command", summary.binary_label()));
             if let Some(id) = &report.attempt_id {
-                lines.push(ui::metadata("Attempt", id));
+                lines.push(ui::metadata("Record", id));
             }
         }
     }
@@ -513,9 +515,7 @@ fn result(frame: &mut Frame, area: Rect, app: &App) -> bool {
             &installed.not_started.join(", "),
         ));
     }
-    lines.push(Line::raw(
-        "Check installed again before another install review.",
-    ));
+    lines.push(Line::raw("Check installed again before another install."));
     ui::report(
         frame,
         area,
@@ -636,9 +636,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                 lines.push(ui::metadata(
                     "Command lookup",
                     match row.binary_observation {
-                        BinaryObservation::Missing => "Not found in reviewed directories",
+                        BinaryObservation::Missing => "Not found in checked folders",
                         BinaryObservation::Candidates { .. } => {
-                            "Found candidates; version and ownership unverified"
+                            "Found, but version and owner are unverified"
                         }
                         _ => "Unavailable or not checked",
                     },
@@ -653,21 +653,21 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                             format!("Select the profile containing {tool}")
                         }
                         Blocker::VersionMismatch => {
-                            "Installed version differs; automatic upgrades are not requested".into()
+                            "Installed version differs. Dort does not upgrade automatically.".into()
                         }
                         Blocker::VersionUnverifiable => {
-                            "The reported version cannot be matched to this declaration".into()
+                            "Reported version does not match this declaration.".into()
                         }
                         Blocker::UnattributedBinaryCandidates => {
-                            "An existing command needs inspection before installation".into()
+                            "An existing command needs a check before install.".into()
                         }
                         Blocker::BinaryObservationUnavailable | Blocker::BinaryNotObserved => {
-                            "Review command search directories in Tool settings".into()
+                            "Check command search folders in Tool settings.".into()
                         }
                         Blocker::RuntimeBindingUnverified => {
-                            "Review the declared runtime's Node and npm settings".into()
+                            "Check the runtime's Node and npm settings.".into()
                         }
-                        _ => "Provider facts are unavailable; review Tool settings".into(),
+                        _ => "Package manager data is unavailable. Check Tool settings.".into(),
                     };
                     lines.push(ui::metadata("Needs attention", &reason));
                 }
@@ -675,11 +675,14 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         }
         {
             let install = &tool.install;
-            lines.push(ui::metadata("Provider", &format!("{:?}", install.provider)));
+            lines.push(ui::metadata(
+                "Package manager",
+                workflow::provider_label(install.provider),
+            ));
             lines.push(ui::metadata("Package", &install.package));
             lines.push(ui::metadata(
                 "Version",
-                install.version.as_deref().unwrap_or("Provider default"),
+                install.version.as_deref().unwrap_or("Default"),
             ));
             if let Some(runtime) = &install.runtime_tool {
                 lines.push(ui::metadata("npm runtime", runtime));
@@ -702,8 +705,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             .to_owned()
     } else {
         app.tools_view.declared.checked.as_ref().map_or_else(
-        || "Check declared tools; install what's missing.\nInstalled = matching package-manager report.".to_owned(),
-        |c| format!("{} missing; {} eligible for installation review.\nInstalled = matching package-manager report.\n{}", c.missing(), c.installable(), if c.missing() > 0 && c.installable() == 0 { "Review missing tools to see installation issues." } else { "Review missing tools before installing." }),
+        || "Check declared tools; install what is missing.\nInstalled means the package manager reports the package.".to_owned(),
+        |c| format!("{} missing; {} ready to install.\nInstalled means the package manager reports the package.\nReview missing tools to see install issues.", c.missing(), c.installable()),
     )
     };
     let top = (intro.lines().count() as u16).min(area.height);

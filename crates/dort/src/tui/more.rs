@@ -1,4 +1,4 @@
-//! Foreground action selection. Only static labels and original typed targets are retained.
+//! Contextual action menu.
 use super::{
     actions::Task,
     app::App,

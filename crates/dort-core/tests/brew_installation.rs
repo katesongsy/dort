@@ -168,7 +168,11 @@ fn process_free_review_and_fixed_native_install_record_current_not_exact() {
     let p = brew::prepare(&f.home.host, f.request(), f.scope(), &[&r]).unwrap();
     assert_eq!(calls, f.calls());
     assert!(!f.home.host.state_dir.join("tools-attempts").exists());
-    assert!(p.review().warning.contains("CAN EXECUTE"));
+    assert!(
+        p.review()
+            .warning
+            .contains("Formula, build and dependency code can run")
+    );
     assert!(p.review().warning.contains("upgraded"));
     assert_eq!(p.review().fresh_probes.len(), 5);
     let out = f.execute(p).unwrap();

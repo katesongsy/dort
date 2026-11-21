@@ -31,7 +31,7 @@ impl Manifest {
         Ok(manifest)
     }
 
-    /// Structural validation does not execute providers or require source files to exist.
+    /// Checks declarations and references. It does not run package managers or require source files.
     pub fn validate(&self) -> Result<()> {
         let mut issues = vec![];
         if self.schema != 1 {

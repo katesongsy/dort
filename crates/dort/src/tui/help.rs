@@ -1,4 +1,4 @@
-//! Metadata-only Help layer. It never moves/clones a draft, approval or private payload.
+//! Read-only Help layer. Drafts and approvals stay in App.
 use super::{
     app::{App, Tab},
     components as ui,
@@ -67,86 +67,60 @@ impl Topic {
     fn instructions(self) -> &'static str {
         match self {
             Self::Overview => {
-                "Start with a repository, inspect observations, then review exact changes."
+                "Start with a repository. Review what Dort found, then approve exact changes."
             }
-            Self::Discover => {
-                "Inspect a selected file first. Adoption is a separate, reviewed action."
-            }
-            Self::Content => {
-                "Only the selected eligible file is read; the preview is bounded and ephemeral."
-            }
-            Self::Managed => {
-                "Inspect linked-file observations. Filters never narrow a later whole-scope apply."
-            }
-            Self::Recovery => {
-                "Inspect all-repository transaction metadata before requesting guarded recovery."
-            }
+            Self::Discover => "Select a file first. Adoption is a separate, reviewed action.",
+            Self::Content => "Only the selected regular file is read. The preview is temporary.",
+            Self::Managed => "Inspect managed links. Filters do not narrow a later apply.",
+            Self::Recovery => "Review operation records across repositories before recovery.",
             Self::Checks => {
-                "Structural checks validate declarations, not live files or installed-tool readiness."
+                "Checks validate declarations. They do not read files or check installed tools."
             }
-            Self::Diagnostics => {
-                "Content-free host, path, registry and history availability facts."
-            }
+            Self::Diagnostics => "Host, path, repository and history details. No file contents.",
             Self::Git => {
-                "Read-only status and comparison metadata. Patch content has its own disclosure gate."
+                "Read-only status and diff details. Patch content needs separate approval."
             }
             Self::GitContent => {
-                "Patches may contain secrets. Each new view requires deliberate disclosure."
+                "Patches may contain secrets. Each new view needs a separate check."
             }
             Self::Tools => {
-                "Enter opens the selected tool or package. Check and Install are named actions. Installed tools keeps only the current inspection; Add declaration prefills known package fields for a separate manifest review."
+                "Enter opens the selected tool or package. Check and Install are named actions. Installed keeps only the current result. Add declaration fills known package fields for a separate review."
             }
-            Self::Actions => "Find a task by name. Unavailable tasks explain their prerequisites.",
+            Self::Actions => "Find a task by name. Unavailable tasks explain what they need.",
             Self::Menu => {
-                "Up/Down selects a section; Left/Right selects a local destination. Enter opens it; Esc closes Menu. Opening/dismissing retains drafts."
+                "Up/Down selects a section. Left/Right selects a page. Enter opens it. Esc closes Menu. Drafts stay open."
             }
-            Self::More => {
-                "Choose a contextual action. This menu never grants an execution approval."
-            }
-            Self::Choice => {
-                "Choose a value for the current form. Selecting a value runs no programs."
-            }
-            Self::Form(Form::Adopt) => {
-                "Declare one ordinary file mapping, then review the real adoption effects."
-            }
+            Self::More => "Choose a contextual action. This menu does not approve work.",
+            Self::Choice => "Choose a value for the form. Selecting a value runs nothing.",
+            Self::Form(Form::Adopt) => "Describe one regular-file link, then review its effects.",
             Self::Form(Form::Check) => {
-                "Check an independent manifest with explicit temporary profile additions."
+                "Check an independent manifest with extra profiles for this run."
             }
             Self::Form(Form::Choose) => {
-                "Select an exact repository root for this session without persisting registration."
+                "Select a repository root for this session. The choice is not saved."
             }
             Self::Form(Form::Init) => {
-                "Prepare local creation or attachment. Only the later approval persists changes."
+                "Prepare a local repository. The next review saves the change."
             }
             Self::Form(Form::KeepId | Form::RemoveId) => {
-                "Use the exact mapping ID; the repository source is retained."
+                "Use the exact mapping ID. The repository source is kept."
             }
-            Self::Picker => {
-                "Choose a repository or session profile additions; selection is not write approval."
-            }
-            Self::Ignored => {
-                "Inspect an ignored path, then review removal of its discovery preference."
-            }
-            Self::About => "Current capabilities, limitations, privacy and supervision facts.",
-            Self::Batch => {
-                "Review the complete marked adoption set; editing an item never adopts it individually."
-            }
-            Self::BatchItem => "Edit TARGET, ID and SOURCE. Done returns to the combined draft.",
+            Self::Picker => "Choose a repository or extra profiles. Selection is not approval.",
+            Self::Ignored => "Inspect an ignored path, then remove its discovery preference.",
+            Self::About => "What works here, tool effects, safety and limits.",
+            Self::Batch => "Review the marked files. Editing one item does not adopt it.",
+            Self::BatchItem => "Edit target, ID and source. Done returns to the draft.",
             Self::Preview => {
-                "Review all effects, warnings and guards. Blocked or preview-only layouts cannot approve."
+                "Review effects, warnings and limits. Blocked or preview-only pages cannot approve."
             }
             Self::Confirmation => {
-                "The displayed scope binds the real approval internally. No typed phrase is required."
+                "The preview determines the approval. No typed phrase is required."
             }
-            Self::Task => {
-                "Progress describes observed metadata, not an invented percentage or completion claim."
-            }
+            Self::Task => "Progress uses reported steps. It does not estimate a percentage.",
             Self::Error => {
-                "Read retry is separate from execution. Failed writes may have partial or ongoing effects."
+                "Retry repeats the read or asks for a new preview. A failed write may leave partial effects."
             }
-            Self::Result => {
-                "Inspect the observed result. A fresh attempt always needs a new review."
-            }
+            Self::Result => "Review the result. Another attempt needs a new review.",
         }
     }
     fn keys(self, app: &App) -> &'static [(&'static str, &'static str)] {
@@ -172,7 +146,7 @@ impl Topic {
             Self::Form(_) | Self::BatchItem => &[
                 ("Tab / Shift-Tab", "Traverse fields only"),
                 ("Enter", "Validate/review, or Done for a batch item"),
-                ("F3", "Full draft metadata"),
+                ("F3", "Full draft details"),
                 ("Ctrl-U", "Clear current field"),
                 ("Esc", "Back, retaining draft"),
             ],
@@ -210,24 +184,21 @@ impl Topic {
                     || app.tools_view.declared.install_preview.is_some() =>
             {
                 &[
-                    (
-                        "Up/Down/PgUp/PgDn",
-                        "Read the complete scope, reasons and risks",
-                    ),
-                    ("Enter", "Activate the explicitly displayed review action"),
-                    ("Esc", "Cancel without executing"),
+                    ("Up/Down/PgUp/PgDn", "Read scope, reasons and risks"),
+                    ("Enter", "Use the shown review action"),
+                    ("Esc", "Cancel"),
                 ]
             }
             Self::Tools if app.tools_view.install_open => &[
                 ("Enter", "Open the selected installation record"),
-                ("x", "Review closure of an unresolved record"),
+                ("x", "Close an unresolved record"),
                 ("R", "Refresh installation history"),
-                ("Esc", "Back without replaying an installation"),
+                ("Esc", "Back"),
             ],
             Self::Tools => &[
-                ("Enter", "Open the selected tool; never Check or Install"),
-                ("C", "Review Check installed"),
-                ("i", "Review Install missing after checking"),
+                ("Enter", "Open the selected tool"),
+                ("C", "Check installed"),
+                ("i", "Install missing tools"),
                 ("e / d", "Edit / remove the selected declaration"),
                 ("a", "Add a declaration"),
                 ("s", "Tool settings when configuration needs attention"),
@@ -238,47 +209,47 @@ impl Topic {
                 ("Type", "Search task names"),
                 ("Up/Down", "Choose a task"),
                 ("Enter", "Open the selected available task"),
-                ("F3", "Task scope and prerequisites"),
+                ("F3", "Task scope and needs"),
                 ("Esc", "Close directly"),
             ],
             Self::Picker => &[
                 ("Up/Down", "Traverse choices"),
                 ("Space", "Toggle optional profile membership"),
                 ("Enter", "Validate/apply selection"),
-                ("F3", "Full selected metadata"),
+                ("F3", "Full selection details"),
                 ("Ctrl-N", "Create/attach from repository picker"),
             ],
             Self::Preview => &[
                 ("PgUp/PgDown", "Read all review rows"),
                 ("F3", "Full report"),
-                ("Enter", "Contextual review/approval step"),
+                ("Enter", "Review or approve"),
                 ("Esc", "Back without execution"),
             ],
             Self::Confirmation => &[
-                ("Enter", "Explicitly confirm the displayed scope"),
+                ("Enter", "Confirm the displayed changes"),
                 ("Esc", "Cancel"),
             ],
             Self::Task => &[
                 ("q / Ctrl-C", "Request exit; wait joined for owned work"),
-                ("F1", "Metadata-only Help"),
+                ("F1", "Help"),
             ],
             Self::Error => &[
                 (
                     "Enter",
                     "Retry a read, or open Recovery after a failed write",
                 ),
-                ("F2", "Other guarded recovery/refresh actions"),
+                ("F2", "More recovery or refresh"),
                 ("Esc", "Back; retained failure warning remains"),
             ],
             Self::Result => &[
                 ("Enter", "Done, or fresh-review navigation for Tools"),
-                ("PgUp/PgDown", "Read result metadata"),
-                ("F2", "Recovery or fresh observations"),
+                ("PgUp/PgDown", "Read the result"),
+                ("F2", "Recovery or refresh"),
             ],
             Self::Content => &[
                 ("Up/Down", "Scroll selected content"),
                 ("PgUp/PgDown", "Page selected content"),
-                ("Alt-PgUp/PgDown", "Read selected metadata"),
+                ("Alt-PgUp/PgDown", "Read selected details"),
                 ("Esc", "Return to list"),
             ],
             Self::Discover
@@ -291,12 +262,12 @@ impl Topic {
                 ("Enter", "Inspect, or the named primary action"),
                 ("Space", "Toggle optional membership where offered"),
                 ("F2", "Contextual actions with scope/reasons"),
-                ("F3", "Metadata when offered"),
+                ("F3", "Details when offered"),
             ],
             _ => &[
                 ("Enter", "Contextual primary shown in the action strip"),
                 ("F2", "More actions"),
-                ("F3", "Full metadata when offered"),
+                ("F3", "Full details when offered"),
                 ("PgUp/PgDown", "Read the visible document"),
             ],
         }
@@ -402,9 +373,9 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
         area.y += height;
         area.height = area.height.saturating_sub(height);
     }
-    let mut sections = vec![("Workbench", "Ctrl-G / Menu: sections and destinations; Ctrl-K: searchable task launcher; F2: additional contextual actions when shown; F1: Help. Esc returns one meaningful level. Outside text entry, o/f/t/r/c/g opens Overview/Files/Tools/Recovery/Checks/Git. Menu and the wide rail use that order, with Session last in Menu. Contextual O/F/T/R/C retains adoption/discovery/profiles/refresh/inspection actions; P chooses Git scope. Home selects the first Files row. Numbered local destinations use 1/2/3/4 within the current section outside text entry, or the selected Menu section. Fields and filters accept digits and other printable keys literally; footer buttons never join field traversal.".to_owned())];
+    let mut sections = vec![("Workbench", "Ctrl-G: Menu. Ctrl-K: task search. F1: Help. F2: more actions. Esc: back. Outside text entry, o/f/t/r/c/g opens sections. Numbers choose a local page. Fields and filters take digits as text; footer buttons do not join field traversal.".to_owned())];
     if matches!(help.topic, Topic::Tools) {
-        sections.insert(0, ("Tools boundaries", "Tools starts with declarations. Check installed prepares only needed detected provider scopes and shows automatic per-tool associations for approval. Installed means a matching package-manager claim, not verified command readiness. Unknown is never missing. Install missing reviews up to 32 eligible tools once, executes serially and stops on failure; earlier effects remain, with no rollback or silent upgrades. Deferred prerequisites need a fresh check/review. Observations and their associations stay internal. Tool settings are available from its details; installation history retains outcomes and explicit record closure. Navigation and preparation run no provider commands; approvals are never replayed.".to_owned()));
+        sections.insert(0, ("Tools guide", "Tools opens declarations. Check installed asks which package managers to query, then shows each result for approval. Installed means the package manager reports the package, not that the command works. Install missing reviews eligible tools once, installs in order and stops on failure. Earlier installs stay; there is no rollback. Settings and history live under Tools.".to_owned()));
     }
     if matches!(help.topic, Topic::Menu)
         && let Some(menu) = app.navigation.menu
@@ -446,8 +417,12 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
             .join("\n");
         sections.push(("Related tasks", related));
     }
-    sections.push(("Reading Help", "Up/Down or PgUp/PgDown scroll; Home returns to the top. Esc or F1 closes Help. Only this foreground owns input; underlying task keys do not act.".to_owned()));
-    sections.push(("Approval and privacy", "Writes require a fresh real review and independent revalidation. Dialogs/busy work explain paused navigation; outside clicks never cancel or approve. q/Ctrl-C waits for owned work. Private backups are unencrypted. Selected-file and Git content stays outside Help, metadata reports and diagnostics; heuristics are not proof of secrecy.".to_owned()));
+    sections.push((
+        "Reading Help",
+        "Up/Down or PgUp/PgDown scrolls. Home returns to the top. Esc or F1 closes Help."
+            .to_owned(),
+    ));
+    sections.push(("Approval and privacy", "Writes need a fresh review. Outside clicks do not cancel or approve. q/Ctrl-C waits for active work. Backups are private, not encrypted. Selected-file and Git content stays out of Help and reports.".to_owned()));
     ui::text_view(
         frame,
         area,

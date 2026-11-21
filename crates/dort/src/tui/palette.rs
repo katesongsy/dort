@@ -1,4 +1,4 @@
-//! Contextual Actions. Highlighting/filtering never constructs a task.
+//! Task search over typed actions.
 pub use super::context::{Entry, entries};
 use super::{app::App, components as ui};
 use ratatui::{
@@ -65,7 +65,7 @@ pub fn draw(
                 label: if app.shell.picker_details {
                     "Actions"
                 } else {
-                    "Metadata"
+                    "Details"
                 },
                 key: "F3",
                 target: Target::PickerDetails,

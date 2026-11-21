@@ -1,4 +1,4 @@
-//! Pure preview planner. Observation is explicit; `plan` performs no filesystem reads.
+//! Pure preview planner over supplied facts.
 use crate::{
     Error, Manifest, Result,
     context::HostContext,

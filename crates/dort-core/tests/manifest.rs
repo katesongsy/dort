@@ -207,7 +207,7 @@ fn provider_policy_rejects_unenforceable_versions_and_injection() {
     for version in ["24", "^24", "24.0.0"] {
         invalid(
             &base.replace("version = \"latest\"", &format!("version = {version:?}")),
-            "cannot enforce this version",
+            "this package manager cannot install that version rule",
         );
     }
     invalid(

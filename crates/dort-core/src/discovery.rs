@@ -1,4 +1,4 @@
-//! Bounded metadata discovery under hidden HOME entries; selected content is a separate private read.
+//! Bounded discovery under hidden HOME entries.
 use crate::{
     Result,
     context::HostContext,

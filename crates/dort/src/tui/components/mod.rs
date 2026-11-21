@@ -1,4 +1,4 @@
-//! Shared visual vocabulary. Metadata is escaped before it reaches styled widgets.
+//! Shared visual components. Metadata is escaped before styling.
 pub mod choice;
 pub mod chrome;
 pub mod dashboard;
@@ -97,7 +97,7 @@ pub fn success() -> Style {
 }
 pub fn state(label: &str) -> Style {
     match label {
-        "INTEGRITY!" => danger(),
+        "Damaged" => danger(),
         "Blocked" | "Not eligible" => warning(),
         "Linked" => Style::default().fg(Color::Green),
         "Needs apply" | "Eligible hint" => warning(),

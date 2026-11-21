@@ -1,5 +1,4 @@
-//! Pure, non-executable command descriptions for missing-package review proposals.
-//! No process runner, approval, deserialization or persistence API exists here.
+//! Command descriptions for install previews.
 use super::{
     VersionPolicy, inspection,
     planning::{PackageAction, PackageFinding, Row},

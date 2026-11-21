@@ -1,4 +1,4 @@
-//! Trusted single-cell decoration only. Runtime metadata never passes through here.
+//! Trusted single-cell decoration. Runtime text stays out.
 pub const SELECTED: &str = "›";
 pub const MENU: &str = "▾";
 pub const EXPAND: &str = "▸";

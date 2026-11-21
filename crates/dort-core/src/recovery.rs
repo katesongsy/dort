@@ -1,4 +1,4 @@
-//! Explicit read-only rollback previews and opaque, head-bound approvals.
+//! Read-only rollback previews and single-use approvals.
 use crate::{Error, Result, adoption, context::HostContext, journal, lifecycle, state::WriterLock};
 use serde::Serialize;
 use std::path::PathBuf;

@@ -1,4 +1,4 @@
-//! One input/render thread and at most one owned worker; workers are never detached.
+//! Input/render loop with one owned worker. Quit joins it.
 use super::actions::{self, Output, Task};
 use dort_core::context::HostContext;
 use std::{

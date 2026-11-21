@@ -1,4 +1,4 @@
-//! Current installed-package discovery. Observations are never merged or kept as history.
+//! Current installed-package discovery. Results are not stored as history.
 use super::{inspection_defaults::Inputs, tools};
 use dort_core::{
     Error, Result,
@@ -91,7 +91,7 @@ pub fn prepare(host: &HostContext, manifest: Option<PathBuf>, input: Inputs) -> 
         for request in requests {
             if queries.len() == MAX_SCOPES {
                 return Err(Error::Invalid(
-                    "Too many installed-tool scopes; inspect a smaller environment.".into(),
+                    "Too many package-manager settings. Check a smaller environment.".into(),
                 ));
             }
             match request.prepare(host) {
@@ -139,8 +139,7 @@ impl Approval {
             }
             if count > MAX_RECORDS {
                 return Err(Error::Invalid(
-                    "Inspection ran, but exceeded the result limit. No inventory was retained."
-                        .into(),
+                    "The check returned too many results. Nothing was kept.".into(),
                 ));
             }
             reports.push(report);

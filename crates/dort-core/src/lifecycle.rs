@@ -1,5 +1,4 @@
-//! Experimental core-only link apply/unmanage and explicit schema-2 rollback.
-//! Sources are immutable watches, never operation destinations. No CLI write interface.
+//! File apply and unmanage with rollback records.
 pub use crate::adoption::{Boundary, Event};
 use crate::{
     Error, Manifest, Result,

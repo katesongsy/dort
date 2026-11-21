@@ -1,4 +1,4 @@
-//! Semantic, reusable Calm Workbench components. No execution or approval policy.
+//! Shared Calm Workbench components. Approval logic stays in App.
 use super::{self as ui, glyphs};
 use crate::tui::{
     input::{Hits, Target},

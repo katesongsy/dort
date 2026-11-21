@@ -129,19 +129,19 @@ fn workflow_gallery(kind: &str, width: u16, height: u16, ascii: bool, mono: bool
                 ), 0, false);
             }
             "Choices" => ui::choice::draw(frame, &hits, ui::choice::View {
-                title: "Choose provider", rows: &[("Homebrew", "available"), ("npm", "unavailable")],
+                title: "Choose package manager", rows: &[("Homebrew", "available"), ("npm", "unavailable")],
                 selected: 1, details: false, scroll: 0, feedback: None,
             }),
             "More" => ui::menu::draw(frame, "More", &[
-                ui::menu::Item { action: ui::ActionButton { label: "Metadata", key: "F3", target: Target::Back }, reason: None },
+                ui::menu::Item { action: ui::ActionButton { label: "Details", key: "F3", target: Target::Back }, reason: None },
                 ui::menu::Item { action: ui::ActionButton { label: "Dependencies", key: "F4", target: Target::Back }, reason: None },
             ], 0, false, None, &hits),
             "Dashboard" => ui::dashboard::draw(frame, areas.body, "Scope facts", &[
                 ui::dashboard::Metric { label: "Linked", value: "4 linked".into(), compact: "4 linked".into(), style: ui::success() },
                 ui::dashboard::Metric { label: "Unavailable", value: "1 unavailable".into(), compact: "1 unavailable".into(), style: ui::warning() },
             ], ui::review_text("Repository: /fixture/repository\nProfiles: default\nUnavailable is not an empty observation."), 0),
-            "Reader" => ui::report(frame, areas.body, "Journal facts", ui::review_text(
-                "Repository: /fixture/repository\nTransaction: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nState: unresolved\nClosure records observations; it does not repair or roll back effects."
+            "Reader" => ui::report(frame, areas.body, "Operation details", ui::review_text(
+                "Repository: /fixture/repository\nOperation: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nState: unresolved\nClosing does not repair or roll back effects."
             ), 0, true),
             "Result" => {
                 let lines = vec![

@@ -90,7 +90,7 @@ fn activity_keeps_scope_and_real_boundary_through_navigation_and_quit_waits() {
         sequence: 17,
     });
     let first = render(&app, 48, 14);
-    assert!(first.contains("Approved execution") && first.contains("quit waits"));
+    assert!(first.contains("Approved work") && first.contains("Quit waits"));
     assert!(key(&mut app, KeyCode::Right).is_none());
     assert!(app.tab == Tab::Overview);
     assert!(app.interaction_notice.is_some());
@@ -135,7 +135,7 @@ fn read_failure_buttons_retry_only_retained_intent_and_back_retains_draft() {
     begin(&mut app, &task, false);
     app.complete(Err("sanitized failure\nsecond diagnostic line".into()));
     let text = render(&app, 48, 14);
-    assert!(text.contains("Read failed:") && text.contains("sanitized failure"));
+    assert!(text.contains("Read failed") && text.contains("sanitized failure"));
     let retry = click(&mut app, "[Retry read").unwrap();
     assert!(matches!(retry, Task::Check { manifest: Some(path), .. } if path == raw));
     app.retry = Some(Retry::Refresh);
@@ -335,7 +335,7 @@ fn receipt_preserves_raw_transaction_scope_and_noop_through_refresh_without_time
             pages.push_str(&render(&app, 48, 14));
             key(&mut app, KeyCode::PageDown);
         }
-        assert!(pages.contains("Transaction ID") || pages.contains("Everything is up to date"));
+        assert!(pages.contains("Operation ID") || pages.contains("Everything is up to date"));
         key(&mut app, KeyCode::Home);
         assert!(key(&mut app, KeyCode::Tab).is_none() && app.show_result);
         assert!(click(&mut app, "[Back").is_none());

@@ -1,4 +1,4 @@
-//! Explicit, homogeneous selected-file batches. Planning never acquires a lock or writes.
+//! Selected-file batch planning.
 use crate::{
     Error, Manifest, Result,
     adoption::canonical,

@@ -203,7 +203,7 @@ impl App {
             quit: false,
             dry_run,
             preview_only_locked: dry_run,
-            status: "Loading read-only observations...".into(),
+            status: "Loading read-only data...".into(),
             error: None,
             failed_write: false,
         }
@@ -356,12 +356,11 @@ impl App {
                         .position(|row| &row.repository_id == r && &row.transaction_id == t)
                 });
                 if data.history_error.is_some() {
-                    self.status = "Recovery diagnosis unavailable; global write safety unknown. r retries read-only diagnosis.".into();
+                    self.status = "Recovery unavailable. Write status unknown. r retries.".into();
                 } else if identity.is_some() && position.is_none() {
-                    self.status =
-                        "Selected transaction disappeared; showing nearest remaining row.".into();
+                    self.status = "The selected operation is gone. Showing the nearest row.".into();
                 } else {
-                    self.status = "All-repository diagnosis refreshed; live drift is assessed by each recovery preview.".into();
+                    self.status = "Recovery refreshed. Each preview checks current files.".into();
                 }
                 self.selected = position
                     .unwrap_or(self.selected)
@@ -374,14 +373,12 @@ impl App {
                 self.tab = Tab::Checks;
                 self.shell.overlay = None;
                 self.details_scroll = 0;
-                self.status =
-                    "Read-only Diagnostics loaded; unavailable observations include their cause."
-                        .into();
+                self.status = "Diagnostics loaded. Unavailable items show why.".into();
             }
             Ok(Output::ToolAttempts(result)) => {
                 if self.tab == Tab::Tools && self.tools_view.install_open && !self.quit {
                     self.tools_view.installation.attempts_ready(result);
-                    self.status = "Installation attempts · metadata only. Unresolved attempts require fresh inspection before metadata closure.".into();
+                    self.status = "Install records · read-only. An unresolved record needs a fresh check before it can close.".into();
                 }
             }
             Ok(Output::ToolClosePreview(preview)) => {
@@ -391,12 +388,15 @@ impl App {
                     && self.tools_view.installation.mode == super::tools_install::Mode::LoadingClose
                 {
                     self.tools_view.installation.close_reviewed(*preview);
-                    self.status = "Review fresh inspection and metadata closure. Approval applies once to this exact scope.".into();
+                    self.status =
+                        "Review the fresh check and record close. Approval applies once.".into();
                 }
             }
             Ok(Output::ToolClosed(result)) => {
                 self.tools_view.installation.closed(result);
-                self.status = "Inspect closure outcome. Closing metadata does not replay, repair or roll back an install.".into();
+                self.status =
+                    "Record checked. Closing does not retry, repair or roll back an install."
+                        .into();
             }
             Ok(Output::ToolsSettingsDetected(tool, request)) => {
                 if self.tab == Tab::Tools && !self.quit {
@@ -422,7 +422,7 @@ impl App {
                         && self.choice.is_none()
                         && self.navigation.menu.is_none(),
                 );
-                self.status = "Git read completed. Summaries are metadata-only; patch viewing requires a new confirmation.".into();
+                self.status = "Git read done. Patch viewing needs a new confirmation.".into();
             }
             Ok(Output::Data(data)) => {
                 if self
@@ -442,9 +442,9 @@ impl App {
                 }
                 // Preserve execution errors/completion until the next explicit action.
                 if self.status == "Reading..." {
-                    self.status = "Read-only observations loaded.".into();
-                } else if self.status.starts_with("Operation completed.") {
-                    self.status = "Operation completed. Observations refreshed.".into();
+                    self.status = "Read-only data loaded.".into();
+                } else if self.status.starts_with("Completed.") {
+                    self.status = "Completed. Refreshed.".into();
                 }
             }
             Ok(Output::Checked { report, standalone }) => {
@@ -527,7 +527,7 @@ impl App {
                     && let Some(receipt) = &self.receipt
                 {
                     self.status = format!(
-                        "{} completed; Discover refreshed. Receipt in details; Recovery retains transaction history.",
+                        "{} completed; Discover refreshed. Details show the record; Recovery keeps history.",
                         receipt.operation
                     ).into();
                 }
@@ -640,10 +640,10 @@ impl App {
                     completion.operation,
                     completion
                         .transaction_id
-                        .map(|id| format!("Transaction ID: {id}"))
+                        .map(|id| format!("Operation ID: {id}"))
                         .unwrap_or_else(|| "Everything is up to date.".into())
                 ));
-                self.status = "Operation completed. Refreshing observations...".into();
+                self.status = "Completed. Refreshing...".into();
                 if adopted {
                     self.rediscovering_after_adoption = true;
                     self.tab = Tab::Files;
@@ -2428,7 +2428,8 @@ impl App {
             Action::ClearMarks => {
                 if self.discovering {
                     self.inventory.candidate_marks.clear();
-                    self.inventory.candidate_mark_revision = self.inventory.candidate_mark_revision.wrapping_add(1);
+                    self.inventory.candidate_mark_revision =
+                        self.inventory.candidate_mark_revision.wrapping_add(1);
                 } else {
                     self.inventory.managed_marks.clear();
                 }
@@ -2444,12 +2445,15 @@ impl App {
                 self.clamp_file_selection();
             }
             Action::BatchAdopt => {
-                let Some(discovery) = &self.discovery else { return None; };
+                let Some(discovery) = &self.discovery else {
+                    return None;
+                };
                 if let Some(editor) = self.batch_editor.as_mut() {
                     editor.sync(&self.inventory.candidate_marks, &discovery.home);
                 } else {
                     self.batch_editor = Some(super::batch_ui::Editor::new(
-                        &self.inventory.candidate_marks, &discovery.home,
+                        &self.inventory.candidate_marks,
+                        &discovery.home,
                     ));
                 }
             }
@@ -2486,18 +2490,33 @@ impl App {
                 self.tab = Tab::Git;
 
                 self.git_view.confirm_patch();
-                self.status = "Choose Unstaged or Staged, then activate View patch in its content warning.".into();
+                self.status =
+                    "Choose Unstaged or Staged, then activate View patch in its content warning."
+                        .into();
             }
             Action::Destination(tab) => {
                 self.go_tab(tab);
-                if tab == Tab::Files { self.discovering = false; }
+                if tab == Tab::Files {
+                    self.discovering = false;
+                }
                 if tab == Tab::Tools {
                     self.tools_view.leave_section();
                 }
             }
-            Action::ToolDeclaration => { self.go_tab(Tab::Tools); self.tools_view.declare(); }
+            Action::ToolDeclaration => {
+                self.go_tab(Tab::Tools);
+                self.tools_view.declare();
+            }
             Action::ToolsConfigure => {
-                let tool = self.data.as_ref()?.tools.as_ref()?.as_ref().ok()?.get(self.tools_view.declared_selected)?.clone();
+                let tool = self
+                    .data
+                    .as_ref()?
+                    .tools
+                    .as_ref()?
+                    .as_ref()
+                    .ok()?
+                    .get(self.tools_view.declared_selected)?
+                    .clone();
                 self.go_tab(Tab::Tools);
                 return self.tools_view.configure(tool);
             }
@@ -2522,9 +2541,15 @@ impl App {
                 self.tools_view.declared.install_waiting = true;
                 return Some(Task::ToolsInstallMissingPrepare(checked));
             }
-            Action::ToolAttempts => { self.go_tab(Tab::Tools); return Some(self.tools_view.open_attempts()); }
+            Action::ToolAttempts => {
+                self.go_tab(Tab::Tools);
+                return Some(self.tools_view.open_attempts());
+            }
             Action::Choose => self.shell.overlay = Some(Overlay::Repositories { selected: 0 }),
-            Action::Init => { self.shell.path_focused = 0; self.shell.overlay = Some(Overlay::Form(Form::Init)); }
+            Action::Init => {
+                self.shell.path_focused = 0;
+                self.shell.overlay = Some(Overlay::Form(Form::Init));
+            }
             Action::ManageIgnored => return Some(Task::IgnoredPaths),
             Action::IgnoreSelected => {
                 if let Some(node) = super::tree::selected(self) {
@@ -2541,40 +2566,51 @@ impl App {
                 self.shell.overlay = Some(Overlay::Form(Form::Adopt));
             }
             Action::AdoptSelected => {
-                if self.tab == Tab::Files && self.discovering {self.adopt_candidate(); }
-                else { self.status = "Open Files > Discover and select an eligible regular file.".into(); }
+                if self.tab == Tab::Files && self.discovering {
+                    self.adopt_candidate();
+                } else {
+                    self.status =
+                        "Open Files > Discover and select an eligible regular file.".into();
+                }
             }
             Action::KeepId | Action::RemoveId => {
                 self.tab = Tab::Files;
                 self.discovering = false;
                 self.shell.unmanage_focused = 0;
-                self.shell.overlay = Some(Overlay::Form(if matches!(action, Action::KeepId) { Form::KeepId } else { Form::RemoveId }));
+                self.shell.overlay = Some(Overlay::Form(if matches!(action, Action::KeepId) {
+                    Form::KeepId
+                } else {
+                    Form::RemoveId
+                }));
             }
             Action::ClearFilter if self.tab == Tab::Recovery => {
                 self.history_search.query.clear();
                 self.clamp_history_selection();
-                self.status = "Recovery display filter cleared; global blockers remain visible.".into();
+                self.status =
+                    "Recovery display filter cleared; global blockers remain visible.".into();
             }
             Action::ClearFilter if self.tab == Tab::Git => self.git_view.clear_filter(),
             Action::ClearFilter => {
                 self.inventory.search_mut(self.discovering).query.clear();
                 self.clamp_file_selection();
-                self.status = "File display filter cleared; Apply uses the full active scope.".into();
+                self.status =
+                    "File display filter cleared; Apply uses the full active scope.".into();
             }
             Action::Inspect if self.tab == Tab::Git => self.git_view.inspect_metadata(),
             Action::Inspect if self.tab == Tab::Recovery => {
-
                 self.history_details = true;
                 self.details_scroll = 0;
             }
             Action::Inspect if self.tab == Tab::Files => {
-
                 self.inventory.details = true;
                 self.details_scroll = 0;
             }
             Action::Profiles => return self.check_task(false, true),
             Action::CheckCurrent => return self.check_task(false, false),
-            Action::CheckStandalone => { self.tab = Tab::Checks; self.shell.overlay = Some(Overlay::Form(Form::Check)); }
+            Action::CheckStandalone => {
+                self.tab = Tab::Checks;
+                self.shell.overlay = Some(Overlay::Form(Form::Check));
+            }
             Action::StandaloneProfiles => {
                 self.shell.overlay = Some(Overlay::Form(Form::Check));
                 return self.check_task(true, true);
@@ -2582,22 +2618,51 @@ impl App {
             Action::Refresh if self.tab == Tab::Git => return self.git_task(),
             Action::Refresh => return Some(self.refresh_task()),
             Action::PreviewOnly => {
-                if self.preview_only_locked { self.status = "--dry-run locks this session to preview-only.".into(); }
-                else { self.dry_run = !self.dry_run; self.status = "Preview-only mode changed; approval always requires a fresh preview.".into(); }
+                if self.preview_only_locked {
+                    self.status = "--dry-run locks this session to preview-only.".into();
+                } else {
+                    self.dry_run = !self.dry_run;
+                    self.status =
+                        "Preview-only mode changed; approval always requires a fresh preview."
+                            .into();
+                }
             }
-            Action::Diagnostics => { self.go_tab(Tab::Checks); self.showing_diagnostics = true; return Some(Task::Diagnostics); }
+            Action::Diagnostics => {
+                self.go_tab(Tab::Checks);
+                self.showing_diagnostics = true;
+                return Some(Task::Diagnostics);
+            }
             Action::About => self.shell.overlay = Some(Overlay::About),
             Action::Help => unreachable!("Help preserves the underlying surface"),
             Action::Quit => self.quit = true,
-            Action::Apply if self.data.as_ref().and_then(|d| d.repository.as_ref()).is_some() => return Some(Task::Files(Request::Apply)),
+            Action::Apply
+                if self
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.repository.as_ref())
+                    .is_some() =>
+            {
+                return Some(Task::Files(Request::Apply));
+            }
             Action::Keep | Action::Remove if self.tab == Tab::Files && !self.discovering => {
                 if !self.visible_file_rows().contains(&self.selected) {
-                    self.status = "No displayed mapping selected. Use Enter exact mapping ID in Actions.".into();
+                    self.status =
+                        "No displayed mapping selected. Use Enter exact mapping ID in Actions."
+                            .into();
                     return None;
                 }
-                if let Some((id, _)) = self.data.as_ref().and_then(|data| data.files.get(self.selected)) {
+                if let Some((id, _)) = self
+                    .data
+                    .as_ref()
+                    .and_then(|data| data.files.get(self.selected))
+                {
                     return Some(Task::Files(Request::Unmanage {
-                        id: id.clone(), mode: if matches!(action, Action::Keep) { UnmanageMode::Keep } else { UnmanageMode::Remove },
+                        id: id.clone(),
+                        mode: if matches!(action, Action::Keep) {
+                            UnmanageMode::Keep
+                        } else {
+                            UnmanageMode::Remove
+                        },
                     }));
                 }
                 self.status = "Choose a managed mapping in Files first.".into();
@@ -2621,9 +2686,12 @@ impl App {
                         _ => Task::Bootstrap(r, t, RecoveryAction::Abandon),
                     });
                 }
-                self.status = "Choose a transaction in Recovery first.".into();
+                self.status = "Choose an operation in Recovery first.".into();
             }
-            _ => self.status = "Action unavailable: choose a repository, file in Files, or transaction in Recovery as labeled.".into(),
+            _ => {
+                self.status =
+                    "Action unavailable. Choose a repository, file or operation as labeled.".into()
+            }
         }
         self.clamp_file_selection();
         self.clamp_history_selection();
@@ -2984,7 +3052,7 @@ impl App {
             .and_then(|d| d.report.candidates.get(self.candidate_selected))
         {
             if !candidate.supported_for_adoption {
-                self.status = "Not eligible for adoption: select an owned, single-link regular file. Directories cannot be adopted; a manual draft is available.".into();
+                self.status = "Not eligible for adoption. Only owned regular files with one link can be added.".into();
                 return;
             }
             let home = &self.discovery.as_ref().expect("selected discovery").home;
@@ -3063,14 +3131,12 @@ impl App {
                     || !self.discovering
                     || self.inventory.candidate_marks.is_empty() =>
             {
-                Some(
-                    "Mark discovered regular files with Space before opening a combined adoption draft.",
-                )
+                Some("Mark regular files with Space before starting a batch.")
             }
             Action::BatchAdopt
                 if self.inventory.candidate_marks.len() > dort_core::batch::MAX_FILES =>
             {
-                Some("A batch supports at most 32 marked files; clear some marks first.")
+                Some("A batch can hold 32 files. Clear some marks.")
             }
             Action::ApplyMarked | Action::KeepMarked | Action::RemoveMarked
                 if self.tab != Tab::Files
@@ -3078,14 +3144,14 @@ impl App {
                     || self.inventory.managed_marks.is_empty() =>
             {
                 Some(
-                    "Mark managed mappings with Space; uppercase A/K/D review the marked batch; Apply reviews the full active scope.",
+                    "Mark managed files with Space. Uppercase A/K/D review the batch; Apply covers every active file.",
                 )
             }
             Action::Keep | Action::Remove | Action::AdoptSelected
                 if self.inventory.group.is_some() =>
             {
                 Some(
-                    "Not eligible for adoption or single-file actions: select a regular file; Space marks matching descendants, including folded rows.",
+                    "Not eligible for adoption. Select a regular file. Folders can only be marked.",
                 )
             }
             Action::Apply
@@ -3095,49 +3161,45 @@ impl App {
                     .and_then(|d| d.repository.as_ref())
                     .is_none() =>
             {
-                Some("Choose a repository before requesting a full-scope apply preview.")
+                Some("Choose a repository first.")
             }
             Action::Keep | Action::Remove
                 if self.tab != Tab::Files
                     || self.discovering
                     || !self.visible_file_rows().contains(&self.selected) =>
             {
-                Some("Select a displayed managed mapping in Files, or use the exact-ID draft.")
+                Some("Select a managed file, or use the exact-ID form.")
             }
             Action::Inspect if self.tab == Tab::Files && self.file_rows_empty() => {
-                Some("No displayed file selected; refresh, discover or clear the display filter.")
+                Some("Select a file first, or clear the filter.")
             }
             Action::Inspect if self.tab == Tab::Recovery && self.history_selection().is_none() => {
-                Some(
-                    "No displayed transaction selected; refresh or clear the Recovery display filter.",
-                )
+                Some("Select an operation record, or clear the filter.")
             }
             Action::Inspect if self.tab == Tab::Git && !self.git_view.has_selection() => {
-                Some("No displayed Git entry selected; load metadata or clear the display filter.")
+                Some("Select a Git entry, or clear the filter.")
             }
             Action::Inspect if !matches!(self.tab, Tab::Files | Tab::Recovery | Tab::Git) => {
-                Some("Select a file in Files or a transaction in Recovery to inspect.")
+                Some("Select a file or operation record to inspect.")
             }
             Action::ClearFilter if !matches!(self.tab, Tab::Files | Tab::Recovery | Tab::Git) => {
-                Some("Display filters are available in Files, Recovery and Git.")
+                Some("Filters are available in Files, Recovery and Git.")
             }
             Action::PreviewOnly if self.preview_only_locked => {
-                Some("--dry-run locks this session to preview-only; approval remains disabled.")
+                Some("--dry-run keeps this session preview-only. Approval is off.")
             }
             Action::GitPatch
                 if !matches!(self.git_view.metadata, Some(super::git::Metadata::Diff(_))) =>
             {
-                Some(
-                    "Load an Unstaged or Staged Git summary before opening the separate content warning.",
-                )
+                Some("Open an Unstaged or Staged diff before viewing a patch.")
             }
             Action::AdoptSelected if self.tab != Tab::Files || !self.discovering => {
-                Some("Select an eligible discovered regular file first.")
+                Some("Select an eligible regular file first.")
             }
             Action::AdoptSelected
                 if !super::discovery_tree::contains(self, self.candidate_selected) =>
             {
-                Some("Select a displayed candidate after the list finishes updating.")
+                Some("Pick a file from the current list.")
             }
             Action::AdoptSelected
                 if self
@@ -3147,7 +3209,7 @@ impl App {
                     .is_none_or(|c| !c.supported_for_adoption) =>
             {
                 Some(
-                    "Not eligible for adoption: directories, links and special files are metadata only; choose an owned single-link regular file.",
+                    "Not eligible for adoption. Only owned regular files with one link can be added.",
                 )
             }
             Action::Rollback
@@ -3156,7 +3218,7 @@ impl App {
                         .history_selection()
                         .is_none_or(|r| !super::recovery::rollback(r)) =>
             {
-                Some("Rollback unavailable; select an eligible schema-1/2/4 transaction.")
+                Some("Rollback is unavailable. Select a completed file or declaration operation.")
             }
             Action::Resume
                 if self.tab != Tab::Recovery
@@ -3164,7 +3226,7 @@ impl App {
                         .history_selection()
                         .is_none_or(|r| !super::recovery::resume(r)) =>
             {
-                Some("Resume unavailable; select an intact Running bootstrap.")
+                Some("Resume is unavailable. Select an intact repository setup.")
             }
             Action::Abandon
                 if self.tab != Tab::Recovery
@@ -3172,7 +3234,7 @@ impl App {
                         .history_selection()
                         .is_none_or(|r| !super::recovery::abandon(r)) =>
             {
-                Some("Abandon unavailable; select an intact nonterminal bootstrap.")
+                Some("Abandon is unavailable. Select an unfinished repository setup.")
             }
             _ => None,
         }

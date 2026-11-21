@@ -1,4 +1,4 @@
-//! Reconstruct install authority from explicit session bindings, never command DTOs.
+//! Builds installs from explicit session inputs.
 use super::reconciliation::{Report, Scope, Snapshot};
 use dort_core::{
     Error, Result,
@@ -97,7 +97,7 @@ impl Request {
             bindings.retain(|id, _| needed.contains(id));
             if bindings.len() != needed.len() {
                 return Err(invalid(
-                    "every installation prerequisite needs an explicit catalog binding",
+                    "Each install needs an explicit package-manager match.",
                 ));
             }
         }
@@ -143,13 +143,13 @@ impl Request {
         let id = self
             .bindings
             .get(&self.tool)
-            .ok_or_else(|| invalid("explicit snapshot binding required"))?;
+            .ok_or_else(|| invalid("Choose a checked package first."))?;
         let mut selected = self.snapshots.iter().filter(|s| &s.id == id);
         let snapshot = selected
             .next()
-            .ok_or_else(|| invalid("selected snapshot unavailable"))?;
+            .ok_or_else(|| invalid("The selected check result is unavailable."))?;
         if selected.next().is_some() {
-            return Err(invalid("duplicate selected snapshot ID"));
+            return Err(invalid("Duplicate check result."));
         }
         let description = &snapshot.report.provider.description;
         let request = install::Request {
@@ -174,16 +174,12 @@ impl Request {
         } else if let Some(binding) = &description.npm_binding {
             self.prepare_catalogs(host, request, Some(binding.clone()))?
         } else {
-            return Err(invalid(
-                "npm installation requires a verified declared Node scope",
-            ));
+            return Err(invalid("npm install needs a declared Node runtime."));
         };
         if preview.review().scope.profiles != self.scope.active_profiles
             || preview.review().scope.platform != self.scope.platform
         {
-            return Err(invalid(
-                "repository profile scope changed; collect and reconcile the selected scope again",
-            ));
+            return Err(invalid("Profiles changed. Check the selected tools again."));
         }
         Ok(preview)
     }
@@ -205,9 +201,9 @@ impl Request {
             let mut candidates = self.snapshots.iter().filter(|s| s.id == id);
             let snapshot = candidates
                 .next()
-                .ok_or_else(|| invalid("selected prerequisite snapshot unavailable"))?;
+                .ok_or_else(|| invalid("The required tool's check result is unavailable."))?;
             if candidates.next().is_some() {
-                return Err(invalid("duplicate prerequisite snapshot ID"));
+                return Err(invalid("Duplicate required-tool result."));
             }
             let d = &snapshot.report.provider.description;
             if d.npm_binding.is_some()
@@ -218,9 +214,7 @@ impl Request {
                         .as_ref()
                         .is_none_or(|source| !source.matches(&entry)))
             {
-                return Err(invalid(
-                    "npm snapshot manifest changed; collect a fresh inventory and bind it explicitly",
-                ));
+                return Err(invalid("The manifest changed. Run a fresh check."));
             }
             catalogs.push(install::npm::Catalog {
                 query: d.query,

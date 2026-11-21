@@ -219,8 +219,8 @@ fn typed_overview_cards_keep_unknown_distinct_from_zero_and_metadata_inspectable
             "Linked: 2",
             "Needs apply: 1",
             "Blocked mappings: 3",
-            "Plan blockers: true",
-            "Global write blockers: 0",
+            "Plan blocks: true",
+            "Blocked writes: 0",
             "Effective profiles:",
         ] {
             assert!(details.contains(value), "inspectable {value} at {w}x{h}");
@@ -245,8 +245,8 @@ fn typed_overview_cards_keep_unknown_distinct_from_zero_and_metadata_inspectable
         assert!(details.contains("Registration: Unknown"));
         assert!(details.contains("session-root-end"));
         assert!(!details.contains("Welcome | manage local files"));
-        assert!(details.contains("Global write blockers: Unknown"));
-        assert!(!details.contains("Global write blockers: 0"));
+        assert!(details.contains("Blocked writes: Unknown"));
+        assert!(!details.contains("Blocked writes: 0"));
     }
 }
 #[test]
@@ -288,18 +288,18 @@ fn diagnostic_cards_independently_render_registry_and_history_availability() {
                 assert!(details.contains(if registry_ok {
                     "Registered repositories: 0"
                 } else {
-                    "Registry metadata unavailable"
+                    "Repository list unavailable"
                 }));
                 assert!(details.contains(if history_ok {
-                    "Global write blockers: 0"
+                    "Blocked writes: 0"
                 } else {
-                    "Global write blockers: Unknown"
+                    "Blocked writes: Unknown"
                 }));
                 for value in [
                     "Session file root:",
                     "Git executable:",
-                    "Capability limits",
-                    "Files inspects live state",
+                    "Limits",
+                    "Files shows live state",
                     "synthetic/home",
                 ] {
                     assert!(details.contains(value), "inspectable {value} at {w}x{h}");
@@ -361,10 +361,10 @@ fn checked_dashboard_preserves_result_scope_union_and_limits_through_diagnostics
             "Defaults:",
             "Platform:",
             "Local:",
-            "Optional additions:",
+            "Extra profiles:",
             "first-tool",
             "second-tool",
-            "Not implemented:",
+            "Unavailable:",
             "tool inventory",
         ] {
             assert!(details.contains(value), "inspectable {value} at {w}x{h}");
@@ -412,8 +412,8 @@ fn recovery_table_has_typed_columns_selection_and_integrity_styles_at_all_sizes(
     key(&mut app, KeyCode::Down);
     for (w, h) in [(48, 14), (80, 24), (110, 24), (140, 40)] {
         let b = buffer(&app, w, h);
-        locate(&b, "Global blockers: 2");
-        for column in ["TX ID", "SCM", "PHASE", "STATE"] {
+        locate(&b, "Blocked writes: 2");
+        for column in ["OP ID", "TYPE", "STATE", "STATUS"] {
             locate(&b, column);
         }
         let selected = locate(&b, "› bbbbbbbb");
@@ -431,13 +431,13 @@ fn recovery_table_has_typed_columns_selection_and_integrity_styles_at_all_sizes(
                 .modifier
                 .contains(Modifier::REVERSED | Modifier::BOLD)
         );
-        let integrity = locate(&b, "INTEGRITY!");
+        let integrity = locate(&b, "Damaged");
         assert_eq!(b[integrity].fg, Color::Red);
         let focus = report_title(&b);
         assert_eq!(b[focus].fg, Color::Cyan);
         assert_eq!(app.selected, 1);
         if w >= 140 {
-            locate(&b, "Transaction details");
+            locate(&b, "Operation details");
         }
     }
     app.history_search.editing = true;
@@ -450,7 +450,7 @@ fn recovery_table_has_typed_columns_selection_and_integrity_styles_at_all_sizes(
         locate(t.backend().buffer(), "Filter history");
         let screen = render(&app, w, h);
         assert!(!screen.contains('\u{1b}') && !screen.contains('é'));
-        assert!(screen.contains("Global blockers: 2"));
+        assert!(screen.contains("Blocked writes: 2"));
     }
 }
 #[test]
@@ -475,11 +475,11 @@ fn recovery_details_keep_full_ids_and_guards_inspectable_without_mutating_diagno
         for (w, h) in [(48, 14), (80, 24), (110, 24), (140, 40)] {
             let mut all = String::new();
             let mut cells = String::new();
-            for offset in 0..55 {
+            for offset in 0..80 {
                 app.details_scroll = offset;
                 all.push_str(&render(&app, w, h));
                 let b = buffer(&app, w, h);
-                let (x, y) = locate(&b, "Journal facts");
+                let (x, y) = locate(&b, "Operation details");
                 // The title begins two cells after its pane's left border.
                 for col in x - 1..w {
                     cells.push_str(b[(col, y + 1)].symbol());
@@ -495,21 +495,22 @@ fn recovery_details_keep_full_ids_and_guards_inspectable_without_mutating_diagno
             all.push_str(&cells);
             for value in [
                 "Repository ID: ",
-                "Transaction ID: ",
-                "Validated checkpoints: 7",
+                "Operation ID: ",
+                "Saved steps: 7",
                 "Integrity:",
-                "Blocks new writes:",
-                "Core preview independently checks live paths and artifacts.",
-                "Adoption rollback (schema 1 or 4) withdraws new sources into private storage;",
-                "no garbage collection.",
+                "Blocks writes:",
+                "Recovery checks current paths",
+                "Rollback restores files",
+                "Private backups stay.",
             ] {
                 assert!(all.contains(value), "full typed detail {value} at {w}x{h}");
             }
-            assert!(all.contains(&"a".repeat(64)));
+            let flat: String = all.chars().filter(|c| !c.is_whitespace()).collect();
+            assert!(flat.contains(&"a".repeat(64)));
             assert!(!all.contains('\u{1b}'));
             app.details_scroll = u16::MAX;
             let end = render(&app, w, h);
-            assert!(end.contains("Global blockers:"));
+            assert!(end.contains("Blocked writes:"));
             key(&mut app, KeyCode::Home);
             assert_eq!(app.details_scroll, 0);
         }
@@ -656,7 +657,7 @@ fn git_metadata_full_paths_branch_and_limits_are_reachable_using_real_scroll_key
             "independent session choice".into(),
             "branch.oid (initial)".into(),
             "branch.head main".into(),
-            "Metadata boundary".into(),
+            "Details".into(),
             "No patch content requested.".into(),
         ] {
             assert!(

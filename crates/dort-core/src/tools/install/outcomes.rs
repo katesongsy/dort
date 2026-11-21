@@ -1,4 +1,4 @@
-//! Pure interpretation of historical metadata, never execution/receipt authority.
+//! Reads saved install results.
 use super::{Attempt, BinaryState, Outcome, PackageState, ProcessOutcome, Report, Scope};
 use serde::{Serialize, Serializer};
 

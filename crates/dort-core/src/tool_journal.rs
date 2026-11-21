@@ -1,4 +1,4 @@
-//! Schema 5 additions and schema 6 edits/removals; manifest-only, no package ownership.
+//! Tool declaration change records.
 use crate::{
     Error, Result,
     context::HostContext,

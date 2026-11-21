@@ -1,4 +1,4 @@
-//! File reviews rendered from typed plans, never parsed from a human report.
+//! File reviews built from typed plans.
 use super::{app::Preview, components as ui, views::safe};
 use dort_core::planner::{Effect, Outcome, Plan};
 use ratatui::{
@@ -43,13 +43,13 @@ fn detail(plan: &Plan, selected: usize) -> Text<'static> {
     }
     if file.destructive {
         lines.push(Line::styled(
-            "Destructive destination effect; inspect all effects below.",
+            "Deletes the linked file; check all effects below.",
             ui::warning(),
         ));
     }
     if file.requires_removal_acknowledgement {
         lines.push(Line::styled(
-            "Confirmation identifies this exact mapping; repository source is retained.",
+            "This confirmation uses the exact mapping. The repository source is kept.",
             ui::danger(),
         ));
     }
@@ -149,7 +149,7 @@ pub fn draw_batch(
         &display,
         preview,
         hits,
-        "Exact marked set · one transaction · failure may be partial",
+        "Exact marked set · one operation · failure may be partial",
     );
 }
 pub fn draw(
@@ -165,7 +165,7 @@ pub fn draw(
         plan,
         preview,
         hits,
-        "Scope: all mappings; display filters never narrow it.",
+        "Scope: every mapping. Filters do not narrow it.",
     );
 }
 fn draw_inner(

@@ -89,11 +89,11 @@ fn recovery_search_preserves_raw_identity_and_never_hides_global_blockers() {
         app.selected, 1,
         "returning to filtered history selects a displayed row"
     );
-    assert!(render(&app, 100, 30).contains("Global blockers: 2"));
+    assert!(render(&app, 100, 30).contains("Blocked writes: 2"));
     key(&mut app, KeyCode::Enter);
     let text = render(&app, 140, 45);
     assert!(text.contains(&"b".repeat(64)));
-    assert!(text.contains("incomplete preparation"));
+    assert!(text.contains("setup is incomplete"));
     assert!(key(&mut app, KeyCode::Char('s')).is_none());
     assert!(
         matches!(key(&mut app, KeyCode::Char('x')), Some(Task::Bootstrap(r,t,_)) if r == "b".repeat(64) && t == "b".repeat(64))
@@ -112,7 +112,7 @@ fn recovery_search_preserves_raw_identity_and_never_hides_global_blockers() {
     );
     app.history_search.query = "no match".into();
     assert!(key(&mut app, KeyCode::Char('x')).is_none());
-    assert!(render(&app, 80, 24).contains("No displayed transaction"));
+    assert!(render(&app, 80, 24).contains("No operation record"));
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Delete);
     key(&mut app, KeyCode::Char('/'));
@@ -148,11 +148,11 @@ fn compact_long_history_keeps_selected_row_and_global_blockers_visible() {
         assert_eq!(app.selected, 120);
     }
     let screen = render(&app, 48, 14);
-    assert!(screen.contains("/129 shown") && screen.contains("Global blockers: 1"));
-    assert!(screen.contains("Completed") && screen.contains("Terminal"));
-    assert!(screen.contains("SCM") && screen.contains("PHASE") && screen.contains("STATE"));
+    assert!(screen.contains("/129 shown") && screen.contains("Blocked writes: 1"));
+    assert!(screen.contains("Completed") && screen.contains("Finished"));
+    assert!(screen.contains("TYPE") && screen.contains("STATE") && screen.contains("STATE"));
     app.history_search.query = "00000078".into();
-    assert!(render(&app, 48, 14).contains("Global blockers: 1"));
+    assert!(render(&app, 48, 14).contains("Blocked writes: 1"));
     assert!(
         matches!(key(&mut app, KeyCode::Char('b')), Some(Task::Rollback(_, t)) if t.starts_with("00000078"))
     );
@@ -167,7 +167,7 @@ fn unavailable_history_is_not_empty_or_an_actionable_stale_selection() {
         error: Some("unreadable state".into()),
     }));
     let text = render(&app, 100, 24);
-    assert!(text.contains("Recovery diagnosis unavailable"));
+    assert!(text.contains("Recovery unavailable"));
     assert!(!text.contains("No retained transactions"));
     assert!(key(&mut app, KeyCode::Char('b')).is_none());
     assert!(matches!(
@@ -188,8 +188,8 @@ fn unavailable_history_is_not_empty_or_an_actionable_stale_selection() {
         app.key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), 48, 14);
     }
     assert!(seen.contains("Repository ID:"));
-    assert!(seen.contains("Transaction ID:"));
-    assert!(seen.contains("Validated checkpoints:"));
+    assert!(seen.contains("Operation ID:"));
+    assert!(seen.contains("Saved steps:"));
 }
 #[test]
 fn preparing_table_enter_inspects_then_the_visible_action_uses_raw_identity() {
@@ -222,7 +222,7 @@ fn preparing_table_enter_inspects_then_the_visible_action_uses_raw_identity() {
         Some(super::shell::Overlay::Actions { .. })
     ));
     assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(app.status.contains("Resume unavailable"));
+    assert!(app.status.contains("Resume is unavailable"));
 }
 #[test]
 fn error_retry_never_retains_approval_and_failed_writes_offer_read_only_recovery() {
@@ -281,8 +281,8 @@ fn about_reports_build_version_and_returns_to_prior_focus_and_details() {
         assert!(key(&mut app, KeyCode::PageDown).is_none());
         text.push_str(&render(&app, 120, 45));
     }
-    assert!(text.contains("Other package installations"));
-    assert!(text.contains("brew/npm"));
+    assert!(text.contains("Not supported:"));
+    assert!(text.contains("Homebrew/npm"));
     assert!(text.contains("macOS, Linux and WSL"));
     key(&mut app, KeyCode::Esc);
     assert!(app.tab == Tab::Recovery);

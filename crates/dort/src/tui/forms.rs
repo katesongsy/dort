@@ -1,4 +1,4 @@
-//! Workflow pages: field-only traversal and direct, explicitly labelled actions.
+//! Workflow forms with field-only traversal and labelled actions.
 use super::{app::App, components as ui, input::Target, shell::Form};
 use ratatui::{Frame, layout::Rect};
 #[derive(Clone, Copy)]

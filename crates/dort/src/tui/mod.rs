@@ -229,8 +229,7 @@ fn run_loop(
                 dirty = true;
                 let output = active.join().map_err(|_| {
                     Error::Invalid(
-                        "TUI service worker panicked; inspect recovery history before writing"
-                            .into(),
+                        "A background task failed. Check Recovery before writing.".into(),
                     )
                 })?;
                 *worker = None;
@@ -362,7 +361,7 @@ fn launch(
         task,
         Task::Execute(_) | Task::ToolClose(_) | Task::ToolsInstallMissing(_)
     );
-    let completed = matches!(task, Task::Refresh) && app.status.starts_with("Operation completed.");
+    let completed = matches!(task, Task::Refresh) && app.status.starts_with("Completed.");
     let activity = task_surfaces::Activity::for_task(&task, app);
     if !matches!(task, Task::Refresh) {
         app.show_result = false;
@@ -380,7 +379,7 @@ fn launch(
     app.activity = Some(activity);
     app.start(writing);
     if completed {
-        app.status = "Operation completed. Refreshing observations...".into();
+        app.status = "Completed. Refreshing...".into();
     }
     Ok(())
 }

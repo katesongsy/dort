@@ -406,7 +406,7 @@ fn navigation_and_metadata_escaping() {
     assert!(app.tab == Tab::Files);
     app.key(key(KeyCode::Down), 80, 24);
     assert_eq!(app.selected, 0);
-    assert!(render(&app, 48, 14).contains("0 active mapping(s)"));
+    assert!(render(&app, 48, 14).contains("No active files."));
 }
 
 #[test]

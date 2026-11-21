@@ -238,7 +238,7 @@ class Session:
             'Recovery': ['All repositories'],
             'Checks': ['Manifest checks', 'Diagnostics'],
             'Git': ['Status', 'Unstaged', 'Staged', 'Choose Git scope', 'Follow selected repository'],
-            'Tools': ['Declared tools', 'Installed tools', 'Installation history'],
+            'Tools': ['Declared tools', 'Installed packages', 'Installation history'],
         }
         rows, columns = len(self.screen.cells), len(self.screen.cells[0])
         modal_width, modal_height = min(columns - 2, 72), min(rows - 3, 16)
@@ -283,7 +283,7 @@ class Session:
 
     def closure_provider(self, number):
         self.send(b'\x1bOS')  # F4 opens an explicit choice, never a provider cycle.
-        self.wait(b'Choose historical provider')
+        self.wait(b'Choose package manager')
         self.send(b'\x1b[H' + b'\x1b[B' * number + b'\r')
         self.settle()
 
@@ -472,7 +472,7 @@ def run():
             session.send(b"\r")
             session.settle()  # Enter inspects a directory; adoption is a separate action.
             assert b"TARGET >" not in session.screen.text()
-            session.wait(b"Directory / tree group")
+            session.wait("Folder · header only".encode())
             session.send(b"e")
             session.settle()
             assert b"TARGET >" not in session.screen.text()
@@ -617,14 +617,14 @@ def run():
             session.send(b"v")
             session.edit_fields('Manifest path')
             session.send(os.fsencode(standalone) + b"\r")
-            session.wait(b"Declarations validated")
+            session.wait(b"Declarations are valid")
             session.wait(b"Checks / Manifest")
             session.wait(b"Valid")
-            session.wait(b"Declarations validated")
+            session.wait(b"Declarations are valid")
             session.send(b"\x1b[6~" * 6)
-            session.wait(b"Capability limits")
+            session.wait(b"Limits")
             session.send(b"\x1b[H")
-            session.wait(b"Structural check only")
+            session.wait(b"Manifest check")
             session.send(b"j")
             session.wait(b"Checks / Diagnostics")
             session.send(b"m")
@@ -634,7 +634,7 @@ def run():
             session.send(b"\x1b[B \r")  # Toggle dev explicitly, then apply from that row.
             session.edit_fields('Manifest path')
             session.send(b"\r")  # Validate directly from the retained path field.
-            session.wait(b"Declarations validated")
+            session.wait(b"Declarations are valid")
             session.send(b"q")
             session.finish()
         assert not (home / ".config").exists() and not (home / ".local").exists()
@@ -714,7 +714,7 @@ def run():
             assert b"Action details" in session.screen.text(), "Paging replaced the metadata subview"
             reached = False
             for _ in range(30):
-                if b"transaction." in session.screen.text(): # final wrapped reason row
+                if b"operation." in session.screen.text(): # final wrapped reason row
                     reached = True
                     break
                 session.send(b"\x1b[6~")
@@ -754,7 +754,7 @@ def run():
             session.settle()  # identical refresh result may still be the prior frame
             session.navigate("Session", "About")
             session.wait(b"About")
-            session.wait(b"Guarded create/attach")
+            session.wait(b"Local repository create/attach")
             session.send(b"\x1b")
             session.wait(b"Checks / Diagnostics")
             session.send(b"q")
@@ -770,10 +770,10 @@ def run():
             session.wait(b"loaded.")
             session.navigate("Checks", "Diagnostics [j]")
             session.wait(b"Registered repositories: Unknown")
-            session.wait(b"All-repository transactions: 0")
-            session.wait(b"Global write blockers: 0")
+            session.wait(b"Operations: 0")
+            session.wait(b"Blocked writes: 0")
             session.send(b"\x1b[6~")
-            session.wait(b"Configuration unavailable")
+            session.wait(b"Config unavailable")
             assert b"private-config-marker" not in session.data
             session.send(b"\x1b[H")
             session.wait(b"Checks / Diagnostics")
@@ -878,10 +878,10 @@ def run():
             session.send(b"e")  # direct, separate Adopt selected action
             session.edit_fields('TARGET')
             session.send(b"\t\t\t\r")  # fields -> Review, no repository selected
-            session.wait(b"Read failed:")
+            session.wait(b"Read failed")
             session.click_action('Retry read')  # Fresh read/preview intent, never execution.
             session.settle()
-            session.wait(b"Read failed:")
+            session.wait(b"Read failed")
             session.click_action('Back')
             session.settle()
             session.wait(b".q?config")
@@ -1153,7 +1153,7 @@ def run():
             session.send(b"\r")
             session.wait(b"Operation result")
             session.wait(b"Everything is up to date.")
-            session.more_action('Refresh observations')
+            session.more_action('Refresh data')
             session.settle()
             session.wait(b"Everything is up to date.")
             session.click_action('Back')
@@ -1179,10 +1179,10 @@ def run():
                 session.settle()
                 assert b"Possible partial effects" in session.screen.text(), "Risk scrolled out of view"
                 assert b"Retry execution" not in session.screen.text()
-                session.more_action('Refresh observations')  # Must work while the writer lock is held.
+                session.more_action('Refresh data')  # Must work while the writer lock is held.
                 session.wait(b"Earlier write failed:")
                 session.destination("Recovery")
-                session.wait(b"Global blockers: 0")
+                session.wait(b"Blocked writes: 0")
                 session.wait(b"Earlier write failed:")
                 session.send(b"q")
                 session.finish()
@@ -1200,15 +1200,15 @@ def run():
             session.wait(b"1/1 shown")
             session.send(b"\r")
             session.wait(b"Repository ID:")
-            session.wait(b"Transaction ID:")
+            session.wait(b"Operation ID:")
             session.send(b"b")
-            session.wait(b"Rollback schema 2")
-            session.wait(b"Inverse paths:")
+            session.wait(b"Roll back operation")
+            session.wait(b"Paths:")
             session.send(b"\x1b")
             session.wait(b"1/1 shown")
             assert target.is_symlink(), "Preview/back performed rollback"
             session.send(b"b")
-            session.wait(b"Rollback schema 2")
+            session.wait(b"Roll back operation")
             session.wait(b"Confirm")
             session.send(b"\r")
             session.wait(b"Operation result")
@@ -1233,23 +1233,23 @@ def run():
             session.wait(b"loaded.")
             session.destination("Recovery")
             session.send(b"/Completed\r")
-            session.wait(b"Global blockers: 0")
+            session.wait(b"Blocked writes: 0")
             session.wait(b"1/2 shown")
             session.wait(b"Completed")
             session.send(b"\r")  # selected row inspects; never requests rollback
-            session.wait(b"Journal facts")
+            session.wait(b"Operation details")
             session.wait(b"Repository ID:")
             session.send(b"\x1b[6~" * 4)
-            session.wait(b"Validated checkpoints:")
+            session.wait(b"Saved steps:")
             session.send(b"\x1b[H")
             session.wait(b"Repository ID:")
             session.more_action('Review rollback')  # same typed action as b; still preview only
-            session.wait(b"Rollback schema 2")
+            session.wait(b"Roll back operation")
             session.send(b"\r")
             session.settle()
             assert b"Confirm" not in session.data, "Dry-run Recovery opened approval"
             session.send(b"\x1b")
-            session.wait(b"Journal facts")
+            session.wait(b"Operation details")
             session.send(b"q")
             session.finish()
         assert checkpoints == {str(path.relative_to(state)): hashlib.sha256(path.read_bytes()).digest()
@@ -1264,7 +1264,7 @@ def run():
             session.wait(b"1/2 shown")
             session.click_label("Completed", min_row=5)  # phase cell, below the retained filter
             session.send(b"\r")
-            session.wait(b"Journal facts")
+            session.wait(b"Operation details")
             session.mouse(65, 90, 10)
             session.settle()
             scrolled = session.screen.text()
@@ -1272,16 +1272,16 @@ def run():
             session.settle()
             assert scrolled == session.screen.text(), "Tab changed Recovery detail scroll"
             session.send(b"\x1b[H")
-            session.wait(b"Transaction identity")
+            session.wait(b"Operation")
             session.resize((14, 48))
-            session.wait(b"Journal facts")
+            session.wait(b"Operation details")
             session.send(b"\x1b")
-            session.wait(b"TX ID")
+            session.wait(b"OP ID")
             session.click_label("Completed", min_row=5)
             session.send(b"\r")
-            session.wait(b"Journal facts")
+            session.wait(b"Operation details")
             session.send(b"\x1b")
-            session.wait(b"TX ID")
+            session.wait(b"OP ID")
             session.send(b"q")
             session.finish()
         assert checkpoints == {str(path.relative_to(state)): hashlib.sha256(path.read_bytes()).digest()
@@ -1297,7 +1297,7 @@ def run():
             session.wait(b"No matches")
             session.send(b"a")
             session.wait(b"Enter Confirm")
-            session.wait(b"display filters never narrow")
+            session.wait(b"Filters do not narrow it.")
             session.send(b"\x1b")
             session.settle()
             session.send(b"q")
@@ -1397,7 +1397,7 @@ def run():
             assert b'ADOPTION' not in session.screen.text(), 'Batch editor leaked the Discover table underneath'
             assert b'ordinary settings' not in session.screen.text(), 'Batch editor leaked selected-file content'
             session.send(b'\x1bOR')  # F3 opens scrollable full selected-item paths.
-            session.wait(b'Selected draft metadata')
+            session.wait(b'Selected draft')
             session.wait(b'files/.config/bundle/only-a')
             session.send(b'\x1b[H\x1b')
             session.settle()
@@ -1420,7 +1420,7 @@ def run():
             batch_heads(batch_home, 1)
             session.destination("Recovery")
             session.send(b'b')
-            session.wait(b'Rollback schema 4')
+            session.wait(b'Roll back operation')
             session.wait(b'Confirm')
             session.send(b'\r')
             session.wait(b'Operation result')

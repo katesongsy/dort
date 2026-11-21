@@ -1,4 +1,4 @@
-//! Declaration-driven application orchestration over existing opaque core capabilities.
+//! Declaration-driven checks and installs shared by the CLI and TUI.
 use super::{inspection_defaults, installation, reconciliation, tools};
 use dort_core::{
     Error, Result,
@@ -17,6 +17,13 @@ use std::{
 };
 
 pub const MAX_INSTALLS: usize = 32;
+
+pub(crate) fn provider_label(provider: Provider) -> &'static str {
+    match provider {
+        Provider::Brew => "Homebrew",
+        Provider::Npm => "npm",
+    }
+}
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Source {
@@ -320,7 +327,7 @@ impl CheckPreview {
                 })
                 .collect(),
             needs_setup: &self.issues,
-            warning: "Checks can execute provider configuration/plugins and change caches. No packages are installed. Command lookup reads metadata only.",
+            warning: "Checks can run package-manager configuration and plugins, and change caches. No packages are installed. Command lookup reads metadata only.",
         }
     }
     pub fn approve(self) -> CheckApproval {
@@ -336,7 +343,7 @@ impl CheckApproval {
         let (_, entry) = read_manifest(&p.prepared.scope.manifest)?;
         if p.source != Source::capture(host, &entry)? {
             return Err(invalid(
-                "Declaration or profile scope changed; review checks again.",
+                "Declaration or profiles changed. Review the check again.",
             ));
         }
         let snapshots: Vec<_> = p
@@ -349,7 +356,7 @@ impl CheckApproval {
             .collect();
         if reconciliation::snapshot_records(&snapshots) > reconciliation::MAX_SNAPSHOT_RECORDS {
             return Err(invalid(
-                "Check results exceed the metadata limit; use a smaller profile.",
+                "Check results are too large. Use a smaller profile.",
             ));
         }
         let reconciliation = p
@@ -358,9 +365,7 @@ impl CheckApproval {
             .map_err(withheld)?;
         let (_, entry) = read_manifest(&reconciliation.scope.manifest)?;
         if p.source != Source::capture(host, &entry)? {
-            return Err(invalid(
-                "Declaration or profile scope changed; check again.",
-            ));
+            return Err(invalid("Declaration or profiles changed. Check again."));
         }
         Ok(Checked {
             reconciliation,
@@ -450,16 +455,16 @@ pub fn install_issues(row: &dort_core::tools::planning::Row) -> Vec<Issue> {
     if let Some(d) = &row.declaration {
         if d.provider == Provider::Npm && !matches!(d.policy, VersionPolicy::Exact { .. }) {
             let policy = match &d.policy {
-                VersionPolicy::ProviderDefault {} => "provider default",
+                VersionPolicy::ProviderDefault {} => "default",
                 VersionPolicy::Latest {} => "latest",
                 VersionPolicy::Exact { .. } => unreachable!(),
             };
             add(
                 format!(
-                    "{:?} installation needs an exact version; this declaration uses {policy}.",
-                    d.provider
+                    "{} installation needs an exact version; this declaration uses {policy}.",
+                    provider_label(d.provider)
                 ),
-                "Edit this declaration to choose an exact version, then check installed again.",
+                "Edit this declaration to choose an exact version, then check again.",
             );
         } else if d.provider == Provider::Brew
             && !matches!(
@@ -468,13 +473,13 @@ pub fn install_issues(row: &dort_core::tools::planning::Row) -> Vec<Issue> {
             )
         {
             add(
-                "This provider installs only its current package; the declaration pins a version."
+                "This package manager installs only its current package; the declaration pins a version."
                     .into(),
-                "Edit the declaration to use provider default/latest, or install the pinned version separately and check again.",
+                "Edit the declaration to use default/latest, or install the pinned version separately and check again.",
             );
         } else if d.provider == Provider::Brew && !install::brew::formula(&d.package) {
             add(
-                "The package name is outside the supported installation scope.".into(),
+                "The package name is outside the supported install scope.".into(),
                 "Edit the package to a supported Homebrew core formula, then check again.",
             );
         }
@@ -482,44 +487,44 @@ pub fn install_issues(row: &dort_core::tools::planning::Row) -> Vec<Issue> {
     for blocker in &row.blockers {
         let (why, next) = match blocker {
             Blocker::ProviderNotObserved => (
-                "The provider has not been checked.".into(),
-                "Review its scope in Tool settings, then check installed again.",
+                "The package manager has not been checked.".into(),
+                "Open Tool settings, then check installed again.",
             ),
             Blocker::ProviderUnavailable => (
-                "The provider check was unavailable.".into(),
-                "Open tool details, correct the provider scope in Tool settings and check again.",
+                "The package manager check failed.".into(),
+                "Open tool details, fix Tool settings and check again.",
             ),
             Blocker::ProviderScopeMismatch => (
-                "The provider scope does not match this declaration.".into(),
-                "Review the scope in Tool settings, then check installed again.",
+                "Tool settings do not match this declaration.".into(),
+                "Review Tool settings, then check again.",
             ),
             Blocker::AmbiguousPackageIdentity => (
-                "The reported package identity is ambiguous.".into(),
-                "Review the declared package and provider scope, then check again.",
+                "The package manager reported more than one match.".into(),
+                "Review the package and Tool settings, then check again.",
             ),
             Blocker::InvalidProviderMetadata => (
-                "The provider returned invalid metadata.".into(),
-                "Correct the provider setup and check installed again.",
+                "The package manager returned invalid data.".into(),
+                "Fix Tool settings and check again.",
             ),
             Blocker::VersionMismatch => (
-                "The installed version differs from the declaration.".into(),
-                "Review the desired version in Edit declaration; automatic upgrades are not offered.",
+                "Installed version differs from the declaration.".into(),
+                "Edit the declaration or install that version separately. Dort does not upgrade automatically.",
             ),
             Blocker::VersionUnverifiable => (
-                "The reported version cannot be verified.".into(),
-                "Review the desired version and provider setup, then check again.",
+                "The version cannot be verified.".into(),
+                "Review the declaration and Tool settings, then check again.",
             ),
             Blocker::BinaryNotObserved | Blocker::BinaryObservationUnavailable => (
-                "Command lookup is unavailable.".into(),
-                "Review command search directories in Tool settings, then check again.",
+                "Command lookup failed.".into(),
+                "Check command search folders in Tool settings, then check again.",
             ),
             Blocker::UnattributedBinaryCandidates => (
-                "A command already exists without matching package provenance.".into(),
-                "Review the command candidates in tool details and resolve the conflict before checking again.",
+                "A command exists, but no package owns it.".into(),
+                "Review the command candidates in tool details and resolve the conflict.",
             ),
             Blocker::RuntimeBindingUnverified => (
-                "The npm runtime association is unverified.".into(),
-                "Review the declared runtime and its exact scope in Tool settings, then check again.",
+                "The npm runtime is not verified.".into(),
+                "Check the runtime's Node and npm settings in Tool settings.",
             ),
             Blocker::DependencyInactive { tool } => (
                 format!("Required tool {tool} is outside the active profiles."),
@@ -539,10 +544,8 @@ pub fn install_issues(row: &dort_core::tools::planning::Row) -> Vec<Issue> {
     if issues.is_empty() {
         issues.push(Issue {
             tool: row.id.clone(),
-            reason: "This missing package is outside the supported installation scope.".into(),
-            next_step:
-                "Review its declaration and Tool settings scope, then check installed again."
-                    .into(),
+            reason: "This package cannot be installed here.".into(),
+            next_step: "Review the declaration and Tool settings, then check again.".into(),
         });
     }
     issues
@@ -585,9 +588,9 @@ impl InstallPreview {
                 .collect(),
             deferred: &self.deferred,
             warning: if self.is_empty() {
-                "No installations are ready. Resolve the listed issues, then check installed again."
+                "No installs are ready. Fix the listed issues, then check again."
             } else {
-                "CAN EXECUTE provider/dependency code. Serial; stops on failure. Partial effects; no rollback."
+                "Runs package-manager and dependency code. Installs one tool at a time; stops on failure. Partial effects; no rollback."
             },
         }
     }
@@ -647,7 +650,7 @@ impl InstallApproval {
                 Ok(())
             } else {
                 Err(invalid(
-                    "Declaration or profile scope changed; check and review installation again.",
+                    "Declaration or profiles changed. Check and review the install again.",
                 ))
             }
         });

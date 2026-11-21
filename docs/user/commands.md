@@ -84,6 +84,8 @@ dort tools edit --declaration '{"id":"rg","binary":"rg","install":{"provider":"b
 dort tools remove rg --dry-run
 dort tools remove rg
 
+`provider` names the package manager: `brew` or `npm`.
+
 dort tools attempts
 dort tools attempts --id RECORD_ID
 dort tools close-attempt RECORD_ID --dry-run
@@ -110,7 +112,7 @@ Declaration JSON is one complete Tool. It is not approval.
 dort files discover
 ```
 
-Shows hidden HOME entries and `.config` metadata. It does not read candidate contents.
+Shows hidden HOME entries and `.config` entries. It does not read contents.
 
 ### List
 
@@ -193,7 +195,7 @@ dort --repo PATH git diff --staged
 dort --repo PATH git diff --patch
 ```
 
-Metadata only by default. `--patch` prints escaped content and may expose secrets. Review privately. No network, hooks or writes.
+Status and paths by default. `--patch` prints escaped content and may expose secrets. Review privately. No network, hooks or writes.
 
 ## History and recovery
 
@@ -223,7 +225,7 @@ Recovery checks current files and refuses changed state. It never runs automatic
 | Code | Meaning |
 | --- | --- |
 | 0 | Success |
-| 1 | I/O failure or unavailable observation |
+| 1 | I/O failure or unavailable data |
 | 2 | Invalid input, configuration or unsupported host |
 | 3 | Another Dort process holds the write lock |
 | 4 | Blocked plan or recovery diagnosis reports write blockers |

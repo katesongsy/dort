@@ -1,4 +1,4 @@
-//! Explicit bounded npm/Homebrew installs. Never executes command-preview DTOs.
+//! Homebrew and npm installs with reviewed previews.
 use super::{VersionMatch, VersionPolicy, binaries, inspection, planning};
 use crate::{
     Error, Manifest, Result, adoption,

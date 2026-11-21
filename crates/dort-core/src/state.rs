@@ -1,4 +1,4 @@
-//! Descriptor-relative private local state access and application writer locking.
+//! Private local state and the application write lock.
 use crate::{
     Error, Result,
     context::{HostContext, validate_absolute},

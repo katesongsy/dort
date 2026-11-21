@@ -1,4 +1,4 @@
-//! Explicit navigation surfaces. Editing text is never a reason to make a page modal.
+//! Navigation surface titles.
 use super::{
     app::{App, Tab},
     shell::{Form, Overlay},
@@ -63,7 +63,7 @@ impl App {
         }
         if let Some(editor) = self.batch_editor.as_ref().filter(|e| e.open) {
             return Some(if editor.details {
-                "Files / Adoption metadata"
+                "Files / Adoption details"
             } else if editor.item_form {
                 "Files / Adopt / Edit item"
             } else {
@@ -73,7 +73,7 @@ impl App {
         match self.shell.overlay {
             Some(Overlay::Form(form)) => {
                 if self.shell.form_details {
-                    return Some("Draft metadata");
+                    return Some("Draft details");
                 }
                 return Some(match form {
                     Form::Choose => "Session / Exact repository path",
@@ -95,14 +95,14 @@ impl App {
             });
         }
         if self.tab == Tab::Recovery && self.history_details {
-            return Some("Recovery / Transaction details");
+            return Some("Recovery / Operation details");
         }
         if self.tab == Tab::Git
             && self.git_view.browsing_details()
             && !self.git_view.sensitive()
             && !self.git_view.editing_root
         {
-            return Some("Git / Metadata details");
+            return Some("Git / Details");
         }
         if self.tab == Tab::Overview && self.overview_details {
             return Some("Overview / Details");
@@ -113,7 +113,7 @@ impl App {
             }
             let t = &self.tools_view;
             return Some(if t.installed_open {
-                "Tools / Installed tools"
+                "Tools / Installed packages"
             } else if t.declaration_open {
                 match t.declaration.change {
                     None => "Tools / Add tool declaration",
@@ -130,12 +130,12 @@ impl App {
                 match t.installation.mode {
                     super::tools_install::Mode::Attempts => {
                         if t.installation.details {
-                            "Tools / Installation details"
+                            "Tools / Install record"
                         } else {
                             "Tools / Installation history"
                         }
                     }
-                    super::tools_install::Mode::CloseInputs => "Tools / Closure settings",
+                    super::tools_install::Mode::CloseInputs => "Tools / Close record",
                     super::tools_install::Mode::LoadingClose
                     | super::tools_install::Mode::CloseReview => {
                         "Tools / Close installation record"
@@ -149,7 +149,7 @@ impl App {
         }
         if self.tab == Tab::Git && self.git_view.editing_root {
             return Some(if self.git_view.root_metadata() {
-                "Git / Draft scope metadata"
+                "Git / Draft details"
             } else {
                 "Git / Choose inspection scope"
             });

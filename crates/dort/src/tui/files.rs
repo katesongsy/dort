@@ -1,4 +1,4 @@
-//! Structured Files workspace; display identity is never used to construct a request.
+//! Files workspace built from typed rows.
 use super::{app::App, components as ui, views::safe};
 use dort_core::observation::Kind;
 use ratatui::{
@@ -33,7 +33,7 @@ fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
         ui::report(
             frame,
             parts[1],
-            "Metadata",
+            "Details",
             details(app),
             app.details_scroll,
             false,
@@ -68,15 +68,14 @@ fn details(app: &App) -> Text<'static> {
     }
     if app.inventory.group.is_some() {
         if let Some(node) = super::tree::selected(app) {
-            lines.push(Line::styled(
-                "Directory / tree group · metadata only",
-                ui::heading(),
-            ));
+            lines.push(Line::styled("Folder · header only", ui::heading()));
             lines.push(ui::metadata(
                 "Full path",
                 node.path.to_str().unwrap_or("unavailable"),
             ));
-            lines.push(Line::raw("Group marks include matching descendants. Adoption uses eligible regular files; marks survive filtering and folding."));
+            lines.push(Line::raw(
+                "Marking a folder marks its eligible files. Marks stay through filters and folds.",
+            ));
         }
     } else if app.discovering {
         if let Some(candidate) = app
@@ -107,7 +106,7 @@ fn details(app: &App) -> Text<'static> {
             }));
             lines.push(Line::raw(if eligible { "Choose Adopt selected to edit target, ID and source." } else { "Only owned, single-link regular files without special permission bits are candidates." }));
             lines.push(Line::raw(
-                "Core preview checks paths, sensitivity and remaining guards.",
+                "The preview checks paths, sensitivity and remaining limits.",
             ));
             if let Some(d) = &app.discovery {
                 lines.push(Line::raw(""));
@@ -121,9 +120,7 @@ fn details(app: &App) -> Text<'static> {
                 }
             }
         } else {
-            lines.push(Line::raw(
-                "No displayed selection. Clear the filter or refresh discovery.",
-            ));
+            lines.push(Line::raw("Select a file, or clear the filter."));
         }
     } else if let Some(data) = &app.data {
         if let Some(error) = &data.files_error {
@@ -152,7 +149,7 @@ fn details(app: &App) -> Text<'static> {
             }
             lines.push(Line::raw(""));
             lines.push(Line::raw(
-                "Keep materializes an ordinary file; both modes retain the source.",
+                "Keep writes a regular file. Both actions keep the source.",
             ));
         } else if let Some((_, detail)) = data
             .files
@@ -161,13 +158,11 @@ fn details(app: &App) -> Text<'static> {
         {
             lines.extend(Text::from(safe(detail)).lines);
         } else {
-            lines.push(Line::raw(
-                "No displayed selection. Clear the filter or discover a file.",
-            ));
+            lines.push(Line::raw("Select a file, or clear the filter."));
         }
     }
     lines.push(Line::styled(
-        "Search changes display only. Apply covers the full active scope.",
+        "Search changes the display only. Apply covers every active file.",
         ui::muted(),
     ));
     Text::from(lines)
@@ -397,7 +392,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                 .as_ref()
                 .and_then(|d| d.files_error.as_deref())
                 .unwrap_or(if total == 0 {
-                    "0 active mapping(s). Discover a regular file to get started."
+                    "No active files. Discover a regular file to start."
                 } else {
                     "No matches. Delete clears the display filter."
                 })
@@ -406,7 +401,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         } else if super::discovery_tree::pending(app) {
             "Updating list... Search, Help and Quit remain available."
         } else if total == 0 {
-            "No metadata candidates found in this bounded scan."
+            "No candidates found."
         } else {
             "No matches. Delete clears the display filter."
         };

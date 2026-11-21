@@ -1,4 +1,4 @@
-//! Declaration-led Tools. Provider observations and associations stay internal.
+//! Tools pages. Package-manager details stay internal.
 use super::{actions::Task, components as ui, input::Target, shell::edit_text};
 use crate::services::{inspection_defaults, tools::Request};
 use dort_core::{
@@ -383,7 +383,7 @@ impl State {
                 } else {
                     "Package manager program"
                 },
-                "Command search directories (colon separated)",
+                "Command search folders (colon separated)",
                 "npm CLI script",
                 "Global package prefix",
             ];

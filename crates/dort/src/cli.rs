@@ -15,7 +15,7 @@ use std::{path::PathBuf, process::ExitCode};
 #[derive(Parser)]
 #[command(
     version,
-    about = "Git-native developer environment manager (experimental guarded file lifecycle)"
+    about = "Git-native development environment manager for local files, tools and Git"
 )]
 struct Cli {
     /// Emit structured output; diagnostics remain on stderr.
@@ -24,10 +24,10 @@ struct Cli {
     /// Override the locally registered active repository.
     #[arg(long, global = true)]
     repo: Option<PathBuf>,
-    /// Preview writes or provider inspection without executing or creating state.
+    /// Preview writes or package-manager queries without changes.
     #[arg(long, global = true)]
     dry_run: bool,
-    /// Explicitly approve writes or provider inspection without prompting.
+    /// Approve writes or package-manager queries without prompting.
     #[arg(long, global = true)]
     yes: bool,
     /// Optional extra ID guard for link deletion; must match the selected mapping.
@@ -39,50 +39,50 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Open the interactive local workflows, recovery, checks and Git interface.
+    /// Open the interactive workbench.
     Tui,
-    /// Create a local repository at an absent path, or attach an already-valid one.
+    /// Create a local repository at a new path, or attach an existing one.
     Init { path: PathBuf },
-    /// Inspect active link state and blockers without writing.
+    /// Show active file links and blockers.
     Status {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
-    /// Preview active link deployment (equivalent to files plan apply).
+    /// Preview linking active files.
     Plan {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
-    /// Read-only retained history across all repositories.
+    /// Read-only operation history across repositories.
     History,
-    /// Explicitly preview/approve guarded rollback of a schema-1/2/4 transaction.
+    /// Preview or approve rollback of a completed file or declaration operation.
     Rollback {
         repository_id: String,
         transaction_id: String,
     },
-    /// Show supported host and local state locations without creating them.
+    /// Show host and state paths.
     Doctor,
-    /// Discover, preview, adopt, apply and unmanage regular-file links.
+    /// Discover and manage regular-file links.
     Files {
         #[command(subcommand)]
         command: FilesCommand,
     },
-    /// Diagnose history or explicitly preview/approve guarded recovery.
+    /// Inspect operation records or recover an unfinished change.
     Recovery {
         #[command(subcommand)]
         command: RecoveryCommand,
     },
-    /// Hardened read-only Git inspection; no network, helpers or writes.
+    /// Read-only Git status and diff. No network or writes.
     Git {
         #[command(subcommand)]
         command: GitCommand,
     },
-    /// Manage declarations, check installed tools, and review missing installations.
+    /// Manage declarations, check installed tools and install missing packages.
     Tools {
         #[command(subcommand)]
         command: ToolsCommand,
     },
-    /// Read-only manifest diagnostics.
+    /// Check a manifest.
     Manifest {
         #[command(subcommand)]
         command: ManifestCommand,
@@ -91,14 +91,14 @@ enum Command {
 
 #[derive(Subcommand)]
 enum GitCommand {
-    /// Metadata-only working-tree/index status, including untracked names.
+    /// Working-tree and index status, including untracked names.
     Status,
-    /// Metadata-only tracked diff by default; untracked contents are excluded.
+    /// Tracked diff. Untracked files are excluded.
     Diff {
         /// Compare the index to HEAD (also works before the first commit).
         #[arg(long)]
         staged: bool,
-        /// Explicitly disclose bounded patch CONTENT, with unsafe bytes escaped.
+        /// Show patch content, with unsafe bytes escaped.
         #[arg(long)]
         patch: bool,
     },
@@ -106,28 +106,28 @@ enum GitCommand {
 
 #[derive(Subcommand)]
 enum RecoveryCommand {
-    /// Explicit guarded rollback for file or tool-declaration history (schemas 1/2/4/5).
+    /// Preview or approve rollback of a completed file or declaration operation.
     Rollback {
         repository_id: String,
         transaction_id: String,
     },
-    /// Resume an intact prepared bootstrap (schema 3), never automatically.
+    /// Resume an intact repository setup. Never automatic.
     Resume {
         repository_id: String,
         transaction_id: String,
     },
-    /// Mark bootstrap abandoned, retaining any published repository/registration.
+    /// Abandon a repository setup. Keeps any published repository and registration.
     Abandon {
         repository_id: String,
         transaction_id: String,
     },
-    /// List all local transaction checkpoints, integrity problems and write blockers.
+    /// List operation records and write blockers.
     List,
 }
 
 #[derive(Subcommand)]
 enum ManifestCommand {
-    /// Validate a manifest and resolve profiles (does not inspect installed tools).
+    /// Validate a manifest and profiles. Does not check installed tools.
     Check {
         /// Explicit manifest; otherwise use --repo or the active local repository.
         #[arg(long)]
@@ -140,7 +140,7 @@ enum ManifestCommand {
 
 #[derive(Subcommand)]
 enum FilesCommand {
-    /// Adopt an owned regular file into a new repository source and mapping.
+    /// Adopt one owned regular file into a new source and mapping.
     #[command(alias = "adopt")]
     Add {
         target: PathBuf,
@@ -151,12 +151,12 @@ enum FilesCommand {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
-    /// Deploy all active ordinary link mappings in one recoverable transaction.
+    /// Link all changed active files as one recoverable operation.
     Apply {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
-    /// Remove a mapping, retaining its source. Keep materializes; remove deletes the link.
+    /// Remove a mapping, keeping its source. Keep writes a file; remove deletes the link.
     #[command(alias = "unmanage")]
     Remove {
         id: String,
@@ -165,14 +165,14 @@ enum FilesCommand {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
-    /// Discover hidden files and .config metadata; never read candidate contents.
+    /// List hidden files and .config entries. Does not read contents.
     Discover,
-    /// Inspect active manifest mappings (no tool execution).
+    /// Show active mappings without running tools.
     List {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
-    /// Preview only; no writes, approvals, backups or journals are performed.
+    /// Preview only. No writes, approvals, backups or history records.
     Plan {
         #[arg(long = "profile", global = true)]
         profiles: Vec<String>,
@@ -185,7 +185,7 @@ enum FilesCommand {
 enum PlanCommand {
     /// Preview active link mappings.
     Apply,
-    /// Preview regular-file adoption as one source/manifest/destination transaction.
+    /// Preview adopting one regular file as a source, mapping and link.
     Adopt {
         /// Absolute or ~/ path; quote ~ when it must be expanded by Dort.
         target: PathBuf,
@@ -195,10 +195,10 @@ enum PlanCommand {
         #[arg(long)]
         source: PathBuf,
     },
-    /// Preview removal of a mapping; repository source is always retained.
+    /// Preview removing a mapping. Keeps the source.
     Unmanage {
         id: String,
-        /// Keep materializes an ordinary file; remove deletes the managed link.
+        /// Keep writes a regular file; remove deletes the link.
         #[arg(long, value_enum)]
         mode: RemovalMode,
     },
@@ -236,15 +236,15 @@ struct InstalledToolsArgs {
 }
 #[derive(Subcommand)]
 enum ToolsCommand {
-    /// Inspect installed packages using detected package managers; keep only this result.
+    /// List installed packages from detected package managers. Keeps only this result.
     Inspect(InstalledToolsArgs),
-    /// Check declared tools using automatically detected, reviewed provider scopes.
+    /// Check declared tools using detected package managers.
     Check(DeclaredToolsArgs),
-    /// Check declarations and review all eligible missing tools for serial installation.
+    /// Check declarations and install all eligible missing tools, one at a time.
     InstallMissing(DeclaredToolsArgs),
-    /// Add one desired tool declaration to a registered repository; never install packages.
+    /// Add a tool declaration to a registered repository. Does not install packages.
     Declare {
-        /// Strict Tool JSON: id, binary, profiles, requires, install (provider/package/version/runtime_tool).
+        /// Tool JSON fields: id, binary, profiles, requires, install (provider/package/version/runtime_tool).
         #[arg(long)]
         declaration: String,
         #[arg(long = "profile")]
@@ -263,22 +263,22 @@ enum ToolsCommand {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
-    /// List private Tools installation attempts; optionally inspect one full record.
+    /// List installation records; show one full record with --id.
     Attempts {
         #[arg(long)]
         id: Option<String>,
     },
-    /// Freshly inspect and close an unchanged unresolved attempt; never replay or roll back.
+    /// Check current package-manager settings and close an unchanged record. Does not retry or roll back.
     CloseAttempt {
         id: String,
-        /// Required for damaged provider scope; known attempts retain their original scope.
+        /// Package manager for a damaged record. Known records keep their original settings.
         #[arg(long, value_enum)]
         provider: Option<InstallationProvider>,
         #[arg(long)]
         npm_cli: Option<PathBuf>,
         #[arg(long)]
         prefix: Option<PathBuf>,
-        /// Required only when the original provider scope is damaged or missing.
+        /// Only needed when the original package-manager settings are damaged or missing.
         #[arg(long)]
         executable: Option<PathBuf>,
         #[arg(long = "search-dir")]
@@ -393,7 +393,9 @@ fn declared_tools(
         );
     }
     if !cli.yes
-        && !confirmed("Check declared tools? Provider configuration/plugins may run. [y/N] ")?
+        && !confirmed(
+            "Check declared tools? Package-manager configuration and plugins may run. [y/N] ",
+        )?
     {
         return Err(Error::Invalid("Tool checks were not approved.".into()));
     }
@@ -443,7 +445,7 @@ fn declared_tools(
                     "Install the displayed missing tools? Partial effects are possible; no rollback. [y/N] ",
                 )?
             {
-                return Err(Error::Invalid("Installation was not approved; approved checks may already have changed provider caches.".into()));
+                return Err(Error::Invalid("Installation was not approved. Approved checks may already have changed package-manager caches.".into()));
             }
             let deferred = preview.deferred.len();
             let approval = preview.approve()?;
@@ -654,7 +656,7 @@ fn tools_command(
             let attempt = attempts
                 .iter()
                 .find(|a| &a.id == id)
-                .ok_or_else(|| Error::Invalid("installation attempt not found".into()))?;
+                .ok_or_else(|| Error::Invalid("installation record not found".into()))?;
             if cli.json {
                 print_git_json(attempt)?;
             } else {
@@ -779,7 +781,7 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
         )
     {
         return Err(Error::Invalid(
-            "recovery uses explicit repository/transaction IDs; omit --repo".into(),
+            "recovery uses explicit repository and operation IDs; omit --repo".into(),
         ));
     }
     match command {
@@ -913,11 +915,11 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
             } else {
                 for transaction in &transactions {
                     println!(
-                        "{} / {}: {:?} (journal schema {:?}; {} valid checkpoints)",
+                        "{} / {}: {:?} ({}; {} saved steps)",
                         transaction.repository_id,
                         transaction.transaction_id,
                         transaction.phase,
-                        transaction.journal_schema,
+                        operation_type(transaction.journal_schema),
                         transaction.valid_checkpoints
                     );
                     if let Some(problem) = &transaction.problem {
@@ -925,7 +927,7 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                     }
                 }
                 println!(
-                    "Read-only diagnosis; writes blocked: {write_blocked}. Recovery requires an explicit preview and approval."
+                    "Read-only history. Writes blocked: {write_blocked}. Recovery needs a preview and approval."
                 );
             }
             if write_blocked {
@@ -1148,6 +1150,16 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+fn operation_type(schema: Option<u32>) -> &'static str {
+    match schema {
+        Some(1) => "file adoption",
+        Some(2) => "file change",
+        Some(3) => "repository setup",
+        Some(4) => "file batch",
+        Some(5 | 6) => "tool declaration",
+        _ => "unknown",
+    }
+}
 fn mutation_report(operation: &str, transaction: Option<String>) -> dort_core::Result<()> {
     print_git_json(
         &serde_json::json!({"schema":1,"operation":operation,"completed":true,"transaction_id":transaction}),

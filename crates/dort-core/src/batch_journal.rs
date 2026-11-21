@@ -1,4 +1,4 @@
-//! Schema 4: explicitly selected homogeneous batches; older formats are unchanged.
+//! Batch operation records.
 pub(crate) use crate::batch::Action;
 use crate::{
     Error, Result,

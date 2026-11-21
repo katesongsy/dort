@@ -126,7 +126,7 @@ fn list_enter_opens_details_and_only_explicit_review_approves_checks_once() {
             s.split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ")
-                .contains("caches may change"),
+                .contains("change caches"),
             "{s}"
         );
         assert!(!s.contains("Snapshot") && !s.contains("\\u{b7}"));

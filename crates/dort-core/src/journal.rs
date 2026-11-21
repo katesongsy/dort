@@ -1,4 +1,4 @@
-//! Immutable schema-1 checkpoint chains. Checksums detect corruption, not a malicious owner.
+//! File operation records with checksummed checkpoints.
 use crate::{
     Error, Result,
     context::HostContext,

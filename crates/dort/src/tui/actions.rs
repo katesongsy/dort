@@ -1,4 +1,4 @@
-//! UI-independent action preparation and dispatch over the existing core services.
+//! Prepares and dispatches actions over core services.
 use crate::services::{BootstrapApproval, BootstrapPreview, FileApproval};
 use dort_core::{
     Error, Result,
@@ -67,7 +67,7 @@ pub struct Data {
 // TOML parser Display includes source lines. Ordinary TUI errors are metadata only.
 pub fn diagnostic(error: &Error) -> String {
     match error {
-        Error::Parse(_) => "Invalid TOML; manifest source text is not displayed.".into(),
+        Error::Parse(_) => "Invalid TOML. Manifest text is not shown.".into(),
         _ => error.to_string(),
     }
 }
@@ -161,7 +161,7 @@ pub fn load_scoped(
                     ) {
                         Err(error) => {
                             let error = diagnostic(&error);
-                            files_error = Some(format!("File observation failed: {error}"));
+                            files_error = Some(format!("Could not read files: {error}"));
                         }
                         Ok(snapshot) => {
                             profiles = snapshot.active_profiles.iter().cloned().collect();
@@ -243,13 +243,13 @@ impl Pending {
             Self::Ignore(preview) => preview.human(),
             Self::Batch(plan) => plan.human(),
             Self::Files(plan) => format!(
-                "Repository: {:?}\nEffective profiles: {:?}\nScope: all mappings selected by this request; the preview defines execution scope.\n{}",
+                "Repository: {:?}\nProfiles: {:?}\nScope: every mapping selected by this request. The preview shows what runs.\n{}",
                 plan.inputs.repository,
                 plan.inputs.active_profiles,
                 plan.human()
             ),
             Self::Init(preview) => format!(
-                "{} local repository\nResolved path: {:?}\nRepository ID: {}\n\nEffects:\n- {}\n\nRegistration and active selection are persistent only after approval.\nPrivate artifacts are retained on failure; inspect Recovery.\nExisting live dotfiles remain in place.",
+                "{} local repository\nPath: {:?}\nRepository ID: {}\n\nEffects:\n- {}\n\nThe change is saved only after approval.\nA failure keeps private records; open Recovery.\nExisting dotfiles stay in place.",
                 if preview.report.create {
                     "Create"
                 } else {
@@ -260,8 +260,7 @@ impl Pending {
                 preview.report.effects.join("\n- ")
             ),
             Self::Rollback(preview) => format!(
-                "Rollback schema {}\nRepository ID: {}\nTransaction ID: {}\nJournal head: {}\nInverse paths:\n{}\nLater edits can block execution. Schema-1 rollback withdraws its new source into private transaction storage; schema-2 leaves repository sources unchanged. Private backups and artifacts are retained.",
-                preview.journal_schema,
+                "Roll back operation\nRepository ID: {}\nOperation ID: {}\nHistory head: {}\nPaths:\n{}\n\nThis reverses the recorded changes if they still match. Later edits can block it. Private backups stay.",
                 preview.repository_id,
                 preview.transaction_id,
                 preview.journal_head_sha256,
@@ -273,7 +272,7 @@ impl Pending {
                     .join("\n")
             ),
             Self::Bootstrap(preview) => format!(
-                "{} bootstrap\nRepository: {:?}\nRepository ID: {}\nTransaction ID: {}\nJournal head: {}\nRepository published: {}\nRegistration published: {}\nEffects:\n- {}\nAbandon retains published repositories, registration and private artifacts. Published state remains available.\nResume publishes only the exact retained preparation; later changes can block execution. Preparing transactions must be abandoned before retrying Create/attach with a new transaction. Existing live dotfiles remain in place.",
+                "{} repository setup\nRepository: {:?}\nRepository ID: {}\nOperation ID: {}\nHistory head: {}\nRepository published: {}\nRegistration published: {}\nEffects:\n- {}\n\nAbandon keeps the published repository, registration and private files.\nResume continues the saved setup; later changes can block it. Finish or abandon it before another create or attach. Existing dotfiles stay in place.",
                 match preview.action {
                     bootstrap::RecoveryAction::Resume => "Resume",
                     bootstrap::RecoveryAction::Abandon => "Abandon",
@@ -404,7 +403,7 @@ impl Approved {
             Self::Bootstrap(approval, tid) => {
                 let lock = WriterLock::acquire(host)?;
                 bootstrap::recover(host, &lock, approval, observer)?;
-                ("Bootstrap recovery", Some(tid), None)
+                ("Repository setup recovery", Some(tid), None)
             }
         };
         Ok(Completion {

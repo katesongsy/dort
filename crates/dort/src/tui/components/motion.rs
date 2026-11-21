@@ -1,4 +1,4 @@
-//! UI-only liveness cue. Elapsed time never changes a service outcome or progress count.
+//! UI liveness animation. It does not affect service outcomes.
 use super::glyphs;
 use std::time::Duration;
 

@@ -1,9 +1,9 @@
-//! Explicit cross-catalog npm scope. No snapshot inference or candidate execution.
+//! Installs one exact npm package in an explicit scope.
 use super::*;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path};
 
-pub const WARNING: &str = "Installs one exact npm package with lifecycle scripts disabled. Native dependencies and bin/man links can change the selected prefix and expose commands immediately on PATH. Trusted npm may read configuration and contact dependency endpoints. Not a sandbox, atomic operation, readiness guarantee or rollback. A 10-minute deadline may leave partial effects.";
+pub const WARNING: &str = "Installs one exact npm package with lifecycle scripts off. Native dependencies and bin/man links can change the prefix and add commands to PATH. npm can read configuration and contact package sources. No sandbox or rollback. A 10-minute deadline can leave partial effects.";
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

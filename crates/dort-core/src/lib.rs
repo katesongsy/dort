@@ -1,5 +1,5 @@
-//! UI-independent planning, experimental journalled bootstrap/file lifecycle and guarded recovery.
-//! External package work, remote Git workflows and generated/secret deployment remain deferred.
+//! UI-independent planning, file lifecycle and guarded recovery for Dort.
+//! Package installation supports Homebrew and npm. Templates, secrets and remote Git workflows are not implemented.
 #[cfg(not(unix))]
 compile_error!("Dort supports macOS, Linux and WSL.");
 

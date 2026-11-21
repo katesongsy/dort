@@ -134,7 +134,7 @@ fn tools_navigation_has_only_places_and_forms_keep_their_parent_drafts() {
             entries.iter().map(|e| e.label).collect::<Vec<_>>(),
             [
                 "Declared tools [1]",
-                "Installed tools [2]",
+                "Installed packages [2]",
                 "Installation history [3]"
             ]
         );

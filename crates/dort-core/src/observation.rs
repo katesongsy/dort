@@ -1,4 +1,4 @@
-//! Read-only, descriptor-relative filesystem snapshots. No symlinked parent is followed.
+//! Read-only filesystem snapshots that do not follow symlinked parents.
 use crate::{Error, Result, context::validate_absolute, error::io_error};
 use rustix::fs::{self, AtFlags, FileType, Mode, OFlags};
 use serde::{Deserialize, Serialize};

@@ -1,4 +1,4 @@
-//! Manifest-only desired metadata. No provider, candidate, or package execution/ownership.
+//! Manifest tool declarations.
 use crate::{
     Error, Manifest, Result,
     adoption::{self, Boundary, Event, anchors, checked_bytes, parent_identity, same},

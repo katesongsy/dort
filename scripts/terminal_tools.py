@@ -143,7 +143,7 @@ def normal_installs(Session, binary, base, env):
             assert calls(home) == before, 'List Enter changed from Details to Install'
             session.send(b'i')
             session.wait(b'Review missing installs')
-            session.wait(b'CAN EXECUTE')
+            session.wait(b'Runs package-manager')
             session.settle()
             assert calls(home) == before, 'Installation preparation executed a package manager'
             assert b'root hooks' not in session.screen.text()
@@ -211,8 +211,8 @@ def batch_guards(Session, binary, base, env):
             session.send(b'i')
             if mode == 'attention':
                 session.wait(b'Installation needs attention')
-                session.wait(b'command already exists')
-                assert b'CAN EXECUTE' not in session.screen.text() and b'root hooks' not in session.screen.text()
+                session.wait(b'A command exists')
+                assert b'Runs package-manager' not in session.screen.text() and b'root hooks' not in session.screen.text()
                 session.send(b'e')
                 session.wait(b'Edit tool')
                 session.send(b'\x1bq')
@@ -225,7 +225,7 @@ def batch_guards(Session, binary, base, env):
             if mode == 'joined':
                 session.wait(b'Installing package')
                 session.send(b'\x03')
-                session.wait(b'waiting for worker')
+                session.wait(b'waiting for the worker')
                 (home / 'release').write_text('fixture')
                 session.finish()
             else:
@@ -266,7 +266,7 @@ def discovery_declarations(Session, binary, base, env):
         session.wait(b'Tool declaration completed.')
         session.settle()
         session.send(b'\r')
-        session.wait(b'Installed tools')
+        session.wait(b'Installed packages')
         session.wait(b'observed')
         assert calls(home) == 'Q', 'Adding a declaration replayed inspection'
         session.navigate('Tools', 'Declared tools [1]')
@@ -386,7 +386,7 @@ def blocked_operation_error(Session, binary, base, env):
         assert b'An earlier operation needs attention' in session.screen.text()
         session.send(b'\r')
         session.wait(b'Recovery')
-        session.wait(b'INTEGRITY!')
+        session.wait(b'Damaged')
         session.send(b'q')
         session.finish()
     assert (repo / 'dort.toml').read_bytes() == original
@@ -424,7 +424,7 @@ def interaction_surface_workflows(Session, binary, base, env):
             session.wait(b'2 Installed')
             session.send(b'/3')
             session.settle()
-            assert b'Installed tools' in session.screen.text(), 'A filter digit changed destination'
+            assert b'Installed packages' in session.screen.text(), 'A filter digit changed destination'
             session.send(b'\r1a')
             session.wait(b'Tool ID')
             session.send(b'\tq?/')

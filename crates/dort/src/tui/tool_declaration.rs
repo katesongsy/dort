@@ -1,4 +1,4 @@
-//! Retained desired metadata. Progressive presentation never changes declaration authority.
+//! Retained declaration form. The saved manifest is the source of truth.
 use super::{actions::Task, components as ui, input::Target, shell::edit_text};
 use crate::services::declaration::Request;
 use ratatui::{
@@ -10,13 +10,13 @@ use ratatui::{
 use std::collections::BTreeMap;
 const LABELS: [&str; 8] = [
     "Tool ID",
-    "Bare binary name",
+    "Command name",
     "Profiles (blank = base)",
-    "Required tool IDs",
-    "Provider",
+    "Required tools",
+    "Package manager",
     "Package",
-    "Version (blank = provider default)",
-    "npm runtime tool ID",
+    "Version (blank = default)",
+    "npm runtime tool",
 ];
 #[derive(Default)]
 pub struct State {
@@ -215,7 +215,7 @@ impl State {
             .map(|&i| {
                 let value = if i == 4 {
                     match self.fields[i].as_str() {
-                        "" => "Choose provider",
+                        "" => "Choose package manager",
                         "brew" => "Homebrew",
                         "npm" => "npm",
                         other => other,

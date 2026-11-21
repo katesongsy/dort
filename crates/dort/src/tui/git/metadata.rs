@@ -1,5 +1,4 @@
-//! Ordinary Git metadata only. This renderer receives no State, Patch, Read or
-//! disclosure input, and never reads Diff.patch. Content rendering stays in git.rs.
+//! Git details renderer. It receives no patch or disclosure data.
 use super::{Comparison, Metadata};
 use crate::tui::{components as ui, inventory::Search};
 use ratatui::{
@@ -104,7 +103,7 @@ fn details(view: &View<'_>) -> Text<'static> {
         lines.push(field("Entries", "Unknown (summary unavailable/not loaded)"));
     }
     lines.push(Line::default());
-    lines.push(Line::styled("Metadata boundary", ui::heading()));
+    lines.push(Line::styled("Details", ui::heading()));
     lines.push(Line::raw("No patch content requested. Filtering and row selection never narrow a later patch request."));
     lines.push(Line::raw("Git requires a trusted executable and exact non-bare root; no manifest or registration required."));
     lines.push(Line::raw("No staging, commits, network or live-file writes. Untracked contents are not included in diffs."));
@@ -142,7 +141,7 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
                 if view.metadata.is_some() {
                     format!("{} displayed | ", view.visible.len())
                 } else {
-                    "Unknown observation | ".into()
+                    "Not loaded | ".into()
                 },
                 ui::muted(),
             ),
@@ -219,8 +218,8 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
     };
     let title = view
         .metadata
-        .map(|m| format!("Metadata | {} entries", m.len()))
-        .unwrap_or_else(|| "Metadata | Unknown".into());
+        .map(|m| format!("Details | {} entries", m.len()))
+        .unwrap_or_else(|| "Details | Unknown".into());
     let block = ui::pane(&title, true);
     if view.metadata.is_none()
         || view.metadata.is_some_and(|m| m.len() == 0)
@@ -231,7 +230,7 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         let text = match view.metadata {
             None => "Summary unavailable/not loaded. Choose scope, then refresh.",
             Some(m) if m.len() == 0 => "No changes in this comparison.",
-            Some(_) => "No matches. Clear the metadata display filter.",
+            Some(_) => "No matches. Clear the details filter.",
         };
         ui::text_view(frame, inner, Text::raw(text), 0);
     } else if let Some(metadata) = view.metadata {

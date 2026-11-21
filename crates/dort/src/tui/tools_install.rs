@@ -1,4 +1,4 @@
-//! Installation history and explicit fresh-query closure. Never replays an install.
+//! Install records and record close. Closing does not replay an install.
 use super::{actions::Task, components as ui, input::Target, shell::edit_text};
 use dort_core::tools::{inspection::NpmBinding, install};
 use ratatui::{
@@ -148,7 +148,7 @@ impl State {
         let count = self.close_field_count();
         if let Some(i) = self.fields[..count].iter().position(String::is_empty) {
             self.focus = i;
-            self.error = Some("Complete the provider settings before reviewing closure.".into());
+            self.error = Some("Complete the package manager settings first.".into());
             return None;
         }
         let request = self.close_request.as_mut()?;
@@ -273,14 +273,14 @@ impl State {
                 .take(self.close_field_count())
                 .map(|(a, b)| (*a, b.as_str()))
                 .collect::<Vec<_>>();
-            ui::field_page(frame,area,&fields,self.focus,hits,|i|Target::ToolInstallControl(i,false),ui::FormActions {choices:&[],buttons:&[ui::ActionButton {label:"Review closure",key:"Enter",target:Target::ToolInstallControl(4,true)},ui::ActionButton {label:"Package manager",key:"F4",target:Target::ToolInstallProvider},ui::ActionButton {label:"Back",key:"Esc",target:Target::Back}],feedback:Some(ui::Feedback {text:self.error.as_deref().unwrap_or("The original record is damaged. Choose the package manager and its scope for a fresh inspection; no package action is replayed."),tone:ui::design::Tone::Attention})});
+            ui::field_page(frame,area,&fields,self.focus,hits,|i|Target::ToolInstallControl(i,false),ui::FormActions {choices:&[],buttons:&[ui::ActionButton {label:"Review close",key:"Enter",target:Target::ToolInstallControl(4,true)},ui::ActionButton {label:"Package manager",key:"F4",target:Target::ToolInstallProvider},ui::ActionButton {label:"Back",key:"Esc",target:Target::Back}],feedback:Some(ui::Feedback {text:self.error.as_deref().unwrap_or("The original record is damaged. Choose the package manager and its paths for a fresh check. Nothing is retried."),tone:ui::design::Tone::Attention})});
             return;
         }
         if let Some(preview) = &self.close_preview {
             let r = preview.review();
             let mut lines = vec![
-                Line::raw("Review record closure"),
-                ui::metadata("Attempt", r.attempt_id),
+                Line::raw("Close installation record"),
+                ui::metadata("Record", r.attempt_id),
                 ui::metadata("Program", &r.query.executable.display().to_string()),
                 ui::metadata("Arguments", &r.query.arguments.join(" ")),
                 ui::metadata("HOME", &r.query.home.display().to_string()),
@@ -325,7 +325,7 @@ impl State {
                 false,
             );
             if !dry_run {
-                action("Confirm closure", "Enter", KeyCode::Enter);
+                action("Confirm close", "Enter", KeyCode::Enter);
             }
             action("Cancel", "Esc", KeyCode::Esc);
             return;
@@ -335,7 +335,7 @@ impl State {
             if let Some(attempt) = self.attempts.get(self.selected) {
                 let s = attempt.summary();
                 lines.extend([
-                    ui::metadata("Attempt", &attempt.id),
+                    ui::metadata("Record", &attempt.id),
                     ui::metadata("Status", s.status.label()),
                     Line::raw(s.explanation),
                     Line::raw(s.package_note()),
@@ -365,7 +365,7 @@ impl State {
                     },
                 ));
                 if attempt.unresolved {
-                    action("Review record closure", "x", KeyCode::Char('x'));
+                    action("Close record", "x", KeyCode::Char('x'));
                 }
             }
             if let Some(e) = &self.error {
@@ -420,7 +420,7 @@ impl State {
                 },
                 self.error
                     .as_deref()
-                    .unwrap_or("Installation attempts appear here after an approved install."),
+                    .unwrap_or("Install records appear here after an approved install."),
                 if self.error.is_some() {
                     ui::design::Tone::Attention
                 } else {
@@ -439,16 +439,16 @@ impl State {
                 hits,
                 Target::ToolAttemptRow,
             );
-            action("Installation details", "Enter", KeyCode::Enter);
+            action("Install record", "Enter", KeyCode::Enter);
             if self
                 .attempts
                 .get(self.selected)
                 .is_some_and(|a| a.unresolved)
             {
-                action("Review record closure", "x", KeyCode::Char('x'));
+                action("Close record", "x", KeyCode::Char('x'));
             }
         }
-        action("Refresh history", "R", KeyCode::Char('r'));
+        action("Refresh history", "R", KeyCode::Char('R'));
         action("Back", "Esc", KeyCode::Esc);
     }
 }

@@ -1,4 +1,4 @@
-//! Display-only file filters. Never used to construct an execution request.
+//! Display-only file filters.
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 #[derive(Default)]

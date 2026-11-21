@@ -1,4 +1,4 @@
-//! Session-only pickers rendered from typed scope/choice data, never report strings.
+//! Session pickers built from typed choices.
 use super::{
     app::App,
     components as ui,
@@ -47,7 +47,7 @@ pub fn profile_details(picker: &ProfilePicker) -> Text<'static> {
             "Manifest",
             picker.report.manifest.to_str().unwrap_or("Unavailable"),
         ),
-        Line::raw("Base is always active. Additional profiles join mandatory contributors."),
+        Line::raw("Base is always active. Extra profiles join the always-active set."),
     ];
     if let Some(name) = choices.known.iter().nth(picker.selected) {
         lines.push(field("Selected", name));
@@ -60,7 +60,7 @@ pub fn profile_details(picker: &ProfilePicker) -> Text<'static> {
             },
         ));
     } else {
-        lines.push(field("Selected", "Apply additions (read-only validation)"));
+        lines.push(field("Selected", "Apply additions (validation only)"));
     }
     names(&mut lines, "Defaults", &choices.defaults);
     names(&mut lines, "Platform", &choices.platform);
@@ -69,7 +69,7 @@ pub fn profile_details(picker: &ProfilePicker) -> Text<'static> {
     names(&mut lines, "Effective union", effective);
     names(&mut lines, "Known profiles", &choices.known);
     lines.push(Line::styled(
-        "Apply validates before changing session scope. Esc leaves it unchanged.",
+        "Apply validates before changing this session. Esc keeps the current profiles.",
         ui::muted(),
     ));
     Text::from(lines)
@@ -122,12 +122,12 @@ pub fn repository_details(app: &App, selected: usize) -> Text<'static> {
         }
         1 => {
             lines.push(field("Selected", "Use registered active repository"));
-            lines.push(Line::raw("The read-only service resolves the registered active root. The explicit session root remains separately selectable. Missing or invalid configuration is an error; the old scope is retained."));
+            lines.push(Line::raw("Uses the registered active repository. You can still choose an explicit root. A missing or invalid config is an error; the old selection stays."));
         }
         i if i == roots.len() + 2 => {
             lines.push(field("Selected", "Create/attach"));
             lines.push(field("Retained path", &app.shell.init_draft));
-            lines.push(Line::raw("Opens a retained path draft, then a read-only preview. Only separate explicit approval can publish registration."));
+            lines.push(Line::raw("Opens a saved path draft, then a read-only preview. Registration needs separate approval."));
         }
         i => {
             if let Some(root) = roots.get(i.saturating_sub(2)) {
@@ -230,7 +230,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
             _ => unreachable!(),
         }
         actions.push(ui::ActionButton {
-            label: "Metadata",
+            label: "Details",
             key: "F3",
             target: Target::PickerDetails,
         });
@@ -252,7 +252,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
         ui::report(
             frame,
             content,
-            "Selection metadata",
+            "Selection details",
             details,
             app.shell.scroll,
             false,
@@ -269,7 +269,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
         ui::report(
             frame,
             parts[1],
-            "Selection metadata",
+            "Selection details",
             details,
             app.shell.scroll,
             false,

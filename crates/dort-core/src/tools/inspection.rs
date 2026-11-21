@@ -1,5 +1,5 @@
-//! Deliberate provider queries, never called by passive observation/planning.
-//! Provider configuration/plugins may execute and caches may change. Not a sandbox.
+//! Package-manager checks. Passive reads and planning do not call them.
+//! Checks can run configuration and plugin code and change caches.
 use crate::model::Provider;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -16,7 +16,7 @@ mod npm_discovery;
 
 const LIMIT: usize = 4 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(10);
-pub const WARNING: &str = "Provider inspection executes a trusted local program. Global configuration and plugins may execute code; caches/logs may change. Offline settings are hardening, not an OS sandbox or a guarantee against network access. No packages are installed by Dort. Results are provider claims, not Dort ownership or verified binary identity.";
+pub const WARNING: &str = "Runs a local package-manager program. It can run configuration and plugin code, and change caches or logs. No packages are installed. Results are what the package manager reports; Dort does not verify ownership or command identity.";
 
 /// Fixed provider inventory protocols.
 /// Managed npm checks require an explicit runtime/Node/CLI/prefix binding.

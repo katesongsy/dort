@@ -1,4 +1,4 @@
-//! Shared declaration inputs only; never package adoption or provider execution.
+//! Shared declaration inputs. Package adoption and installs stay in their services.
 use dort_core::{Error, Result, context::HostContext, model::Tool, tools::declaration};
 use std::{fmt::Write, path::Path};
 pub fn report(preview: &declaration::Preview) -> String {
@@ -47,7 +47,7 @@ fn tool_report(out: &mut String, title: &str, tool: &Tool) {
             "{:?} / {} / {}",
             spec.provider,
             spec.package,
-            spec.version.as_deref().unwrap_or("Provider default")
+            spec.version.as_deref().unwrap_or("Default")
         )
         .unwrap();
         if let Some(runtime) = &spec.runtime_tool {

@@ -1,5 +1,4 @@
-//! Read-only Git presentation. Patch payloads have no Debug/Serialize implementation and
-//! never enter generic reports, errors, progress, retained drafts or metadata inventories.
+//! Read-only Git view. Patch content stays out of reports.
 use super::{actions::Task, components as ui, input::Target, shell::edit_text, views::safe};
 use dort_core::git::{Diff, Git, Status};
 use ratatui::{
@@ -673,7 +672,7 @@ impl State {
                 target: Target::Key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE)),
             });
             if self.root_details {
-                ui::report(frame, area, "Draft Git scope", vec![ui::metadata("Full root draft", &self.draft), ratatui::text::Line::raw("Relative literal paths resolve from the launch directory. This session-only draft has not been read or approved as patch content.")].into(), self.scroll, false);
+                ui::report(frame, area, "Git root draft", vec![ui::metadata("Full root draft", &self.draft), ratatui::text::Line::raw("Relative paths resolve from the launch directory. This draft is not saved and shows no patch content.")].into(), self.scroll, false);
                 hits.present(ui::ActionButton {
                     label: "Back",
                     key: "Esc",
@@ -692,7 +691,7 @@ impl State {
                     choices: &[],
                     buttons: &[
                         ui::ActionButton {
-                            label: "Read Git scope",
+                            label: "Read Git",
                             key: "Enter",
                             target: Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
                         },
@@ -703,7 +702,7 @@ impl State {
                         },
                     ],
                     feedback: Some(ui::Feedback {
-                        text: "Independent selection applies to this session only.",
+                        text: "This selection applies to this session only.",
                         tone: ui::design::Tone::Information,
                     }),
                 },

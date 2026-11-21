@@ -1,4 +1,4 @@
-//! Shared application dispatch; presentation must obtain approval before calling.
+//! Application dispatch shared by CLI and TUI. Callers approve writes first.
 pub mod declaration;
 pub mod declared_tools;
 #[cfg(test)]

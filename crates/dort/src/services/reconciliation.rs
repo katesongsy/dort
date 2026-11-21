@@ -1,4 +1,4 @@
-//! Session-only, explicitly selected inspection snapshots and metadata reconciliation.
+//! Session check results and package comparisons.
 use super::tools;
 use dort_core::{
     Error, Manifest, Result,
@@ -112,13 +112,11 @@ impl Prepared {
         ids: &BTreeSet<String>,
     ) -> Result<()> {
         if ids.len() > MAX_SNAPSHOTS || ids.iter().any(|id| !identifier(id)) {
-            return Err(invalid("invalid or excessive snapshot IDs"));
+            return Err(invalid("Too many or invalid check results."));
         }
         for (tool, scope) in bindings {
             if !self.tools.iter().any(|t| &t.id == tool) || !ids.contains(scope) {
-                return Err(invalid(
-                    "binding must name a selected tool and an existing snapshot ID",
-                ));
+                return Err(invalid("Choose a checked tool first."));
             }
         }
         Ok(())
@@ -131,12 +129,12 @@ impl Prepared {
     ) -> Result<Report> {
         let ids: BTreeSet<_> = snapshots.iter().map(|s| s.id.clone()).collect();
         if ids.len() != snapshots.len() {
-            return Err(invalid("duplicate snapshot IDs are not allowed"));
+            return Err(invalid("Duplicate check result."));
         }
         self.validate_bindings(&bindings, &ids)?;
         if snapshot_records(snapshots) > MAX_SNAPSHOT_RECORDS {
             return Err(invalid(
-                "session snapshot record limit exceeded; forget metadata before collecting more",
+                "Too many check results. Clear old results and check again.",
             ));
         }
         let (_, entry) = observation::read_manifest(&self.scope.manifest).map_err(|_| {
@@ -152,7 +150,7 @@ impl Prepared {
             let snapshot = snapshots
                 .iter()
                 .find(|s| &s.id == id)
-                .ok_or_else(|| invalid("selected snapshot is unavailable"))?;
+                .ok_or_else(|| invalid("The selected check result is unavailable."))?;
             if snapshot.report.provider.description.query == inspection::Query::NpmGlobals
                 && (snapshot.report.manifest.as_ref() != Some(&self.scope.manifest)
                     || snapshot
@@ -161,9 +159,7 @@ impl Prepared {
                         .as_ref()
                         .is_none_or(|source| !source.matches(&entry)))
             {
-                return Err(invalid(
-                    "npm snapshot manifest differs or changed; collect a fresh approved snapshot for this exact manifest",
-                ));
+                return Err(invalid("The manifest changed. Run a fresh check."));
             }
             catalogs.insert(tool.clone(), &snapshot.report.provider);
         }
@@ -177,7 +173,7 @@ impl Prepared {
         })?;
         if !self.source.matches(&after) {
             return Err(invalid(
-                "reconciliation manifest changed during observation; reload declarations before retrying",
+                "The manifest changed. Reload declarations and try again.",
             ));
         }
         let observations = planning::Observations {

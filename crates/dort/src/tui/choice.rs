@@ -1,4 +1,4 @@
-//! Choice ownership and application of explicit metadata selections. Never executes a provider.
+//! Choice selection for explicit options. Selecting a value runs nothing.
 use super::{
     app::{App, Tab},
     components as ui, tools_install,
@@ -76,13 +76,13 @@ impl App {
             && code == KeyCode::F(4)
         {
             Some(Choice::new(
-                "Choose historical provider",
+                "Choose package manager",
                 ["npm", "Homebrew"]
                     .iter()
                     .enumerate()
                     .map(|(index, label)| Item {
                         label: (*label).into(),
-                        scope: "Retained closure inputs; no replay".into(),
+                        scope: "Saved inputs; nothing is retried.".into(),
                         value: Value::ClosureProvider(index),
                     })
                     .collect(),
@@ -96,12 +96,12 @@ impl App {
                 .position(|(_, value)| *value == tools.declaration.fields[field])
                 .unwrap_or(0);
             Some(Choice::new(
-                "Declaration provider",
+                "Package manager",
                 options
                     .into_iter()
                     .map(|(label, provider)| Item {
                         label: label.into(),
-                        scope: "Desired metadata only; no installation".into(),
+                        scope: "Declaration only; no install".into(),
                         value: Value::DeclarationProvider { field, provider },
                     })
                     .collect(),

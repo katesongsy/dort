@@ -44,7 +44,7 @@ fi"#,
     app.tab = Tab::Tools;
     let Task::ToolsInstalledPrepare(mut inputs) = app.activate(Action::ToolsInstalled).unwrap()
     else {
-        panic!("Installed tools")
+        panic!("Installed packages")
     };
     inputs.search_dirs = vec![f.bin.clone()];
     let output = actions::perform_scoped(
@@ -124,7 +124,7 @@ fn current_inspection_details_and_prefilled_add_have_separate_approvals_and_no_r
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let text = render(&app, w, h);
         assert!(
-            text.contains("Inspect installed") && text.contains("caches may change"),
+            text.contains("Check packages") && text.contains("change caches"),
             "{text}"
         );
         assert!(text.lines().last().unwrap().contains("F1 Help"), "{text}");

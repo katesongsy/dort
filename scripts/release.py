@@ -226,8 +226,9 @@ def notes(tag):
 Experimental, TUI-first local dotfile management with a shared Rust core and CLI automation.
 
 - Guided local repository creation/attachment, profiles and standalone manifest checks.
-- File discovery, reviewed adoption/link apply, Keep/Delete unmanage and guarded recovery.
-- Read-only Git status/diff with deliberate patch disclosure; Diagnostics and contextual help.
+- File discovery, reviewed links, Keep/Delete unmanage and recovery.
+- Homebrew/npm tool checks, exact missing-package installs and install history.
+- Read-only Git status/diff with separate patch disclosure; Diagnostics and contextual help.
 - Keyboard-first compact/wide navigation, retained drafts and explicit write confirmations.
 
 ## Installation
@@ -236,7 +237,7 @@ Choose the archive matching your CPU and OS. Linux binaries require Ubuntu 24.04
 See the [getting-started guide](https://github.com/katesongsy/dort/blob/{tag}/docs/user/getting-started.md) for installation, a disposable-HOME walkthrough and TUI workflows, and the [safety guide](https://github.com/katesongsy/dort/blob/{tag}/docs/user/safety.md) before touching real configuration.
 
 ## Boundaries
-Dort remains experimental, not a production-ready dotfile manager. No package-manager/provider execution, cloning/sync, Git staging/commit/push, templates or secrets. Repository/HOME/state mutations require supported same-filesystem operations. Recovery never automatically replays or overwrites later edits. Backups are private, not encrypted. Tests do not establish real power-loss or failing-fsync safety.
+Dort remains experimental. Templates, secrets, cloning/sync, Git writes and other package managers are not supported. Installs can run package-manager and package code and may leave partial effects. Repository, HOME and state writes use same-filesystem operations. Recovery is manual and refuses later edits. Backups are private, not encrypted. Tests do not establish power-loss or failing-fsync safety.
 
 [Full generated history](https://github.com/katesongsy/dort/blob/{tag}/CHANGLOG.md). Rust 1.99.1 is required only for building from source; Cargo installation is also documented in the getting-started guide.
 """

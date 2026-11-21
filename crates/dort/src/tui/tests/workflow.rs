@@ -510,7 +510,7 @@ fn create_retains_input_on_back_then_approves_and_switches_session() {
     run_task(&mut app, &fixture, task);
     let task = approve(&mut app);
     let refresh = run_task(&mut app, &fixture, task).unwrap();
-    assert!(app.result.as_ref().unwrap().contains("Transaction ID:"));
+    assert!(app.result.as_ref().unwrap().contains("Operation ID:"));
     assert!(app.shell.overlay.is_none());
     assert_eq!(
         app.repository.as_ref().unwrap(),
@@ -628,7 +628,7 @@ fn invalid_path_missing_git_and_read_errors_preserve_draft_and_old_scope() {
     type_text(&mut app, "absent/q?path");
     let task = submit_path(&mut app);
     run_task(&mut app, &fixture, task);
-    assert!(app.error.as_ref().unwrap().contains("Read failed:"));
+    assert!(app.error.as_ref().unwrap().contains("Read failed"));
     assert!(!app.error.as_ref().unwrap().contains("partial effects"));
     assert_eq!(
         app.data.as_ref().unwrap().repository,
@@ -687,7 +687,7 @@ fn dry_run_bootstrap_can_never_execute_even_after_mode_toggle() {
         super::tests::menu_action(&mut app, super::shell::Action::PreviewOnly, 80, 24).is_none()
     );
     assert!(app.dry_run && app.navigation.menu.is_some());
-    assert!(app.status.contains("--dry-run locks"));
+    assert!(app.status.contains("--dry-run keeps"));
     key(&mut app, KeyCode::Esc); // dismiss disabled menu, no task/approval
     key(&mut app, KeyCode::Char('n'));
     type_text(&mut app, "new");
@@ -763,7 +763,11 @@ fn discovery_marks_ineligible_entries_and_enter_preserves_existing_draft() {
     }
     adopt_selected(&mut app);
     assert!(app.shell.overlay.is_none());
-    assert!(app.status.contains("Not eligible for adoption"));
+    assert!(
+        app.status.contains("Not eligible for adoption"),
+        "{}",
+        app.status
+    );
     assert_eq!(app.shell.adoption.target, "retained target");
     assert_eq!(app.shell.adoption.id, "retained-id");
     assert_eq!(app.shell.adoption.source, "retained/source");
@@ -785,7 +789,7 @@ fn discovery_marks_ineligible_entries_and_enter_preserves_existing_draft() {
     }
     app.candidate_selected = index;
     key(&mut app, KeyCode::Char('i'));
-    assert!(super::tests::render(&app, 140, 40).contains("Directory / tree group"));
+    assert!(super::tests::render(&app, 140, 40).contains("Folder · header only"));
     key(&mut app, KeyCode::Esc);
     // The directory is now a foldable group. Reopen it before selecting its file.
     key(&mut app, KeyCode::Char('l'));
@@ -1007,7 +1011,7 @@ fn adoption_retains_all_input_through_missing_repository_picker_and_attachment()
         fs::read_to_string(fixture.root.join("files/config")).unwrap(),
         "ordinary settings\n"
     );
-    assert!(app.result.as_ref().unwrap().contains("Transaction ID:"));
+    assert!(app.result.as_ref().unwrap().contains("Operation ID:"));
 }
 
 #[test]
@@ -1100,10 +1104,7 @@ fn standalone_check_is_independent_and_preserves_path_profile_drafts_on_errors()
             .contains("choices")
     ); // CLI JSON unchanged
     let screen = super::tests::render(&app, 160, 40);
-    assert!(
-        screen.contains("standalone manifest (independent")
-            && screen.contains("Tool dependency order")
-    );
+    assert!(screen.contains("standalone manifest") && screen.contains("Tool dependency order"));
     key(&mut app, KeyCode::Char('v'));
     let task = app
         .key(
@@ -1262,7 +1263,7 @@ fn file_search_is_text_only_and_never_narrows_approved_apply() {
     let task = key(&mut app, KeyCode::Char('a')).unwrap();
     run_task(&mut app, &fixture, task);
     let preview = app.preview.as_ref().unwrap();
-    assert!(preview.text.contains("the preview defines execution scope"));
+    assert!(preview.text.contains("The preview shows what runs"));
     let super::actions::Pending::Files(plan) = &preview.pending else {
         panic!("plan")
     };
@@ -1275,7 +1276,7 @@ fn file_search_is_text_only_and_never_narrows_approved_apply() {
             && fixture.host.home.join(".second").is_symlink()
     );
     assert_eq!(app.data.as_ref().unwrap().history.len(), 1);
-    assert!(app.result.as_ref().unwrap().contains("Transaction ID:"));
+    assert!(app.result.as_ref().unwrap().contains("Operation ID:"));
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Delete);
     assert_eq!(app.visible_file_rows(), [0, 1]);
@@ -1347,7 +1348,7 @@ fn exact_id_forms_can_keep_or_delete_a_mapping_outside_the_display_filter() {
             "ordinary settings\n"
         );
         assert!(app.data.as_ref().unwrap().files.is_empty());
-        assert!(app.result.as_ref().unwrap().contains("Transaction ID:"));
+        assert!(app.result.as_ref().unwrap().contains("Operation ID:"));
     }
 }
 
@@ -1404,7 +1405,7 @@ fn failed_profile_union_leaves_prior_scope_and_invalid_inventory_is_not_empty_su
     assert!(data.files_error.is_some() && data.history_error.is_none());
     app.complete(Ok(Output::Data(data)));
     super::tests::destination(&mut app, super::app::Tab::Files, 80, 24);
-    assert!(super::tests::render(&app, 80, 24).contains("observation failed"));
+    assert!(super::tests::render(&app, 80, 24).contains("Could not read files"));
     assert!(!fixture.host.state_dir.exists() && !fixture.host.config_dir.exists());
 }
 
@@ -1447,7 +1448,7 @@ fn structural_check_reports_dependencies_and_capability_limits_without_observing
     let mut app = App::new(false);
     app.complete(Ok(output));
     let screen = super::tests::render(&app, 160, 40);
-    assert!(screen.contains("Declarations validated"));
+    assert!(screen.contains("Declarations are valid"));
     assert!(screen.contains("tool inventory and installation"));
     assert!(!fixture.root.join("templates").exists() && !fixture.root.join("secrets").exists());
     assert!(!fixture.host.config_dir.exists() && !fixture.host.state_dir.exists());
@@ -1572,8 +1573,8 @@ fn diagnostics_share_doctor_metadata_and_keep_configuration_failure_content_free
     assert_eq!(*report.history.as_ref().unwrap(), (0, 0));
     assert!(!fixture.host.state_dir.exists() && !fixture.host.config_dir.exists());
     let text = super::tests::render(&app, 140, 45);
-    assert!(text.contains("Diagnostics | Dort") && text.contains("Global write blockers: 0"));
-    assert!(text.contains("Session file root:") && text.contains("Files inspects live state"));
+    assert!(text.contains("Diagnostics | Dort") && text.contains("Blocked writes: 0"));
+    assert!(text.contains("Session file root:") && text.contains("Files shows live state"));
     let task = key(&mut app, KeyCode::Char('R')).unwrap();
     assert!(matches!(task, Task::Diagnostics));
     run_task(&mut app, &fixture, task);
@@ -1585,9 +1586,9 @@ fn diagnostics_share_doctor_metadata_and_keep_configuration_failure_content_free
     .unwrap();
     run_task(&mut app, &fixture, Task::Diagnostics);
     let text = super::tests::render(&app, 140, 45);
-    assert!(text.contains("Configuration unavailable:"));
+    assert!(text.contains("Config unavailable:"));
     assert!(
-        text.contains("Registry metadata unavailable; counts and active selection unresolved.")
+        text.contains("Repository list unavailable. Counts and the active repository are unknown.")
     );
     assert!(!text.contains("private-config-body-marker"));
     assert_eq!(
@@ -1657,7 +1658,7 @@ fn recovery_lock_failure_needs_new_preview_and_confirmation_not_replayed_approva
     let task = key(&mut app, KeyCode::Char('b')).unwrap();
     run_task(&mut app, &fixture, task);
     let text = &app.preview.as_ref().unwrap().text;
-    assert!(text.contains("Journal head:") && text.contains("Inverse paths:"));
+    assert!(text.contains("History head:") && text.contains("Paths:"));
     let task = approve(&mut app);
     let lock = WriterLock::acquire(&fixture.host).unwrap();
     run_task(&mut app, &fixture, task);
@@ -1736,8 +1737,8 @@ fn bootstrap_running_recovery_uses_contextual_preview_and_retains_published_arti
         let task = key(&mut app, KeyCode::Char(if abandon { 'x' } else { 's' })).unwrap();
         run_task(&mut app, &fixture, task);
         let report = &app.preview.as_ref().unwrap().text;
-        assert!(report.contains("Repository published: true") && report.contains("Journal head:"));
-        assert!(report.contains("retains published repositories"));
+        assert!(report.contains("Repository published: true") && report.contains("History head:"));
+        assert!(report.contains("keeps the published repository"));
         key(&mut app, KeyCode::Esc);
         assert!(root.exists());
         assert!(dort_core::journal::diagnose(&fixture.host).unwrap()[0].blocks_writes());
@@ -1798,7 +1799,7 @@ fn selected_schema_one_rollback_withdraws_source_into_private_storage() {
             .as_ref()
             .unwrap()
             .text
-            .contains("Rollback schema 1")
+            .contains("Roll back operation")
     );
     let task = approve(&mut app);
     run_task(&mut app, &fixture, task);

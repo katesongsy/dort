@@ -1,4 +1,4 @@
-//! Separate private Tools attempt storage. Never a file lifecycle journal or receipt.
+//! Private install record storage.
 use super::{Outcome, Scope, Sources, invalid};
 use crate::{
     Result, adoption,

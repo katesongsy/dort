@@ -141,12 +141,10 @@ impl State {
         };
         if let Some(preview) = &self.preview {
             let review = preview.review();
-            let mut lines = vec![Line::raw(
-                "Inspect installed packages using these package managers:",
-            )];
+            let mut lines = vec![Line::raw("Check packages with these package managers:")];
             for query in &review.inspections {
                 lines.push(ui::metadata(
-                    "Provider",
+                    "Package manager",
                     discovery::label(query.provider.query),
                 ));
                 lines.push(ui::metadata(
@@ -158,7 +156,7 @@ impl State {
                         "Global location query",
                         &probe.arguments.join(" "),
                     ));
-                    lines.push(Line::raw("The package list uses the prefix reported by this query. Node is selected from the displayed PATH."));
+                    lines.push(Line::raw("The list uses the prefix reported by this check. Node comes from the displayed PATH."));
                 }
                 lines.push(ui::metadata(
                     "Arguments",
@@ -201,7 +199,7 @@ impl State {
                 ui::chrome_prose(
                     frame,
                     Rect::new(area.x, area.y, area.width, top),
-                    "Package-manager configuration/plugins may run; caches may change. No packages are installed.",
+                    "Checks can run package-manager configuration and plugins, and change caches. No packages are installed.",
                     ui::warning(),
                 );
             }
@@ -219,7 +217,7 @@ impl State {
                 false,
             );
             if !preview.is_empty() && !dry_run {
-                action("Run inspection", "Enter", KeyCode::Enter);
+                action("Check installed", "Enter", KeyCode::Enter);
             }
             action("Back", "Esc", KeyCode::Esc);
             return;
@@ -244,10 +242,10 @@ impl State {
                 let mut lines = vec![
                     ui::metadata("Package", &package.package),
                     ui::metadata("Version", &package.version),
-                    ui::metadata("Provider", discovery::label(scope.query)),
+                    ui::metadata("Package manager", discovery::label(scope.query)),
                     ui::metadata("Reported by", &scope.executable.display().to_string()),
                     Line::raw(
-                        "This is the last inspection result, not a live inventory or proof of command readiness.",
+                        "From the last check. Packages may change; a package does not prove its command works.",
                     ),
                 ];
                 if let Some(prefix) = &scope.npm_global_prefix {
@@ -278,7 +276,7 @@ impl State {
             let unavailable = current.reports.iter().filter(|r| !r.available()).count();
             let count = current.rows().len();
             let note = format!(
-                "Last inspection: {count} package{}.{}",
+                "Last check: {count} package{}.{}",
                 if count == 1 { "" } else { "s" },
                 if unavailable == 0 {
                     String::new()
@@ -312,9 +310,9 @@ impl State {
             let mut lines = vec![Line::raw(if !self.filter.is_empty() {
                 "No packages match this filter."
             } else if self.current.as_ref().is_some_and(|c| c.available()) {
-                "The inspected package managers reported no installed packages."
+                "The checked package managers reported no installed packages."
             } else {
-                "Inspection unavailable. Review the reasons below, then inspect again."
+                "Check unavailable. Review the reasons, then check again."
             })];
             if let Some(current) = &self.current {
                 for report in &current.reports {
@@ -339,7 +337,7 @@ impl State {
             ui::report(
                 frame,
                 body,
-                "Installed tools",
+                "Installed packages",
                 lines.into(),
                 self.scroll,
                 false,
@@ -380,7 +378,7 @@ impl State {
                 frame,
                 body,
                 ui::design::PairTable {
-                    headers: ["PACKAGE / PROVIDER", "VERSION"],
+                    headers: ["PACKAGE / MANAGER", "VERSION"],
                     rows: &pairs,
                     selected: self.selected,
                 },
@@ -390,7 +388,7 @@ impl State {
             action("Package details", "Enter", KeyCode::Enter);
             action("Add declaration", "a", KeyCode::Char('a'));
         }
-        action("Inspect installed", "R", KeyCode::Char('R'));
+        action("Check installed", "R", KeyCode::Char('R'));
         action("Filter packages", "/", KeyCode::Char('/'));
         action("Back", "Esc", KeyCode::Esc);
     }
