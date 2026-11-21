@@ -239,7 +239,7 @@ See the [getting-started guide](https://github.com/katesongsy/dort/blob/{tag}/do
 ## Boundaries
 Dort remains experimental. Templates, secrets, cloning/sync, Git writes and other package managers are not supported. Installs can run package-manager and package code and may leave partial effects. Repository, HOME and state writes use same-filesystem operations. Recovery is manual and refuses later edits. Backups are private, not encrypted. Tests do not establish power-loss or failing-fsync safety.
 
-[Full generated history](https://github.com/katesongsy/dort/blob/{tag}/CHANGLOG.md). Rust 1.99.1 is required only for building from source; Cargo installation is also documented in the getting-started guide.
+[Full generated history](https://github.com/katesongsy/dort/blob/{tag}/CHANGELOG.md). Rust 1.99.1 is required only for building from source; Cargo installation is also documented in the getting-started guide.
 """
 
 

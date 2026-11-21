@@ -210,12 +210,20 @@ pub fn execute(
         .items
         .iter()
         .flat_map(|s| &s.files)
-        .map(|f| Watch {
-            mapping: f.mapping.clone(),
-            source: f.source.clone().unwrap(),
-            destination: f.destination.clone().unwrap(),
+        .map(|f| {
+            Ok(Watch {
+                mapping: f.mapping.clone(),
+                source: f
+                    .source
+                    .clone()
+                    .ok_or_else(|| Error::Invalid("missing batch source snapshot".into()))?,
+                destination: f
+                    .destination
+                    .clone()
+                    .ok_or_else(|| Error::Invalid("missing batch destination snapshot".into()))?,
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
     let first = &fresh.inputs.items[0];
     let mut entries = vec![&first.manifest, &first.local_config];
     for w in &watches {
@@ -263,15 +271,15 @@ pub fn execute(
             &h.watches
                 .iter()
                 .find(|w| w.destination.path == b.path)
-                .unwrap()
+                .ok_or_else(|| Error::Invalid("missing backup destination".into()))?
                 .destination
         };
         let bytes = if e.kind == Kind::Symlink {
             e.link_target
                 .as_ref()
-                .unwrap()
+                .ok_or_else(|| Error::Invalid("missing backup link target".into()))?
                 .to_str()
-                .unwrap()
+                .ok_or_else(|| Error::Invalid("backup link target must be UTF-8".into()))?
                 .as_bytes()
                 .to_vec()
         } else {
@@ -338,7 +346,7 @@ pub fn execute(
                 .watches
                 .iter()
                 .find(|w| w.source.path == path)
-                .unwrap()
+                .ok_or_else(|| Error::Invalid("missing watched source".into()))?
                 .source
                 .clone(),
             Role::Destination => j
@@ -347,7 +355,7 @@ pub fn execute(
                 .watches
                 .iter()
                 .find(|w| w.destination.path == path)
-                .unwrap()
+                .ok_or_else(|| Error::Invalid("missing watched destination".into()))?
                 .destination
                 .clone(),
         };
@@ -374,8 +382,13 @@ pub fn execute(
             Role::Manifest => stage_file(
                 &j,
                 id,
-                new_manifest.as_ref().unwrap(),
-                before.fingerprint.as_ref().unwrap(),
+                new_manifest
+                    .as_ref()
+                    .ok_or_else(|| Error::Invalid("missing edited manifest".into()))?,
+                before
+                    .fingerprint
+                    .as_ref()
+                    .ok_or_else(|| Error::Invalid("missing manifest fingerprint".into()))?,
             )?,
             Role::Source => {
                 let index = j
@@ -384,7 +397,7 @@ pub fn execute(
                     .watches
                     .iter()
                     .position(|w| w.source.path == path)
-                    .unwrap();
+                    .ok_or_else(|| Error::Invalid("missing watched source".into()))?;
                 stage_file(
                     &j,
                     id,
@@ -393,7 +406,7 @@ pub fn execute(
                         .destination
                         .fingerprint
                         .as_ref()
-                        .unwrap(),
+                        .ok_or_else(|| Error::Invalid("missing destination fingerprint".into()))?,
                 )?;
             }
             Role::Destination => match action {
@@ -404,7 +417,7 @@ pub fn execute(
                         .watches
                         .iter()
                         .find(|w| w.destination.path == path)
-                        .unwrap();
+                        .ok_or_else(|| Error::Invalid("missing watched destination".into()))?;
                     fs::symlinkat(&w.source.path, &j.directory.file, stage_name(id).as_str())
                         .map_err(|e| io_error("prepare managed link", &path, e))?;
                 }
@@ -415,7 +428,7 @@ pub fn execute(
                         .watches
                         .iter()
                         .position(|w| w.destination.path == path)
-                        .unwrap();
+                        .ok_or_else(|| Error::Invalid("missing watched destination".into()))?;
                     stage_file(
                         &j,
                         id,
@@ -424,7 +437,7 @@ pub fn execute(
                             .source
                             .fingerprint
                             .as_ref()
-                            .unwrap(),
+                            .ok_or_else(|| Error::Invalid("missing source fingerprint".into()))?,
                     )?;
                 }
                 Action::Remove => {}
@@ -584,8 +597,14 @@ fn validate_layout(host: &HostContext, j: &Journal) -> Result<()> {
                     && states[child.id]
                     && child.before.path.parent() == Some(op.before.path.as_path())
             })
-            .map(|o| o.before.path.file_name().unwrap().to_owned())
-            .collect();
+            .map(|o| {
+                o.before
+                    .path
+                    .file_name()
+                    .map(|name| name.to_owned())
+                    .ok_or_else(|| Error::Invalid("missing managed file name".into()))
+            })
+            .collect::<Result<Vec<_>>>()?;
         expected.sort();
         if observation::names(&path, 4096)? != expected {
             return Err(Error::Invalid(

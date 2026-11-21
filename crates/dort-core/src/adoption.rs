@@ -298,8 +298,14 @@ pub fn execute(
         .map(|(id, _)| id.clone())
         .ok_or_else(|| Error::Invalid("adoption requires a registered repository".into()))?;
     let file = &fresh.inputs.files[0];
-    let source = file.source.as_ref().unwrap();
-    let destination = file.destination.as_ref().unwrap();
+    let source = file
+        .source
+        .as_ref()
+        .ok_or_else(|| Error::Invalid("missing adoption source".into()))?;
+    let destination = file
+        .destination
+        .as_ref()
+        .ok_or_else(|| Error::Invalid("missing adoption destination".into()))?;
     if fresh
         .inputs
         .manifest
@@ -389,7 +395,10 @@ pub fn execute(
         }
     }
     let mut directories = vec![];
-    let mut parent = file.source_path.parent().unwrap();
+    let mut parent = file
+        .source_path
+        .parent()
+        .ok_or_else(|| Error::Invalid("missing source parent directory".into()))?;
     while observation::inspect(parent, false)?.kind == Kind::Missing {
         directories.push(parent.to_owned());
         parent = parent
@@ -406,6 +415,15 @@ pub fn execute(
         (Role::Manifest, inputs.manifest.path.clone()),
         (Role::Destination, file.target_path.clone()),
     ]);
+    let destination_fingerprint = destination
+        .fingerprint
+        .as_ref()
+        .ok_or_else(|| Error::Invalid("missing destination fingerprint".into()))?;
+    let manifest_fingerprint = inputs
+        .manifest
+        .fingerprint
+        .as_ref()
+        .ok_or_else(|| Error::Invalid("missing manifest fingerprint".into()))?;
     for (id, (role, path)) in roles.into_iter().enumerate() {
         let name = stage_name(id);
         match role {
@@ -432,15 +450,15 @@ pub fn execute(
                 &journal,
                 id,
                 &destination_bytes,
-                destination.fingerprint.as_ref().unwrap().mode & 0o777,
-                destination.fingerprint.as_ref().unwrap().gid,
+                destination_fingerprint.mode & 0o777,
+                destination_fingerprint.gid,
             )?,
             Role::Manifest => stage_file(
                 &journal,
                 id,
                 new_manifest.as_bytes(),
-                inputs.manifest.fingerprint.as_ref().unwrap().mode & 0o777,
-                inputs.manifest.fingerprint.as_ref().unwrap().gid,
+                manifest_fingerprint.mode & 0o777,
+                manifest_fingerprint.gid,
             )?,
             Role::Destination => {
                 fs::symlinkat(&file.source_path, &journal.directory.file, name.as_str())
@@ -558,8 +576,15 @@ fn validate_layout(host: &HostContext, journal: &Journal) -> Result<()> {
                     && states[child.id]
                     && child.before.path.parent() == Some(op.before.path.as_path())
             })
-            .map(|child| child.before.path.file_name().unwrap().to_owned())
-            .collect();
+            .map(|child| {
+                child
+                    .before
+                    .path
+                    .file_name()
+                    .map(|name| name.to_owned())
+                    .ok_or_else(|| Error::Invalid("missing source directory entry name".into()))
+            })
+            .collect::<Result<Vec<_>>>()?;
         expected.sort();
         if observation::names(&path, 4096)? != expected {
             return Err(Error::Invalid(
@@ -765,9 +790,14 @@ fn validate_record(host: &HostContext, journal: &Journal) -> Result<()> {
             } else if id == n - 1 {
                 (Role::Destination, &h.destination.path)
             } else {
+                let source_parent = h
+                    .source
+                    .path
+                    .parent()
+                    .ok_or_else(|| Error::Invalid("missing source parent directory".into()))?;
                 if !op.before.path.starts_with(&h.repository)
                     || op.before.path == h.repository
-                    || !h.source.path.parent().unwrap().starts_with(&op.before.path)
+                    || !source_parent.starts_with(&op.before.path)
                     || previous_dir.is_some_and(|p| op.before.path.parent() != Some(p))
                 {
                     return Err(Error::Invalid("invalid source parent operation".into()));

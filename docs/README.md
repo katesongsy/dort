@@ -17,6 +17,6 @@ Start with the [user guide](user/README.md).
 - [Release mechanics](releases.md)
 - [Roadmap](roadmap.md)
 - [Agent rules](../AGENTS.md)
-- [Changelog](../CHANGLOG.md)
+- [Changelog](../CHANGELOG.md)
 
 Tracked pages describe current behavior. Temporary design notes are not kept here.

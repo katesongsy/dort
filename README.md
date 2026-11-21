@@ -44,7 +44,7 @@ Cargo builds need Rust **1.99.1**. See [getting started](docs/user/getting-start
 - [Command reference](docs/user/commands.md)
 - [Safety and troubleshooting](docs/user/safety.md)
 - [Roadmap](docs/roadmap.md)
-- [Changelog](CHANGLOG.md)
+- [Changelog](CHANGELOG.md)
 
 Contributor notes:
 
@@ -64,6 +64,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 python3 scripts/test.py full
 cargo build --workspace --locked
 python3 scripts/check-docs.py
+python3 scripts/check-prose.py
 python3 scripts/check-tui-style.py
 python3 scripts/test-terminal.py
 git diff --check

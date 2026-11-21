@@ -23,6 +23,12 @@ pub use closure::{CloseApproval, ClosePreview, CloseRequest, CloseReview, close,
 pub use outcomes::{NextStep, Status, Summary};
 
 pub const TIMEOUT_SECONDS: u64 = 600;
+/// Bound on the metadata a plan records for one install.
+///
+/// Every program and directory entry carries its own chain of ancestor
+/// fingerprints, so one npm tool with a backed-up runtime measures about 49 KB
+/// from a nine-deep temporary HOME. Keep the bound well above that.
+const METADATA_LIMIT: usize = 256 * 1024;
 
 #[derive(Clone)]
 pub struct Request {
@@ -363,8 +369,11 @@ fn sources(
     Ok((manifest, scope, sources))
 }
 fn bounded_metadata(scope: &Scope, sources: &Sources) -> Result<()> {
-    if journal::encode(&(scope, sources))?.len() > 48 * 1024 {
-        return Err(invalid("installation scope exceeds metadata limit"));
+    let size = journal::encode(&(scope, sources))?.len();
+    if size > METADATA_LIMIT {
+        return Err(scope_invalid(format!(
+            "installation metadata is {size} bytes, over the {METADATA_LIMIT} byte limit"
+        )));
     }
     Ok(())
 }

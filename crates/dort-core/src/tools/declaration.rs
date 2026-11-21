@@ -162,15 +162,32 @@ fn edit(
             if change == Some(Change::Remove) {
                 a.remove(i);
             } else {
-                let mut replacement = tables.get(0).unwrap().clone();
-                replacement.set_position(a.get(i).unwrap().position());
-                *a.get_mut(i).unwrap() = replacement;
+                let mut replacement = tables
+                    .get(0)
+                    .ok_or_else(|| Error::Invalid("missing tool declaration table".into()))?
+                    .clone();
+                replacement.set_position(
+                    a.get(i)
+                        .ok_or_else(|| Error::Invalid("missing tool table at index".into()))?
+                        .position(),
+                );
+                let slot = a
+                    .get_mut(i)
+                    .ok_or_else(|| Error::Invalid("missing tool table at index".into()))?;
+                *slot = replacement;
             }
         } else if let Some(a) = doc["tools"].as_array_mut() {
             if change == Some(Change::Remove) {
                 a.remove(i);
             } else {
-                a.replace(i, tables.get(0).unwrap().clone().into_inline_table());
+                a.replace(
+                    i,
+                    tables
+                        .get(0)
+                        .ok_or_else(|| Error::Invalid("missing tool declaration table".into()))?
+                        .clone()
+                        .into_inline_table(),
+                );
             }
         } else {
             return Err(Error::Invalid(
@@ -498,7 +515,13 @@ pub fn execute(
     notify(&j, Boundary::Checkpoint, &mut observer)?;
     j.directory.create("manifest.backup", &bytes)?;
     j.verify_backup()?;
-    let fp = j.record.header.manifest.fingerprint.as_ref().unwrap();
+    let fp = j
+        .record
+        .header
+        .manifest
+        .fingerprint
+        .as_ref()
+        .ok_or_else(|| Error::Invalid("missing manifest fingerprint".into()))?;
     let device = fs::fstat(&j.directory.file)
         .map_err(|e| io_error("inspect declaration filesystem", &j.directory.path, e))?
         .st_dev;
@@ -539,16 +562,30 @@ pub fn execute(
     checkpoint(&mut j, &mut observer)?;
     validate_scope(host, &j)?;
     validate_layout(host, &j)?;
-    j.record.operation.as_mut().unwrap().progress = Progress::Intent;
+    j.record
+        .operation
+        .as_mut()
+        .ok_or_else(|| Error::Invalid("missing declaration operation".into()))?
+        .progress = Progress::Intent;
     checkpoint(&mut j, &mut observer)?;
     validate_layout(host, &j)?;
     mutate(&j, false)?;
     notify(&j, Boundary::Mutation, &mut observer)?;
     let after = entry(&j.record.header.manifest.path)?;
-    if !same(&j.record.operation.as_ref().unwrap().staged, &after, false) {
+    let staged = &j
+        .record
+        .operation
+        .as_ref()
+        .ok_or_else(|| Error::Invalid("missing declaration operation".into()))?
+        .staged;
+    if !same(staged, &after, false) {
         return Err(Error::Invalid("declaration postcondition mismatch".into()));
     }
-    let op = j.record.operation.as_mut().unwrap();
+    let op = j
+        .record
+        .operation
+        .as_mut()
+        .ok_or_else(|| Error::Invalid("missing declaration operation".into()))?;
     op.after = Some(after);
     op.progress = Progress::Done;
     checkpoint(&mut j, &mut observer)?;
@@ -599,16 +636,30 @@ pub(crate) fn rollback(
         j.record.phase = Phase::RollingBack;
         checkpoint(&mut j, &mut observer)?;
     }
-    if j.record.operation.as_ref().unwrap().progress != Progress::Undone {
+    if j.record
+        .operation
+        .as_ref()
+        .ok_or_else(|| Error::Invalid("missing declaration operation".into()))?
+        .progress
+        != Progress::Undone
+    {
         let was_applied = applied(&j)?;
-        j.record.operation.as_mut().unwrap().progress = Progress::UndoIntent;
+        j.record
+            .operation
+            .as_mut()
+            .ok_or_else(|| Error::Invalid("missing declaration operation".into()))?
+            .progress = Progress::UndoIntent;
         checkpoint(&mut j, &mut observer)?;
         validate_layout(host, &j)?;
         if was_applied {
             mutate(&j, true)?;
             notify(&j, Boundary::Mutation, &mut observer)?;
         }
-        j.record.operation.as_mut().unwrap().progress = Progress::Undone;
+        j.record
+            .operation
+            .as_mut()
+            .ok_or_else(|| Error::Invalid("missing declaration operation".into()))?
+            .progress = Progress::Undone;
         checkpoint(&mut j, &mut observer)?;
     }
     validate_layout(host, &j)?;

@@ -64,7 +64,7 @@ provider = "brew"
 package = "git"
 ```
 
-This only describes the tool. It does not check or install anything by itself. `provider` names the package manager.
+This only describes the tool. Checks and installs come from a separate command. `provider` names the package manager.
 
 Package managers:
 
