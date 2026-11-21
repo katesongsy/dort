@@ -1,6 +1,6 @@
 ---
 name: verify-dort
-description: Launch Dort in a disposable HOME and prove a workflow end to end — adopt a file, check a manifest, run a tool check, read Git status, or drive the TUI. Use when you need to prove a Dort change actually works the way a user would hit it, not just that tests pass.
+description: Launch Dort in a disposable HOME and prove a workflow end to end — adopt a file, check a manifest, run a tool check, read Git status, or drive the TUI. Use when you need to prove a Dort change works the way a user meets it, on the surface the user reaches it from.
 ---
 
 # Verify Dort
@@ -86,7 +86,7 @@ A finished proof needs all four:
 1. **The action.** The preview the user approved, or the keystrokes that reached the state.
 2. **The resulting state.** The screen after the action, or stdout after the write.
 3. **The side effect, observed directly.** `[ -L "$HOME/.demorc" ]` and `readlink`, the repository source content, the manifest mapping, a transaction directory under `$XDG_STATE_HOME/dort/repositories/*/transactions/`. A screen that says "Applied" is not evidence the link exists.
-4. **The exit status.** CLI codes are meaningful: `0` success, `1` I/O, `2` invalid input, `3` writer lock held, `4` blocked plan. `4` still prints on stdout, so read the body, not just the code.
+4. **The exit status.** CLI codes are meaningful: `0` success, `1` I/O, `2` invalid input, `3` writer lock held, `4` blocked plan. Plan `4` prints its body on stdout, so read the body and the code.
 
 Proof standards:
 

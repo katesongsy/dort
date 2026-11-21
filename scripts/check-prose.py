@@ -13,6 +13,7 @@ from maintained_docs import paths as maintained_paths
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = ('crates/dort-core/src', 'crates/dort/src')
+PROJECT_SKILLS = '.pi/skills'
 RULES = (
     ('scope-negation', re.compile(r'\bIt does not\b'), 'state the scope as what it covers'),
     ('not-just', re.compile(r'\bnot just\b', re.I), 'state the point'),
@@ -72,6 +73,11 @@ def check(root):
     for path in maintained_paths(root):
         if not path.exists():
             continue
+        relative = path.relative_to(root)
+        for number, text in markdown_prose(path):
+            for rule in scan(text):
+                found.append((str(relative), number, rule))
+    for path in sorted((root / PROJECT_SKILLS).rglob('*.md')):
         relative = path.relative_to(root)
         for number, text in markdown_prose(path):
             for rule in scan(text):

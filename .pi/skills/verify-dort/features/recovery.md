@@ -54,7 +54,7 @@ dort rollback <REPOSITORY_ID> <OPERATION_ID> --dry-run
 
 - **Changed state blocks rollback.** Editing the linked file or the manifest after the operation makes it refuse. That refusal is the correct behaviour to prove, not a bug.
 - **An unresolved record blocks new writes.** A blocked operation names its repository and action; open Recovery.
-- **`R` after a failed write only refreshes.** It does not retry the write; `h` (or `r`) opens Recovery.
+- **`R` after a failed write only refreshes.** Retry stays manual: `h` (or `r`) opens Recovery.
 - **Abandon keeps the repository and registration.** It is not a cleanup.
 - **`--dry-run` on every recovery verb** prints the diagnosis without changing anything. Use it first, and keep its output as evidence.
 - **Records are per state directory.** A run with its own `XDG_STATE_HOME` sees only its own history.

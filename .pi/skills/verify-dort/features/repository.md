@@ -1,6 +1,6 @@
 # Repository create and attach
 
-`dort init` creates a private staged Git repository at an absent path, or attaches an existing Git working tree that already has a valid `dort.toml`. It registers the repository and makes it the selected one. It does not clone or sync.
+`dort init` creates a private staged Git repository at an absent path, or attaches an existing Git working tree that already has a valid `dort.toml`. It registers the repository and makes it the selected one. Clone and sync stay manual.
 
 ## Sub-features
 

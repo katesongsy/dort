@@ -4,6 +4,7 @@
 Subcommands:
   build                 Build target/debug/dort once.
   doctor                Read-only check of the environment and last run.
+  smoke                 Build, then prove create, read and cleanup in one run.
   new NAME              Create an isolated HOME + repository for one run.
   env NAME              Print exports that put the current shell in that run.
   cli NAME -- ARGS...   Run the dort binary with ARGS inside that run.
@@ -252,6 +253,23 @@ def command_tui(args):
         print(frame)
 
 
+def command_smoke(_):
+    """Prove the disposable-HOME path end to end: build, create, read, clean up."""
+    command_build(None)
+    name = "smoke"
+    if run_dir(name).is_dir():
+        command_cleanup(argparse.Namespace(name=name, all=False))
+    command_new(argparse.Namespace(name=name))
+    for label, arguments in (("version", ["--version"]), ("doctor", ["doctor"])):
+        try:
+            command_cli(name, label, arguments)
+        except SystemExit as status:
+            if status.code:
+                fail(f"dort {label} exited {status.code}; inspect {evidence_dir(name)}")
+    command_cleanup(argparse.Namespace(name=name, all=False))
+    print("PASS disposable HOME: build, init, version, doctor, cleanup")
+
+
 def command_cleanup(args):
     names = ([p.name for p in STORE.glob("*") if p.is_dir()]
              if args.all else [args.name])
@@ -315,6 +333,7 @@ def main():
 
     sub.add_parser("build").set_defaults(handler=command_build)
     sub.add_parser("doctor").set_defaults(handler=command_doctor)
+    sub.add_parser("smoke").set_defaults(handler=command_smoke)
 
     new = sub.add_parser("new")
     new.add_argument("name")

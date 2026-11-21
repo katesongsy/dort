@@ -44,7 +44,7 @@ cp "$DORT_EVIDENCE/dort.toml.good" "$DORT_REPO/dort.toml"
 ## Observable end state
 
 - **Valid:** `Valid manifest: <path>` plus `Profiles:`, `Selected: N tools, M files`, exit `0`.
-- **Invalid:** a named problem and a nonzero exit. The message names the declaration, not just a line number.
+- **Invalid:** a named problem and a nonzero exit. The message names the declaration and its line number.
 - **Either way:** `Read-only structural check; live files and installed tools were not inspected.` A check that claims files are fine is over-reading it.
 
 ## Gotchas
