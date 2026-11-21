@@ -1,10 +1,10 @@
 # Manifest guide
 
-[User guide](README.md) · [Command reference](commands.md)
+An environment repository contains `dort.toml`. It describes files, tools and profiles.
 
-An environment directory contains a shared `dort.toml`. Keep machine-local variables/state outside that repository. Schema 1 is strict: unknown fields, duplicate resource IDs, invalid paths/profiles/dependencies and conflicting destinations are errors.
+`schema = 1` is the manifest format version. Unknown fields, duplicate IDs, invalid paths and broken references are errors.
 
-## Minimal file mapping
+## Files
 
 ```toml
 schema = 1
@@ -16,32 +16,23 @@ target = "~/.editorrc"
 mode = "link"
 ```
 
-Create the repository source yourself before previewing an apply. A manifest check does not read source files; a file plan does.
+- `id`: unique name for this mapping.
+- `source`: file inside the repository. No absolute paths, `..`, `.git` or `dort.toml`.
+- `target`: absolute path or `~/...` under your HOME. Dort config, state, the repository and overlapping targets are refused.
+- `mode`: `link`, `template` or `secret`. Only links can be deployed today. Templates and secrets are validated but blocked.
+- `profiles`: defaults to `["base"]`. An empty list is invalid.
+- `requires`: tool IDs this file needs. Missing or unverified prerequisites block the file plan.
+- `permissions`: links do not take one. Templates accept an octal mode; secrets require `"0600"`.
 
-- `id`: unique among file mappings. Tool IDs use a separate namespace.
-- `source`: repository-relative file path; no traversal, absolute paths or protected metadata such as `.git` or `dort.toml`.
-- `target`: absolute or `~/…`, expanded below the configured HOME. HOME itself, Dort configuration/state, the environment repository and overlapping ancestor/descendant destinations are forbidden.
-- `mode`: `link`, `template` or `secret`. **Only ordinary-file links can currently produce supported file-change previews.** Templates/secrets are validated declarations, but file plans block their execution.
-- `profiles`: defaults to `["base"]`; an explicit empty list is invalid.
-- `requires`: tool IDs required by this file. Dependencies are validated, but file plans block prerequisites because installed tools cannot yet be verified.
-- `overrides`: optional platform-specific repository source paths.
-- `permissions`: not allowed for links; templates accept an octal mode, and secrets require `"0600"`. These declarations do not enable deployment.
-
-For example, a source override:
+Use platform-specific sources when needed:
 
 ```toml
-[[files]]
-id = "shell"
-source = "files/shellrc"
-target = "~/.shellrc"
-mode = "link"
-
 [files.overrides]
 macos = "files/macos/shellrc"
 linux = "files/linux/shellrc"
 ```
 
-Both source variants must obey the same path restrictions. Foreign/broken links, symlinked source/parent paths, directories, hard links and special files cannot be adopted as ordinary files.
+Symlinks, directories, hard links and special files cannot be adopted as ordinary files.
 
 ## Profiles
 
@@ -55,22 +46,13 @@ macos = ["macos"]
 linux = ["linux"]
 ```
 
-`base` is built in and always selected. Other names must be declared in `available`. Effective profiles combine base, manifest defaults, platform profiles, local active profiles and repeatable command-line `--profile` selections.
+`base` is always active. Other names must appear in `available`.
 
-A resource with several profiles is selected if **any** is active, not only if all are active:
+Effective profiles combine base, manifest defaults, platform profiles, local choices and `--profile` flags. A resource is active if any of its profiles is active. Dependencies must also be active.
 
-```toml
-[[files]]
-id = "editor-dev"
-source = "files/editor-devrc"
-target = "~/.editor-devrc"
-mode = "link"
-profiles = ["dev", "macos"]
-```
+Tools use one install rule on every host. Only file overrides and profile selection use platform keys.
 
-A dependency must also be active; profiles cannot silently disable a required resource. Tools use one install specification across macOS, Linux and WSL; only file overrides and profile selection use platform keys. Command-line profiles affect only that invocation and do not save preferences.
-
-## Tool declarations
+## Tools
 
 ```toml
 [[tools]]
@@ -82,11 +64,39 @@ provider = "brew"
 package = "git"
 ```
 
-This declares intent only; the declaration itself does not inspect or install Git. Supported providers are `brew` and `npm`, on macOS, Linux and WSL. Homebrew accepts omitted or `latest` versions; npm accepts default/latest or exact semver metadata, while installation requires an exact version and a declared Node runtime. See the [example manifest](../../examples/dort.toml) for Homebrew and npm declarations.
+This only describes the tool. It does not check or install anything by itself. `provider` names the package manager.
 
-Tool `requires` must name declared tools, and dependency cycles are rejected. An npm install definition must explicitly name its runtime via `runtime_tool`; that runtime also becomes a dependency.
+Package managers:
 
-## Validate and inspect separately
+- `brew`: Homebrew. Version may be omitted or `latest`.
+- `npm`: npm. Version may be default/latest or exact. Installing needs an exact version and a declared runtime.
+
+npm runtime example:
+
+```toml
+[[tools]]
+id = "node"
+binary = "node"
+
+[tools.install]
+provider = "brew"
+package = "node"
+
+[[tools]]
+id = "formatter"
+binary = "formatter"
+requires = ["node"]
+
+[tools.install]
+provider = "npm"
+package = "prettier"
+version = "3.3.3"
+runtime_tool = "node"
+```
+
+`requires` must name declared tools, and cycles are refused. An npm install names its runtime with `runtime_tool`; that tool becomes a dependency.
+
+## Validate
 
 ```sh
 dort manifest check --manifest /absolute/path/to/dort.toml --profile dev
@@ -94,6 +104,8 @@ dort --repo /absolute/path/to/dotfiles files list --profile dev
 dort --repo /absolute/path/to/dotfiles files plan apply --profile dev
 ```
 
-`--manifest` belongs to `manifest check` and cannot be combined with global `--repo`. File commands use an environment directory, not an arbitrary manifest filename. A valid manifest can still produce blocked file plans because of unsafe/missing files or unsupported capabilities.
+`--manifest` works only with `manifest check`; do not combine it with `--repo`.
 
-For sensitive data, do not put plaintext secrets into an ordinary source, example or command line. Secret deployment is not available yet; exclusions are heuristics, not a guarantee.
+A valid manifest can still produce a blocked plan. Check the reported reason.
+
+Do not put plaintext secrets in the repository or on the command line. Secret deployment is not available yet.

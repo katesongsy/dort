@@ -1,36 +1,31 @@
 # Dort user guide
 
-Dort helps describe a development environment in a Git repository. The experimental CLI supports local initialization, regular-file adoption/link deployment, unmanage and guarded recovery after explicit approval. The interactive interface provides searchable Actions/help, guided create/attach, session repository/profiles, Files discovery/adoption/apply/unmanage, Checks/Diagnostics, all-repository Recovery and read-only Git over the same services. **Start with a disposable HOME**, not real dotfiles. Tool execution, templates, secrets and remote Git workflows are not implemented.
+Dort keeps your development environment in a Git repository: dotfiles, profiles and the tools you expect. It works on macOS, Linux and WSL.
+
+Dort is experimental. Start with a disposable HOME. Do not point it at real dotfiles until you understand the workflows.
 
 ## Start here
 
-1. [Getting started](getting-started.md): build Dort and follow a TUI-only walkthrough in a disposable HOME.
+1. [Getting started](getting-started.md): install Dort and try a complete workflow in a temporary HOME.
 2. [Manifest guide](manifest.md): describe files, tools and profiles in `dort.toml`.
-3. [Command reference](commands.md): available commands, output and exit codes.
-4. [Safety and troubleshooting](safety.md): understand blockers, sensitive data and recovery diagnostics.
+3. [Command reference](commands.md): keys, commands, output and exit codes.
+4. [Safety and troubleshooting](safety.md): approvals, recovery, common blockers and state locations.
 
-## What works today?
+## What works
 
-| Task | Available? |
+| Task | Use |
 | --- | --- |
-| Validate a manifest and resolve profiles/dependencies | Yes: `manifest check`. |
-| Discover hidden configuration metadata | Yes: `files discover`. |
-| Inspect declared active files | Yes: `files list`. |
-| Preview links, adoption and unmanage effects | Yes: `files plan …`; no changes are made. |
-| Inspect Git status/diff | Yes: metadata-only `git status` / `git diff`; explicit `--patch` discloses bounded escaped content. |
-| Inspect retained transaction history/integrity | Yes: `history` / `recovery list`, all supported journal formats, no replay. |
-| Create/attach a local repository | Experimental: interactive Actions → Create/attach, or `init PATH`. |
-| Adopt/deploy/unmanage regular-file links | Experimental: `files add`, `files apply`, `files remove`. |
-| Guarded rollback / bootstrap recovery | Experimental: `rollback`, `recovery resume` / `abandon`. |
-| Inspect installed packages and seed a declaration | Tools → Installed tools or `tools inspect`; [explicit query approval](commands.md#installed-tool-discovery), one current result and no ownership inference. |
-| Check declared tools | Tools **Check installed** (`C`) or `tools check`; [derived scopes and per-tool status](commands.md#declared-tool-workflow). |
-| Review exact query/install effects | Human-readable reviews show programs, arguments, destinations and risks before approval. |
-| Install missing supported packages | Tools **Install missing** (`i`) or `tools install-missing`; [exact npm and provider-current Homebrew](commands.md#installation-safety), serial stop-on-failure, durable attempts and no rollback. |
-| Add, edit or remove desired declarations | Tools `a` / `e` / `d`, or CLI `tools declare` / `edit` / `remove`; manifest-only changes with guarded recovery. |
-| General package upgrades, runtime configuration or Git staging/commit/push | Not yet. |
-| Interactive onboarding, Files, profiles/checks/diagnostics, Recovery, Tools and read-only Git | Experimental: terminal `dort` or `dort tui`; [keys and limitations](commands.md#interactive-interface). |
-| Templates, secrets or Git clone/sync | Not yet. |
+| Validate a manifest | `manifest check`, Checks in the TUI |
+| Discover and manage dotfiles | `files discover`, `list`, `plan`, `add`, `apply`, `remove` |
+| Create or attach a local repository | `init PATH`, Create/attach |
+| Inspect Git status and diff | `git status`, `git diff`; patches need explicit disclosure |
+| Check installed tools | Tools **Check installed** (`C`), `tools check` |
+| Install missing Homebrew or npm tools | Tools **Install missing** (`i`), `tools install-missing` |
+| Browse installed packages | Tools **Installed** (`2`), `tools inspect` |
+| Inspect install history and close old records | Tools **History** (`3`), `tools attempts`, `tools close-attempt` |
+| Add, edit or remove declarations | Tools `a` / `e` / `d`, `tools declare` / `edit` / `remove` |
+| Inspect or recover interrupted writes | `history`, `recovery list`, Recovery |
 
-Use `--dry-run` to inspect effects without writes, locks or prompts. Provider inspection needs an explicit Run query action, CLI `y/N` confirmation or `--yes`. Writes require terminal confirmation or `--yes`; JSON/nonterminal writes always need `--yes`. Deletion confirmation identifies the exact selected mapping; no typing challenge is required. These sandbox-tested prototypes are not a production deployment guarantee.
+Not implemented: templates, secrets, Git clone/sync, staging/commit/push, and general package upgrades.
 
-See the [project overview](../../README.md) and [release history](../../CHANGLOG.md) for more information.
+Every write needs a preview and confirmation. `--dry-run` previews without writing. Run `dort --help` for command syntax.

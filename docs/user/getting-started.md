@@ -2,172 +2,135 @@
 
 [User guide](README.md) · [Command reference](commands.md)
 
-## Installation
+Dort runs on macOS, Linux and WSL. It needs a trusted Git executable on PATH for repository and Git workflows.
 
-Supported hosts are **macOS, Linux or WSL**, on Intel/x86_64 or ARM64. Prebuilt Linux archives retain the minimum glibc requirement below; source builds use the host's native libraries. Local init/attach and Git inspection additionally need an installed trusted Git executable in an absolute PATH directory. Initialization and Git inspection do not install Git for you.
+## Installation
 
 ### Homebrew
 
-The third-party [Dort tap](https://github.com/katesongsy/homebrew-tap) installs the verified native release for macOS 15+ or Ubuntu 24.04+ (glibc 2.39+), on Intel/x86_64 or ARM64. Rust is not required:
+The [Dort tap](https://github.com/katesongsy/homebrew-tap) installs a verified release:
 
 ```sh
 brew install katesongsy/tap/dort
 ```
 
-To use the short name, tap once first:
-
-```sh
-brew tap katesongsy/tap
-brew install dort
-```
-
-Dort is not in Homebrew Core, so a fresh Homebrew installation needs the qualified command or the one-time tap. The formula retains the release's license, dependency/Rust notices and build provenance.
+This supports macOS 15+ and Ubuntu 24.04+ (glibc 2.39+).
 
 ### Mise
 
-With [mise](https://mise.jdx.dev/getting-started.html) installed, use its built-in GitHub backend:
+Mise can install the pinned GitHub release:
 
 ```sh
 mise use --global github:katesongsy/dort@0.1.0
 mise exec github:katesongsy/dort@0.1.0 -- dort --version
 ```
 
-This records the pinned tool in mise's global configuration and installs the matching native archive. The same macOS 15+/Ubuntu 24.04+ and CPU requirements apply; Rust is not needed. Configure mise's PATH/shims to run `dort` directly, or use `mise exec`. No third-party plugin or `dort` short-name registry entry is required. Neither installation method approves any dotfile operation.
+Configure mise's PATH/shims, or use `mise exec` each time.
 
 ### Prebuilt archives
 
-Download an archive and `SHA256SUMS` from [GitHub Releases](https://github.com/katesongsy/dort/releases). Rust is not needed to run these binaries.
+Download the archive for your host from [GitHub Releases](https://github.com/katesongsy/dort/releases):
 
-| Host | v0.1.0 archive |
+| Host | Archive |
 | --- | --- |
-| macOS 15+, Apple Silicon | `dort-v0.1.0-aarch64-apple-darwin.tar.gz` |
-| macOS 15+, Intel | `dort-v0.1.0-x86_64-apple-darwin.tar.gz` |
-| Ubuntu 24.04+, ARM64 | `dort-v0.1.0-aarch64-unknown-linux-gnu.tar.gz` |
-| Ubuntu 24.04+, x86_64 | `dort-v0.1.0-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS, Apple Silicon | `dort-v0.1.0-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `dort-v0.1.0-x86_64-apple-darwin.tar.gz` |
+| Linux, ARM64 | `dort-v0.1.0-aarch64-unknown-linux-gnu.tar.gz` |
+| Linux, x86_64 | `dort-v0.1.0-x86_64-unknown-linux-gnu.tar.gz` |
 
-Linux binaries require glibc 2.39 or newer. Choose your archive, then verify its matching checksum before extracting. For example, on Apple Silicon macOS:
-
-```sh
-archive=dort-v0.1.0-aarch64-apple-darwin.tar.gz
-curl -fLO "https://github.com/katesongsy/dort/releases/download/v0.1.0/$archive"
-curl -fLO https://github.com/katesongsy/dort/releases/download/v0.1.0/SHA256SUMS
-awk -v file="$archive" '$2 == file' SHA256SUMS > selected.sha256
-test -s selected.sha256 && shasum -a256 -c selected.sha256
-# On Ubuntu, use: sha256sum -c selected.sha256
-# Continue only when the selected checksum reports OK.
-mkdir dort-v0.1.0 && tar -xzf "$archive" -C dort-v0.1.0
-./dort-v0.1.0/dort --version
-```
-
-Use an empty download directory, not an existing configuration repository. Archives contain `dort`, the MIT `LICENSE`, dependency notices (`THIRD-PARTY-NOTICES.txt`), Rust standard-library notices (`RUST-COPYRIGHT.html`) and `BUILD-INFO.json` (version, target, commit, Rust toolchain and minimum runtime). Checksums detect corruption; they are not an independent publisher signature. Use the binary's absolute path, or place it in a directory you already manage on PATH. Dort has no installer and does not bypass operating-system download/security prompts; do not disable platform protections to run it.
-
-### Install with Cargo
-
-The [`dort`](https://crates.io/crates/dort) executable and [`dort-core`](https://crates.io/crates/dort-core) library are published as source packages. Install the executable with Rust **1.99.1** active:
+Verify the checksum before extracting:
 
 ```sh
-cargo install dort --version 0.1.0 --locked
-dort --version
+shasum -a 256 -c selected.sha256
+# Linux:
+sha256sum -c selected.sha256
 ```
 
-With rustup, use `cargo +1.99.1 install dort --version 0.1.0 --locked` to select the pinned toolchain explicitly. Cargo builds from source and installs into its configured binary directory, which must be on PATH. This does not initialize a Dort repository or manage any files.
+Use an empty download directory, not an environment repository. Archives contain `dort`, the license, notices and build info.
 
-### Build from source
+### Cargo or source
 
-You need pinned **Rust 1.99.1**; Cargo/rustup may download dependencies/toolchain components. From the Dort checkout:
+Cargo builds need Rust 1.99.1:
 
 ```sh
-cargo build --release --workspace --locked
-./target/release/dort --version
+cargo install dort --locked
 ```
 
-Elsewhere, `dort` means your chosen executable; use its absolute path if necessary. Run `dort` or `dort tui` with terminal stdin/stdout/stderr for the interactive interface. Use at least 48×14; 80×24 or larger gives more room for reports.
-
-## Start in a disposable HOME
-
-Dort is experimental. Try this walkthrough before using your own configuration, and read the [safety guide](safety.md). Keep one shell session. The example below uses a source build from the Dort checkout; for a prebuilt archive, set `dort_bin` to the extracted binary's absolute path instead:
+From a checkout:
 
 ```sh
-dort_bin="$(pwd -P)/target/release/dort"
-demo="$(mktemp -d)"
-# Resolve macOS /var aliases: no-follow access requires physical paths.
-demo="$(cd "$demo" && pwd -P)"
-mkdir -p "$demo/home"
-printf 'notes-format plain\n' > "$demo/home/.notesrc"
-
-demo_dort() {
-    HOME="$demo/home" \
-    XDG_CONFIG_HOME="$demo/home/.config" \
-    XDG_STATE_HOME="$demo/home/.local/state" \
-    "$dort_bin" "$@"
-}
-
-# Keep this path for the Create/attach form below.
-printf 'Demo repository path: %s/dotfiles\n' "$demo"
-demo_dort
+cargo build --workspace --locked
+target/debug/dort --version
 ```
 
-Only this child command uses the demo HOME/XDG paths; your shell's HOME is unchanged. The demo repository destination must be **absent**, with its parent already present. Keep the demo on one filesystem: repository, HOME and state must support the same-filesystem atomic-rename operations. Do not use `sudo`.
+## Try it in a disposable HOME
 
-### Find your way around
-
-Welcome shows the next steps. Ctrl-K opens the global **Actions** launcher with search focused; type a label, use Up/Down to choose and Enter to request it. Actions searches supported tasks and destinations. The bottom strip shows up to eight relevant actions; F2 **More** appears when additional actions do not fit. Click **Menu** or press Ctrl-G to see sections and their destinations at any width: Files → Managed / Discover / Ignored paths, Checks → Manifest checks / Diagnostics, and Git → Status / Unstaged / Staged. In Menu, Up/Down selects a section, Left/Right a local destination and Enter opens it; Esc or Ctrl-G returns without navigating. Stable section pages also show clickable numbered local destinations with the current one marked. Outside text entry, 1/2/3 opens the numbered destination in the current section (Tools also has 4); in Menu the numbers apply to its selected section. Digits remain text in fields and filters. Outside text entry, plain o/f/t/r/c/g opens Overview/Files/Tools/Recovery/Checks/Git directly. Menu and the wide rail use this order, with Session last in Menu. Workflow shortcuts use contextual uppercase O/F/T/R/C for adoption/discovery/profiles/refresh/inspection; P chooses Git scope, and Home selects the first Files row. Fields and filters retain all letters literally. The shortcuts are labeled in Menu and the wide navigation rail. Local More opens Menu when labels do not fit. The current subview stays visible; switch views for their workflows. Letter shortcuts below are optional accelerators. F1 opens contextual Help anywhere; `?` does so outside text. Esc returns to the retained draft/screen/focus with the draft intact. Discover offers **Ignore selected** (`I`) in the action strip or More; Files → **Ignored paths** (`U` in Discover) is in the menu; both preference changes require review and a Confirm action. Tab/Shift-Tab moves among form controls only. F3 opens full metadata where offered; Ctrl-N opens Create/attach. Enter requests the primary action from any field or choice row; footer actions are direct clicks/shortcuts, not focus stops. Workflow forms/reviews/results are pages with Back and available menus; short choices, Actions, Help/About and final gates are dimmed dialogs. Dialogs and running work explain paused navigation; outside clicks do not dismiss dialogs. Fields show a caret while choices do not. Enter opens full inspection at every width; Esc returns from the reader to the list. Outside Menu, Left/Right does not change destinations. One bottom strip owns the foreground's contextual actions; the top row holds the location and Menu.
-
-PgUp/PgDn scroll reports; Home returns to the start. File reviews use Up/Down to select a mapping and `i` to toggle the complete report. In that full report, Left/Right scrolls long lines; Home resets both axes. Esc returns without writing: preview → retained form → parent page. In text fields/search, printable `q`, `?` and `/` are text, Backspace edits and Ctrl-U clears the current field. Outside text entry, `q` exits; Ctrl-C exits anywhere, waiting for an active worker.
-
-### 1. Create a local repository
-
-1. Open Actions → **Create/attach local repository** (`n`). Enter the physical demo repository path printed above, for example `/private/tmp/your-demo/dotfiles`. Do not enter the literal `$demo`, `~`, or an existing empty directory: the form does not expand shell variables/tilde.
-2. Enter requests **Review read-only preview** directly from the path field. Inspect its resolved paths and effects, scrolling as needed. Esc returns to the retained path without creating anything; Enter requests a fresh preview again.
-3. When the preview is intended and unblocked, activate **Confirm changes** with Enter or a click on the preview. Wait for observations to refresh before choosing another action.
-
-Approved creation publishes a minimal local Git repository and `dort.toml`, registers/selects it and shows the result in Overview. It does not clone, stage or commit. Missing Git is a prerequisite error: install trusted Git separately and restart Dort; other read-only workflows remain available. A preview alone never authorizes execution.
-
-For inspection-only sessions, use `demo_dort --dry-run tui` instead. This disables all write approvals, including creation/adoption; read-only discovery/checks remain available, but automatic Discover file-content previews are withheld. The remaining write steps require a normal session **only inside this disposable demo**.
-
-### 2. Discover and adopt the demo file
-
-1. Open Actions → **Discover files** (`F`). This scans bounded metadata and automatically previews only the selected eligible regular file, with sensitive/binary/oversized content withheld. Directories and other ineligible rows are labeled and cannot open a candidate adoption draft. Find the `.notesrc` regular-file row with **Eligible hint** in its ADOPTION column with Up/Down or `/notesrc`; Esc leaves search while retaining the display filter.
-2. Enter inspects the candidate without starting adoption (optional). Press `e` or click **Adopt selected** to open the editable draft as a separate action. Set TARGET to `~/.notesrc`, ID to `notes`, and SOURCE to `files/notesrc`. Tab enters the first field; Esc stops editing and Esc again goes back. Tab/Shift-Tab moves between fields only; Enter requests the primary review from any field. The suggested ID/source may differ, so edit them explicitly for this walkthrough.
-3. On **Review read-only preview**, Enter requests the actual preview. Review source-copy, manifest, destination-link and backup effects. PgDn scrolls selected effects; F3 opens the full report, including permissions and warnings. Esc retains the draft without writing. To execute adoption, activate **Adopt all** with Enter or a click from the unblocked preview; no typed yes is needed. Dort returns to refreshed Discover, retaining receipt details.
-
-The demo `.notesrc` becomes a link to its copied repository source, with a new base-profile mapping. Discovery eligibility is not approval or proof that content is safe: privately review any real file before adoption. Only Discover's ephemeral selected-file preview displays ordinary content; reports, receipts and history stay content-free. Unsupported kinds, sensitive paths/content and unsafe parents are refused by core checks.
-
-### 3. Inspect files, checks and Git
-
-- Open Files → **Managed** from the menu. Delete clears the display filter; select `notes`, then Enter for full metadata. Compact layouts use Esc to return to the list; wide layouts show list/details together.
-- **Preview apply** (`a`) covers the entire active-profile scope, not the filtered list. After adoption the correct link is a successful no-op: approving it creates no new transaction. Esc can dismiss any preview without executing.
-- **Check current repository manifest** (`C`) checks declarations, not live files or installed tools. **Profiles: temporary repository additions** (`T`) adds session-only profiles without removing base/default/platform/local contributors.
-- Open Git → **Status** for metadata. Untracked files appear in Status, not tracked diffs. Unstaged/Staged summaries are metadata-only; Dort exposes no staging/commit/push. You do not need to view a patch for this walkthrough. **View patch content** is a separate secrets warning and View patch action; patches may disclose secrets.
-- Checks → **Diagnostics** (`j`) shows host, registry and global journal blockers. About/version is in the Session menu. These do not repair state or inspect live tools.
-
-### 4. Keep the file and inspect history
-
-1. In managed Files, select `notes`. Choose **Keep local file** (`u`), also available in Actions. Review the preview, then activate **Confirm changes** with Enter. Wait for observations to refresh.
-2. Keep removes the mapping and materializes an ordinary `.notesrc`; `files/notesrc` remains in the repository. The alternative **Delete managed link** shows the exact selected mapping for confirmation and deletes only its correct link. Do not try that alternative after Keep: its mapping/link is already gone.
-3. Open Recovery → **All repositories**. Search transaction metadata, select a row and Enter for full IDs, phase, integrity and action hints. The global blocker count is never filtered away. Completed history is not proof that rollback is still safe.
-4. For the latest schema-2 Keep transaction, **Preview rollback** (`b`) requests a fresh guarded preview. Inspect its inverse effects; Esc returns without executing. Only if you intend to restore the managed link/mapping, obtain the preview again and activate **Confirm changes** with Enter. Later edits/transactions can invalidate guards; a refusal must not be bypassed. Schema-1 adoption rollback instead withdraws its newly published source into retained private transaction storage.
-
-On any failed write, stop and inspect Recovery: partial effects may remain. Error `h` opens independent all-repository Recovery. Error `R` retries a read/fresh preview, or only refreshes after a failed write; it never replays approval. There is no automatic undo or repair. See [explicit recovery](commands.md#explicit-recovery).
-
-Exit with `q` outside text entry or Ctrl-C. The demo remains for inspection; remove **only that demo directory** yourself when finished. Backups/private transaction artifacts are retained, not garbage-collected.
-
-## Use an existing environment repository
-
-Launch `dort`, then Actions → **Choose repository (session only)** (`p`). Select a known root or enter an exact physical directory containing `dort.toml`; selection does not register it or save configuration. To enable writes, use **Create/attach** with that exact existing non-bare Git working-tree root and approve its attachment preview. Arbitrary empty directories are refused. Relative form paths resolve from Dort's launch directory; no upward repository search or clone operation occurs.
-
-**Check standalone manifest** (`v`) works without a selected repository, registration or Git. Enter an exact manifest path, then activate Check. A successful check validates declarations, not live files or installed tools. Checks do not deploy templates/secrets or inspect/install tools; use the separate Tools workflows for inventories and supported Homebrew/npm installs. Separate [Installed tools](commands.md#installed-tool-discovery) reports provider claims only after explicit approval; it does not verify declared binaries or install anything. To add an observed package to your repository, select it and choose **Add declaration** (`a`), then fill in the tool ID and command and review the declaration before confirming.
-
-## Optional CLI and automation
-
-All supported local workflows also have explicit CLI commands. See the [command reference](commands.md) for flags, JSON, profile additions and recovery:
+Use a temporary HOME. Do not point Dort at real dotfiles yet.
 
 ```sh
-demo_dort doctor
-demo_dort files list
-demo_dort --json recovery list
-# Preview only; no writes, locks or prompts.
-demo_dort files apply --dry-run
+tmp=$(mktemp -d /tmp/dort-demo.XXXXXX)
+mkdir -p "$tmp/home"
+export HOME="$tmp/home"
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_STATE_HOME="$HOME/.local/state"
+cd "$tmp"
+dort init repo
 ```
 
-Quote `'~/.notesrc'` in CLI arguments so Dort expands it against the configured HOME. JSON/nonterminal writes require `--yes` and never prompt; `--yes` does not bypass safety validation or separate deletion acknowledgement. Do not share reports blindly. Only explicit patch disclosure reveals bounded escaped file content, potentially secrets; read the [Git boundary](safety.md#git-inspection-boundary) first.
+Add a demo file to the repository:
+
+```sh
+printf 'hello\n' > repo/demo
+```
+
+Open the workbench:
+
+```sh
+dort
+```
+
+Use Menu (`Ctrl-G`) to move between destinations. `F1` opens Help. `q` quits.
+
+1. Open **Files**. Choose **Discover**, select the repository file and adopt it with a preview.
+2. Open the file's details and review **Apply**. Confirm once.
+3. Inspect **Status** and **History**. Keep or delete the link when finished.
+4. Open **Checks** to validate the manifest.
+
+The same steps work from the CLI:
+
+```sh
+dort --repo "$tmp/repo" files discover
+dort --repo "$tmp/repo" files plan apply
+dort --repo "$tmp/repo" files apply
+dort --repo "$tmp/repo" manifest check
+```
+
+`--dry-run` previews without writing. `--yes` approves noninteractive writes.
+
+Remove only the demo directory when finished:
+
+```sh
+rm -rf "$tmp"
+```
+
+## Use an existing repository
+
+`dort init` accepts an absent path, or an existing Git working tree with a valid `dort.toml`. It registers the repository; it does not clone or sync.
+
+To select another registered repository for one command, use `--repo`.
+
+## Tools
+
+Tools → **1 Declared** lists tools from the manifest. **Check installed** asks before running package managers. **Install missing** reviews one exact set and runs it serially.
+
+Tools → **2 Installed** shows the current package inventory. You can turn a package into a declaration.
+
+Tools → **3 History** shows install records, including failures. Open a record to inspect it or close an unresolved one.
+
+The CLI equivalents are `tools check`, `tools install-missing`, `tools inspect` and `tools attempts`. See the [command reference](commands.md#tools).
+
+## Next steps
+
+- Read the [manifest guide](manifest.md).
+- Read [safety](safety.md) before using real files or package managers.
+- Use `--dry-run` and review every preview.
