@@ -78,7 +78,7 @@ Open the workbench:
 dort
 ```
 
-Use Menu (`Ctrl-G`) to move between destinations. `F1` opens Help. `q` quits.
+Use `o`/`f`/`t`/`r`/`c`/`g` to move between destinations. `F1` opens Help. `q` quits.
 
 1. Open **Files**. Choose **Discover**, select the repository file and adopt it with a preview.
 2. Open the file's details and review **Apply**. Confirm once.

@@ -227,28 +227,31 @@ class Session:
 
     def navigate(self, group, item):
         self.settle()
-        self.send(b'\x07')  # Ctrl-G opens the same Menu as the mouse control.
-        self.wait(b'Left/Right destination')
-        self.settle()
-        groups = ['Overview', 'Files', 'Tools', 'Recovery', 'Checks', 'Git', 'Session']
-        destinations = {
-            'Session': ['Choose repository', 'Create/attach', 'Preview-only mode', 'Help', 'About', 'Quit'],
-            'Overview': ['Overview'],
-            'Files': ['Managed', 'Discover', 'Ignored paths'],
-            'Recovery': ['All repositories'],
-            'Checks': ['Manifest checks', 'Diagnostics'],
-            'Git': ['Status', 'Unstaged', 'Staged', 'Choose Git scope', 'Follow selected repository'],
-            'Tools': ['Declared tools', 'Installed packages', 'Installation history'],
+        if self.screen.cursor_visible:
+            self.send(b'\x1b')  # Leave field editing; the draft stays.
+            self.settle()
+        label = item.split(' [')[0]
+        if group == 'Session':
+            self.more_action('About Dort' if label == 'About' else label)
+            return
+        sections = {'Overview': b'o', 'Files': b'f', 'Tools': b't',
+                    'Recovery': b'r', 'Checks': b'c', 'Git': b'g'}
+        pages = {
+            'Files': {'Managed': b'1', 'Discover': b'2', 'Ignored paths': b'3'},
+            'Checks': {'Manifest checks': b'1', 'Diagnostics': b'2'},
+            'Git': {'Status': b'1', 'Unstaged': b'2', 'Staged': b'3'},
+            'Tools': {'Declared tools': b'1', 'Installed packages': b'2',
+                      'Installation history': b'3'},
         }
-        rows, columns = len(self.screen.cells), len(self.screen.cells[0])
-        modal_width, modal_height = min(columns - 2, 72), min(rows - 3, 16)
-        x, y = (columns - modal_width) // 2 + 1, (rows - 1 - modal_height) // 2 + 1
-        self.mouse(0, x + 2, y + 1 + groups.index(group))  # Section selection never dispatches.
+        self.send(sections[group])  # Section keys open the section's first page.
         self.settle()
-        index = destinations[group].index(item.split(' [')[0])
-        self.send(b'\x1b[C' * index)
-        self.settle()
-        self.send(b'\r')
+        if group == 'Git' and label == 'Choose Git scope':
+            self.send(b'P')  # Advertised Git scope key; opens its own root draft.
+            self.settle()
+            return
+        page = pages.get(group, {}).get(label)
+        if page:
+            self.send(page)
         self.settle()
 
     def destination(self, group):
@@ -267,8 +270,7 @@ class Session:
         if label in footer:
             self.click_action(label)
             return
-        assert 'F2 More' in footer, 'Neither direct action nor More is visible: ' + label
-        self.send(b'\x1bOQ')
+        self.send(b'\x1bOQ')  # F2 always opens More.
         self.wait(b'More actions')
         self.send(b'\x1b[H')
         for _ in range(40):
@@ -362,7 +364,7 @@ def run():
         # Text carries navigation/state meaning even with a low-color terminal.
         with Session([binary, "--dry-run", "tui"], dict(env, TERM="vt100", NO_COLOR="1"), (14, 48)) as session:
             session.wait(b"loaded.")
-            for label in [b"Ctrl-G Menu", b"Overview", b"DRY RUN", b"Create or attach", b"F2 More", b"F1 Help"]:
+            for label in [b"Overview", b"DRY RUN", b"Create or attach", b"F2 More", b"F1 Help"]:
                 session.wait(label)
             session.send(b"?")
             session.wait(b"Start with a repository")
@@ -380,45 +382,30 @@ def run():
         assert not list(home.iterdir()), "Compact navigation/help created state"
         print("PASS compact low-color navigation and Home help reset without state")
 
-        for menu_size in [(14, 48), (24, 80), (40, 140)]:
-            with Session([binary, 'tui'], env, menu_size) as session:
+        for nav_size in [(14, 48), (24, 80), (40, 140)]:
+            with Session([binary, 'tui'], env, nav_size) as session:
                 session.wait(b'loaded.')
-                session.send(b'\x1b[21~')  # F10 no longer opens Menu.
-                session.settle(); assert b'Left/Right destination' not in session.screen.text()
-                session.click_label('Ctrl-G Menu')
-                session.wait(b'Left/Right destination')
-                session.settle(); assert b'Keys in this context' not in session.screen.text()
-                session.send(b'\x1b[B\x1b[C')  # Overview -> Files section -> Discover; no dispatch yet.
-                session.wait(b'Discover')
-                session.settle()
-                session.send(b'\x1bOP')
-                session.wait(b'Up/Down selects a section')
-                session.send(b'\r')  # Help cannot select the retained menu entry
-                session.settle()
-                session.send(b'\x1b')
-                session.settle(); assert b'Keys in this context' not in session.screen.text()
-                session.send(b'\r')
-                session.wait(b'0 / 0 shown')
-                session.wait(b'Files / Discover')
-                session.send(b'1')
+                session.send(b'f')
                 session.wait(b'Files / Managed')
                 session.send(b'2')
                 session.wait(b'Files / Discover')
+                session.send(b'1')
+                session.wait(b'Files / Managed')
                 session.send(b'9')  # No ninth local destination exists in Files.
                 session.settle()
-                assert b'Files / Discover' in session.screen.text(), 'An unassigned local number changed destination'
-                session.click_label('Managed', min_row=1)  # Persistent local destinations are direct mouse targets.
-                session.wait(b"Files / Managed")
-                session.click_label('Ctrl-G Menu')
-                session.wait(b'Left/Right destination')
-                session.send(b"\x1b[B\x1b[B\x1b[B\x1b[C")  # Files -> Tools -> Recovery -> Checks -> Diagnostics.
-                session.wait(b"Diagnostics")
-                session.send(b"\r")
-                session.wait(b"Checks / Diagnostics")
+                assert b'Files / Managed' in session.screen.text(), 'An unassigned local number changed destination'
+                session.send(b't')
+                session.wait(b'Tools / Declared tools')
+                session.send(b'c')
+                session.wait(b'Checks / Manifest')
+                session.send(b'2')
+                session.wait(b'Checks / Diagnostics')
+                session.send(b'o')
+                session.wait(b'Dort / Overview')
                 session.send(b'q')
                 session.finish()
-        assert not list(home.iterdir()), 'Menu navigation created local state'
-        print('PASS keyboard dropdown navigation, contextual menu Help and consolidated hints at all sizes')
+        assert not list(home.iterdir()), 'Section navigation created local state'
+        print('PASS section keys and numbered local destinations at all sizes')
 
         # Capability detection uses only each child's environment; ASCII and color
         # are independent. These are VT fixture checks, not physical theme review.
@@ -441,10 +428,10 @@ def run():
                 session.send(b"\tq")
                 session.settle()
                 session.focused_field('ID')
-                session.send(b'\x07')
-                session.wait(b'Left/Right destination')
+                session.send(b'\x1bOP')  # Help opens without disturbing the retained draft.
+                session.wait(b'Keys in this context')
                 session.settle()
-                assert not session.screen.cursor_visible, 'Menu retained the background field caret'
+                assert not session.screen.cursor_visible, 'Help retained the background field caret'
                 assert session.screen.text().isascii() == ascii_only, "Unexpected decoration capability"
                 assert session.data.isascii() == ascii_only, "Unexpected output encoding"
                 assert has_color_sgr(session.data) != monochrome, "Unexpected color capability"
@@ -527,7 +514,6 @@ def run():
             session.wait(b'loaded.')
             session.send(b'F')
             session.wait(b'Filter files')
-            session.wait(b'Ctrl-G Menu')
             session.more_action('Ignore selected')
             session.wait(b'Ignore discovery path')
             assert not ignore_store.exists(), 'Ignore preview wrote preferences'
@@ -689,60 +675,15 @@ def run():
 
         with Session([binary, "tui"], env, size=(14, 48)) as session:
             session.wait(b"loaded.")
-            session.send(b";")
-            session.wait(b"Find an action")
-            session.send(b"q?/")
-            session.wait(b"No matching actions")
-            session.send(b"\x15rollback\r")
-            session.wait(b"No matching actions")  # other-view commands stay in their view
-            session.send(b"\x1bOP")  # F1 works even in Actions search
-            session.wait(b"Find a task by name.")
-            session.send(b"\r")  # Help never dispatches
-            session.send(b"\x1b")
-            session.wait(b"rollback")  # exact query retained
-            session.send(b"\x1b")  # leave search
-            session.settle()
-            session.send(b"\x1b")  # close
-            session.settle()
-            session.destination("Recovery")
-            session.send(b";rollback\r")  # disabled Enter in its relevant view
-            session.wait(b"x Preview rollback")
-            session.send(b"\x1bOR")  # Full metadata/reasons are an explicit dialog subview.
-            session.wait(b"Action details")
-            session.send(b"\x1b[6~")
-            session.settle()
-            assert b"Action details" in session.screen.text(), "Paging replaced the metadata subview"
-            reached = False
-            for _ in range(30):
-                if b"operation." in session.screen.text(): # final wrapped reason row
-                    reached = True
-                    break
-                session.send(b"\x1b[6~")
-                session.settle()
-            assert reached, "Compact Actions prerequisites were not keyboard reachable"
-            session.send(b"\x1b[H")
-            session.wait(b"Action details")
-            session.send(b"\x1b")  # metadata -> choices
-            session.settle()
-            session.send(b"\x1b")  # close, restoring Recovery
-            session.settle()
-            session.destination("Checks")
-            session.send(b";")
-            session.wait(b"Check current")  # current-view actions, not flat navigation first
-            session.send(b"about\r")
-            session.wait(b"No matching actions")  # session commands moved out of Actions
-            session.send(b"\x1b")
-            session.settle()
-            session.send(b"\x1b")
-            session.settle()
-            session.navigate("Session", "About")
+            session.more_action("About Dort")
             session.wait(b"About")
+            session.wait(b"Local repository create/attach")
             session.send(b"\x1b")
             session.settle()
             session.send(b"q")
             session.finish()
-        assert not list(home.iterdir()), "Browsing Actions or refusing an action created state"
-        print("PASS compact search-first contextual Actions and full disabled reasons without dispatch")
+        assert not list(home.iterdir()), "Session actions created state"
+        print("PASS session actions from More without dispatch")
 
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
@@ -926,19 +867,8 @@ def run():
             session.send(b"\x1b[3~u")  # clear display filter; unstaged summary
             session.wait(b"Unstaged (worktree vs index)")
             session.wait(b"1 entries")
-            session.send(b";View patch content")
-            session.wait(b"Find an action")
-            session.wait(b"Action details")
-            session.send(b"\x1b[6~")
             session.settle()
-            assert b"SCOPE" in session.screen.text(), "Paging replaced Actions controls"
-            session.send(b"\x1b[H")
-            session.wait(b"SCOPE")
-            session.send(b"\x1b")
-            session.settle()
-            session.send(b"\x1b")
-            session.wait(b"1 entries")
-            assert not (base / "patch-calls").exists(), "Summary/Actions browsing prefetched a patch"
+            assert not (base / "patch-calls").exists(), "Summary browsing prefetched a patch"
             assert b"PRIVATE-PATCH" not in session.data
             session.send(b"w")
             session.wait(b"May expose secrets")
@@ -1213,7 +1143,7 @@ def run():
             session.send(b"\r")
             session.wait(b"Operation result")
             assert not target.exists() and not target.is_symlink()
-            # Return from the retained receipt before opening navigation menus.
+            # Return from the retained receipt before navigating.
             session.click_action('Back')
             # A new action needs a new actual preview and confirmation.
             session.destination("Overview")
@@ -1331,7 +1261,7 @@ def run():
             session.destination("Files")
             session.send(b"/notconfig\x1b")
             session.settle()
-            session.send(b";delete managed link: enter\r")
+            session.more_action('Delete managed link: enter exact mapping ID')
             session.edit_fields('Exact ID')
             session.send(b"config\r")
             session.wait(b"Enter Confirm")

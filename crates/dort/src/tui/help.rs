@@ -18,8 +18,6 @@ pub enum Topic {
     Git,
     GitContent,
     Tools,
-    Actions,
-    Menu,
     More,
     Choice,
     Form(Form),
@@ -47,8 +45,6 @@ impl Topic {
             Self::Git => "Git inspection",
             Self::Tools => "Tools",
             Self::GitContent => "Git content disclosure",
-            Self::Actions => "Actions",
-            Self::Menu => "Menu",
             Self::More => "More actions",
             Self::Choice => "Choose a value",
             Self::Form(_) => "Form",
@@ -85,10 +81,6 @@ impl Topic {
             }
             Self::Tools => {
                 "Enter opens the selected tool or package. Check and Install are named actions. Installed keeps only the current result. Add declaration fills known package fields for a separate review."
-            }
-            Self::Actions => "Find a task by name. Unavailable tasks explain what they need.",
-            Self::Menu => {
-                "Up/Down selects a section. Left/Right selects a page. Enter opens it. Esc closes Menu. Drafts stay open."
             }
             Self::More => "Choose a contextual action. This menu does not approve work.",
             Self::Choice => "Choose a value for the form. Selecting a value runs nothing.",
@@ -130,18 +122,6 @@ impl Topic {
                 ("Enter", "Choose"),
                 ("F3", "Inspect choice details"),
                 ("Esc", "Return without choosing"),
-            ],
-            Self::Menu => &[
-                ("Up/Down", "Choose a section"),
-                ("Left/Right", "Choose a local destination"),
-                ("Enter", "Open selected destination"),
-                ("1/2/3/4", "Open numbered destination in this section"),
-                (
-                    "o/f/t/r/c/g",
-                    "Open Overview/Files/Tools/Recovery/Checks/Git",
-                ),
-                ("Ctrl-G", "Open Menu, including Session"),
-                ("Esc / Ctrl-G", "Close Menu without navigating"),
             ],
             Self::Form(_) | Self::BatchItem => &[
                 ("Tab / Shift-Tab", "Traverse fields only"),
@@ -204,13 +184,6 @@ impl Topic {
                 ("s", "Tool settings when configuration needs attention"),
                 ("h", "Installation history"),
                 ("Esc", "Back"),
-            ],
-            Self::Actions => &[
-                ("Type", "Search task names"),
-                ("Up/Down", "Choose a task"),
-                ("Enter", "Open the selected available task"),
-                ("F3", "Task scope and needs"),
-                ("Esc", "Close directly"),
             ],
             Self::Picker => &[
                 ("Up/Down", "Traverse choices"),
@@ -286,9 +259,6 @@ pub fn topic(app: &App) -> Topic {
     if app.more.is_some() {
         return Topic::More;
     }
-    if app.navigation.menu.is_some() {
-        return Topic::Menu;
-    }
     if app.error.is_some() {
         return Topic::Error;
     }
@@ -313,7 +283,6 @@ pub fn topic(app: &App) -> Topic {
     }
     if let Some(o) = &app.shell.overlay {
         return match o {
-            Overlay::Actions { .. } => Topic::Actions,
             Overlay::Form(f) => Topic::Form(*f),
             Overlay::Ignored { .. } => Topic::Ignored,
             Overlay::About => Topic::About,
@@ -335,7 +304,7 @@ pub fn topic(app: &App) -> Topic {
 }
 /// Text focus is surface-specific; background retained forms do not steal task/error Help.
 pub fn text_input(app: &App) -> bool {
-    if app.navigation.menu.is_some() || app.more.is_some() || app.choice.is_some() {
+    if app.more.is_some() || app.choice.is_some() {
         return false;
     }
     if app.busy
@@ -373,22 +342,9 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
         area.y += height;
         area.height = area.height.saturating_sub(height);
     }
-    let mut sections = vec![("Workbench", "Ctrl-G: Menu. Ctrl-K: task search. F1: Help. F2: more actions. Esc: back. Outside text entry, o/f/t/r/c/g opens sections. Numbers choose a local page. Fields and filters take digits as text; footer buttons do not join field traversal.".to_owned())];
+    let mut sections = vec![("Workbench", "F1: Help. F2: more actions. Esc: back. Outside text entry, o/f/t/r/c/g opens sections. Numbers choose a local page. Fields and filters take digits as text; footer buttons do not join field traversal.".to_owned())];
     if matches!(help.topic, Topic::Tools) {
         sections.insert(0, ("Tools guide", "Tools opens declarations. Check installed asks which package managers to query, then shows each result for approval. Installed means the package manager reports the package, not that the command works. Install missing reviews eligible tools once, installs in order and stops on failure. Earlier installs stay; there is no rollback. Settings and history live under Tools.".to_owned()));
-    }
-    if matches!(help.topic, Topic::Menu)
-        && let Some(menu) = app.navigation.menu
-        && let Some(entry) = super::navigation::entries(menu.group).get(menu.selected)
-    {
-        let mut detail = entry.label.to_owned();
-        if let super::navigation::Item::Action(action) = entry.item
-            && let Some(reason) = app.action_reason(action)
-        {
-            detail.push_str(": ");
-            detail.push_str(reason);
-        }
-        sections.insert(0, ("Selected destination", detail));
     }
     if matches!(
         help.topic,

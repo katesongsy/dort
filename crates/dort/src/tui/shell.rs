@@ -85,12 +85,6 @@ pub enum Overlay {
         paths: Vec<std::path::PathBuf>,
         selected: usize,
     },
-    Actions {
-        query: String,
-        selected: usize,
-        searching: bool,
-        entries: Vec<super::palette::Entry>,
-    },
     Repositories {
         selected: usize,
     },
@@ -148,7 +142,6 @@ pub enum Action {
     Diagnostics,
     About,
     Help,
-    Quit,
 }
 impl Action {
     pub fn label(self) -> &'static str {
@@ -206,7 +199,6 @@ impl Action {
             Self::Diagnostics => "Diagnostics: host, paths and blocked writes",
             Self::About => "About Dort: version, features and limits",
             Self::Help => "Help: keys and context",
-            Self::Quit => "Quit (waits for work)",
         }
     }
 }
@@ -219,7 +211,6 @@ pub struct Shell {
     pub form_details: bool,
     pub form_feedback: Option<(Form, &'static str)>,
     pub picker_details: bool,
-    pub global_commands: bool,
     pub choose_draft: String,
     pub adoption: AdoptionDraft,
     pub return_to_adopt: bool,
@@ -251,7 +242,6 @@ impl Shell {
             form_details: false,
             form_feedback: None,
             picker_details: false,
-            global_commands: false,
             choose_draft: String::new(),
             adoption: AdoptionDraft::new(),
             return_to_adopt: false,
@@ -261,16 +251,6 @@ impl Shell {
             unmanage_id: String::new(),
             unmanage_focused: 0,
         }
-    }
-    pub fn open_actions(&mut self, entries: Vec<super::palette::Entry>) {
-        self.global_commands = false;
-        self.scroll = 0;
-        self.overlay = Some(Overlay::Actions {
-            query: String::new(),
-            selected: 0,
-            searching: true,
-            entries,
-        });
     }
     /// Page the currently visible inline metadata viewport.
     pub fn page(&mut self, down: bool) {
@@ -287,14 +267,9 @@ impl Shell {
         }
         matches!(
             self.overlay,
-            Some(Overlay::Actions {
-                searching: true,
-                ..
-            })
-        ) || (matches!(self.overlay, Some(Overlay::Form(Form::Choose | Form::Init)))
-            && self.path_focused == 0)
-            || (matches!(self.overlay, Some(Overlay::Form(Form::Adopt)))
-                && self.adoption.focused < 3)
+            Some(Overlay::Form(Form::Choose | Form::Init))
+                if self.path_focused == 0
+        ) || (matches!(self.overlay, Some(Overlay::Form(Form::Adopt))) && self.adoption.focused < 3)
             || (matches!(self.overlay, Some(Overlay::Form(Form::Check)))
                 && self.manifest_focused == 0)
             || (matches!(
@@ -363,12 +338,7 @@ impl Shell {
         }
         if matches!(
             self.overlay,
-            Some(
-                Overlay::Profiles(_)
-                    | Overlay::Repositories { .. }
-                    | Overlay::Actions { .. }
-                    | Overlay::Ignored { .. }
-            )
+            Some(Overlay::Profiles(_) | Overlay::Repositories { .. } | Overlay::Ignored { .. })
         ) {
             if key.code == KeyCode::F(3) {
                 self.picker_details = !self.picker_details;
@@ -560,56 +530,6 @@ impl Shell {
                     return Some(Intent::Action(Action::Init));
                 }
                 KeyCode::Enter => return Some(Intent::Known(*selected - 2)),
-                _ => (),
-            },
-            Overlay::Actions {
-                query,
-                selected,
-                searching,
-                entries,
-            } => match key.code {
-                KeyCode::Esc => self.overlay = None,
-                KeyCode::Down => {
-                    *searching = false;
-                    *selected = selected.saturating_add(1).min(
-                        super::palette::matches(entries, query)
-                            .len()
-                            .saturating_sub(1),
-                    );
-                }
-                KeyCode::Up => {
-                    *searching = false;
-                    *selected = selected.saturating_sub(1);
-                }
-                KeyCode::PageDown => {
-                    *searching = false;
-                    *selected = (*selected + usize::from(self.page_rows.get())).min(
-                        super::palette::matches(entries, query)
-                            .len()
-                            .saturating_sub(1),
-                    );
-                }
-                KeyCode::PageUp => {
-                    *searching = false;
-                    *selected = selected.saturating_sub(usize::from(self.page_rows.get()));
-                }
-                KeyCode::Enter => {
-                    if let Some(entry) = super::palette::matches(entries, query).get(*selected) {
-                        return Some(Intent::Action(entry.action));
-                    }
-                }
-                KeyCode::Char('/') if !*searching => *searching = true,
-                KeyCode::Delete if !*searching => {
-                    query.clear();
-                    *selected = 0;
-                }
-                _ if *searching => {
-                    let before = query.clone();
-                    edit_text(query, key);
-                    if *query != before {
-                        *selected = 0;
-                    }
-                }
                 _ => (),
             },
         }

@@ -67,12 +67,6 @@ fn vim_pages_use_the_rendered_viewport_and_chords_reset() {
     key(&mut app, KeyCode::Char(' '));
     assert_eq!(app.inventory.managed_marks.len(), 1);
     assert!(app.shell.overlay.is_none());
-    key(&mut app, KeyCode::Char(';'));
-    assert!(app.shell.overlay.is_some());
-    key(&mut app, KeyCode::Char('g'));
-    assert!(!app.inventory.pending_g);
-    key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Char('/'));
     for c in ['g', 'g', ' ', ';', 'j', 'k'] {
         key(&mut app, KeyCode::Char(c));

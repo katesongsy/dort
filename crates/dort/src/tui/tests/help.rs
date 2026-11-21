@@ -88,24 +88,6 @@ fn forms_actions_and_search_keep_exact_drafts_scroll_and_focus() {
         assert_eq!(app.shell.scroll, 3);
     }
     let mut app = App::new(false);
-    key(&mut app, KeyCode::Char(';'));
-    for c in "q?/".chars() {
-        key(&mut app, KeyCode::Char(c));
-    }
-    key(&mut app, KeyCode::F(1));
-    inert(&mut app);
-    key(&mut app, KeyCode::Esc);
-    assert!(
-        matches!(&app.shell.overlay, Some(Overlay::Actions {query, searching:true, selected:0, ..}) if query == "q?/")
-    );
-    key(&mut app, KeyCode::Down); // row focus, retaining the filter
-    key(&mut app, KeyCode::Char('?'));
-    assert!(matches!(app.help.as_ref().unwrap().topic, Topic::Actions));
-    key(&mut app, KeyCode::F(1));
-    assert!(
-        matches!(&app.shell.overlay, Some(Overlay::Actions {query, searching:false, ..}) if query == "q?/")
-    );
-    app.shell.overlay = None;
     for tab in [Tab::Files, Tab::Recovery, Tab::Git] {
         app.tab = tab;
         key(&mut app, KeyCode::Char('/'));

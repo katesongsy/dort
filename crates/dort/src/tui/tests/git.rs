@@ -174,15 +174,10 @@ fn git_context_actions_inspect_and_clear_only_the_git_display_filter() {
     key(&mut app, KeyCode::Char('/'));
     text(&mut app, "no-match");
     key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Char(';'));
-    text(&mut app, "Clear current display");
-    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(app.activate(super::shell::Action::ClearFilter).is_none());
     assert!(app.git_view.search.query.is_empty());
     assert_eq!(app.inventory.managed.query, "retained-file-filter");
-    key(&mut app, KeyCode::Char(';'));
-    text(&mut app, "Inspect selected");
-    assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(render(&app, 80, 24).contains("No matching actions"));
+    assert!(app.activate(super::shell::Action::Inspect).is_none());
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Esc);
     assert!(key(&mut app, KeyCode::Enter).is_none());
@@ -237,18 +232,25 @@ fn independent_git_summaries_match_backend_and_never_prefetch_content() {
     f.readonly();
 }
 #[test]
-fn git_menu_comparisons_are_read_only_and_never_bypass_or_restore_disclosure() {
+fn git_comparisons_are_read_only_and_never_bypass_or_restore_disclosure() {
     let f = Fixture::new();
     let mut app = f.app();
     f.choose(&mut app);
-    for (selected, comparison) in [
-        (0, super::git::Comparison::Status),
-        (1, super::git::Comparison::Unstaged),
-        (2, super::git::Comparison::Staged),
+    for (action, comparison) in [
+        (
+            super::shell::Action::GitStatus,
+            super::git::Comparison::Status,
+        ),
+        (
+            super::shell::Action::GitUnstaged,
+            super::git::Comparison::Unstaged,
+        ),
+        (
+            super::shell::Action::GitStaged,
+            super::git::Comparison::Staged,
+        ),
     ] {
-        app.open_menu(5, 100);
-        app.navigation.menu.as_mut().unwrap().selected = selected;
-        let task = key(&mut app, KeyCode::Enter).unwrap();
+        let task = app.activate(action).unwrap();
         f.run(&mut app, task);
         assert!(app.tab == Tab::Git && app.git_view.comparison == comparison);
         assert!(app.git_view.metadata.is_some() && !app.git_view.sensitive());
@@ -257,16 +259,17 @@ fn git_menu_comparisons_are_read_only_and_never_bypass_or_restore_disclosure() {
     key(&mut app, KeyCode::Char('w'));
     text(&mut app, "view ");
     key(&mut app, KeyCode::F(10));
-    assert!(app.navigation.menu.is_none());
     text(&mut app, "patch");
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.run(&mut app, task);
     assert!(render(&app, 100, 30).contains("PRIVATE-PATCH"));
-    super::tests::click_places(&mut app, 100, 30);
-    assert!(app.navigation.menu.is_some() && !app.git_view.sensitive());
+    key(&mut app, KeyCode::Esc); // Leaving the disclosure drops the patch.
+    assert!(!app.git_view.sensitive());
     assert!(!render(&app, 100, 30).contains("PRIVATE-PATCH"));
-    key(&mut app, KeyCode::Esc);
-    assert!(!render(&app, 100, 30).contains("PRIVATE-PATCH"));
+    key(&mut app, KeyCode::Char('o'));
+    assert!(app.tab == Tab::Overview);
+    key(&mut app, KeyCode::Char('g'));
+    assert!(app.tab == Tab::Git);
     assert_eq!(f.patch_calls(), 1);
     f.readonly();
 }
@@ -277,10 +280,8 @@ fn patch_disclosure_is_once_isolated_and_dropped_on_close_scope_resize_or_exit()
     f.choose(&mut app);
     let task = key(&mut app, KeyCode::Char('u')).unwrap();
     f.run(&mut app, task);
-    key(&mut app, KeyCode::Tab); // Actions focus must return to Git content after activation.
-    key(&mut app, KeyCode::Char(';')); // Actions opens with search focused.
-    text(&mut app, "View patch content");
-    assert!(key(&mut app, KeyCode::Enter).is_none());
+    key(&mut app, KeyCode::Tab);
+    assert!(app.activate(super::shell::Action::GitPatch).is_none());
     assert!(app.tab == Tab::Git);
     assert!(render(&app, 48, 14).contains("May expose secrets"));
     assert_eq!(f.patch_calls(), 0);
@@ -336,7 +337,18 @@ fn refusals_empty_missing_git_and_patch_errors_keep_content_out_of_diagnostics()
     let mut app = f.app();
     app.git = Err("Git unavailable".into());
     key(&mut app, KeyCode::Char('g'));
+    println!(
+        "tab_git={} editing_root={} form={:?}",
+        app.tab == Tab::Git,
+        app.git_view.editing_root,
+        app.form_page()
+    );
     text(&mut app, "git-only");
+    println!(
+        "draft={:?} tab_git={}",
+        app.git_view.draft,
+        app.tab == Tab::Git
+    );
     assert!(key(&mut app, KeyCode::Enter).is_none());
     assert!(app.error.as_ref().unwrap().contains("restart"));
     assert_eq!(app.git_view.draft, "git-only");
@@ -391,9 +403,7 @@ fn git_root_default_and_independent_selection_do_not_require_healthy_file_observ
     app.complete(Ok(result));
     assert_eq!(app.repository.as_ref(), Some(&other));
     assert_eq!(app.git_view.root.as_ref(), Some(&f.root));
-    app.open_menu(5, 100);
-    key(&mut app, KeyCode::End);
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = app.activate(super::shell::Action::GitDefault).unwrap();
     f.run(&mut app, task);
     assert_eq!(app.git_view.root.as_ref(), Some(&other));
     assert!(app.git_view.follows_files);

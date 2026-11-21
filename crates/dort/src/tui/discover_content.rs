@@ -145,7 +145,6 @@ pub fn sync(app: &mut App, width: u16, height: u16) {
         && app.more.is_none()
         && app.choice.is_none()
         && app.shell.overlay.is_none()
-        && app.navigation.menu.is_none()
         && !app.batch_editor.as_ref().is_some_and(|e| e.open)
         && app.inventory.group.is_none()
     {

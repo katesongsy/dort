@@ -196,36 +196,41 @@ fn trusted_separators_render_but_program_path_status_metadata_stays_escaped() {
     assert_eq!(ui::chrome_clip("界界界", 4), "...");
 }
 #[test]
-fn workflow_pages_allow_menus_and_keep_field_text_focus_until_actual_navigation() {
+fn workflow_pages_keep_field_text_focus_until_the_form_is_left() {
     for size in [(48, 14), (80, 24), (140, 40)] {
-        for form in [
+        for (index, form) in [
             Form::Choose,
             Form::Init,
             Form::Adopt,
             Form::Check,
             Form::KeepId,
             Form::RemoveId,
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let mut app = App::new(false);
             app.shell.overlay = Some(Overlay::Form(form));
             super::tests::focus_form(&mut app);
             app.shell.init_draft = "retained".into();
-            assert!(app.menus_available() && app.dialog_title().is_none());
+            assert!(app.navigation_available() && app.dialog_title().is_none());
             assert!(render(&app, size.0, size.1).starts_with("Dort /"));
             assert!(app.page_title().is_some());
             key(&mut app, KeyCode::Char('q'), size.0, size.1);
             assert!(!app.quit);
             let path = app.shell.init_draft.clone();
             let focused = app.shell.path_focused;
-            super::tests::click_places(&mut app, size.0, size.1);
-            assert!(app.navigation.menu.is_some());
+            key(&mut app, KeyCode::F(1), size.0, size.1);
+            assert!(app.help.is_some());
             key(&mut app, KeyCode::Esc, size.0, size.1);
-            assert!(matches!(app.shell.overlay,Some(Overlay::Form(f)) if f==form));
+            assert!(matches!(app.shell.overlay, Some(Overlay::Form(f)) if f == form));
             assert_eq!(app.shell.init_draft, path);
             assert_eq!(app.shell.path_focused, focused);
-            app.open_menu(1, size.0);
-            key(&mut app, KeyCode::Enter, size.0, size.1);
-            assert!(app.shell.overlay.is_none() && app.tab == Tab::Overview);
+            key(&mut app, KeyCode::Esc, size.0, size.1); // Stop editing.
+            key(&mut app, KeyCode::Esc, size.0, size.1); // Leave the form.
+            assert!(app.shell.overlay.is_none(), "{index} {size:?}");
+            key(&mut app, KeyCode::Char('o'), size.0, size.1);
+            assert!(app.tab == Tab::Overview);
             assert_eq!(app.shell.init_draft, path);
         }
         let mut app = App::new(false);
@@ -240,15 +245,11 @@ fn workflow_pages_allow_menus_and_keep_field_text_focus_until_actual_navigation(
             assert!(app.tools_view.declaration.focus < 12);
         }
         let focus = app.tools_view.declaration.focus;
-        super::tests::click_places(&mut app, size.0, size.1);
-        assert!(app.navigation.menu.is_some());
+        key(&mut app, KeyCode::F(1), size.0, size.1);
+        assert!(app.help.is_some());
         key(&mut app, KeyCode::Esc, size.0, size.1);
         assert_eq!(app.tools_view.declaration.focus, focus);
         assert_eq!(app.tools_view.declaration.fields[0], "retainedq");
-        click(&mut app, size.0, size.1, |t| {
-            matches!(t, Target::MenuOpen | Target::MenuGroup(_))
-        });
-        assert!(app.navigation.menu.is_some());
     }
 }
 fn profile_app() -> App {
@@ -280,7 +281,7 @@ fn profile_app() -> App {
 #[test]
 fn real_dialogs_dim_capture_and_explain_disabled_navigation_without_outside_cancel() {
     for size in [(48, 14), (80, 24), (140, 40)] {
-        for which in 0..5 {
+        for which in [0, 1, 3, 4] {
             let mut app = if which == 1 {
                 profile_app()
             } else {
@@ -288,16 +289,13 @@ fn real_dialogs_dim_capture_and_explain_disabled_navigation_without_outside_canc
             };
             match which {
                 0 => app.shell.overlay = Some(Overlay::Repositories { selected: 0 }),
-                2 => {
-                    key(&mut app, KeyCode::Char(';'), size.0, size.1);
-                }
                 3 => app.shell.overlay = Some(Overlay::About),
                 4 => {
                     key(&mut app, KeyCode::F(1), size.0, size.1);
                 }
                 _ => (),
             }
-            assert!(app.dialog_title().is_some() && !app.menus_available());
+            assert!(app.dialog_title().is_some() && !app.navigation_available());
             let mut terminal = Terminal::new(TestBackend::new(size.0, size.1)).unwrap();
             terminal.draw(|f| views::draw(f, &app)).unwrap();
             assert!(
@@ -306,12 +304,6 @@ fn real_dialogs_dim_capture_and_explain_disabled_navigation_without_outside_canc
                     .contains(Modifier::DIM)
             );
             assert!(render(&app, size.0, size.1).contains(app.dialog_title().unwrap()));
-            super::tests::click_places(&mut app, size.0, size.1);
-            assert!(
-                app.navigation.menu.is_none()
-                    && app.dialog_title().is_some()
-                    && app.interaction_notice.is_some()
-            );
             render(&app, size.0, size.1);
             assert!(matches!(
                 app.hits.target(0, 0),
@@ -327,7 +319,12 @@ fn real_dialogs_dim_capture_and_explain_disabled_navigation_without_outside_canc
                 size.0,
                 size.1,
             );
-            assert!(app.dialog_title().is_some() && !app.quit && app.confirmation.is_none());
+            assert!(
+                app.dialog_title().is_some()
+                    && app.interaction_notice.is_some()
+                    && !app.quit
+                    && app.confirmation.is_none()
+            );
             click(&mut app, size.0, size.1, |t| matches!(t, Target::Back));
             assert!(
                 app.dialog_title().is_none(),
@@ -394,8 +391,21 @@ fn direct_field_submission_is_preview_only_and_busy_navigation_explains_joined_w
     ));
     app.shell.overlay = None;
     app.start(true);
-    super::tests::click_places(&mut app, 80, 24);
-    assert!(app.busy && app.navigation.menu.is_none() && app.interaction_notice.is_some());
+    render(&app, 100, 30);
+    let (column, row) = super::tests::target_position(&app, 100, 30, |target| {
+        matches!(target, Target::NavigationBlocked)
+    });
+    app.mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        },
+        100,
+        30,
+    );
+    assert!(app.busy && app.interaction_notice.is_some());
     key(&mut app, KeyCode::Char('q'), 80, 24);
     assert!(app.busy && app.exit_requested && !app.quit);
 }

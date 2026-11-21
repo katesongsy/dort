@@ -224,43 +224,7 @@ fn clicks_and_wheels_use_hovered_rows_and_details_with_filtered_raw_identity() {
         if tab != Tab::Git {
             assert_eq!(app.selected, 1);
         }
-        let (x, y) = at(&app, "Menu", size);
-        mouse(
-            &mut app,
-            MouseEventKind::Down(MouseButton::Left),
-            x,
-            y,
-            size,
-        );
-        assert!(
-            app.navigation.menu.is_some(),
-            "menu should open: files={} recovery={} git={} git_text={} overlay={} busy={}",
-            app.tab == Tab::Files,
-            app.tab == Tab::Recovery,
-            app.tab == Tab::Git,
-            app.git_view.text_entry(),
-            app.shell.overlay.is_some(),
-            app.busy
-        );
-        render(&app, size.0, size.1);
-        let (x, y) = super::tests::target_position(&app, size.0, size.1, |t| {
-            matches!(t, super::input::Target::MenuGroup(4))
-        });
-        mouse(
-            &mut app,
-            MouseEventKind::Down(MouseButton::Left),
-            x,
-            y,
-            size,
-        );
-        let (x, y) = at(&app, "Manifest checks", size);
-        mouse(
-            &mut app,
-            MouseEventKind::Down(MouseButton::Left),
-            x,
-            y,
-            size,
-        );
+        super::tests::destination(&mut app, Tab::Checks, size.0, size.1);
         assert!(app.tab == Tab::Checks);
     }
 }
@@ -327,18 +291,7 @@ fn mouse_form_controls_and_palette_actions_never_bypass_typed_approval_or_disclo
     assert_eq!(app.shell.adoption.id, "q");
     press(&mut app, KeyCode::Esc, size); // stop editing
     press(&mut app, KeyCode::Esc, size); // leave form
-    press(&mut app, KeyCode::Char(';'), size);
-    for c in "delete managed link".chars() {
-        press(&mut app, KeyCode::Char(c), size);
-    }
-    let (x, y) = at(&app, "Delete managed link (", size);
-    let task = mouse(
-        &mut app,
-        MouseEventKind::Down(MouseButton::Left),
-        x,
-        y,
-        size,
-    );
+    let task = app.activate(super::shell::Action::Remove);
     assert!(
         matches!(task,Some(super::actions::Task::Files(dort_core::planner::Request::Unmanage{ref id,..})) if id=="first")
     );
@@ -406,60 +359,16 @@ fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_ta
     );
     press(&mut app, KeyCode::Esc, size);
     press(&mut app, KeyCode::Char('n'), size);
-    let (x, y) = at(&app, "Menu", size);
-    mouse(
-        &mut app,
-        MouseEventKind::Down(MouseButton::Left),
-        x,
-        y,
-        size,
-    );
     assert!(app.tab == Tab::Files && matches!(app.shell.overlay, Some(Overlay::Form(Form::Init))));
-    assert!(app.navigation.menu.is_some()); // A page permits menus; opening does not navigate.
     press(&mut app, KeyCode::Esc, size);
-    press(&mut app, KeyCode::Char(';'), size);
-    // Recovery commands now stay in Recovery, rather than the Files action list.
-    app.shell.overlay = None;
+    assert!(app.shell.overlay.is_none());
+    // Recovery commands stay in Recovery, not the Files action list.
     app.tab = Tab::Recovery;
-    press(&mut app, KeyCode::Char(';'), size);
-    for c in "rollback".chars() {
-        press(&mut app, KeyCode::Char(c), size);
-    }
-    let (x, y) = at(&app, "Preview rollback", size);
-    assert!(
-        mouse(
-            &mut app,
-            MouseEventKind::Down(MouseButton::Left),
-            x,
-            y,
-            size
-        )
-        .is_none()
-    );
-    assert!(matches!(app.shell.overlay, Some(Overlay::Actions { .. })));
+    assert!(app.activate(super::shell::Action::Rollback).is_none());
     assert!(render(&app, size.0, size.1).contains("Rollback is unavailable"));
-    press(&mut app, KeyCode::Esc, size); // clicked results, no hidden input focus
     app.start(false);
-    render(&app, size.0, size.1);
-    let (x, y) = super::tests::target_position(&app, size.0, size.1, |t| {
-        matches!(t, super::input::Target::NavigationBlocked)
-    }); // Visibly paused Menu, not a hidden live menu.
-    assert!(matches!(
-        app.hits.target(x, y),
-        Some(super::input::Target::NavigationBlocked)
-    ));
-    assert!(
-        mouse(
-            &mut app,
-            MouseEventKind::Down(MouseButton::Left),
-            x,
-            y,
-            size
-        )
-        .is_none()
-    );
-    assert!(app.tab == Tab::Recovery && app.busy && app.navigation.menu.is_none());
-    press(&mut app, KeyCode::Right, size); // Task-time navigation explains its pause.
+    assert!(app.tab == Tab::Recovery && app.busy);
+    press(&mut app, KeyCode::Char('c'), size); // Task-time navigation explains its pause.
     assert!(app.tab == Tab::Recovery && app.busy && app.interaction_notice.is_some());
 }
 #[test]

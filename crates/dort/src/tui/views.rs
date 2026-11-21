@@ -13,10 +13,9 @@ pub fn draw(frame: &mut ratatui::Frame, app: &App) {
 /// Metadata-only reading views. Controls and instructions belong to the shared strip/Help.
 pub(super) fn overlay_text(app: &App, overlay: &Overlay, _height: u16, _width: u16) -> String {
     match overlay {
-        Overlay::Ignored { .. }
-        | Overlay::Profiles(_)
-        | Overlay::Repositories { .. }
-        | Overlay::Actions { .. } => unreachable!("typed overlay renderer"),
+        Overlay::Ignored { .. } | Overlay::Profiles(_) | Overlay::Repositories { .. } => {
+            unreachable!("typed overlay renderer")
+        }
         Overlay::Form(Form::Adopt) => format!(
             "New link\n\nTarget: {:?}\nID: {:?}\nSource: {:?}\nRepository: {:?}\nProfiles: {:?}\n\nSource is relative to the repository. Only owned regular files with one link can be adopted. The review shows the exact effects.",
             app.shell.adoption.target,

@@ -148,20 +148,6 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
         }
         return actions;
     }
-    if app.navigation.menu.is_some() {
-        return vec![
-            ui::ActionButton {
-                label: "Open",
-                key: "Enter",
-                target: Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-            },
-            ui::ActionButton {
-                label: "Back",
-                key: "Esc",
-                target: Target::Back,
-            },
-        ];
-    }
     let mut result = app.hits.actions();
     if app.confirmation.is_some() || app.preview.is_some() {
         return result;
@@ -285,18 +271,6 @@ pub(super) fn strip_actions(
 ) -> (Vec<ui::design::StripAction>, Vec<ui::ActionButton>) {
     use ui::design::StripAction;
     let mut available = actions(app);
-    if app.dialog_title().is_none()
-        && app.help.is_none()
-        && app.more.is_none()
-        && app.navigation.menu.is_none()
-        && !app.busy
-    {
-        available.push(ui::ActionButton {
-            key: "Ctrl-K",
-            label: "Commands",
-            target: Target::Commands,
-        });
-    }
     if app.help.is_none() && !available.iter().any(|a| a.key == "F1") {
         available.push(ui::ActionButton {
             key: "F1",
@@ -324,11 +298,8 @@ pub(super) fn strip_actions(
             ratatui::text::Line::raw(format!(" {} {} ", a.key, label)).width() + 1
         })
         .sum();
-    let more_allowed = app.more.is_none()
-        && app.choice.is_none()
-        && app.help.is_none()
-        && app.navigation.menu.is_none()
-        && !app.busy;
+    let more_allowed =
+        app.more.is_none() && app.choice.is_none() && app.help.is_none() && !app.busy;
     let mut shown: Vec<ui::ActionButton> = Vec::new();
     let mut hidden: Vec<ui::ActionButton> = Vec::new();
     let mut used = 0usize;
@@ -503,12 +474,6 @@ fn overlay(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
             true,
         ),
         Overlay::Form(form) => super::forms::draw(frame, inner, app, *form),
-        Overlay::Actions {
-            query,
-            selected,
-            searching,
-            entries,
-        } => super::palette::draw(frame, inner, app, entries, query, *selected, *searching),
         _ => ui::text_view(
             frame,
             inner,
@@ -528,9 +493,8 @@ fn overlay(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
     app.hits.begin(area);
-    app.hits.input_focus(
-        app.dialog_title().is_none() && app.navigation.menu.is_none() && app.form_has_focus(),
-    );
+    app.hits
+        .input_focus(app.dialog_title().is_none() && app.form_has_focus());
     if area.width < 48 || area.height < 14 {
         ui::prose(
             frame,
@@ -564,10 +528,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         body.height = body.height.saturating_sub(1);
     }
     app.hits.wheel(body, Wheel::Details);
-    let foreground = app.help.is_some()
-        || app.more.is_some()
-        || app.choice.is_some()
-        || app.navigation.menu.is_some();
+    let foreground = app.help.is_some() || app.more.is_some() || app.choice.is_some();
     if !foreground && !app.busy && app.error.is_none() {
         if let Some(notice) = app.interaction_notice {
             let height = (1 + notice.len().div_ceil(usize::from(body.width).max(1)) as u16)
@@ -682,8 +643,6 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 .then_some("Earlier write failed: Possible partial effects")),
             &app.hits,
         );
-    } else if let Some(menu) = app.navigation.menu {
-        super::navigation::popup(frame, app, menu);
     }
     strip(frame, areas.footer, app);
 }

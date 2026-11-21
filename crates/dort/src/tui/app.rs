@@ -210,7 +210,6 @@ impl App {
     }
     pub fn start(&mut self, writing: bool) {
         self.motion.reset();
-        self.navigation.menu = None;
         self.last_click = None;
         self.inventory.pending_g = false;
         self.hits.clear();
@@ -419,8 +418,7 @@ impl App {
                         && self.shell.overlay.is_none()
                         && self.help.is_none()
                         && self.more.is_none()
-                        && self.choice.is_none()
-                        && self.navigation.menu.is_none(),
+                        && self.choice.is_none(),
                 );
                 self.status = "Git read done. Patch viewing needs a new confirmation.".into();
             }
@@ -714,57 +712,6 @@ impl App {
             return None;
         }
         self.viewport = (width, height);
-        if self.navigation.menu.is_some() {
-            let target = self.hits.target(event.column, event.row);
-            self.hits.clear();
-            if matches!(
-                event.kind,
-                MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
-            ) {
-                let code = if event.kind == MouseEventKind::ScrollDown {
-                    KeyCode::Down
-                } else {
-                    KeyCode::Up
-                };
-                return self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height);
-            }
-            if event.kind == MouseEventKind::Down(MouseButton::Left) {
-                match target {
-                    Some(Target::MenuGroup(group)) => {
-                        // This is traversal inside the owned Menu dialog, not
-                        // an attempt to open navigation through another dialog.
-                        if let Some(menu) = &mut self.navigation.menu {
-                            menu.group = group.min(super::navigation::GROUPS.len() - 1);
-                            menu.selected = 0;
-                        }
-                    }
-                    Some(Target::MenuDestination(group, index)) => {
-                        if let Some(entry) = super::navigation::entries(group).get(index) {
-                            let task = self.menu_item(entry.item);
-                            super::discover_content::sync(self, width, height);
-                            return task;
-                        }
-                    }
-                    Some(Target::MenuItem(index)) => {
-                        let group = self.navigation.menu.as_ref()?.group;
-                        if let Some(entry) = super::navigation::entries(group).get(index) {
-                            let task = self.menu_item(entry.item);
-                            super::discover_content::sync(self, width, height);
-                            return task;
-                        }
-                    }
-                    _ => {
-                        return self.key(
-                            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
-                            width,
-                            height,
-                        );
-                    }
-                }
-                super::discover_content::sync(self, width, height);
-            }
-            return None;
-        }
         let code = match event.kind {
             MouseEventKind::ScrollDown => Some(KeyCode::PageDown),
             MouseEventKind::ScrollUp => Some(KeyCode::PageUp),
@@ -928,10 +875,7 @@ impl App {
                 }
                 None
             }
-            Target::Commands => self.open_commands(),
-            Target::Destination(tab) => {
-                self.menu_item(super::navigation::Item::Action(Action::Destination(tab)))
-            }
+            Target::Destination(tab) => self.go_place(super::navigation::Place::Destination(tab)),
             Target::NavigationBlocked => {
                 let reason = self
                     .navigation_block()
@@ -940,24 +884,15 @@ impl App {
                 self.status = reason.into();
                 None
             }
-            Target::MenuOpen => {
-                self.open_menu(super::navigation::group(self), width);
-                None
-            }
-            Target::MenuGroup(group) => {
-                self.open_menu(group, width);
-                None
-            }
             Target::LocalDestination(group, index) => {
                 if let Some(reason) = self.navigation_block() {
                     self.interaction_notice = Some(reason);
                     self.status = reason.into();
                     return None;
                 }
-                let item = super::navigation::entries(group).get(index)?.item;
-                self.menu_item(item)
+                let (_, place) = *super::navigation::local_catalog(group).get(index)?;
+                self.go_place(place)
             }
-            Target::MenuItem(_) | Target::MenuDestination(_, _) => None,
             Target::Feedback(control) => self.feedback(control, width, height),
             Target::Continue => {
                 if self.preview.is_some() {
@@ -1178,11 +1113,7 @@ impl App {
             Target::PickerDetails => {
                 if !matches!(
                     self.shell.overlay,
-                    Some(
-                        Overlay::Profiles(_)
-                            | Overlay::Repositories { .. }
-                            | Overlay::Actions { .. }
-                    )
+                    Some(Overlay::Profiles(_) | Overlay::Repositories { .. })
                 ) {
                     return None;
                 }
@@ -1222,33 +1153,6 @@ impl App {
                 } else {
                     None
                 }
-            }
-            Target::Palette(action) => {
-                if let Some(Overlay::Actions {
-                    entries,
-                    query,
-                    selected,
-                    searching,
-                }) = &mut self.shell.overlay
-                {
-                    if let Some(index) = super::palette::matches(entries, query)
-                        .iter()
-                        .position(|entry| entry.action == action)
-                    {
-                        *selected = index;
-                    }
-                    *searching = false;
-                }
-                self.intent(Intent::Action(action))
-            }
-            Target::PaletteSearch => {
-                if let Some(Overlay::Actions { searching, .. }) = &mut self.shell.overlay {
-                    *searching = true;
-                } else {
-                    self.git_view.discard_patch();
-                    self.shell.open_actions(super::palette::entries(self));
-                }
-                None
             }
         }
     }
@@ -1328,14 +1232,9 @@ impl App {
         section_shortcuts: bool,
     ) -> Option<Task> {
         let more_actions = (key.code == KeyCode::F(2)).then(|| {
-            let hidden = super::workbench::strip_actions(self, width).1;
-            if hidden.is_empty() {
-                Vec::new()
-            } else {
-                let mut actions = super::workbench::actions(self);
-                actions.extend(hidden);
-                actions
-            }
+            let mut actions = super::workbench::actions(self);
+            actions.extend(super::workbench::strip_actions(self, width).1);
+            actions
         });
         self.hits.clear();
         self.last_click = None;
@@ -1352,28 +1251,16 @@ impl App {
         let return_content = self
             .help
             .as_ref()
-            .map(|h| (h.content_focus, h.content_scroll))
-            .or_else(|| {
-                self.navigation
-                    .menu
-                    .map(|m| (m.content_focus, m.content_scroll))
-            });
+            .map(|h| (h.content_focus, h.content_scroll));
         let form_before = self.form_page();
-        let transient_before = self.help.is_some()
-            || self.more.is_some()
-            || self.choice.is_some()
-            || self.navigation.menu.is_some();
+        let transient_before = self.help.is_some() || self.more.is_some() || self.choice.is_some();
         let task = self.key_inner(key, width, height, more_actions, section_shortcuts);
-        let transient_after = self.help.is_some()
-            || self.more.is_some()
-            || self.choice.is_some()
-            || self.navigation.menu.is_some();
+        let transient_after = self.help.is_some() || self.more.is_some() || self.choice.is_some();
         if !transient_before && !transient_after && form_before != self.form_page() {
             self.form_focus = None;
         }
         super::discover_content::sync(self, width, height);
         if self.help.is_none()
-            && self.navigation.menu.is_none()
             && self.content.available()
             && let Some((focus, scroll)) = return_content
         {
@@ -1400,7 +1287,6 @@ impl App {
                 && self.more.is_none()
                 && self.choice.is_none()
                 && (self.help.is_some()
-                    || self.navigation.menu.is_some()
                     || self.confirmation.is_none()
                         && (self.error.is_some()
                             || self.show_result
@@ -1422,20 +1308,17 @@ impl App {
             && key.modifiers == KeyModifiers::NONE
             && !self.key_text_entry()
             && let KeyCode::Char(letter) = key.code
-            && let Some(group) = super::navigation::section_shortcut(letter)
+            && let Some(place) = super::navigation::section_shortcut(letter)
         {
             if width < 48 || height < 14 {
                 return None;
             }
-            // The owned Menu allows direct section activation; other dialogs do not.
-            if (self.navigation.menu.is_none() || self.help.is_some() || self.busy)
-                && let Some(reason) = self.navigation_block()
-            {
+            if let Some(reason) = self.navigation_block() {
                 self.interaction_notice = Some(reason);
                 self.status = reason.into();
                 return None;
             }
-            return self.menu_item(super::navigation::entries(group)[0].item);
+            return self.go_place(place);
         }
         if key.modifiers == KeyModifiers::NONE
             && let KeyCode::Char(digit @ '1'..='9') = key.code
@@ -1444,26 +1327,11 @@ impl App {
             && self.dialog_title().is_none()
             && !self.text_entry()
             && super::navigation::local_available(self)
-            && let Some(&(index, _)) =
+            && let Some((_, place)) =
                 super::navigation::local_catalog(super::navigation::group(self))
                     .get((digit as u8 - b'1') as usize)
         {
-            return self
-                .menu_item(super::navigation::entries(super::navigation::group(self))[index].item);
-        }
-        if key.code == KeyCode::Char('g') && key.modifiers == KeyModifiers::CONTROL {
-            if self.help.is_none() && self.navigation.menu.is_some() {
-                self.navigation.menu = None;
-            } else if width >= 48 && height >= 14 {
-                self.open_menu(super::navigation::group(self), width);
-            }
-            return None;
-        }
-        if self.help.is_none()
-            && self.navigation.menu.is_some()
-            && !matches!(key.code, KeyCode::F(1) | KeyCode::Char('?'))
-        {
-            return self.menu_key(key.code, width);
+            return self.go_place(*place);
         }
         if self.dialog_title().is_some() && matches!(key.code, KeyCode::Left | KeyCode::Right) {
             let reason = self
@@ -1495,7 +1363,6 @@ impl App {
             return None;
         }
         if width < 48 || height < 14 {
-            self.navigation.menu = None;
             if key.code == KeyCode::Esc {
                 if self.error.is_some() {
                     self.error = None;
@@ -1523,15 +1390,12 @@ impl App {
             self.choice_key(key.code);
             return None;
         }
-        if key.code == KeyCode::Char('k') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            return self.open_commands();
-        }
         if self.more.is_some() {
             return self.more_key(key.code, width, height);
         }
         if key.code == KeyCode::F(2) {
-            if let Some(actions) = more_actions.filter(|actions| !actions.is_empty()) {
-                self.open_more(actions);
+            if self.dialog_title().is_none() {
+                self.open_more(more_actions.unwrap_or_default());
             }
             return None;
         }
@@ -1545,9 +1409,6 @@ impl App {
                 width,
                 height,
             );
-        }
-        if self.navigation.menu.is_some() {
-            return self.menu_key(key.code, width);
         }
         if self.tab == Tab::Overview
             && self.batch_editor.as_ref().is_none_or(|e| !e.open)
@@ -1824,11 +1685,7 @@ impl App {
                 && !self.shell.picker_details
                 && !matches!(
                     self.shell.overlay,
-                    Some(
-                        Overlay::Profiles(_)
-                            | Overlay::Repositories { .. }
-                            | Overlay::Actions { .. }
-                    )
+                    Some(Overlay::Profiles(_) | Overlay::Repositories { .. })
                 );
             if report_scroll {
                 match key.code {
@@ -2099,7 +1956,7 @@ impl App {
                 _ => (),
             }
         }
-        let opens_overlay = matches!(key.code, KeyCode::Char('?' | ';' | '/' | 'p' | 'n'));
+        let opens_overlay = matches!(key.code, KeyCode::Char('?' | '/' | 'p' | 'n'));
         if !matches!(
             key.code,
             KeyCode::PageDown | KeyCode::PageUp | KeyCode::Tab | KeyCode::BackTab
@@ -2152,12 +2009,10 @@ impl App {
 
                 self.result = None;
             }
-            KeyCode::Char(';') => self.shell.open_actions(super::palette::entries(self)),
             KeyCode::Char('/') if self.tab == Tab::Files => {
                 self.inventory.search_mut(self.discovering).editing = true
             }
             KeyCode::Char('/') if self.tab == Tab::Recovery => self.history_search.editing = true,
-            KeyCode::Char('/') => self.shell.open_actions(super::palette::entries(self)),
             KeyCode::Delete if self.tab == Tab::Recovery => {
                 self.history_search.query.clear();
                 self.clamp_history_selection();
@@ -2230,7 +2085,6 @@ impl App {
         if width < 48 || height < 14 {
             self.more = None;
             self.choice = None;
-            self.navigation.menu = None;
             self.confirmation = None;
             self.git_view.resize();
             self.tools_view.shrink();
@@ -2287,21 +2141,7 @@ impl App {
         }
         match intent {
             Intent::Unignore(path) => Some(Task::Ignore(path, false)),
-            Intent::Action(action) => {
-                if matches!(self.shell.overlay, Some(Overlay::Actions { .. }))
-                    && let Some(reason) = self.action_reason(action)
-                {
-                    self.interaction_notice = Some(reason);
-                    self.status = reason.into();
-                    return None;
-                }
-                if self.shell.global_commands
-                    && matches!(self.shell.overlay, Some(Overlay::Actions { .. }))
-                {
-                    self.leave_page_for_navigation();
-                }
-                self.activate(action)
-            }
+            Intent::Action(action) => self.activate(action),
             Intent::Active => Some(Task::Select(None)),
             Intent::ApplyProfiles {
                 manifest,
@@ -2634,7 +2474,6 @@ impl App {
             }
             Action::About => self.shell.overlay = Some(Overlay::About),
             Action::Help => unreachable!("Help preserves the underlying surface"),
-            Action::Quit => self.quit = true,
             Action::Apply
                 if self
                     .data
@@ -2701,7 +2540,6 @@ impl App {
         self.help.is_none()
             && self.more.is_none()
             && self.choice.is_none()
-            && self.navigation.menu.is_none()
             && !self.busy
             && self.error.is_none()
             && !self.show_result
@@ -2714,7 +2552,6 @@ impl App {
         if self.help.is_some()
             || self.more.is_some()
             || self.choice.is_some()
-            || self.navigation.menu.is_some()
             || self.busy
             || self.error.is_some()
             || self.show_result

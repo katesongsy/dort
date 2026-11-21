@@ -200,29 +200,14 @@ fn tools_collections_share_numbered_tabs_clicks_and_guarded_keyboard_navigation(
 }
 
 #[test]
-fn task_actions_are_not_menu_destinations_and_shell_keys_remain_global() {
+fn task_actions_are_not_local_destinations_and_shell_keys_remain_global() {
     let f = Fixture::new();
     let mut app = app(&f, false);
-    let places = super::navigation::entries(6);
-    assert_eq!(
-        places.iter().map(|e| e.label).collect::<Vec<_>>(),
-        [
-            "Declared tools [1]",
-            "Installed packages [2]",
-            "Installation history [3]"
-        ]
-    );
-    assert!(
-        places
-            .iter()
-            .all(|e| !e.label.starts_with(|c: char| c.is_ascii_digit())
-                && !e.label.contains("Check")
-                && !e.label.contains("Advanced"))
-    );
-    assert_eq!(
-        super::navigation::local_catalog(6),
-        &[(0, "1 Declared"), (1, "2 Installed"), (2, "3 History")]
-    );
+    let labels: Vec<_> = super::navigation::local_catalog(6)
+        .iter()
+        .map(|(label, _)| *label)
+        .collect();
+    assert_eq!(labels, ["1 Declared", "2 Installed", "3 History"]);
     key(&mut app, KeyCode::Char('c'));
     assert!(app.tab == Tab::Checks);
     key(&mut app, KeyCode::Char('t'));

@@ -38,48 +38,38 @@ pub(super) fn eligible(app: &App, action: &ui::ActionButton) -> bool {
             Target::Continue | Target::ConfirmAction | Target::PatchConfirm
         )
 }
-impl App {
-    pub(super) fn open_commands(&mut self) -> Option<Task> {
-        if let Some(reason) = self.navigation_block() {
-            self.interaction_notice = Some(reason);
-            self.status = reason.into();
-            return None;
-        }
-        let mut entries = Vec::new();
-        for group in 0..super::navigation::GROUPS.len() {
-            for entry in super::navigation::entries(group) {
-                let action = match entry.item {
-                    super::navigation::Item::Action(action) => action,
-                    super::navigation::Item::Manifest => {
-                        super::shell::Action::Destination(super::app::Tab::Checks)
-                    }
-                };
-                if !entries
-                    .iter()
-                    .any(|entry: &super::context::Entry| entry.action == action)
-                {
-                    entries.push(super::context::entry(action, None));
-                }
-            }
-        }
-        for entry in super::context::entries(self) {
-            if !entries
-                .iter()
-                .any(|existing| existing.action == entry.action)
-            {
-                entries.push(entry);
-            }
-        }
-        self.git_view.discard_patch();
-        self.shell.open_actions(entries);
-        self.shell.global_commands = true;
-        None
+/// Session controls without their own key; More is their only entry point.
+fn session_actions(app: &App) -> Vec<ui::ActionButton> {
+    use super::app::Tab;
+    use super::shell::Action;
+    let mut actions = vec![
+        ui::ActionButton {
+            label: "Toggle preview-only mode",
+            key: "",
+            target: Target::Action(Action::PreviewOnly),
+        },
+        ui::ActionButton {
+            label: "About Dort",
+            key: "",
+            target: Target::Action(Action::About),
+        },
+    ];
+    if app.tab == Tab::Git && !app.git_view.follows_files {
+        actions.push(ui::ActionButton {
+            label: "Follow selected repository",
+            key: "",
+            target: Target::Action(Action::GitDefault),
+        });
     }
+    actions
+}
+impl App {
     pub(super) fn open_more(&mut self, mut actions: Vec<ui::ActionButton>) {
         if self.busy {
             self.interaction_notice = self.navigation_block();
             return;
         }
+        actions.extend(session_actions(self));
         actions.retain(|action| eligible(self, action));
         let mut items = Vec::new();
         for action in actions {

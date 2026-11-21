@@ -212,16 +212,8 @@ fn preparing_table_enter_inspects_then_the_visible_action_uses_raw_identity() {
         matches!(key(&mut app, KeyCode::Char('x')), Some(Task::Bootstrap(r,t,dort_core::bootstrap::RecoveryAction::Abandon)) if r == "b".repeat(64) && t == "b".repeat(64))
     );
     assert!(app.preview.is_none() && app.confirmation.is_none());
-    // Discovery in the global palette still includes inapplicable operations.
-    key(&mut app, KeyCode::Char(';')); // search-first, no extra / keystroke
-    for c in "resume".chars() {
-        key(&mut app, KeyCode::Char(c));
-    }
-    assert!(matches!(
-        app.shell.overlay,
-        Some(super::shell::Overlay::Actions { .. })
-    ));
-    assert!(key(&mut app, KeyCode::Enter).is_none());
+    // Unavailable recovery operations still explain their reason.
+    assert!(app.activate(Action::Resume).is_none());
     assert!(app.status.contains("Resume is unavailable"));
 }
 #[test]

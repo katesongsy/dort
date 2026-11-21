@@ -19,7 +19,7 @@ JSON and nonterminal writes still need `--yes`.
 Run `dort` or `dort tui`.
 
 - `F1`: Help.
-- `Ctrl-G`: Menu. Choose a destination.
+- `F2`: More actions, including preview-only mode and About.
 - Sections: Overview `o`, Files `f`, Tools `t`, Recovery `r`, Checks `c`, Git `g`.
 - `Enter`: open the selected item or invoke the primary action.
 - `Esc`: back.
@@ -27,7 +27,7 @@ Run `dort` or `dort tui`.
 
 Lists use `Enter` for details. Named actions start checks, installs or reviews. Numbers switch collection tabs; in fields and filters they are text.
 
-Reviews show exact effects. Confirm once. Menus and Help keep drafts; choosing another destination drops approval. A window below 48×14 clears approval.
+Reviews show exact effects. Confirm once. Help keeps drafts; choosing another destination drops approval. A window below 48×14 clears approval.
 
 After a failure, `R` retries a read or asks for a fresh preview. It never replays an approval. After a failed write, `R` only refreshes; use `h` for Recovery. A blocked earlier operation names its repository and action; open Recovery.
 

@@ -119,7 +119,7 @@ fn settings_detection_and_save_are_process_free_and_only_accepted_values_affect_
     );
 }
 #[test]
-fn settings_and_declaration_drafts_survive_menus_but_navigation_drops_reviews() {
+fn settings_and_declaration_drafts_survive_help_but_navigation_drops_reviews() {
     let f = Fixture::new();
     let mut app = app(&f, false);
     settings(&f, &mut app);
@@ -128,9 +128,7 @@ fn settings_and_declaration_drafts_survive_menus_but_navigation_drops_reviews() 
         assert!(key(&mut app, KeyCode::Char(c)).is_none());
     }
     let draft = app.tools_view.settings.fields.clone();
-    key(&mut app, KeyCode::F(1));
-    key(&mut app, KeyCode::Esc);
-    app.open_menu(6, 80);
+    key(&mut app, KeyCode::F(1)); // Help retains the draft.
     key(&mut app, KeyCode::Esc);
     assert_eq!(app.tools_view.settings.fields, draft);
     assert!(!app.quit && app.tools_view.settings_open);

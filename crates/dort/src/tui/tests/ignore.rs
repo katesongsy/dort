@@ -1,7 +1,7 @@
 use super::{
     actions::{self, Output, Task},
     app::{App, Tab},
-    shell::Overlay,
+    shell::{self, Overlay},
     tests::render,
 };
 use dort_core::{
@@ -42,11 +42,9 @@ fn key(app: &mut App, code: KeyCode) -> Option<Task> {
     app.key(KeyEvent::new(code, KeyModifiers::NONE), 100, 30)
 }
 fn action(app: &mut App, query: &str) -> Task {
-    key(app, KeyCode::Char(';'));
-    for c in query.chars() {
-        key(app, KeyCode::Char(c));
-    }
-    key(app, KeyCode::Enter).expect("action task")
+    assert_eq!(query, "Ignore selected");
+    app.activate(shell::Action::IgnoreSelected)
+        .expect("primary action task")
 }
 fn approve(app: &mut App) -> Task {
     key(app, KeyCode::Enter).expect("one explicit preview approval")
@@ -75,9 +73,7 @@ fn ignore_folder_confirm_refresh_manage_and_unignore_are_complete_tui_workflows(
             .iter()
             .all(|c| !c.entry.path.starts_with(f.host.home.join(".tool")))
     );
-    app.open_menu(2, 100);
-    key(&mut app, KeyCode::End);
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = app.activate(shell::Action::ManageIgnored).unwrap();
     f.finish(&mut app, task);
     assert!(matches!(app.shell.overlay, Some(Overlay::Ignored { .. })));
     assert!(super::tests::has_action(&app, "Review unignore"));
@@ -128,7 +124,7 @@ fn visible_ignore_controls_mouse_and_keyboard_work_at_all_supported_sizes() {
         app.resize(w, h);
         let screen = render(&app, w, h);
         assert!(
-            screen.contains("Menu") && screen.contains("F2 More") && screen.contains("F1 Help"),
+            screen.contains("F2 More") && screen.contains("F1 Help"),
             "{screen}"
         );
         let (column, row) =
@@ -203,13 +199,10 @@ fn visible_ignore_controls_mouse_and_keyboard_work_at_all_supported_sizes() {
         let task = f.finish(&mut app, task).unwrap();
         f.finish(&mut app, task);
         app.resize(w, h);
-        app.open_menu(2, w);
-        app.navigation.menu.as_mut().unwrap().selected = 2;
-        assert!(render(&app, w, h).contains("Ignored paths"));
-        let (column, row) = (0..h)
-            .flat_map(|y| (0..w).map(move |x| (x, y)))
-            .find(|&(x, y)| matches!(app.hits.target(x, y), Some(Target::MenuItem(2))))
-            .expect("visible Ignored paths menu item");
+        render(&app, w, h);
+        let (column, row) = super::tests::target_position(&app, w, h, |target| {
+            matches!(target, Target::LocalDestination(2, 2))
+        });
         let task = app
             .mouse(
                 MouseEvent {
@@ -258,10 +251,8 @@ fn help_retains_real_preview_confirmation_and_shrink_still_clears_approval() {
     let task = key(&mut app, KeyCode::Char('I')).unwrap();
     f.finish(&mut app, task);
     let original = app.preview.as_ref().unwrap().text.clone();
-    super::tests::click_places(&mut app, 80, 24);
-    assert!(app.navigation.menu.is_some() && app.preview.is_some());
-    key(&mut app, KeyCode::Esc); // Dismissing a menu retains the real preview.
     key(&mut app, KeyCode::F(1));
+    assert!(app.help.is_some() && app.preview.is_some());
     for code in [
         KeyCode::Enter,
         KeyCode::Char('y'),
@@ -308,20 +299,6 @@ fn plain_section_navigation_drops_real_preview_ownership_without_any_write() {
     assert!(!f.host.config_dir.exists() && !f.host.state_dir.exists());
 }
 
-#[test]
-fn actual_menu_navigation_drops_real_preview_ownership_without_any_write() {
-    let f = Fixture::new();
-    let mut app = f.app(false);
-    let task = key(&mut app, KeyCode::Char('I')).unwrap();
-    f.finish(&mut app, task);
-    assert!(app.preview.is_some());
-    app.open_menu(1, 80);
-    assert!(app.preview.is_some()); // Opening Menu retains the real preview.
-    key(&mut app, KeyCode::Enter); // Actual navigation discards it.
-    assert!(app.preview.is_none() && app.confirmation.is_none());
-    assert!(app.tab == super::app::Tab::Overview);
-    assert!(!f.host.config_dir.exists() && !f.host.state_dir.exists());
-}
 #[test]
 fn ignore_preview_cancel_dry_run_and_small_layout_cannot_write() {
     let f = Fixture::new();

@@ -71,19 +71,12 @@ mod installed_tools_tests;
 #[path = "tests/interaction.rs"]
 mod interaction_tests;
 mod inventory;
-#[cfg(test)]
-#[path = "tests/menus.rs"]
-mod menu_tests;
 mod more;
 mod navigation;
 #[cfg(test)]
 #[path = "tests/navigation.rs"]
 mod navigation_tests;
 mod observations;
-mod palette;
-#[cfg(test)]
-#[path = "tests/palette.rs"]
-mod palette_tests;
 #[cfg(test)]
 #[path = "tests/picker.rs"]
 mod picker_tests;

@@ -15,7 +15,7 @@ fn key(app: &mut App, code: KeyCode) {
 }
 
 #[test]
-fn footer_fits_context_and_more_only_when_actions_overflow() {
+fn footer_fits_context_and_more_lists_overflow_and_session_actions() {
     let mut app = App::new(false);
     app.tab = Tab::Tools;
     app.tools_view.declare();
@@ -36,7 +36,17 @@ fn footer_fits_context_and_more_only_when_actions_overflow() {
                 app.key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE), w, h)
                     .is_none()
             );
-            assert!(app.more.is_none());
+            // Session controls stay reachable from More on every page.
+            let menu = app.more.as_ref().expect("F2 always opens More");
+            assert!(
+                menu.items
+                    .iter()
+                    .any(|item| item.action.label == "About Dort")
+            );
+            assert!(
+                app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), w, h)
+                    .is_none()
+            );
         } else {
             assert!(
                 app.key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE), w, h)
@@ -92,7 +102,7 @@ fn declaration_footer_describes_fields_and_review_not_underlying_tools_shortcuts
 }
 
 #[test]
-fn help_footer_precedes_retained_forms_menus_errors_and_running_work() {
+fn help_footer_precedes_retained_forms_overlays_errors_and_running_work() {
     for state in 0..4 {
         let mut app = App::new(false);
         app.tab = Tab::Tools;
@@ -101,7 +111,7 @@ fn help_footer_precedes_retained_forms_menus_errors_and_running_work() {
         match state {
             0 => (),
             1 => {
-                super::tests::click_places(&mut app, 80, 24);
+                app.shell.overlay = Some(super::shell::Overlay::About);
             }
             2 => app.error = Some("synthetic unavailable metadata".into()),
             _ => app.busy = true,

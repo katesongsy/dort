@@ -2,7 +2,6 @@
 use super::{
     actions::{Data, Output, Task},
     app::{App, Tab},
-    navigation,
     shell::{Action, Form, Overlay},
     tests::render,
 };
@@ -11,51 +10,24 @@ fn key(app: &mut App, code: KeyCode, w: u16, h: u16) -> Option<Task> {
     app.key(KeyEvent::new(code, KeyModifiers::NONE), w, h)
 }
 #[test]
-fn menu_labels_have_unique_working_local_shortcuts_and_keep_guards() {
-    for group in 0..navigation::GROUPS.len() {
-        let mut codes = Vec::new();
-        for entry in navigation::entries(group) {
-            let code = navigation::shortcut(entry.item);
-            assert!(!codes.contains(&code));
-            codes.push(code);
-            let label = match code {
-                KeyCode::Char(c) => c.to_string(),
-                KeyCode::F(n) => format!("F{n}"),
-                _ => panic!("explicit shortcut"),
-            };
-            assert!(entry.label.contains(&format!("[{label}]")));
-            let mut app = App::new(false);
-            let blocked = matches!(entry.item, navigation::Item::Action(action) if app.action_reason(action).is_some());
-            app.open_menu(group, 80);
-            let _ = key(&mut app, code, 80, 24);
-            assert!(app.preview.is_none() && app.confirmation.is_none());
-            if code == KeyCode::F(1) {
-                assert!(app.help.is_some() && app.navigation.menu.is_some());
-            } else if code == KeyCode::Char('q') {
-                assert!(app.quit);
-            } else {
-                assert_eq!(app.navigation.menu.is_some(), blocked, "{label}");
-            }
-        }
-    }
+fn local_shortcuts_keep_guards() {
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let mut app = App::new(false);
-        app.open_menu(4, w);
+        app.go_tab(Tab::Checks);
         assert!(matches!(
             key(&mut app, KeyCode::Char('2'), w, h),
             Some(Task::Diagnostics)
         ));
         assert!(app.tab == Tab::Checks && app.showing_diagnostics);
-        app.open_menu(2, w);
+        app.go_tab(Tab::Files);
         assert!(matches!(
             key(&mut app, KeyCode::Char('3'), w, h),
             Some(Task::IgnoredPaths)
         ));
         assert!(app.preview.is_none() && app.confirmation.is_none());
-        app = App::new(true);
-        app.open_menu(0, w);
-        assert!(key(&mut app, KeyCode::Char('v'), w, h).is_none());
-        assert!(app.dry_run && app.navigation.menu.is_some());
+        let mut dry = App::new(true);
+        assert!(dry.activate(Action::PreviewOnly).is_none());
+        assert!(dry.dry_run && dry.interaction_notice.is_some());
     }
 }
 #[test]
@@ -246,14 +218,10 @@ fn workspace_toolbar_has_one_row_and_overlay_uses_reclaimed_space() {
         super::input::Target::Action(super::shell::Action::Apply)
     )));
     assert!(!screen.contains("[Inspect"));
-    key(&mut app, KeyCode::Char(';'), 48, 14);
+    key(&mut app, KeyCode::F(1), 48, 14);
+    assert_eq!(app.dialog_title(), Some("Help"));
     let screen = render(&app, 48, 14);
-    assert!(screen.lines().nth(2).unwrap().contains("Find an action"));
-    assert!(
-        super::workbench::actions(&app)
-            .iter()
-            .any(|a| matches!(a.target, super::input::Target::PickerDetails))
-    );
-    key(&mut app, KeyCode::F(3), 48, 14);
-    assert!(render(&app, 48, 14).contains("Action details"));
+    assert!(screen.starts_with("Dort /"));
+    key(&mut app, KeyCode::F(1), 48, 14);
+    assert!(app.help.is_none());
 }

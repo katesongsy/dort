@@ -15,9 +15,6 @@ impl App {
         if let Some(menu) = &self.more {
             return Some(menu.title);
         }
-        if self.navigation.menu.is_some() {
-            return Some("Menu");
-        }
         if self.confirmation.is_some() {
             return Some("Confirm reviewed changes");
         }
@@ -30,18 +27,13 @@ impl App {
         match self.shell.overlay {
             Some(Overlay::Repositories { .. }) => Some("Choose repository"),
             Some(Overlay::Profiles(_)) => Some("Choose temporary profiles"),
-            Some(Overlay::Actions { .. }) => Some(if self.shell.global_commands {
-                "Commands"
-            } else {
-                "Actions"
-            }),
             Some(Overlay::About) => Some("About Dort"),
             _ => None,
         }
     }
     pub(super) fn navigation_block(&self) -> Option<&'static str> {
         if self.busy {
-            Some("Menus paused while work completes; q/Ctrl-C waits for the owned worker.")
+            Some("Navigation paused while work completes; q/Ctrl-C waits for the owned worker.")
         } else if self.dialog_title().is_some() {
             Some("Dialog open: close or cancel it with Esc before navigating.")
         } else {
@@ -156,12 +148,11 @@ impl App {
         }
         None
     }
-    /// Called only after selecting a menu destination, never opening/dismissing
-    /// a menu. Retain drafts and historical metadata, discard one-use approvals.
+    /// Called only after choosing another destination. Retain drafts and
+    /// historical metadata, discard one-use approvals.
     pub(super) fn leave_page_for_navigation(&mut self) {
         self.more = None;
         self.choice = None;
-        self.shell.global_commands = false;
         self.preview = None;
         self.confirmation = None;
         self.error = None;

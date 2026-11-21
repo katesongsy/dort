@@ -683,12 +683,10 @@ fn bootstrap_approval_staleness_and_lock_failure_are_visible_without_retry() {
 fn dry_run_bootstrap_can_never_execute_even_after_mode_toggle() {
     let fixture = Fixture::new(false);
     let mut app = onboarding_app(&fixture, true);
-    assert!(
-        super::tests::menu_action(&mut app, super::shell::Action::PreviewOnly, 80, 24).is_none()
-    );
-    assert!(app.dry_run && app.navigation.menu.is_some());
+    assert!(app.activate(super::shell::Action::PreviewOnly).is_none());
+    assert!(app.dry_run && app.interaction_notice.is_some());
     assert!(app.status.contains("--dry-run keeps"));
-    key(&mut app, KeyCode::Esc); // dismiss disabled menu, no task/approval
+    key(&mut app, KeyCode::Esc); // dismiss the notice; no task or approval
     key(&mut app, KeyCode::Char('n'));
     type_text(&mut app, "new");
     let task = submit_path(&mut app);
@@ -1240,9 +1238,12 @@ fn temporary_profiles_are_mandatory_union_and_drive_full_inventory_and_plans() {
 }
 
 fn choose_action(app: &mut App, query: &str) {
-    key(app, KeyCode::Char(';')); // real search is focused immediately
-    type_text(app, query);
-    key(app, KeyCode::Enter);
+    let action = match query {
+        "delete managed link: enter" => super::shell::Action::RemoveId,
+        "keep local file: enter" => super::shell::Action::KeepId,
+        other => panic!("unknown action {other}"),
+    };
+    assert!(app.activate(action).is_none());
 }
 
 #[test]

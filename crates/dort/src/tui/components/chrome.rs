@@ -24,36 +24,18 @@ pub fn shell(
     hits: &Hits,
 ) -> Areas {
     let area = frame.area();
-    let menu = " Ctrl-G Menu ";
-    let width = menu.len() as u16;
-    let title_area = Rect::new(area.x, area.y, area.width.saturating_sub(width), 1);
     let suffix = if dry_run { " [DRY RUN]" } else { "" };
     let title = format!(
         "{}{}",
         ui::chrome_clip(
             &format!("Dort / {title}"),
-            title_area.width.saturating_sub(suffix.len() as u16),
+            area.width.saturating_sub(suffix.len() as u16),
         ),
         suffix,
     );
-    frame.render_widget(Paragraph::new(title).style(ui::heading()), title_area);
-    let control = Rect::new(
-        area.right().saturating_sub(width),
-        area.y,
-        width.min(area.width),
-        1,
-    );
     frame.render_widget(
-        Paragraph::new(menu).style(if blocked { ui::muted() } else { ui::heading() }),
-        control,
-    );
-    hits.click(
-        control,
-        if blocked {
-            Target::NavigationBlocked
-        } else {
-            Target::MenuOpen
-        },
+        Paragraph::new(title).style(ui::heading()),
+        Rect::new(area.x, area.y, area.width, 1),
     );
     let footer = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
     let mut body = Rect::new(

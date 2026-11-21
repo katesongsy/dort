@@ -429,13 +429,6 @@ def interaction_surface_workflows(Session, binary, base, env):
             session.wait(b'Tool ID')
             session.send(b'\tq?/')
             session.settle()
-            session.send(b'\x07')
-            session.wait(b'Left/Right destination')
-            session.settle()
-            menu = session.screen.text()
-            assert b'Advanced' not in menu and b'Snapshot' not in menu and b'Check installed' not in menu
-            session.send(b'\x1b')
-            session.wait(b'q?/')
             session.send(b'\x1bOP')
             session.wait(b'Enter opens the selected')
             session.settle()

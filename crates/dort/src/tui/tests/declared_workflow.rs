@@ -99,7 +99,7 @@ fn empty_review_explains_why_and_opens_affected_details_or_edit_without_executio
     }
 }
 #[test]
-fn review_help_menus_dry_run_and_shrink_keep_the_real_approval_boundary() {
+fn review_help_dry_run_and_shrink_keep_the_real_approval_boundary() {
     let f = Fixture::new();
     let mut app = app(&f, false);
     let Some(Task::ToolsCheckPrepare(mut inputs)) = key(&mut app, KeyCode::Char('C')) else {
@@ -111,9 +111,6 @@ fn review_help_menus_dry_run_and_shrink_keep_the_real_approval_boundary() {
     assert!(key(&mut app, KeyCode::Enter).is_none());
     key(&mut app, KeyCode::Esc);
     assert!(app.tools_view.declared.check_preview.is_some() && f.calls().is_empty());
-    app.open_menu(6, 80);
-    key(&mut app, KeyCode::Esc);
-    assert!(app.tools_view.declared.check_preview.is_some());
     app.dry_run = true;
     assert!(key(&mut app, KeyCode::Enter).is_none());
     app.dry_run = false;

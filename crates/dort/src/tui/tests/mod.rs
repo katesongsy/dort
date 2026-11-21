@@ -39,32 +39,6 @@ fn terminal_cleanup_probe() {
     }
 }
 
-pub(super) fn menu_action(
-    app: &mut App,
-    action: super::shell::Action,
-    width: u16,
-    height: u16,
-) -> Option<super::actions::Task> {
-    use super::navigation::{self, Item};
-    let (group, index) = (0..navigation::GROUPS.len())
-        .find_map(|group| {
-            navigation::entries(group)
-                .iter()
-                .position(|e| e.item == Item::Action(action))
-                .map(|index| (group, index))
-        })
-        .expect("Task has a Menu destination");
-    app.open_menu(group, width);
-    app.navigation.menu.as_mut().unwrap().selected = 0;
-    let position = navigation::entry_order(group)
-        .iter()
-        .position(|id| *id == index)
-        .unwrap();
-    for _ in 0..position {
-        assert!(app.key(key(KeyCode::Right), width, height).is_none());
-    }
-    app.key(key(KeyCode::Enter), width, height)
-}
 pub(super) fn target_position(
     app: &App,
     width: u16,
@@ -75,20 +49,6 @@ pub(super) fn target_position(
         .flat_map(|y| (0..width).map(move |x| (x, y)))
         .find(|(x, y)| app.hits.target(*x, *y).is_some_and(&target))
         .expect("Actual foreground must expose the typed hit target")
-}
-pub(super) fn click_places(app: &mut App, width: u16, height: u16) -> Option<super::actions::Task> {
-    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-    render(app, width, height);
-    app.mouse(
-        MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: width - 2,
-            row: 0,
-            modifiers: KeyModifiers::NONE,
-        },
-        width,
-        height,
-    )
 }
 pub(super) fn has_action(app: &App, label: &str) -> bool {
     render(app, 80, 24);
@@ -282,7 +242,7 @@ fn compact_navigation_and_report_home_are_readable_without_color() {
     let mut app = App::new(true);
     for (width, height) in [(48, 14), (80, 24), (140, 40)] {
         let screen = render(&app, width, height);
-        for label in ["Menu", "Overview", "More", "Help", "DRY RUN"] {
+        for label in ["Overview", "More", "Help", "DRY RUN"] {
             assert!(
                 screen.contains(label),
                 "missing textual {label} at {width}x{height}"
@@ -411,17 +371,10 @@ fn navigation_and_metadata_escaping() {
 
 #[test]
 fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
-    use super::shell::Overlay;
     let mut app = App::new(false);
     app.tab = Tab::Files;
     app.key(key(KeyCode::Tab), 80, 24);
     assert!(app.preview.is_none() && app.confirmation.is_none());
-    app.key(key(KeyCode::Char(';')), 80, 24);
-    for c in "Choose repository".chars() {
-        app.key(key(KeyCode::Char(c)), 80, 24);
-    }
-    assert!(render(&app, 80, 24).contains("No matching actions")); // session commands live in menus
-    app.key(key(KeyCode::Esc), 80, 24); // Close the explicit dialog in one action.
     app.details_scroll = 3;
     app.key(key(KeyCode::Char('?')), 80, 24);
     assert!(render(&app, 100, 40).contains("Help") && app.dialog_title() == Some("Help"));
@@ -432,16 +385,6 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     assert!(app.tab == Tab::Files);
     app.key(key(KeyCode::BackTab), 80, 24);
     assert!(app.preview.is_none() && app.confirmation.is_none());
-    app.key(key(KeyCode::Char(';')), 80, 24);
-    for c in "q?/".chars() {
-        app.key(key(KeyCode::Char(c)), 80, 24);
-    }
-    assert!(!app.quit);
-    assert!(matches!(&app.shell.overlay, Some(Overlay::Actions { query, .. }) if query == "q?/"));
-    app.key(key(KeyCode::Down), 80, 24); // row focus, retain the literal query
-    app.key(key(KeyCode::Delete), 80, 24);
-    assert!(matches!(&app.shell.overlay, Some(Overlay::Actions { query, .. }) if query.is_empty()));
-    app.key(key(KeyCode::Esc), 80, 24);
     app.key(key(KeyCode::Char('n')), 80, 24);
     focus_form(&mut app);
     for c in "q?/".chars() {

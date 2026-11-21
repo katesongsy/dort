@@ -11,13 +11,6 @@ pub enum Scope {
     View,
 }
 impl Scope {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Item => "Context: selected item",
-            Self::Marked => "Context: marked items",
-            Self::View => "Context: current view",
-        }
-    }
     pub fn short(self) -> &'static str {
         match self {
             Self::Item => "Item",
@@ -78,7 +71,7 @@ pub(super) fn entry(action: Action, primary: Option<usize>) -> Entry {
         primary,
     }
 }
-/// Only operations belonging to this view. Menus own navigation/session commands.
+/// Only operations belonging to this view. Keys and the rail own navigation and session commands.
 /// Missing prerequisites stay visible and are explained by App's authoritative dispatch guard.
 pub fn entries(app: &App) -> Vec<Entry> {
     use Action::*;
@@ -140,9 +133,19 @@ pub fn entries(app: &App) -> Vec<Entry> {
         .chain(other.into_iter().map(|a| entry(a, None)))
         .collect();
     // Diagnostics is a refresh operation only when already in that subview.
+    // Section destinations and session commands stay on keys and the rail.
     rows.retain(|e| {
-        !super::navigation::owns(e.action)
-            || (e.action == Diagnostics && app.tab == Tab::Checks && app.showing_diagnostics)
+        !matches!(
+            e.action,
+            Discover
+                | ManageIgnored
+                | Diagnostics
+                | GitStatus
+                | GitUnstaged
+                | GitStaged
+                | ToolsInstalled
+                | ToolAttempts
+        ) || (e.action == Diagnostics && app.tab == Tab::Checks && app.showing_diagnostics)
     });
     // Related task order is not the foreground primary; only an explicit Enter control is.
     rows.sort_by_key(|e| (e.scope, e.primary.unwrap_or(usize::MAX)));
@@ -150,7 +153,7 @@ pub fn entries(app: &App) -> Vec<Entry> {
 }
 #[cfg(test)]
 pub fn page_actions(app: &App) -> Vec<Action> {
-    // Primary ordering is deliberately independent of the palette's scope sections.
+    // Primary ordering is independent of the scope sections.
     let mut rows: Vec<_> = entries(app)
         .into_iter()
         .filter(|e| e.primary.is_some())
