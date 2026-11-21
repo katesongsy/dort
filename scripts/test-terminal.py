@@ -188,6 +188,29 @@ class Session:
         while time.monotonic() < deadline:
             self.pump()
 
+    def press(self, key, marker):
+        """Press a key until `marker` renders.
+
+        The app refuses keys while owned work completes and paints an Action
+        unavailable notice, which the next accepted key clears. A fixed settle
+        is not enough on a slow runner, so resend while the notice is up.
+        """
+        deadline = time.monotonic() + TIMEOUT
+        sent = False
+        while time.monotonic() < deadline:
+            if marker in self.screen.text():
+                return
+            if sent and b'Action unavailable' not in self.screen.text():
+                break
+            self.send(key)
+            sent = True
+            window = time.monotonic() + 0.5
+            while time.monotonic() < window:
+                self.pump()
+                if marker in self.screen.text():
+                    return
+        self.wait(marker)
+
     def send(self, value):
         if value == b'\x1b':
             self.escape()
@@ -1449,9 +1472,7 @@ def run():
             session.wait(b'Confirm')
             session.send(b'\r')
             session.wait(b'File operation completed.')
-            session.settle()  # Complete the joined read refresh before leaving its receipt.
-            session.send(b'\x1b')
-            session.wait(b'0 marked (0 hidden)')
+            session.press(b'\x1b', b'0 marked (0 hidden)')
             session.click_label('only-b')
             session.send(b' K')
             session.wait(b'Exact marked set')
@@ -1459,9 +1480,7 @@ def run():
             session.wait(b'Confirm')
             session.send(b'\r')
             session.wait(b'Batch file operation completed.')
-            session.settle()
-            session.send(b'\x1b')
-            session.wait(b'0 marked (0 hidden)')
+            session.press(b'\x1b', b'0 marked (0 hidden)')
             session.send(b'q')
             session.finish()
         for name in ('only-a', 'only-b'):
