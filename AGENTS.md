@@ -9,10 +9,7 @@
 
 ## Code principles
 
-Architecture: Separate business logic from UI, persistence and external systems. Prefer high cohesion, low coupling and consistent dependency direction.
-
-Readability: Use descriptive names, focused functions, explicit error handling and simple control flow.
-
-Maintainability: Reuse existing patterns, avoid premature abstraction and keep changes localized.
-
-Verification: Run formatting, linting, type checks and tests. Review the final diff for design problems.
+* Architecture: Separate business logic from UI, persistence and external systems. Prefer high cohesion, low coupling and consistent dependency direction.
+* Readability: Use descriptive names, focused functions, explicit error handling and simple control flow.
+* Maintainability: Reuse existing patterns, avoid premature abstraction and keep changes localized.
+* Verification: Run formatting, linting, type checks and tests. Review the final diff for design problems.

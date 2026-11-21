@@ -20,7 +20,7 @@ FOCUSED = ('quick', 'npm', 'tools', 'ui')
 
 
 def cargo(*args):
-    return ['cargo', 'test', '--quiet', *args, '--locked', '--', '--test-threads=1']
+    return ['cargo', 'test', *args, '--locked', '--', '--test-threads=1']
 
 
 def plan(suite):
@@ -57,39 +57,13 @@ def plan(suite):
     raise ValueError('Unknown focused suite: ' + suite)
 
 
-def run(suite):
-    print(f'Focused {suite} checks. Full durability validation: python3 scripts/test.py full', flush=True)
-    started = time.monotonic()
-    total = 0
-    for label, command in plan(suite):
-        print(f'\nRunning {label}\n$ {shlex.join(command)}', flush=True)
-        start = time.monotonic()
-        count = 0
-        with subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, text=True) as child:
-            for line in child.stdout:
-                print(line, end='', flush=True)
-                match = re.search(r'test result: .*? (\d+) passed;', line)
-                if match:
-                    count += int(match[1])
-            status = child.wait()
-        if status:
-            return status
-        if not count:
-            print(f'FAIL {label}: no passing tests matched; update the focused suite.')
-            return 1
-        total += count
-        print(f'PASS {label}: {count} tests in {time.monotonic() - start:.1f}s', flush=True)
-    print(f'\nPASS {suite}: {total} tests in {time.monotonic() - started:.1f}s', flush=True)
-    return 0
-
-
-def artifacts():
-    result = subprocess.run(FULL_BUILD, cwd=ROOT, capture_output=True, text=True)
+def executables(build):
+    """Every test binary a cargo test invocation builds."""
+    result = subprocess.run(build, cwd=ROOT, capture_output=True, text=True)
     if result.returncode:
         print(result.stderr, flush=True)
         return None
-    executables = set()
+    found = set()
     for line in result.stdout.splitlines():
         try:
             message = json.loads(line)
@@ -99,8 +73,137 @@ def artifacts():
             continue
         executable = message.get('executable')
         if executable and message.get('profile', {}).get('test'):
-            executables.add(executable)
-    return sorted(executables)
+            found.add(executable)
+    return sorted(found)
+
+
+VALUE_FLAGS = {'-p', '--package', '--test', '--bin', '--example', '--bench',
+               '--exclude', '--features', '-F', '--target', '--jobs', '-j'}
+
+
+def selection(command):
+    """The build command and the name filters behind one cargo test command.
+
+    Cargo takes the test-name filter as a bare positional before `--`, so a
+    filter is any positional left once the flags and their values are removed.
+    """
+    at = command.index('--')
+    head = command[:at]
+    filters, build = [], list(head[:2])  # 'cargo', 'test'
+    index = 2
+    while index < len(head):
+        part = head[index]
+        if part in VALUE_FLAGS:
+            build.extend(head[index:index + 2])
+            index += 2
+        elif part.startswith('-'):
+            build.append(part)
+            index += 1
+        else:
+            filters.append(part)
+            index += 1
+    return build + ['--no-run', '--message-format=json'], filters
+
+
+def private_tmpdirs(count):
+    """A private TMPDIR per test, all created before any test starts.
+
+    A private TMPDIR per test keeps unrelated sibling creation out of shared
+    temp ancestors. A short private root keeps scope metadata under its fixed
+    bounds; system temp roots can be much longer than an application HOME.
+    """
+    short = Path('/tmp') if Path('/tmp').is_dir() and os.access('/tmp', os.W_OK) else None
+    tmp_root = Path(tempfile.mkdtemp(prefix='dort-', dir=short))
+    tmpdirs = []
+    for index in range(count):
+        path = tmp_root / str(index)
+        path.mkdir()
+        tmpdirs.append(str(path))
+    return tmp_root, tmpdirs
+
+
+def execute(executable, name, tmpdir, timeout):
+    start = time.monotonic()
+    environment = dict(os.environ, TMPDIR=tmpdir)
+    try:
+        result = subprocess.run([executable, '--exact', name, '--test-threads=1'],
+                                cwd=ROOT, capture_output=True, text=True, timeout=timeout,
+                                env=environment)
+        output = result.stdout + result.stderr
+        ran = re.search(r'test result: .*? 1 passed;', output) is not None
+        code = result.returncode if ran else 'not run'
+        return executable, name, code, output, time.monotonic() - start
+    except subprocess.TimeoutExpired as error:
+        output = (error.stdout or b'') + (error.stderr or b'')
+        if isinstance(output, bytes):
+            output = output.decode(errors='replace')
+        return executable, name, 'timeout', output, time.monotonic() - start
+
+
+def run_each(label, command, jobs, timeout):
+    """One process per test, at most `jobs` at a time. Returns (status, passed).
+
+    A test binary shares one process among its tests, and these tests interfere
+    in a shared process: run two at once inside one binary and a different test
+    fails on each attempt, even at two threads. Giving every test its own process
+    removes the interference, and the process is the unit these commands already
+    name. `--test-threads=1` stays because one process runs one test, so it costs
+    nothing and states the guarantee.
+    """
+    build, filters = selection(command)
+    binaries = executables(build)
+    if binaries is None:
+        return 1, 0
+    work = [(executable, name) for executable in binaries
+            for name in tests(executable)
+            if all(part in name for part in filters)]
+    if not work:
+        print(f'FAIL {label}: no passing tests matched; update the focused suite.')
+        return 1, 0
+    started = time.monotonic()
+    tmp_root, tmpdirs = private_tmpdirs(len(work))
+    passed = failed = timed_out = 0
+    failures = []
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        futures = [pool.submit(execute, executable, name, tmpdir, timeout)
+                   for (executable, name), tmpdir in zip(work, tmpdirs)]
+        for future in as_completed(futures):
+            _, name, code, output, _ = future.result()
+            if code == 0:
+                passed += 1
+            elif code == 'timeout':
+                timed_out += 1
+                failures.append((name, f'timed out after {timeout:.0f}s'))
+            else:
+                failed += 1
+                failures.append((name, output[-8000:]))
+    shutil.rmtree(tmp_root, ignore_errors=True)
+    for name, output in failures:
+        print(f'\nFAIL {name}\n{output}', flush=True)
+    verdict = 'PASS' if not failed and not timed_out else 'FAIL'
+    print(f'{verdict} {label}: {passed} passed, {failed} failed, {timed_out} timed out '
+          f'in {time.monotonic() - started:.1f}s', flush=True)
+    return (1 if failed or timed_out else 0), passed
+
+
+def run(suite, jobs, timeout):
+    print(f'Focused {suite} checks: {jobs} parallel processes '
+          f'(each test runs alone with a private TMPDIR).', flush=True)
+    print('Full durability validation: python3 scripts/test.py full', flush=True)
+    started = time.monotonic()
+    total = 0
+    for label, command in plan(suite):
+        print(f'\nRunning {label}\n$ {shlex.join(command)}', flush=True)
+        status, passed = run_each(label, command, jobs, timeout)
+        if status:
+            return status
+        total += passed
+    print(f'\nPASS {suite}: {total} tests in {time.monotonic() - started:.1f}s', flush=True)
+    return 0
+
+
+def artifacts():
+    return executables(FULL_BUILD)
 
 
 def listed(executable, *options):
@@ -140,43 +243,16 @@ def run_full(jobs, timeout):
     if not work:
         print('FAIL Full workspace: no tests discovered.')
         return 1
-    # A private TMPDIR per test keeps unrelated sibling creation out of shared
-    # temp ancestors; all directories are created before any test starts.
-    # A short private root keeps scope metadata under its fixed bounds; system
-    # temp roots can be much longer than an application HOME.
-    short = Path('/tmp') if Path('/tmp').is_dir() and os.access('/tmp', os.W_OK) else None
-    tmp_root = Path(tempfile.mkdtemp(prefix='dort-', dir=short))
-    tmpdirs = []
-    for index in range(len(work)):
-        path = tmp_root / str(index)
-        path.mkdir()
-        tmpdirs.append(str(path))
+    tmp_root, tmpdirs = private_tmpdirs(len(work))
     print(f'Full workspace: {len(work)} tests in {len(executables)} binaries, '
           f'{jobs} parallel processes (each test runs alone with private TMPDIR).', flush=True)
     passed = failed = timed_out = 0
     failures = []
     slowest = []
 
-    def execute(executable, name, tmpdir):
-        start = time.monotonic()
-        environment = dict(os.environ, TMPDIR=tmpdir)
-        try:
-            result = subprocess.run([executable, '--exact', name, '--test-threads=1'],
-                                    cwd=ROOT, capture_output=True, text=True, timeout=timeout,
-                                    env=environment)
-            output = result.stdout + result.stderr
-            ran = re.search(r'test result: .*? 1 passed;', output) is not None
-            code = result.returncode if ran else 'not run'
-            return executable, name, code, output, time.monotonic() - start
-        except subprocess.TimeoutExpired as error:
-            output = (error.stdout or b'') + (error.stderr or b'')
-            if isinstance(output, bytes):
-                output = output.decode(errors='replace')
-            return executable, name, 'timeout', output, time.monotonic() - start
-
     done = 0
     with ThreadPoolExecutor(max_workers=jobs) as pool:
-        futures = [pool.submit(execute, executable, name, tmpdir)
+        futures = [pool.submit(execute, executable, name, tmpdir, timeout)
                    for (executable, name), tmpdir in zip(work, tmpdirs)]
         for future in as_completed(futures):
             executable, name, code, output, elapsed = future.result()
@@ -233,6 +309,24 @@ class PlanTests(unittest.TestCase):
         self.assertTrue(any('npm_inventory_cli' in command for command in commands))
         self.assertTrue(any('installed_tools_tests' in command for command in commands))
 
+    def test_selection_recovers_the_filters_and_builds_without_running(self):
+        build, filters = selection(cargo('-p', 'dort', '--bin', 'dort', 'tools::'))
+        self.assertNotIn('--quiet', build)
+        self.assertEqual(build[-2:], ['--no-run', '--message-format=json'])
+        self.assertEqual(filters, ['tools::'])
+        self.assertNotIn('--test-threads=1', build)
+        self.assertEqual(selection(cargo('--workspace', '--lib', '--bins'))[1], [])
+
+    def test_every_focused_command_can_run_one_process_per_test(self):
+        # The runner derives a build command and a filter from each entry, so an
+        # entry without a `--` separator would silently run nothing.
+        for suite in FOCUSED:
+            for label, command in plan(suite):
+                self.assertIn('--', command, label)
+                build, _ = selection(command)
+                self.assertEqual(build[:3], ['cargo', 'test', '-p'] if '-p' in command
+                                 else ['cargo', 'test', '--workspace'], label)
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -253,15 +347,18 @@ def main():
             print('  then every test in its own process, at most --jobs concurrently, each --exact --test-threads=1')
             print('Doc tests: ' + shlex.join(FULL_DOC))
             return 0
+        print('Focused suites run each test in its own process too, at most --jobs concurrently,')
+        print('each --exact --test-threads=1. These commands select the tests; they are not the runner.')
         for label, command in plan(args.suite):
-            print(label + ': ' + shlex.join(command))
+            build, filters = selection(command)
+            print(f'{label}: {shlex.join(build)}' + (f' {shlex.join(filters)}' if filters else ''))
         return 0
     if args.jobs < 1 or args.timeout <= 0:
         print('--jobs and --timeout must be positive.')
         return 2
     if args.suite == 'full':
         return run_full(args.jobs, args.timeout)
-    return run(args.suite)
+    return run(args.suite, args.jobs, args.timeout)
 
 
 if __name__ == '__main__':

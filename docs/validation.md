@@ -23,9 +23,9 @@ python3 scripts/check-crates.py --archives
 git diff --check
 ```
 
-`python3 scripts/test.py` runs focused unit checks. Choose `npm`, `tools` or `ui`; use `--list` to see commands. `full` builds once and runs every test in its own process with a private temporary directory, up to 8 at a time. Use `--jobs` and `--timeout` to tune it.
+`python3 scripts/test.py` runs focused unit checks. Choose `npm`, `tools` or `ui`; use `--list` to see which tests each suite selects. Every focused suite runs each test in its own process, up to `--jobs` at a time, each with a private temporary directory. `full` builds once and runs every test the same way, up to 8 at a time. Use `--jobs` and `--timeout` to tune either.
 
-Direct `cargo test` remains valid for debugging. Keep `--test-threads=1`: same-process tests can briefly share a fork-inherited file lock.
+Direct `cargo test` remains valid for debugging. Keep `--test-threads=1`: same-process tests can briefly share a fork-inherited file lock, and two tests in one binary interfere. Two at once is enough to lose a test on some runs. `scripts/test.py` avoids this by giving every test its own process.
 
 ## Fixtures
 
