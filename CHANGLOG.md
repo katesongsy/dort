@@ -7,6 +7,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Documentation
 
+- simplify guides and consolidate contributor documentation ([2fa5af2](https://github.com/katesongsy/dort/commit/2fa5af206bda4fc27ad3cf9d8017b3920fbe744b))
+
 - streamline agent instructions ([68e3060](https://github.com/katesongsy/dort/commit/68e30605c64540ea9ffc48c1e404288eba2c6235))
 
 - add Homebrew and mise installation channels ([94d6fcd](https://github.com/katesongsy/dort/commit/94d6fcd34fd17f692040ccfaa899c0eab66c55e1))
@@ -54,6 +56,10 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 ### Maintenance
 
 - validate mise independently from Homebrew ([bbf8e0d](https://github.com/katesongsy/dort/commit/bbf8e0d6e21a6ca9e45740ec911e91bcb33f3117))
+
+### Refactoring
+
+- align UI copy and source notes with contributor rules ([df0fcdb](https://github.com/katesongsy/dort/commit/df0fcdbb9aa115d74a6ca4b48286e57e6a45ebf9))
 
 ### Tests
 
