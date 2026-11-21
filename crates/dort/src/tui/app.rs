@@ -10,6 +10,8 @@ use dort_core::{
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::PathBuf;
 
+mod output;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Overview,
@@ -254,52 +256,16 @@ impl App {
         if result.is_ok() {
             self.retry = None;
         }
-        match result {
+        let task = match result {
             Ok(Output::ToolsInstalledPreview(preview)) => {
-                if self.tab == Tab::Tools
-                    && self.tools_view.installed_open
-                    && self.tools_view.installed.waiting
-                    && !self.quit
-                {
-                    self.tools_view.installed.waiting = false;
-                    self.tools_view.installed.preview = Some(preview);
-                }
+                self.accept_tools_installed_preview(preview)
             }
-            Ok(Output::ToolsInstalled(current)) => {
-                if self.tab == Tab::Tools && self.tools_view.installed_open && !self.quit {
-                    self.tools_view.installed.completed(current);
-                }
-            }
-            Ok(Output::ToolsCheckPreview(preview)) => {
-                if self.tab == Tab::Tools && self.tools_view.declared.check_waiting {
-                    self.tools_view.declared.check_waiting = false;
-                    self.tools_view.declared.check_preview = Some(preview);
-                    self.details_scroll = 0;
-                }
-            }
-            Ok(Output::ToolsChecked(checked)) => {
-                if self.tab == Tab::Tools && self.tools_view.landing() {
-                    self.tools_view.declared.checked = Some(std::sync::Arc::new(checked));
-                    self.tools_view.declared.installed = None;
-                    self.tools_view.declared.stale = false;
-                    self.status =
-                        "Declared tools checked. Select a tool for details, or Install missing."
-                            .into();
-                }
-            }
-            Ok(Output::ToolsMissingPreview(preview)) => {
-                if self.tab == Tab::Tools && self.tools_view.declared.install_waiting {
-                    self.tools_view.declared.install_waiting = false;
-                    self.tools_view.declared.install_preview = Some(preview);
-                    self.details_scroll = 0;
-                }
-            }
+            Ok(Output::ToolsInstalled(current)) => self.accept_tools_installed(current),
+            Ok(Output::ToolsCheckPreview(preview)) => self.accept_tools_check_preview(preview),
+            Ok(Output::ToolsChecked(checked)) => self.accept_tools_checked(checked),
+            Ok(Output::ToolsMissingPreview(preview)) => self.accept_tools_missing_preview(preview),
             Ok(Output::ToolsMissingInstalled(installed)) => {
-                self.write_warning |= !installed.succeeded();
-                self.tools_view.declared.installed = Some(installed);
-                self.tools_view.declared.stale = true;
-                self.tools_view.declared.result_open = self.tab == Tab::Tools;
-                self.details_scroll = 0;
+                self.accept_tools_missing_installed(installed)
             }
             Err(error) => {
                 if self.tools_view.install_open
@@ -336,326 +302,42 @@ impl App {
                     self.retry = None;
                 }
                 self.error = Some(self.status.to_string());
+                None
             }
             Ok(
                 Output::DiscoverContent(_) | Output::DiscoveryTree(_) | Output::RecoveryRequired(_),
             ) => unreachable!(),
-            Ok(Output::History { rows, error }) => {
-                let identity = self
-                    .data
-                    .as_ref()
-                    .and_then(|d| d.history.get(self.selected))
-                    .map(|r| (r.repository_id.clone(), r.transaction_id.clone()));
-                let data = self.data.get_or_insert_with(Default::default);
-                data.history = rows;
-                data.history_error = error;
-                let position = identity.as_ref().and_then(|(r, t)| {
-                    data.history
-                        .iter()
-                        .position(|row| &row.repository_id == r && &row.transaction_id == t)
-                });
-                if data.history_error.is_some() {
-                    self.status = "Recovery unavailable. Write status unknown. r retries.".into();
-                } else if identity.is_some() && position.is_none() {
-                    self.status = "The selected operation is gone. Showing the nearest row.".into();
-                } else {
-                    self.status = "Recovery refreshed. Each preview checks current files.".into();
-                }
-                self.selected = position
-                    .unwrap_or(self.selected)
-                    .min(data.history.len().saturating_sub(1));
-                self.clamp_history_selection();
-            }
-            Ok(Output::Diagnostics(report)) => {
-                self.diagnostics = Some(report);
-                self.showing_diagnostics = true;
-                self.tab = Tab::Checks;
-                self.shell.overlay = None;
-                self.details_scroll = 0;
-                self.status = "Diagnostics loaded. Unavailable items show why.".into();
-            }
-            Ok(Output::ToolAttempts(result)) => {
-                if self.tab == Tab::Tools && self.tools_view.install_open && !self.quit {
-                    self.tools_view.installation.attempts_ready(result);
-                    self.status = "Install records · read-only. An unresolved record needs a fresh check before it can close.".into();
-                }
-            }
-            Ok(Output::ToolClosePreview(preview)) => {
-                if self.tab == Tab::Tools
-                    && self.tools_view.install_open
-                    && !self.quit
-                    && self.tools_view.installation.mode == super::tools_install::Mode::LoadingClose
-                {
-                    self.tools_view.installation.close_reviewed(*preview);
-                    self.status =
-                        "Review the fresh check and record close. Approval applies once.".into();
-                }
-            }
-            Ok(Output::ToolClosed(result)) => {
-                self.tools_view.installation.closed(result);
-                self.status =
-                    "Record checked. Closing does not retry, repair or roll back an install."
-                        .into();
-            }
+            Ok(Output::History { rows, error }) => self.accept_history(rows, error),
+            Ok(Output::Diagnostics(report)) => self.accept_diagnostics(report),
+            Ok(Output::ToolAttempts(result)) => self.accept_tool_attempts(result),
+            Ok(Output::ToolClosePreview(preview)) => self.accept_tool_close_preview(preview),
+            Ok(Output::ToolClosed(result)) => self.accept_tool_closed(result),
             Ok(Output::ToolsSettingsDetected(tool, request)) => {
-                if self.tab == Tab::Tools && !self.quit {
-                    self.tools_view.settings_ready(tool, request);
-                }
+                self.accept_tools_settings_detected(tool, request)
             }
-            Ok(Output::ToolsSettingsSaved(request)) => {
-                if self.tab == Tab::Tools && self.tools_view.settings_open && !self.quit {
-                    self.tools_view.settings_saved(request);
-                    self.status =
-                        "Tool settings saved for this session. Check installed to refresh status."
-                            .into();
-                }
-            }
-            Ok(Output::Git(report)) => {
-                self.git_view.accept(
-                    report,
-                    self.tab == Tab::Git
-                        && !self.quit
-                        && self.shell.overlay.is_none()
-                        && self.help.is_none()
-                        && self.more.is_none()
-                        && self.choice.is_none(),
-                );
-                self.status = "Git read done. Patch viewing needs a new confirmation.".into();
-            }
-            Ok(Output::Data(data)) => {
-                if self
-                    .tools_view
-                    .declared
-                    .checked
-                    .as_ref()
-                    .is_some_and(|c| data.tools_source.as_ref() != Some(&c.source))
-                {
-                    self.tools_view.declared.invalidate();
-                }
-                self.replace_data(data);
-                // Adoption must refresh managed/history observations as well as
-                // Discover, so immediately opening Recovery sees the new receipt.
-                if self.rediscovering_after_adoption && !self.quit {
-                    return Some(Task::Discover);
-                }
-                // Preserve execution errors/completion until the next explicit action.
-                if self.status == "Reading..." {
-                    self.status = "Read-only data loaded.".into();
-                } else if self.status.starts_with("Completed.") {
-                    self.status = "Completed. Refreshed.".into();
-                }
-            }
-            Ok(Output::Checked { report, standalone }) => {
-                self.check = Some((report, standalone));
-                self.showing_diagnostics = false;
-                self.tab = Tab::Checks;
-                self.shell.overlay = None;
-                self.details_scroll = 0;
-                self.status =
-                    "Declarations validated; inspect Files for live state and verify installed tools separately.".into();
-            }
+            Ok(Output::ToolsSettingsSaved(request)) => self.accept_tools_settings_saved(request),
+            Ok(Output::Git(report)) => self.accept_git(report),
+            Ok(Output::Data(data)) => self.accept_data(data),
+            Ok(Output::Checked { report, standalone }) => self.accept_checked(report, standalone),
             Ok(Output::Profiles {
                 report,
                 requested,
                 standalone,
                 apply,
-            }) => {
-                self.preview = None;
-                self.confirmation = None;
-                if apply {
-                    if standalone {
-                        self.shell.check_profiles = requested;
-                        self.check = Some((report, true));
-                        self.shell.overlay = Some(Overlay::Form(Form::Check));
-                    } else {
-                        if self.requested_profiles != requested {
-                            self.tools_view.declared.invalidate();
-                        }
-                        self.requested_profiles = requested;
-                        self.shell.overlay = None;
-                        if self
-                            .check
-                            .as_ref()
-                            .is_some_and(|(_, standalone)| !standalone)
-                        {
-                            self.check = None;
-                        }
-                        self.status = "Temporary profile additions changed; refreshing full active scope. Configuration unchanged.".into();
-                        if !self.quit {
-                            return Some(Task::Refresh);
-                        }
-                    }
-                    self.status =
-                        "Standalone profile additions validated; configuration unchanged.".into();
-                } else {
-                    self.shell.scroll = 0;
-                    self.shell.overlay = Some(Overlay::Profiles(Box::new(ProfilePicker {
-                        report,
-                        requested,
-                        standalone,
-                        selected: 0,
-                    })));
-                }
-            }
-            Ok(Output::Discovery(discovery)) => {
-                let old_path = self
-                    .discovery
-                    .as_ref()
-                    .and_then(|d| d.report.candidates.get(self.candidate_selected))
-                    .map(|c| &c.entry.path);
-                let position = old_path.and_then(|path| {
-                    discovery
-                        .report
-                        .candidates
-                        .iter()
-                        .position(|c| &c.entry.path == path)
-                });
-                if old_path.is_some() && position.is_none() {
-                    self.status =
-                        "Selected candidate disappeared; showing nearest remaining row.".into();
-                } else {
-                    self.status = "Discovery loaded; review each candidate before adoption.".into();
-                }
-                self.candidate_selected = position
-                    .unwrap_or(self.candidate_selected)
-                    .min(discovery.report.candidates.len().saturating_sub(1));
-                self.discovery = Some(std::sync::Arc::new(discovery));
-                self.clamp_file_selection();
-                if std::mem::take(&mut self.rediscovering_after_adoption)
-                    && let Some(receipt) = &self.receipt
-                {
-                    self.status = format!(
-                        "{} completed; Discover refreshed. Details show the record; Recovery keeps history.",
-                        receipt.operation
-                    ).into();
-                }
-            }
-            Ok(Output::Selected(repository, data)) => {
-                self.origin = if repository.is_some() {
-                    "session choice"
-                } else {
-                    "registered active"
-                };
-                self.repository = repository;
-                self.reset_repository_scope();
-                self.discovery = None;
-                self.candidate_selected = 0;
-                self.result = None;
-                self.receipt = None;
-                self.show_result = false;
-                self.data = None;
-                self.selected = 0;
-                self.details_scroll = 0;
-                self.preview = None;
-                self.confirmation = None;
-                self.shell.back();
-                self.replace_data(data);
-                self.status =
-                    "Repository selected for this session only; configuration unchanged.".into();
-            }
-            Ok(Output::IgnoredPaths(paths)) => {
-                self.shell.overlay = Some(Overlay::Ignored { paths, selected: 0 });
-                self.shell.scroll = 0;
-                self.status =
-                    "Select an exact ignored path to review Unignore. Ancestor rules still apply."
-                        .into();
-            }
+            }) => self.accept_profiles(report, requested, standalone, apply),
+            Ok(Output::Discovery(discovery)) => self.accept_discovery(discovery),
+            Ok(Output::Selected(repository, data)) => self.accept_selected(repository, data),
+            Ok(Output::IgnoredPaths(paths)) => self.accept_ignored_paths(paths),
             Ok(Output::Preview(Pending::ToolDeclaration(_)))
-                if self.tab != Tab::Tools || !self.tools_view.declaration_open || self.quit => {}
-            Ok(Output::Preview(pending)) => match pending.report() {
-                Ok(text) => {
-                    self.reviewed_activity =
-                        Some(super::task_surfaces::Activity::for_pending(&pending));
-                    self.preview = Some(Preview {
-                        pending,
-                        text,
-                        scroll: 0,
-                        horizontal: 0,
-                        full: false,
-                        selected: 0,
-                        effect_scroll: 0,
-                    });
-                    self.status = if self.preview.as_ref().is_some_and(|p| p.pending.adoption()) {
-                        "Review all mappings; Adopt all approves this exact set once."
-                    } else {
-                        "Review effects before confirming this exact change."
-                    }
-                    .into();
-                }
-                Err(error) => self.status = super::actions::diagnostic(&error).into(),
-            },
-            Ok(Output::Completed(completion)) => {
-                if completion.operation == "Tool declaration" {
-                    self.tools_view.declaration_finished();
-                    self.form_focus = None;
-                }
-                if completion.operation == "Discovery preferences" {
-                    self.content = Default::default();
-                    self.discovery = None;
-                    self.inventory.candidate_marks.clear();
-                    self.inventory.candidate_mark_revision =
-                        self.inventory.candidate_mark_revision.wrapping_add(1);
-                    self.shell.back();
-                    self.tab = Tab::Files;
-                    self.discovering = true;
-                    self.inventory.details = false;
-                    self.status = "Discovery preferences saved. Refreshing discovery; undo in Actions > Manage ignored paths.".into();
-                    if !self.quit {
-                        return Some(Task::Discover);
-                    }
-                    return None;
-                }
-                self.receipt = Some(super::task_surfaces::Receipt {
-                    operation: completion.operation,
-                    transaction_id: completion.transaction_id.clone(),
-                    activity: activity.or_else(|| self.reviewed_activity.clone()),
-                });
-                self.show_result = true;
-                self.details_scroll = 0;
-                if let Some(editor) = &mut self.batch_editor {
-                    editor.open = false;
-                }
-                let adopted = std::mem::take(&mut self.return_to_discover);
-                if !adopted {
-                    self.discovery = None;
-                }
-                if let Some(root) = completion.repository {
-                    self.repository = Some(root);
-                    self.reset_repository_scope();
-                    self.origin = "approved create/attach";
-                    self.tab = if self.shell.return_to_adopt {
-                        Tab::Files
-                    } else {
-                        Tab::Overview
-                    };
-                    self.data = None;
-                    self.selected = 0;
-                    self.details_scroll = 0;
-                }
-                self.shell.back();
-                self.result = Some(format!(
-                    "{} completed.\n{}",
-                    completion.operation,
-                    completion
-                        .transaction_id
-                        .map(|id| format!("Operation ID: {id}"))
-                        .unwrap_or_else(|| "Everything is up to date.".into())
-                ));
-                self.status = "Completed. Refreshing...".into();
-                if adopted {
-                    self.rediscovering_after_adoption = true;
-                    self.tab = Tab::Files;
-                    self.discovering = true;
-                    self.show_result = false;
-                    self.inventory.details = false;
-                    self.inventory.candidate_marks.clear();
-                    self.inventory.candidate_mark_revision =
-                        self.inventory.candidate_mark_revision.wrapping_add(1);
-                }
-                if !self.quit {
-                    return Some(Task::Refresh);
-                }
+                if self.tab != Tab::Tools || !self.tools_view.declaration_open || self.quit =>
+            {
+                None
             }
+            Ok(Output::Preview(pending)) => self.accept_preview(pending),
+            Ok(Output::Completed(completion)) => self.accept_completed(completion, activity),
+        };
+        if task.is_some() {
+            return task;
         }
         self.hits.clear();
         None
