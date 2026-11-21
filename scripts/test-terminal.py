@@ -189,7 +189,27 @@ class Session:
             self.pump()
 
     def send(self, value):
+        if value == b'\x1b':
+            self.escape()
+            return
         os.write(self.master, value)
+
+    def escape(self):
+        """Send a lone Esc and wait for the child to act on it.
+
+        Esc is a prefix byte. A key that lands in the same read window arrives
+        as Alt-key and is dropped, which cost 20s timeouts on slower runners.
+        """
+        frames = len(self.data)
+        os.write(self.master, b'\x1b')
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            self.pump()
+            if self.code is not None:
+                return
+            if len(self.data) > frames:
+                self.settle()
+                return
 
     def mouse(self, button, column, row):
         # SGR coordinates are one-based; button 0 clicks, 64/65 wheel up/down.
