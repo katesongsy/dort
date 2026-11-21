@@ -15,6 +15,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Features
 
+- **tools:** support Homebrew and npm on macOS, Linux and WSL ([189ee1e](https://github.com/katesongsy/dort/commit/189ee1e8b0043ca845394081c3fe1dbee621627e))
+
 - **tui:** improve navigation and menu interactions ([4d6a4b0](https://github.com/katesongsy/dort/commit/4d6a4b073cf7b155a49ce266927f1f9c27fa94d7))
 
 - **tui:** refine navigation and seed tool declarations from inventory ([7f01069](https://github.com/katesongsy/dort/commit/7f010691a5286605e686c7e1f566e8a37638e902))
