@@ -31,7 +31,7 @@ impl Manifest {
         Ok(manifest)
     }
 
-    /// Checks declarations and references. It does not run package managers or require source files.
+    /// Checks declarations and references only. Package managers stay idle; source files stay unread.
     pub fn validate(&self) -> Result<()> {
         let mut issues = vec![];
         if self.schema != 1 {
@@ -163,7 +163,7 @@ impl Manifest {
     }
 
     /// Checks effective-platform definitions, inactive dependencies and expanded target collisions.
-    /// It does not claim that providers, binaries or sources have been inspected.
+    /// Provider, binary and source inspection run in the discovery path.
     pub fn validate_for_host(
         &self,
         host: &HostContext,

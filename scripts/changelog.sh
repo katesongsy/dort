@@ -48,15 +48,15 @@ fi
     --offline --no-exec "$@" --output "$temporary"
 
 if [ "$check" = true ]; then
-    if ! cmp -s "$temporary" "$root/CHANGLOG.md"; then
-        printf '%s\n' "CHANGLOG.md differs from committed history; run scripts/changelog.sh." >&2
+    if ! cmp -s "$temporary" "$root/CHANGELOG.md"; then
+        printf '%s\n' "CHANGELOG.md differs from committed history; run scripts/changelog.sh." >&2
         exit 1
     fi
-    printf '%s\n' "CHANGLOG.md is up to date."
-elif ! cmp -s "$temporary" "$root/CHANGLOG.md"; then
+    printf '%s\n' "CHANGELOG.md is up to date."
+elif ! cmp -s "$temporary" "$root/CHANGELOG.md"; then
     chmod 644 "$temporary"
-    mv "$temporary" "$root/CHANGLOG.md"
-    printf '%s\n' "Updated CHANGLOG.md from committed history."
+    mv "$temporary" "$root/CHANGELOG.md"
+    printf '%s\n' "Updated CHANGELOG.md from committed history."
 else
-    printf '%s\n' "CHANGLOG.md is already up to date."
+    printf '%s\n' "CHANGELOG.md is already up to date."
 fi

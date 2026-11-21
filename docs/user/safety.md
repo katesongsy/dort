@@ -14,7 +14,7 @@ One preview creates one approval. Navigation, resizing below 48×14, or a failed
 
 ## Sensitive content
 
-Dort reports names, paths and package facts. It does not print file bodies.
+Dort reports names, paths and package facts. File bodies stay unprinted.
 
 Two deliberate exceptions:
 
@@ -51,7 +51,7 @@ A failed or interrupted write keeps a private record. New writes may be blocked 
 
 Recovery rechecks current files and refuses changed state. It never replays automatically. A completed operation can still be rolled back if its files still match.
 
-File and install history are separate. Closing an install record acknowledges it. It does not retry, repair or roll back a package.
+File and install history are separate. Closing an install record acknowledges it. Retry, repair and rollback stay manual.
 
 ## Terminal and interruption
 

@@ -8,14 +8,9 @@ import tempfile
 import unittest
 from urllib.parse import unquote, urlsplit
 
+from maintained_docs import paths as maintained_paths
+
 ROOT = Path(__file__).resolve().parent.parent
-
-
-def maintained_paths(root):
-    paths = [root / name for name in ("README.md", "ARCHITECTURE.md", "AGENTS.md", "CHANGLOG.md")]
-    paths.extend(sorted((root / "docs").rglob("*.md")))
-    paths.extend(sorted((root / "crates").rglob("README.md")))
-    return paths
 
 
 def prose(text):

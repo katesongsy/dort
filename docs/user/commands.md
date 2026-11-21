@@ -44,7 +44,7 @@ Tools has three tabs: **1 Declared**, **2 Installed**, **3 History**.
 - `a` Add declaration, `e` Edit, `d` Remove.
 - `s` Tool settings, only when detection needs paths.
 
-Status is Installed, Missing, Version differs, Couldn't check or Needs attention. Installed means the package manager reports the package. It does not prove the command works.
+Status is Installed, Missing, Version differs, Couldn't check or Needs attention. Installed means the package manager reports the package. Proving the command runs is a separate check.
 
 Checks are point-in-time. After an install, check again before another install. Installs stop on the first failure. Earlier effects stay; there is no rollback.
 
@@ -56,7 +56,7 @@ The result needs no repository or tool declaration. Query approval is separate f
 
 ### Installation history
 
-`3` lists install records. `Enter` opens details. `x` prepares closure of an unresolved record. Closure runs a fresh query and only acknowledges the unchanged record. It does not retry or repair anything.
+`3` lists install records. `Enter` opens details. `x` prepares closure of an unresolved record. Closure runs a fresh query and acknowledges the unchanged record. Retry and repair stay manual.
 
 ### Tool settings
 
@@ -112,7 +112,7 @@ Declaration JSON is one complete Tool. It is not approval.
 dort files discover
 ```
 
-Shows hidden HOME entries and `.config` entries. It does not read contents.
+Shows hidden HOME entries and `.config` entries. Contents stay unread.
 
 ### List
 
@@ -171,7 +171,7 @@ dort init /path/to/new-repository
 dort init /path/to/existing-repository
 ```
 
-Creates a local repository at an absent path, or attaches an existing Git tree with a valid `dort.toml`. It does not clone or sync.
+Creates a local repository at an absent path, or attaches an existing Git tree with a valid `dort.toml`. Clone and sync stay manual.
 
 ## Checks
 
@@ -182,9 +182,9 @@ dort manifest check --manifest /path/to/dort.toml
 dort --repo /path/to/dotfiles manifest check --profile dev
 ```
 
-`doctor` shows host and local state paths. It does not check packages or repair configuration.
+`doctor` shows host and local state paths. Package checks and configuration repair stay manual.
 
-`manifest check` validates declarations and profiles. It does not read file sources or check installed tools. `--manifest` is not combined with `--repo`.
+`manifest check` validates declarations and profiles. File sources and installed tools belong to the other checks. `--manifest` takes no `--repo`.
 
 ## Git
 

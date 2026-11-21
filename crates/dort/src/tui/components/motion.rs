@@ -1,4 +1,4 @@
-//! UI liveness animation. It does not affect service outcomes.
+//! UI liveness animation. Service outcomes stay untouched.
 use super::glyphs;
 use std::time::Duration;
 
