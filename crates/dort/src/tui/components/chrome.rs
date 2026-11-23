@@ -25,16 +25,24 @@ pub fn shell(
 ) -> Areas {
     let area = frame.area();
     let suffix = if dry_run { " [DRY RUN]" } else { "" };
-    let title = format!(
-        "{}{}",
-        ui::chrome_clip(
-            &format!("Dort / {title}"),
-            area.width.saturating_sub(suffix.len() as u16),
-        ),
-        suffix,
+    let title_start = "Dort / ".len()
+        + title
+            .rsplit_once(" / ")
+            .map_or(0, |(section, _)| section.len() + " / ".len());
+    let title = ui::chrome_clip(
+        &format!("Dort / {title}"),
+        area.width.saturating_sub(suffix.len() as u16),
     );
+    let (brand, location) = title.split_at("Dort".len().min(title.len()));
+    let (location, title) = location.split_at((title_start - brand.len()).min(location.len()));
+    let title = Line::from(vec![
+        Span::styled(brand, design::brand()),
+        Span::styled(location, design::muted_chrome()),
+        Span::styled(title, ui::heading()),
+        Span::styled(suffix, ui::heading()),
+    ]);
     frame.render_widget(
-        Paragraph::new(title).style(ui::heading()),
+        Paragraph::new(title).style(design::chrome()),
         Rect::new(area.x, area.y, area.width, 1),
     );
     let footer = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
@@ -56,25 +64,17 @@ pub fn shell(
             }
             let row = Rect::new(rail.x, rail.y + index as u16, rail.width, 1);
             let active = destination == tab;
-            let line = Line::from(vec![
-                Span::styled(
-                    if active {
-                        format!("{} ", glyphs::EXPAND)
-                    } else {
-                        "  ".into()
-                    },
-                    ui::accent(),
-                ),
-                Span::raw(label),
-            ]);
-            frame.render_widget(
-                Paragraph::new(line).style(if active {
-                    design::selection()
-                } else {
-                    ui::muted()
-                }),
-                row,
-            );
+            let (marker, style) = if active {
+                let style = design::active_rail();
+                (
+                    Span::styled(format!("{} ", glyphs::EXPAND), design::focus_marker(style)),
+                    style,
+                )
+            } else {
+                (Span::raw("  "), ui::muted())
+            };
+            let line = Line::from(vec![marker, Span::raw(label)]);
+            frame.render_widget(Paragraph::new(line).style(style), row);
             hits.click(
                 row,
                 if blocked {

@@ -13,6 +13,7 @@ pub fn terminal_appearance() -> crate::tui::appearance::Appearance {
     let ctype = value("LC_CTYPE");
     let lang = value("LANG");
     let no_color = value("NO_COLOR");
+    let colorterm = value("COLORTERM");
     crate::tui::appearance::Appearance::classify(
         term.as_deref(),
         all.as_deref(),
@@ -20,6 +21,7 @@ pub fn terminal_appearance() -> crate::tui::appearance::Appearance {
         lang.as_deref(),
         no_color.as_deref(),
     )
+    .with_color_depth(term.as_deref(), colorterm.as_deref())
 }
 
 // Ignore empty/relative PATH entries so a repository-local `git` is not selected.

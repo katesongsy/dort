@@ -1,5 +1,5 @@
 //! Shared navigation presentation. Controllers supply only trusted labels and typed hits.
-use super::{self as ui};
+use super::{self as ui, design};
 use crate::tui::input::{Hits, Target};
 use ratatui::{Frame, layout::Rect, text::Line, widgets::Paragraph};
 
@@ -46,7 +46,7 @@ fn destinations(
         let rect = Rect::new(x, area.y, width, 1);
         frame.render_widget(
             Paragraph::new(text).style(if item.selected {
-                ui::selected()
+                design::active_tab()
             } else {
                 ui::muted()
             }),

@@ -1,11 +1,11 @@
 //! Read-only metrics and a scrollable fact document. No workflow or approval state.
-use super::{clip, inline, pane, report};
+use super::{clip, design::titled_block, heading, inline, report};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     style::Style,
-    text::Text,
-    widgets::Paragraph,
+    text::{Line, Text},
+    widgets::{Borders, Paragraph},
 };
 pub struct Metric {
     pub label: &'static str,
@@ -34,17 +34,16 @@ pub fn draw(
         ])
         .split(rows[0]);
         for (area, metric) in columns.iter().zip(metrics) {
-            let widget = Paragraph::new(clip(
-                &inline(if cards {
-                    &metric.value
-                } else {
-                    &metric.compact
-                }),
-                area.width,
-            ))
-            .style(metric.style);
+            let value = if cards {
+                &metric.value
+            } else {
+                &metric.compact
+            };
+            let widget =
+                Paragraph::new(Line::styled(clip(&inline(value), area.width), metric.style));
             if cards {
-                frame.render_widget(widget.block(pane(metric.label, false)), *area);
+                let label = titled_block(metric.label, Borders::TOP, heading().patch(metric.style));
+                frame.render_widget(widget.block(label), *area);
             } else {
                 frame.render_widget(widget, *area);
             }

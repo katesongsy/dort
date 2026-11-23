@@ -122,17 +122,21 @@ pub(super) fn assert_text_focus(
 }
 pub(super) fn assert_primary_action(terminal: &Terminal<TestBackend>) {
     use ratatui::style::{Color, Modifier};
-    assert!(
-        terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .any(|c| c.fg == Color::Cyan
-                && c.bg == Color::Black
-                && c.modifier.contains(Modifier::BOLD | Modifier::REVERSED)),
-        "Missing explicit primary action role"
-    );
+    let buffer = terminal.backend().buffer();
+    let footer = &buffer.content[buffer.content.len() - usize::from(buffer.area.width)..];
+    let primary = footer
+        .windows(5)
+        .find(|cells| {
+            cells
+                .iter()
+                .map(|c| c.symbol())
+                .eq(["E", "n", "t", "e", "r"])
+        })
+        .expect("Missing Enter in footer");
+    assert!(primary.iter().all(|c| c.fg != Color::Reset
+        && c.bg != Color::Reset
+        && c.fg != c.bg
+        && c.modifier.contains(Modifier::BOLD | Modifier::REVERSED)));
 }
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)

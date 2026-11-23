@@ -41,7 +41,7 @@ pub fn document(
     lines.push(Line::default());
     lines.push(section("Keys in this context", width));
     let key_width = keys.iter().map(|(key, _)| key.len()).max().unwrap_or(0) + 4;
-    let key_style = design::primary();
+    let key_style = design::secondary_key();
     for (key, description) in keys {
         let keycap = format!(" {} ", inline(key));
         let indent = if width.saturating_sub(key_width) >= 20 {
