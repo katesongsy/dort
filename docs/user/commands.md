@@ -58,7 +58,7 @@ Checks are point-in-time. After an install, check again before another install. 
 
 ### Installed packages
 
-`2` opens the current package inventory. `R` prepares a fresh query. `/` filters the display. `Enter` opens package details. `a` starts a declaration with known fields filled in.
+`2` opens the current package inventory. `R` prepares a fresh query. `/` filters the display. `Enter` opens package details. `a` starts a declaration with the package name as the Tool ID and Command name. Edit either field if needed. Saving returns to Installed.
 
 The result needs no repository or tool declaration. Query approval is separate from declaration approval.
 

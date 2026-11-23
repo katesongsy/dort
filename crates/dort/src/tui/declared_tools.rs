@@ -176,8 +176,6 @@ pub fn key(app: &mut App, code: KeyCode) -> Option<Option<Task>> {
         KeyCode::Char('c') => Some(Action::ToolsCheck),
         KeyCode::Char('i') => Some(Action::ToolsInstallMissing),
         KeyCode::Char('a') => Some(Action::ToolDeclaration),
-        KeyCode::Char('h') => Some(Action::ToolAttempts),
-        KeyCode::Char('v') => Some(Action::ToolsInstalled),
         KeyCode::Char('s') if app.tools_view.declared_details => Some(Action::ToolsConfigure),
         _ => None,
     };
@@ -307,16 +305,6 @@ fn commands(app: &App) {
     if settings && !needs_settings {
         app.presented("Tool settings", "s", Target::Action(Action::ToolsConfigure));
     }
-    app.presented(
-        "Installed packages",
-        "v",
-        Target::Action(Action::ToolsInstalled),
-    );
-    app.presented(
-        "Installation history",
-        "h",
-        Target::Action(Action::ToolAttempts),
-    );
 }
 fn inspection_lines(body: &mut Vec<Line<'static>>, d: &dort_core::tools::inspection::Description) {
     body.push(ui::metadata("Program", &d.executable.display().to_string()));

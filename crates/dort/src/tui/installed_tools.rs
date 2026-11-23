@@ -91,10 +91,7 @@ impl State {
         }
         if self.details {
             match key.code {
-                KeyCode::Esc => {
-                    self.details = false;
-                    self.scroll = 0;
-                }
+                KeyCode::Esc => self.close_details(),
                 _ => self.scroll(key.code),
             }
             return None;
@@ -131,6 +128,10 @@ impl State {
             _ => (),
         }
         None
+    }
+    pub(super) fn close_details(&mut self) {
+        self.details = false;
+        self.scroll = 0;
     }
     fn scroll(&mut self, code: KeyCode) {
         match code {

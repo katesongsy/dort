@@ -185,7 +185,7 @@ impl Topic {
                 ("e / d", "Edit / remove the selected declaration"),
                 ("a", "Add a declaration"),
                 ("s", "Tool settings when configuration needs attention"),
-                ("h", "Installation history"),
+                ("2 / 3", "Open Installed / History"),
                 ("Esc", "Back"),
             ],
             Self::Picker => &[

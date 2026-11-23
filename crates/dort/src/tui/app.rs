@@ -1694,7 +1694,9 @@ impl App {
             KeyCode::Char('p') => return self.activate(Action::Choose),
             KeyCode::Char('n') => return self.activate(Action::Init),
             KeyCode::Char('c') => return self.activate(Action::CheckCurrent),
-            KeyCode::Char('v') => return self.activate(Action::CheckStandalone),
+            KeyCode::Char('v') if self.tab != Tab::Tools => {
+                return self.activate(Action::CheckStandalone);
+            }
             KeyCode::Char('t') => return self.activate(Action::Profiles),
             KeyCode::Char('?') => return self.activate(Action::Help),
             KeyCode::Char('r') => return self.activate(Action::Refresh),

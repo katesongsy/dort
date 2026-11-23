@@ -408,10 +408,12 @@ impl App {
         completion: Completion,
         activity: Option<crate::tui::task_surfaces::Activity>,
     ) -> Option<Task> {
-        if completion.operation == "Tool declaration" {
-            self.tools_view.declaration_finished();
+        let returned_to_installed = if completion.operation == "Tool declaration" {
             self.form_focus = None;
-        }
+            self.tools_view.declaration_finished()
+        } else {
+            false
+        };
         if completion.operation == "Discovery preferences" {
             self.content = Default::default();
             self.discovery = None;
@@ -433,7 +435,7 @@ impl App {
             transaction_id: completion.transaction_id.clone(),
             activity: activity.or_else(|| self.reviewed_activity.clone()),
         });
-        self.show_result = true;
+        self.show_result = !returned_to_installed;
         self.details_scroll = 0;
         if let Some(editor) = &mut self.batch_editor {
             editor.open = false;

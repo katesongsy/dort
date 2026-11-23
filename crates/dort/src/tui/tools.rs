@@ -189,13 +189,16 @@ impl State {
             self.declaration.seed_tool(tool, change);
         }
     }
-    pub fn declaration_finished(&mut self) {
-        if self.parents.last() == Some(&Page::Installed) {
+    pub fn declaration_finished(&mut self) -> bool {
+        let from_installed = self.parents.last() == Some(&Page::Installed);
+        if from_installed {
             self.back();
+            self.installed.close_details();
         } else {
             self.leave_section();
         }
         self.declaration_saved();
+        from_installed
     }
     pub fn declaration_saved(&mut self) {
         self.saved_declarations

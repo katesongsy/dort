@@ -229,7 +229,7 @@ fn declared_workflow_gallery_export_probe() {
             }
             "Installation history" => {
                 key(&mut app, KeyCode::Enter);
-                let task = key(&mut app, KeyCode::Char('h')).unwrap();
+                let task = key(&mut app, KeyCode::Char('3')).unwrap();
                 run(&f, &mut app, task);
             }
             "Tool settings" => {

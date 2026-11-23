@@ -5,8 +5,8 @@ Declare a tool in the manifest, find out whether the package manager reports it 
 ## Sub-features
 
 - **Declared tools** (`1`, `t`): status Installed / Missing / Version differs / Couldn't check / Needs attention.
-- **Installed packages** (`2`, `v`): current inventory, no declaration or repository needed. `a` turns a package into a declaration with the fields filled in.
-- **Installation history** (`3`, `h`): install records including failures. `x` prepares closure of an unresolved record; closure re-queries and only acknowledges the unchanged record.
+- **Installed packages** (`2`): current inventory, no declaration or repository needed. `a` turns a package into a declaration with the fields filled in.
+- **Installation history** (`3`): install records including failures. `x` prepares closure of an unresolved record; closure re-queries and only acknowledges the unchanged record.
 - **Check installed** (`C`): reviews the detected package-manager queries, then runs them once.
 - **Install missing** (`i`): review one eligible set, then install serially. First failure stops the run; earlier effects stay.
 - **Declaration editing**: `a` add, `e` edit, `d` remove.
@@ -14,7 +14,7 @@ Declare a tool in the manifest, find out whether the package manager reports it 
 
 ## How to get to it (user POV)
 
-TUI: `t`. Footer shows `a Add declaration`, `v Installed packages`, `h Installation history`. Numbers `1`/`2`/`3` switch tabs.
+Press `t` for Tools. Use `1`, `2`, or `3` to switch tabs. From Installed, press `a` to add a declaration. The package name fills both Tool ID and Command name. After confirmation, check that the Installed list returns without another query.
 
 CLI:
 
