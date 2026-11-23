@@ -12,7 +12,7 @@ Working today:
 
 - Local repository create/attach, manifest checks and profiles.
 - Discover, adopt, link, keep and remove regular files with history and recovery.
-- Read-only Git status and diff, with explicit patch disclosure.
+- Read-only Git status and diff, with patch previews in the terminal app.
 - Homebrew and npm tool checks, missing-tool installs and declaration editing.
 - CLI and TUI workflows for the supported tasks.
 

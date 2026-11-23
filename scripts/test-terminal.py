@@ -898,45 +898,32 @@ def run():
         git.chmod(0o700)
         git_only = base / "git-only"
         git_only.mkdir(mode=0o700)
-        with Session([binary, "tui"], dict(env, PATH=str(bin_dir))) as session:
+        with Session([binary, "tui"], dict(env, PATH=str(bin_dir)), (30, 140)) as session:
             session.wait(b"loaded.")
             session.navigate("Git", "Choose Git scope [g]")
             session.edit_fields('Exact Git root')
             session.send(os.fsencode(git_only) + b"\r")
-            session.wait(b"PATH")
             session.wait(b"q?name")
+            assert not (base / "patch-calls").exists(), "Untracked status requested a patch"
             session.send(b"/q?/\x1b")  # literal text, no quit/help/actions
             session.wait(b"0 displayed")
-            session.send(b"\x1b[3~u")  # clear display filter; unstaged summary
-            session.wait(b"Unstaged (worktree vs index)")
-            session.wait(b"1 entries")
-            session.settle()
-            assert not (base / "patch-calls").exists(), "Summary browsing prefetched a patch"
-            assert b"PRIVATE-PATCH" not in session.data
-            session.send(b"w")
-            session.wait(b"May expose secrets")
-            session.settle()
-            assert not (base / "patch-calls").exists(), "Warning opened a patch automatically"
-            session.send(b"\x1b")
-            session.wait(b"1 entries")
-            session.send(b"w")
-            session.click_label('Enter View patch')
+            session.send(b"\x1b[3~u")
+            session.wait(b"Git / Unstaged")
             session.wait(b"PRIVATE-PATCH\\x1b[31m")
-            session.send(b"\x1b")
-            session.wait(b"1 entries")
-            session.send(b"R")
-            session.wait(b"PATH")
-            session.settle()
+            rows = session.screen.text().splitlines()
+            preview_row = next(row for row in rows if b"PRIVATE-PATCH" in row)
+            assert preview_row.index(b"PRIVATE-PATCH") >= 50, "Patch was not in the right pane"
+            session.send(b"/not-present\r")
+            session.wait(b"No matches")
             assert b"PRIVATE-PATCH" not in session.screen.text()
-            assert (base / "patch-calls").read_text() == "x", "Refresh re-fetched patch"
+            session.send(b"\x1b[3~R")
+            session.wait(b"PRIVATE-PATCH\\x1b[31m")
             session.send(b"s")
-            session.wait(b"Staged (index vs HEAD")
+            session.wait(b"Git / Staged")
             session.send(b"q")
             session.finish()
         assert not list(home.iterdir()) and not list(git_only.iterdir())
-        print("PASS independent Git root, metadata search/summaries and one-view patch disclosure")
-
-        patch_calls = (base / "patch-calls").read_text()
+        print("PASS independent Git root, filter and automatic escaped patch preview")
         with Session([binary, "tui"], dict(env, PATH=str(bin_dir)), (14, 48)) as session:
             session.wait(b"loaded.")
             session.navigate("Git", "Choose Git scope [g]")
@@ -966,14 +953,13 @@ def run():
             session.settle()  # identical summaries can otherwise match the prior frame
             session.wait(b"1 entries")
             session.wait(b"PATH")
-            session.send(b"\r")
+            session.send(b"\x1bOR")
             session.wait(b"Modes: 100644 -> 100644")
-            assert b"PRIVATE-PATCH" not in session.data, "Metadata rendered patch content"
+            assert b"PRIVATE-PATCH" not in session.screen.text(), "Scope details showed patch content"
             session.send(b"q")
             session.finish()
-        assert (base / "patch-calls").read_text() == patch_calls, "Metadata inspection fetched a patch"
         assert not list(home.iterdir()) and not list(git_only.iterdir())
-        print("PASS compact typed Git tables, full-scope details and Home without patch reads or state")
+        print("PASS compact typed Git tables and full-scope details")
 
         with Session([binary, "tui"], dict(env, PATH=str(bin_dir)), (24, 110)) as session:
             session.wait(b"loaded.")
@@ -1002,28 +988,22 @@ def run():
             session.wait(b"Git details")
             session.send(b'\x1b')
             session.wait(b"PATH")
+            session.resize((30, 140))
             session.navigate("Git", "Unstaged [u]")
             session.wait(b"Git / Unstaged")
             session.wait(b"100644 -> 100644")  # loaded diff before content action
-            session.more_action('View patch')
-            session.wait(b"May expose secrets")
-            session.wait(b'Esc Cancel')
-            rows = session.screen.text().splitlines()
-            footer_row = next(i for i, row in enumerate(rows) if b'Esc Cancel' in row)
-            assert footer_row < len(rows) - 2 and b'Enter View patch' in rows[footer_row]
-            session.mouse(0, 20, 8)
-            session.send(b"yes")
-            session.settle()
-            assert b"May expose secrets" in session.screen.text()
-            session.mouse(0, 0, 0)
-            session.settle()
-            assert b"May expose secrets" not in session.screen.text()
-            assert b"PRIVATE-PATCH" not in session.data
+            session.wait(b"PRIVATE-PATCH\\x1b[31m")
+            session.resize((14, 48))
+            session.wait(b"100644 -> 100644")
+            assert b"PRIVATE-PATCH" not in session.screen.text()
+            session.send(b"\r")
+            session.wait(b"PRIVATE-PATCH\\x1b[31m")
+            session.send(b"\x1b")
+            session.wait(b"100644 -> 100644")
             session.send(b"q")
             session.finish()
-        assert (base / "patch-calls").read_text() == patch_calls, "Wide metadata controls disclosed content"
         assert not list(home.iterdir()) and not list(git_only.iterdir())
-        print("PASS direct Git metadata keys/mouse and resize isolated from patch confirmation")
+        print("PASS Git metadata keys/mouse and compact patch preview after resize")
 
         created = base / "created"
         for intent in ("create", "attach"):

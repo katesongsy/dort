@@ -205,6 +205,8 @@ def parse_steps(steps):
             parsed.append(("wait", value.encode()))
         elif kind == "send":
             parsed.append(("send", eval(value).encode() if value else b""))
+        elif kind == "click":
+            parsed.append(("click", value))
         elif kind == "snap":
             parsed.append(("snap", value or "frame"))
         elif kind == "resize":
@@ -232,6 +234,8 @@ def command_tui(args):
                     session.wait(value)
                 elif kind == "send":
                     session.send(value)
+                elif kind == "click":
+                    session.click_label(value)
                 elif kind == "snap":
                     session.settle()
                     frames.append(f"--- {value} ---\n{session.screen.text().decode()}")

@@ -67,6 +67,7 @@ python3 .pi/skills/verify-dort/drive.py tui my-proof --label managed \
 | --- | --- |
 | `wait:TEXT` | block until `TEXT` appears on the rendered screen |
 | `send:EXPR` | write bytes; the value is a Python literal, so `send:'\x1b'`, `send:'\x1b[B'` (down arrow), `send:'\x1bOQ'` (F2) |
+| `click:TEXT` | click the first visible match for the label |
 | `snap:NAME` | settle, then store the rendered screen as evidence |
 | `resize:RxC` | resize to `R` rows, `C` columns |
 | `sleep:SECONDS` | wait |
