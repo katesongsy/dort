@@ -12,6 +12,16 @@ use std::{
 
 const LIMIT: usize = 4 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(10);
+const DIFF_ARGS: &[&str] = &[
+    "diff",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-color",
+    "--no-renames",
+    "--ignore-submodules=all",
+    "--submodule=short",
+];
+const PATCH_ARGS: &[&str] = &["--patch", "--unified=3", "--"];
 
 fn failure(message: &'static str) -> Error {
     Error::Invalid(message.into())
@@ -98,15 +108,7 @@ impl Git {
 
     pub fn diff(&self, repository: &Path, staged: bool, patch: bool) -> Result<Diff> {
         let root = self.preflight(repository)?;
-        let mut args = vec![
-            "diff",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--no-color",
-            "--no-renames",
-            "--ignore-submodules=all",
-            "--submodule=short",
-        ];
+        let mut args = DIFF_ARGS.to_vec();
         if staged {
             args.push("--cached");
         }
@@ -118,7 +120,7 @@ impl Git {
             self.preflight(&root)?;
             args.truncate(args.len() - 4);
             // Do not request --binary; Git emits only a binary-change marker.
-            args.extend(["--patch", "--unified=3", "--"]);
+            args.extend_from_slice(PATCH_ARGS);
             Some(escape_patch(&self.checked(&root, &args)?))
         } else {
             None
@@ -132,6 +134,40 @@ impl Git {
         })
     }
 
+    pub fn selected_patch(
+        &self,
+        repository: &Path,
+        staged: bool,
+        path: &str,
+        original_path: Option<&str>,
+    ) -> Result<String> {
+        if let Some(old) = original_path
+            && (path.strip_prefix(old).is_some_and(|p| p.starts_with('/'))
+                || old.strip_prefix(path).is_some_and(|p| p.starts_with('/')))
+        {
+            let mut patch = self.selected_patch(repository, staged, old, None)?;
+            patch.push_str(&self.selected_patch(repository, staged, path, None)?);
+            return Ok(patch);
+        }
+        let mut pathspecs = Vec::new();
+        for path in [Some(path), original_path].into_iter().flatten() {
+            if path.contains('\0') || path.split('/').any(|p| matches!(p, "" | "." | "..")) {
+                return Err(failure("invalid Git file path"));
+            }
+            pathspecs.push(format!(":(top,literal){path}"));
+            // A positive literal pathspec also matches a directory. Exclude
+            // descendants if the selected file has become a directory.
+            pathspecs.push(format!(":(top,exclude,literal){path}/"));
+        }
+        let root = self.preflight(repository)?;
+        let mut args = DIFF_ARGS.to_vec();
+        if staged {
+            args.push("--cached");
+        }
+        args.extend_from_slice(PATCH_ARGS);
+        args.extend(pathspecs.iter().map(String::as_str));
+        Ok(escape_patch(&self.checked(&root, &args)?))
+    }
     // Only bootstrap may initialize Git, and only in its newly allocated private stage.
     pub(crate) fn initialize_private(executable: PathBuf, stage: &Path) -> Result<()> {
         let backend = Self::new(executable)?;
