@@ -81,7 +81,6 @@ pub(super) fn more_target(
         item.action.target,
         super::input::Target::ConfirmAction
             | super::input::Target::Continue
-            | super::input::Target::PatchConfirm
             | super::input::Target::ToolInstallControl(_, true)
     )));
     let index = menu

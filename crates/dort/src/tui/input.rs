@@ -25,7 +25,6 @@ pub enum Target {
     Filter,
     FormControl(usize, bool),
     FormAction(super::forms::Command),
-    PatchConfirm,
     ConfirmAction,
     CancelConfirmation,
     ToolInstallControl(usize, bool),
@@ -51,7 +50,7 @@ pub enum Wheel {
     Preview,
     PreviewRows,
     Confirmation,
-    GitPrivate,
+    GitPatch,
     Tools,
 }
 struct Region {

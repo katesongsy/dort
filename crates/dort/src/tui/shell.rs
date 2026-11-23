@@ -2,7 +2,6 @@
 use super::app::Tab;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-// Ordinary metadata viewport only; private Git patch scrolling never calls this.
 pub fn scroll_details(scroll: &mut u16, code: KeyCode) -> bool {
     match code {
         KeyCode::Down | KeyCode::PageDown => {
@@ -101,7 +100,6 @@ pub enum Action {
     GitUnstaged,
     GitStaged,
     GitRefresh,
-    GitPatch,
     ToolDeclaration,
     ToolsConfigure,
     ToolsCheck,
@@ -164,7 +162,6 @@ impl Action {
             Self::GitUnstaged => "Git: Unstaged summary",
             Self::GitStaged => "Git: Staged summary",
             Self::GitRefresh => "Git: Refresh",
-            Self::GitPatch => "View patch content (Git comparison; may expose secrets)",
             Self::Choose => "Choose repository (session only)",
             Self::Init => "Create/attach local repository",
             Self::Discover => "Discover files (no repository needed)",

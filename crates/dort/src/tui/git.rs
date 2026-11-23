@@ -1,17 +1,16 @@
 //! Read-only Git view. Patch content stays out of reports.
-use super::{actions::Task, components as ui, input::Target, shell::edit_text, views::safe};
+use super::{actions::Task, components as ui, input::Target, shell::edit_text};
 use dort_core::git::{Diff, Git, Status};
 use ratatui::{
     Frame,
     crossterm::event::{KeyCode, KeyEvent},
     layout::Rect,
-    style::Style,
-    text::{Line, Span, Text},
-    widgets::Paragraph,
 };
 use std::path::PathBuf;
 
 mod metadata;
+mod preview;
+pub use preview::{Read as PreviewRead, Report as PreviewReport};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Comparison {
@@ -68,142 +67,31 @@ impl Metadata {
         text.is_some_and(|text| search.matches(&text))
     }
 }
-// Only this module can construct a content-disclosure read, after consuming confirmation.
 pub struct Read {
     root: PathBuf,
     executable: PathBuf,
     comparison: Comparison,
-    patch: bool,
-}
-pub enum Report {
-    Summary(Metadata),
-    Patch(Patch),
-}
-pub struct Patch {
-    text: String,
-    lines: Vec<usize>,
-}
-impl Patch {
-    fn styled_viewport(
-        &self,
-        line: usize,
-        column: usize,
-        width: usize,
-        height: usize,
-    ) -> Text<'static> {
-        let digits = line.saturating_add(height).to_string().len().max(5);
-        let visible = self.viewport(line, column, width.saturating_sub(digits + 2), height);
-        Text::from(
-            visible
-                .lines()
-                .enumerate()
-                .map(|(offset, text)| {
-                    let index = line + offset;
-                    let start = self.lines[index];
-                    let original = &self.text[start..];
-                    let style = if original.starts_with("diff ")
-                        || original.starts_with("index ")
-                        || original.starts_with("---")
-                        || original.starts_with("+++")
-                    {
-                        super::components::heading()
-                    } else if original.starts_with("@@") {
-                        super::components::accent()
-                    } else if original.starts_with('+') {
-                        super::components::success()
-                    } else if original.starts_with('-') {
-                        super::components::danger()
-                    } else {
-                        Style::default()
-                    };
-                    Line::from(vec![
-                        Span::styled(
-                            format!("{:>digits$} │", index + 1),
-                            super::components::muted(),
-                        ),
-                        Span::styled(text.to_owned(), style),
-                    ])
-                })
-                .collect::<Vec<_>>(),
-        )
-    }
-    fn new(text: String) -> Self {
-        // Backend reports are ASCII-escaped, with LF as the sole raw control byte.
-        let lines = std::iter::once(0)
-            .chain(text.match_indices('\n').map(|(i, _)| i + 1))
-            .collect();
-        Self { text, lines }
-    }
-    fn viewport(&self, line: usize, column: usize, width: usize, height: usize) -> String {
-        self.lines
-            .iter()
-            .enumerate()
-            .skip(line)
-            .take(height)
-            .map(|(i, &start)| {
-                let end = self.lines.get(i + 1).copied().unwrap_or(self.text.len());
-                self.text[start..end]
-                    .trim_end_matches('\n')
-                    .get(column..)
-                    .unwrap_or_default()
-                    .chars()
-                    .take(width)
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-}
-#[cfg(test)]
-#[test]
-fn patch_viewport_styles_hunks_and_changes_even_when_scrolled_horizontally() {
-    let patch = Patch::new("diff --git a/x b/x\n@@ -1 +1 @@\n-old\n+new\n context".into());
-    let text = patch.styled_viewport(0, 0, 40, 5);
-    assert_eq!(text.lines[0].spans[1].style, super::components::heading());
-    assert_eq!(text.lines[1].spans[1].style, super::components::accent());
-    assert_eq!(text.lines[2].spans[1].style, super::components::danger());
-    assert_eq!(text.lines[3].spans[1].style, super::components::success());
-    assert!(text.lines[3].to_string().contains("4 │+new"));
-    let horizontal = patch.styled_viewport(2, 1, 30, 1);
-    assert_eq!(
-        horizontal.lines[0].spans[1].style,
-        super::components::danger()
-    );
-    assert!(horizontal.lines[0].to_string().ends_with("old"));
-}
-#[cfg(test)]
-#[test]
-fn patch_viewport_reaches_beyond_terminal_u16_scroll_without_retaining_history() {
-    let patch = Patch::new(format!(
-        "{}{}END\nLAST",
-        "line\n".repeat(70_000),
-        "x".repeat(70_000)
-    ));
-    assert_eq!(patch.viewport(70_000, 70_000, 10, 1), "END");
-    assert_eq!(patch.viewport(70_001, 0, 10, 1), "LAST");
 }
 impl Read {
-    pub fn perform(self) -> dort_core::Result<Report> {
+    pub fn perform(self) -> dort_core::Result<Metadata> {
         let git = Git::new(self.executable)?;
-        if self.comparison == Comparison::Status {
-            return git
-                .status(&self.root)
-                .map(|s| Report::Summary(Metadata::Status(s)));
-        }
-        let mut diff = git.diff(
-            &self.root,
-            self.comparison == Comparison::Staged,
-            self.patch,
-        )?;
-        if self.patch {
-            Ok(Report::Patch(Patch::new(
-                diff.patch.take().unwrap_or_default(),
-            )))
-        } else {
-            Ok(Report::Summary(Metadata::Diff(diff)))
+        match self.comparison {
+            Comparison::Status => git.status(&self.root).map(Metadata::Status),
+            comparison => git
+                .diff(&self.root, comparison == Comparison::Staged, false)
+                .map(Metadata::Diff),
         }
     }
 }
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Reader {
+    #[default]
+    Entries,
+    Details,
+    Patch,
+}
+
 #[derive(Default)]
 pub struct State {
     pub root: Option<PathBuf>,
@@ -217,12 +105,8 @@ pub struct State {
     selected: usize,
     pub viewport: super::navigation::ListViewport,
     scroll: u16,
-    patch_scroll: usize,
-    horizontal: usize,
-    details: bool,
-    confirmation: Option<()>,
-    patch: Option<Patch>,
-    awaiting_patch: bool,
+    reader: Reader,
+    preview: preview::State,
     awaiting_summary: bool,
 }
 impl State {
@@ -233,78 +117,47 @@ impl State {
         }
     }
     pub fn text_entry(&self) -> bool {
-        (self.editing_root && !self.root_details)
-            || self.search.editing
-            || self.confirmation.is_some()
-    }
-    // Local input routing only, not page modality or menu availability.
-    pub fn navigation_input(&self) -> bool {
-        self.editing_root || self.confirmation.is_some()
-    }
-    pub fn disclosure_pending(&self) -> bool {
-        self.confirmation.is_some()
+        (self.editing_root && !self.root_details) || self.search.editing
     }
     pub fn leave_page(&mut self) {
         self.editing_root = false;
         self.root_details = false;
         self.search.editing = false;
-        self.discard_patch();
+        self.reader = Reader::Entries;
+        self.discard_preview();
     }
-    pub fn sensitive(&self) -> bool {
-        self.confirmation.is_some() || self.patch.is_some() || self.awaiting_patch
-    }
-    pub fn discard_patch(&mut self) {
-        self.confirmation = None;
-        self.patch = None;
-        self.awaiting_patch = false;
-        self.scroll = 0;
-        self.horizontal = 0;
-        self.patch_scroll = 0;
+    pub fn discard_preview(&mut self) {
+        self.preview.sync(None);
+        if self.reader == Reader::Patch {
+            self.reader = Reader::Entries;
+        }
     }
     pub fn failed(&mut self) {
         if self.awaiting_summary {
             self.metadata = None;
         }
         self.awaiting_summary = false;
-        self.discard_patch();
-    }
-    pub fn resize(&mut self) {
-        self.discard_patch();
+        self.discard_preview();
     }
     pub fn scope_changed(&mut self) {
-        self.discard_patch();
+        self.discard_preview();
         self.metadata = None;
         self.selected = 0;
-        self.details = false;
+        self.reader = Reader::Entries;
+        self.scroll = 0;
     }
-    pub fn accept(&mut self, report: Report, visible: bool) {
-        match report {
-            Report::Summary(metadata) => {
-                self.awaiting_summary = false;
-                let old = self
-                    .metadata
-                    .as_ref()
-                    .and_then(|m| m.path(self.selected))
-                    .map(str::to_owned);
-                self.selected = old
-                    .and_then(|path| {
-                        (0..metadata.len()).find(|&i| metadata.path(i) == Some(path.as_str()))
-                    })
-                    .unwrap_or(self.selected)
-                    .min(metadata.len().saturating_sub(1));
-                self.metadata = Some(metadata);
-                self.clamp();
-            }
-            Report::Patch(patch) if self.awaiting_patch && visible => {
-                self.awaiting_patch = false;
-                self.patch = Some(patch);
-                self.scroll = 0;
-            }
-            Report::Patch(_) => self.discard_patch(),
-        }
+    pub fn accept(&mut self, metadata: Metadata) {
+        self.awaiting_summary = false;
+        let old = self.metadata.as_ref().and_then(|m| m.path(self.selected));
+        self.selected = old
+            .and_then(|path| (0..metadata.len()).find(|&i| metadata.path(i) == Some(path)))
+            .unwrap_or(self.selected)
+            .min(metadata.len().saturating_sub(1));
+        self.metadata = Some(metadata);
+        self.clamp();
     }
     pub fn request(&mut self, root: PathBuf, executable: PathBuf) -> Task {
-        self.discard_patch();
+        self.discard_preview();
         if self.root.as_ref() != Some(&root) {
             self.scope_changed();
         }
@@ -314,14 +167,60 @@ impl State {
             root,
             executable,
             comparison: self.comparison,
-            patch: false,
         })
     }
-    pub fn confirm_patch(&mut self) {
-        self.discard_patch();
-        if self.comparison != Comparison::Status && self.metadata.is_some() {
-            self.confirmation = Some(());
+    fn selection(&self) -> Option<preview::Selection> {
+        if self.awaiting_summary || self.editing_root {
+            return None;
         }
+        let metadata = self.metadata.as_ref()?;
+        let path = metadata.path(self.selected)?;
+        if !self.search.query.is_empty() && !metadata.matches(self.selected, &self.search) {
+            return None;
+        }
+        let (staged, unstaged) = match metadata {
+            Metadata::Status(status) => {
+                let row = status.entries.get(self.selected)?;
+                let [index, worktree] = row.xy.as_ref()?.as_bytes() else {
+                    return None;
+                };
+                let change = |code| match code {
+                    b'.' | b'?' | b'!' => None,
+                    b'R' => Some(
+                        row.original_path
+                            .clone()
+                            .map_or(preview::Change::File, preview::Change::RenameFrom),
+                    ),
+                    _ => Some(preview::Change::File),
+                };
+                (change(*index), change(*worktree))
+            }
+            Metadata::Diff(diff) if diff.staged => (Some(preview::Change::File), None),
+            Metadata::Diff(_) => (None, Some(preview::Change::File)),
+        };
+        if staged.is_none() && unstaged.is_none() {
+            return None;
+        }
+        Some(preview::Selection {
+            root: self.root.clone()?,
+            comparison: self.comparison,
+            path: path.to_owned(),
+            staged,
+            unstaged,
+        })
+    }
+    pub fn sync_preview(&mut self, enabled: bool) {
+        if let Some(selection) = enabled.then(|| self.selection()).flatten() {
+            self.preview.sync(Some(selection));
+        } else {
+            self.discard_preview();
+        }
+    }
+    pub fn next_preview(&mut self, executable: PathBuf) -> Option<Task> {
+        self.preview.next(executable).map(Task::GitPreview)
+    }
+    pub fn accept_preview(&mut self, report: PreviewReport) {
+        self.preview.accept(report);
     }
     pub fn choose(&mut self, comparison: Comparison) {
         if self.comparison != comparison {
@@ -352,66 +251,6 @@ impl State {
         launch: &std::path::Path,
         executable: &Result<PathBuf, String>,
     ) -> Option<Option<Task>> {
-        if (self.confirmation.is_some() || self.editing_root)
-            && matches!(key.code, KeyCode::PageDown | KeyCode::PageUp)
-        {
-            self.scroll = if key.code == KeyCode::PageDown {
-                self.scroll.saturating_add(3)
-            } else {
-                self.scroll.saturating_sub(3)
-            };
-            return Some(None);
-        }
-        if self.confirmation.is_some() || self.editing_root {
-            self.scroll = 0;
-        }
-        if self.confirmation.is_some() {
-            match key.code {
-                KeyCode::Esc => self.discard_patch(),
-                KeyCode::Enter => {
-                    self.confirmation = None;
-                    if let (Some(root), Ok(executable)) = (&self.root, executable) {
-                        self.awaiting_patch = true;
-                        return Some(Some(Task::Git(Read {
-                            root: root.clone(),
-                            executable: executable.clone(),
-                            comparison: self.comparison,
-                            patch: true,
-                        })));
-                    }
-                }
-                _ => (),
-            }
-            return Some(None);
-        }
-        if let Some(patch) = &self.patch {
-            match key.code {
-                KeyCode::Esc => self.discard_patch(),
-                KeyCode::Down | KeyCode::PageDown => {
-                    self.patch_scroll = self
-                        .patch_scroll
-                        .saturating_add(if key.code == KeyCode::Down { 1 } else { 8 })
-                        .min(patch.lines.len().saturating_sub(1))
-                }
-                KeyCode::Up | KeyCode::PageUp => {
-                    self.patch_scroll = self
-                        .patch_scroll
-                        .saturating_sub(if key.code == KeyCode::Up { 1 } else { 8 })
-                }
-                KeyCode::Home => {
-                    self.patch_scroll = 0;
-                    self.horizontal = 0;
-                }
-                KeyCode::End => self.patch_scroll = patch.lines.len().saturating_sub(1),
-                KeyCode::Right => self.horizontal = self.horizontal.saturating_add(4),
-                KeyCode::Left => self.horizontal = self.horizontal.saturating_sub(4),
-                _ => {
-                    self.discard_patch();
-                    return None;
-                }
-            }
-            return Some(None);
-        }
         if self.editing_root && self.root_details {
             match key.code {
                 KeyCode::Esc | KeyCode::F(3) => self.root_details = false,
@@ -447,7 +286,11 @@ impl State {
         }
         if key.code == KeyCode::F(3) {
             self.search.editing = false;
-            self.details = !self.details;
+            self.reader = if self.reader == Reader::Details {
+                Reader::Entries
+            } else {
+                Reader::Details
+            };
             self.scroll = 0;
             return Some(None);
         }
@@ -457,59 +300,40 @@ impl State {
             self.clamp();
             return Some(None);
         }
-        if self.details {
+        if self.reader != Reader::Entries {
             match key.code {
-                KeyCode::Down | KeyCode::PageDown => {
-                    self.scroll = self.scroll.saturating_add(2);
-                    return Some(None);
-                }
-                KeyCode::Up | KeyCode::PageUp => {
-                    self.scroll = self.scroll.saturating_sub(2);
+                KeyCode::Esc => {
+                    self.reader = Reader::Entries;
+                    self.scroll = 0;
                     return Some(None);
                 }
                 KeyCode::Enter => return Some(None),
+                code if self.reader == Reader::Patch && self.preview.scroll(code) => {
+                    return Some(None);
+                }
+                KeyCode::Left | KeyCode::Right if self.reader == Reader::Patch => {
+                    return Some(None);
+                }
+                code if super::shell::scroll_details(&mut self.scroll, code) => return Some(None),
                 _ => (),
             }
         }
         match key.code {
-            KeyCode::Char('/') => {
-                self.search.editing = true;
-                self.scroll = 0;
-            }
+            KeyCode::Char('/') => self.edit_filter(),
             KeyCode::Delete => self.clear_filter(),
-            KeyCode::Up | KeyCode::Down => {
-                let visible = self.visible();
-                let pos = visible
-                    .iter()
-                    .position(|&i| i == self.selected)
-                    .unwrap_or(0);
-                let next = if key.code == KeyCode::Up {
-                    pos.saturating_sub(1)
-                } else {
-                    (pos + 1).min(visible.len().saturating_sub(1))
-                };
-                if let Some(&i) = visible.get(next) {
-                    self.selected = i;
-                }
-                self.scroll = 0;
-            }
+            KeyCode::Up | KeyCode::Down => self.move_metadata(key.code == KeyCode::Up),
             KeyCode::Enter => {
                 if self.metadata.is_none() {
                     self.editing_root = true;
-                } else if !self.visible().is_empty() {
-                    self.details = true;
+                } else if self.has_selection() {
+                    self.reader = if self.preview.available() {
+                        Reader::Patch
+                    } else {
+                        Reader::Details
+                    };
                 }
                 self.scroll = 0;
             }
-            KeyCode::Esc => {
-                self.details = false;
-                self.scroll = 0;
-            }
-            // The compact metadata detail viewport has three rows. Overlap
-            // scroll steps so no wrapped path row can be skipped at the floor.
-            KeyCode::PageDown => self.scroll = self.scroll.saturating_add(2),
-            KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(2),
-            KeyCode::Home => self.scroll = 0,
             _ => return None,
         }
         Some(None)
@@ -518,7 +342,10 @@ impl State {
         self.editing_root && self.root_details
     }
     pub fn browsing_details(&self) -> bool {
-        self.details
+        self.reader == Reader::Details
+    }
+    pub fn browsing_entries(&self) -> bool {
+        self.reader == Reader::Entries && !self.editing_root
     }
     pub fn page_metadata(&mut self, backwards: bool, count: usize) {
         let visible = self.visible();
@@ -543,14 +370,21 @@ impl State {
         self.search.query.clear();
         self.clamp();
     }
+    pub fn edit_filter(&mut self) {
+        self.search.editing = true;
+        self.reader = Reader::Entries;
+        self.scroll = 0;
+    }
     pub fn inspect_metadata(&mut self) {
-        if !self.sensitive() && !self.editing_root {
-            self.details = true;
+        if !self.editing_root {
+            self.reader = Reader::Details;
+            self.scroll = 0;
         }
     }
     pub fn select_metadata(&mut self, index: usize) {
-        if !self.sensitive() && !self.editing_root && self.visible().contains(&index) {
+        if !self.editing_root && self.visible().contains(&index) {
             self.selected = index;
+            self.reader = Reader::Entries;
             self.scroll = 0;
         }
     }
@@ -570,97 +404,12 @@ impl State {
         }
     }
     pub fn scroll_metadata_details(&mut self, code: KeyCode) -> bool {
-        if self.sensitive() || self.editing_root {
-            return false;
-        }
         super::shell::scroll_details(&mut self.scroll, code)
     }
+    pub fn scroll_patch(&mut self, code: KeyCode) {
+        self.preview.scroll(code);
+    }
     pub fn draw(&self, frame: &mut Frame, area: Rect, busy: bool, hits: &super::input::Hits) {
-        hits.wheel(
-            area,
-            if self.sensitive() || self.editing_root {
-                super::input::Wheel::GitPrivate
-            } else {
-                super::input::Wheel::Details
-            },
-        );
-        let scope = format!(
-            "Git-only root: {:?} ({})\n{}\n",
-            self.root,
-            if self.follows_files {
-                "current file repository"
-            } else {
-                "independent session choice"
-            },
-            self.comparison.label()
-        );
-        if let Some(patch) = &self.patch {
-            // Backend has already escaped unsafe bytes. Do not route through generic safe/report paths.
-            let heading = format!(
-                "{}\n{}",
-                ui::short_field(
-                    "Git root",
-                    self.root
-                        .as_ref()
-                        .and_then(|p| p.to_str())
-                        .unwrap_or("not selected"),
-                    area.width
-                ),
-                self.comparison.label()
-            );
-            frame.render_widget(
-                Paragraph::new(safe(&heading)),
-                Rect::new(area.x, area.y, area.width, 2),
-            );
-            let area = Rect::new(
-                area.x,
-                area.y + 2,
-                area.width,
-                area.height.saturating_sub(2),
-            );
-            frame.render_widget(
-                Paragraph::new("Patch may contain secrets").style(ui::warning()),
-                Rect::new(area.x, area.y, area.width, 1),
-            );
-            let content = Rect::new(
-                area.x,
-                area.y + 1,
-                area.width,
-                area.height.saturating_sub(1),
-            );
-            frame.render_widget(
-                Paragraph::new(patch.styled_viewport(
-                    self.patch_scroll,
-                    self.horizontal,
-                    usize::from(content.width),
-                    usize::from(content.height),
-                )),
-                content,
-            );
-            return;
-        }
-        if self.confirmation.is_some() {
-            let body = area;
-            super::components::text_view(
-                frame,
-                body,
-                Text::from(safe(&format!(
-                    "May expose secrets: whole comparison\n\n{scope}"
-                ))),
-                self.scroll,
-            );
-            hits.present(ui::ActionButton {
-                label: "View patch",
-                key: "Enter",
-                target: Target::PatchConfirm,
-            });
-            hits.present(ui::ActionButton {
-                label: "Cancel",
-                key: "Esc",
-                target: Target::Back,
-            });
-            return;
-        }
         if self.editing_root {
             use ratatui::crossterm::event::KeyModifiers;
             hits.present(ui::ActionButton {
@@ -723,7 +472,8 @@ impl State {
                     visible: &visible,
                     selected: self.selected,
                     viewport: &self.viewport,
-                    details: self.details,
+                    reader: self.reader,
+                    preview: &self.preview,
                     scroll: self.scroll,
                     busy,
                 },

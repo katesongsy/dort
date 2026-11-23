@@ -2,7 +2,7 @@
 use super::{
     actions::{Data, ManagedRow, Output},
     app::{App, Tab},
-    git::{Metadata, Report},
+    git::Metadata,
     tests::render,
 };
 use dort_core::{
@@ -56,23 +56,20 @@ fn fixture(tab: Tab) -> App {
         ..Default::default()
     })));
     app.tab = tab;
-    app.git_view.accept(
-        Report::Summary(Metadata::Status(Status {
-            schema: 1,
-            read_only: true,
-            branch: vec!["branch.head main".into()],
-            entries: ["first", "second"]
-                .into_iter()
-                .map(|id| StatusEntry {
-                    kind: "renamed".into(),
-                    xy: Some("R.".into()),
-                    path: id.into(),
-                    original_path: Some(format!("{}/original-end", long_path("original"))),
-                })
-                .collect(),
-        })),
-        true,
-    );
+    app.git_view.accept(Metadata::Status(Status {
+        schema: 1,
+        read_only: true,
+        branch: vec!["branch.head main".into()],
+        entries: ["first", "second"]
+            .into_iter()
+            .map(|id| StatusEntry {
+                kind: "renamed".into(),
+                xy: Some("R.".into()),
+                path: id.into(),
+                original_path: Some(format!("{}/original-end", long_path("original"))),
+            })
+            .collect(),
+    }));
     app
 }
 
@@ -139,7 +136,7 @@ fn direct_keys_select_rows_scroll_details_and_ignore_tab_without_region_focus() 
         assert!(app.tab == tab);
         press(&mut app, KeyCode::Left, size);
         assert!(app.tab == tab);
-        assert!(!app.git_view.sensitive() && app.confirmation.is_none());
+        assert!(app.confirmation.is_none());
     }
 }
 #[test]
@@ -272,7 +269,7 @@ fn hit_rows_follow_rendered_table_offset_and_stale_geometry_is_inert() {
     assert_eq!(app.selected, 79);
 }
 #[test]
-fn mouse_form_controls_and_palette_actions_never_bypass_typed_approval_or_disclosure() {
+fn mouse_form_controls_and_palette_actions_never_bypass_typed_approval() {
     let size = (80, 24);
     let mut app = fixture(Tab::Files);
     press(&mut app, KeyCode::Char('m'), size);
@@ -296,35 +293,6 @@ fn mouse_form_controls_and_palette_actions_never_bypass_typed_approval_or_disclo
         matches!(task,Some(super::actions::Task::Files(dort_core::planner::Request::Unmanage{ref id,..})) if id=="first")
     );
     assert!(app.confirmation.is_none());
-    app.git_view.choose(super::git::Comparison::Unstaged);
-    app.git_view.accept(
-        Report::Summary(Metadata::Diff(dort_core::git::Diff {
-            schema: 1,
-            read_only: true,
-            staged: false,
-            patch: None,
-            entries: vec![],
-        })),
-        true,
-    );
-    super::tests::destination(&mut app, super::app::Tab::Git, size.0, size.1);
-    press(&mut app, KeyCode::Char('w'), size);
-    assert!(app.git_view.sensitive());
-    press(&mut app, KeyCode::Tab, size);
-    assert!(
-        mouse(
-            &mut app,
-            MouseEventKind::Down(MouseButton::Left),
-            20,
-            8,
-            size
-        )
-        .is_none()
-    );
-    press(&mut app, KeyCode::Enter, size);
-    assert!(!app.git_view.sensitive()); // no configured Git; consumed confirmation is not replayed
-    press(&mut app, KeyCode::Esc, size);
-    assert!(!app.git_view.sensitive());
 }
 #[test]
 fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_tabs() {

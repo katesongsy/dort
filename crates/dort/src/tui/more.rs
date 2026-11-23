@@ -33,10 +33,7 @@ pub(super) fn eligible(app: &App, action: &ui::ActionButton) -> bool {
                 app.tools_view.installation.mode,
                 super::tools_install::Mode::CloseReview
             ))
-        && !matches!(
-            action.target,
-            Target::Continue | Target::ConfirmAction | Target::PatchConfirm
-        )
+        && !matches!(action.target, Target::Continue | Target::ConfirmAction)
 }
 /// Session controls without their own key; More is their only entry point.
 fn session_actions(app: &App) -> Vec<ui::ActionButton> {
@@ -86,7 +83,6 @@ impl App {
             };
             items.push(Item { action, reason });
         }
-        self.git_view.discard_patch();
         self.more = Some(More::new("More actions", items));
     }
     pub(super) fn more_key(&mut self, code: KeyCode, width: u16, height: u16) -> Option<Task> {

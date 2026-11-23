@@ -205,6 +205,7 @@ fn run_loop(
             app.resize(size.width, size.height);
         }
         discover_content::sync(&mut app, size.width, size.height);
+        app.sync_git_preview();
         if let Some(active) = worker.as_mut() {
             if let Some(progress) = active.progress()
                 && !app.exit_requested
@@ -244,8 +245,9 @@ fn run_loop(
         }
         discover_content::sync(&mut app, size.width, size.height);
         if worker.is_none()
-            && let Some(task) =
-                discovery_tree::next(&app).or_else(|| discover_content::next(&mut app))
+            && let Some(task) = discovery_tree::next(&app)
+                .or_else(|| discover_content::next(&mut app))
+                .or_else(|| app.next_git_preview())
         {
             launch(task, host, &mut app, worker)?;
             dirty = true;
@@ -341,7 +343,10 @@ fn launch(
     app: &mut App,
     worker: &mut Option<Worker>,
 ) -> Result<()> {
-    if matches!(task, Task::DiscoverContent(_) | Task::DiscoveryTree(_)) {
+    if matches!(
+        task,
+        Task::DiscoverContent(_) | Task::DiscoveryTree(_) | Task::GitPreview(_)
+    ) {
         debug_assert!(worker.is_none());
         *worker = Some(
             Worker::start(task, host.clone(), app.repository.clone(), vec![])

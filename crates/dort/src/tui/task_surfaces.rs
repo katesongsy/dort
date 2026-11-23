@@ -110,7 +110,7 @@ impl Activity {
                 "Review missing-tool installations (no execution)"
             }
             Task::ToolsInstallMissing(_) => "Install reviewed missing tools serially · quit waits",
-            Task::DiscoverContent(_) | Task::DiscoveryTree(_) => {
+            Task::DiscoverContent(_) | Task::DiscoveryTree(_) | Task::GitPreview(_) => {
                 unreachable!("private passive reads have no activity surface")
             }
             Task::IgnoredPaths => "Manage ignored paths",

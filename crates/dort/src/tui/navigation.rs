@@ -243,7 +243,6 @@ pub fn local_available(app: &App) -> bool {
         || app.page_title().is_some()
             && !ignored
             && !(app.tab == Tab::Tools && app.tools_view.collection_visible())
-        || app.git_view.sensitive()
     {
         return false;
     }

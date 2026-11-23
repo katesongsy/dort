@@ -227,8 +227,8 @@ fn retained_review_viewports_keep_action_rows_aligned_for_recovery_git_and_ignor
 
     let mut app = App::new(false);
     app.tab = Tab::Git;
-    app.git_view.accept(
-        super::git::Report::Summary(super::git::Metadata::Status(dort_core::git::Status {
+    app.git_view
+        .accept(super::git::Metadata::Status(dort_core::git::Status {
             schema: 1,
             read_only: true,
             branch: vec![],
@@ -240,9 +240,7 @@ fn retained_review_viewports_keep_action_rows_aligned_for_recovery_git_and_ignor
                     original_path: Some(format!("old-{i:03}")),
                 })
                 .collect(),
-        })),
-        true,
-    );
+        }));
     assert_review_list_navigation(
         &mut app,
         |t, i| matches!(t, Target::Row(n) if i == n),

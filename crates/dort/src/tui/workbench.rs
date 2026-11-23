@@ -45,7 +45,6 @@ pub fn shortcut(action: Action) -> &'static str {
         Action::GitStatus => "z",
         Action::GitUnstaged => "u",
         Action::GitStaged => "s",
-        Action::GitPatch => "w",
         _ => "",
     }
 }
@@ -77,7 +76,6 @@ fn short(action: Action) -> &'static str {
         Action::GitStatus => "Status",
         Action::GitUnstaged => "Unstaged",
         Action::GitStaged => "Staged",
-        Action::GitPatch => "View patch",
         _ => action.label(),
     }
 }
@@ -615,8 +613,6 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 app.presented("Confirm", "Enter", Target::ConfirmAction);
             }
             app.presented("Cancel", "Esc", Target::CancelConfirmation);
-        } else if app.tab == Tab::Git && app.git_view.disclosure_pending() {
-            app.git_view.draw(frame, body, app.busy, &app.hits);
         } else if app.preview.is_some() {
             preview(frame, body, app);
         } else if let Some(editor) = app.batch_editor.as_ref().filter(|e| e.open) {
