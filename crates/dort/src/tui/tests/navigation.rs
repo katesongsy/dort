@@ -72,7 +72,7 @@ fn vim_pages_use_the_rendered_viewport_and_chords_reset() {
         key(&mut app, KeyCode::Char(c));
     }
     assert_eq!(app.inventory.managed.query, "gg ;jk");
-    assert!(!app.inventory.pending_g && !app.quit);
+    assert!(!app.quit);
 }
 #[test]
 fn selected_keep_uses_u_while_jk_and_ctrl_u_keep_their_navigation_meaning() {

@@ -207,7 +207,7 @@ fn preparing_table_enter_inspects_then_the_visible_action_uses_raw_identity() {
     assert!(app.history_details && app.preview.is_none() && app.confirmation.is_none());
     assert!(app.page_actions() == vec![Action::Abandon]);
     key(&mut app, KeyCode::Tab); // no region focus cycle
-    assert!(super::tests::has_action(&app, "Review abandon"));
+    assert!(super::tests::has_action(&app, "Abandon"));
     assert!(
         matches!(key(&mut app, KeyCode::Char('x')), Some(Task::Bootstrap(r,t,dort_core::bootstrap::RecoveryAction::Abandon)) if r == "b".repeat(64) && t == "b".repeat(64))
     );

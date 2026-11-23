@@ -136,7 +136,7 @@ fn workbench_has_semantic_styles_and_selected_identity_at_all_supported_sizes() 
         );
         let title = report_title(&b);
         assert_eq!(b[title].fg, Color::Cyan);
-        assert!(super::tests::has_action(&app, "Review apply"));
+        assert!(super::tests::has_action(&app, "Apply"));
         // Chrome occupies two normal rows or three compact rows, not nine.
         assert!(locate(&b, "Files / Managed").1 <= 3);
         assert!(!render(&app, w, h).contains("fallback must not be parsed"));

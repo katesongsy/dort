@@ -225,12 +225,26 @@ impl Topic {
                 ("Alt-PgUp/PgDown", "Read selected details"),
                 ("Esc", "Return to list"),
             ],
-            Self::Discover
-            | Self::Managed
-            | Self::Recovery
-            | Self::Git
-            | Self::Ignored
-            | Self::Batch => &[
+            Self::Discover => &[
+                ("Up/Down, Home/End", "Move selection"),
+                ("a / A", "Adopt selected / marked files"),
+                ("Space", "Mark/unmark"),
+                ("i", "Ignore the selected path"),
+                ("g", "Open Git"),
+                ("Enter", "Read the selected file"),
+            ],
+            Self::Managed => &[
+                ("Up/Down, Home/End", "Move selection"),
+                (
+                    "u / U",
+                    "Unmanage selected / marked files; keep local copies",
+                ),
+                ("Space", "Mark/unmark"),
+                ("m", "Manual adopt"),
+                ("a / A", "Apply all active / marked files"),
+                ("Enter", "Read file details"),
+            ],
+            Self::Recovery | Self::Git | Self::Ignored | Self::Batch => &[
                 ("Up/Down", "Traverse displayed rows"),
                 ("Enter", "Inspect, or the named primary action"),
                 ("Space", "Toggle optional membership where offered"),

@@ -273,7 +273,7 @@ fn repository_picker_preserves_raw_indices_and_retained_create_adopt_drafts() {
     assert!(text.contains(&super::components::inline(&path)));
     assert!(text.contains("explicit/session"));
     key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Char('O'));
+    key(&mut app, KeyCode::Char('m'));
     super::tests::focus_form(&mut app);
     app.shell.adoption.target = "~/.keep-draft".into();
     key(&mut app, KeyCode::Char('p')); // text in target, not navigation

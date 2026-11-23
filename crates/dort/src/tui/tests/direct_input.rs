@@ -275,7 +275,7 @@ fn hit_rows_follow_rendered_table_offset_and_stale_geometry_is_inert() {
 fn mouse_form_controls_and_palette_actions_never_bypass_typed_approval_or_disclosure() {
     let size = (80, 24);
     let mut app = fixture(Tab::Files);
-    press(&mut app, KeyCode::Char('O'), size);
+    press(&mut app, KeyCode::Char('m'), size);
     let (x, y) = at(&app, "ID", size);
     mouse(
         &mut app,

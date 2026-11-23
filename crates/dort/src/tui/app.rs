@@ -213,7 +213,6 @@ impl App {
     pub fn start(&mut self, writing: bool) {
         self.motion.reset();
         self.last_click = None;
-        self.inventory.pending_g = false;
         self.hits.clear();
         self.details_scroll = 0;
         self.failed_write = false;
@@ -357,7 +356,6 @@ impl App {
         height: u16,
         now: std::time::Instant,
     ) -> Option<Task> {
-        self.inventory.pending_g = false;
         if self.help.is_some() {
             use ratatui::crossterm::event::MouseEventKind;
             self.resize(width, height);
@@ -893,7 +891,7 @@ impl App {
             && !key
                 .modifiers
                 .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-            && let KeyCode::Char(letter @ ('O' | 'F' | 'T' | 'R' | 'C')) = key.code
+            && let KeyCode::Char(letter @ ('F' | 'T' | 'R' | 'C')) = key.code
         {
             key.code = KeyCode::Char(letter.to_ascii_lowercase());
             key.modifiers = KeyModifiers::NONE;
@@ -920,16 +918,6 @@ impl App {
         });
         self.hits.clear();
         self.last_click = None;
-        if key.code != KeyCode::Char('g')
-            || key.modifiers != KeyModifiers::NONE
-            || self.tab != Tab::Files
-            || self.text_entry()
-            || self.preview.is_some()
-            || self.shell.overlay.is_some()
-            || self.busy
-        {
-            self.inventory.pending_g = false;
-        }
         let return_content = self
             .help
             .as_ref()
@@ -1425,14 +1413,8 @@ impl App {
                 match key.code {
                     KeyCode::Char('j') | KeyCode::Down => self.content.scroll_by(false, 1),
                     KeyCode::Char('k') | KeyCode::Up => self.content.scroll_by(true, 1),
-                    KeyCode::Char('g') => {
-                        if std::mem::take(&mut self.inventory.pending_g) {
-                            self.content.scroll = 0;
-                        } else {
-                            self.inventory.pending_g = true;
-                        }
-                    }
-                    KeyCode::Char('G') => self.content.scroll = self.content.end.get(),
+                    KeyCode::Home => self.content.scroll = 0,
+                    KeyCode::End => self.content.scroll = self.content.end.get(),
                     _ => return self.workspace_key(key),
                 }
                 return None;
@@ -1631,7 +1613,9 @@ impl App {
                     self.move_files(true, usize::MAX);
                     return None;
                 }
-                KeyCode::Char('G') => {
+                KeyCode::End | KeyCode::Char('G')
+                    if !self.discovering || key.code == KeyCode::End =>
+                {
                     self.move_files(false, usize::MAX);
                     return None;
                 }
@@ -1646,45 +1630,20 @@ impl App {
         {
             self.details_scroll = 0;
         }
+        if self.tab == Tab::Files
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            && let Some(action) = super::context::file_action(key.code, self)
+        {
+            return self.activate(action);
+        }
         match key.code {
             KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(2),
             KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(2),
             KeyCode::Home => self.details_scroll = 0,
-            KeyCode::Char(' ') if self.tab == Tab::Files => {
-                return self.activate(Action::ToggleMark);
-            }
             KeyCode::Char('h') if self.tab == Tab::Files => super::tree::fold(self, true),
             KeyCode::Char('l') if self.tab == Tab::Files => super::tree::fold(self, false),
-            KeyCode::Char('E') if self.tab == Tab::Files => {
-                return self.activate(Action::BatchAdopt);
-            }
-            KeyCode::Char('A') if self.tab == Tab::Files => {
-                return self.activate(Action::ApplyMarked);
-            }
-            KeyCode::Char('u')
-                if self.tab == Tab::Files
-                    && !self.discovering
-                    && !key
-                        .modifiers
-                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-            {
-                return self.activate(Action::Keep);
-            }
-            KeyCode::Char('K') if self.tab == Tab::Files => {
-                return self.activate(Action::KeepMarked);
-            }
-            KeyCode::Char('D') if self.tab == Tab::Files => {
-                return self.activate(Action::RemoveMarked);
-            }
-            KeyCode::Char('I') if self.tab == Tab::Files && self.discovering => {
-                return self.activate(Action::IgnoreSelected);
-            }
-            KeyCode::Char('U') if self.tab == Tab::Files && self.discovering => {
-                return self.activate(Action::ManageIgnored);
-            }
-            KeyCode::Char('e') if self.tab == Tab::Files && self.discovering => {
-                return self.activate(Action::AdoptSelected);
-            }
             KeyCode::Esc => {
                 self.inventory.details = false;
                 self.history_details = false;
@@ -1721,7 +1680,7 @@ impl App {
             KeyCode::Char('?') => return self.activate(Action::Help),
             KeyCode::Char('r') => return self.activate(Action::Refresh),
             KeyCode::Char('f') => return self.activate(Action::Discover),
-            KeyCode::Char('o') => return self.activate(Action::Adopt),
+            KeyCode::Char('m') if self.tab != Tab::Files => return self.activate(Action::Adopt),
             KeyCode::Enter if self.tab == Tab::Checks => {
                 return self.activate(self.checks_primary());
             }
@@ -1739,7 +1698,7 @@ impl App {
                     .min(self.row_count().saturating_sub(1))
             }
             KeyCode::Up => self.selected = self.selected.saturating_sub(1),
-            KeyCode::Char('a') if self.tab == Tab::Files || self.tab == Tab::Overview => {
+            KeyCode::Char('a') if self.tab == Tab::Overview => {
                 return self.activate(Action::Apply);
             }
             KeyCode::Char('b') if self.tab == Tab::Recovery => {
@@ -1759,7 +1718,6 @@ impl App {
     }
     pub fn resize(&mut self, width: u16, height: u16) {
         if self.viewport != (width, height) {
-            self.inventory.pending_g = false;
             self.last_click = None;
             self.hits.clear();
         }
@@ -2663,7 +2621,7 @@ impl App {
                     || self.inventory.managed_marks.is_empty() =>
             {
                 Some(
-                    "Mark managed files with Space. Uppercase A/K/D review the batch; Apply covers every active file.",
+                    "Mark managed files with Space. A/U/D review the batch; Apply covers every active file.",
                 )
             }
             Action::Keep | Action::Remove | Action::AdoptSelected

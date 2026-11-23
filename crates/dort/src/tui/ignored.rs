@@ -52,7 +52,7 @@ pub fn draw(
     }
     if paths.get(selected).is_some() {
         app.presented(
-            "Review unignore",
+            "Unignore",
             "Enter",
             Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         );

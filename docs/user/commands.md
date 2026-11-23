@@ -31,6 +31,11 @@ Reviews show exact effects. Confirm once. Help keeps drafts; choosing another de
 
 After a failure, `R` retries a read or asks for a fresh preview. It never replays an approval. After a failed write, `R` only refreshes; use `h` for Recovery. A blocked earlier operation names its repository and action; open Recovery.
 
+### Files
+Use `1` for Managed, `2` for Discover and `3` for Ignored paths. `g` opens Git.
+- **Managed:** `u` Unmanage keeps the local file; `U` Unmanage marked does the same for marked files. `m` Manual adopt opens an adoption draft. `a` Apply reviews all active files; `A` Apply marked reviews marked files only.
+- **Discover:** `a` Adopt opens a draft for the selected file; `A` Adopt marked opens a batch draft. `i` Ignore reviews excluding the selected path from discovery.
+- In either list, `Space` marks or unmarks, and `Home` / `End` select the first or last row. Hidden marks still count.
 ## Tools
 
 Tools has three tabs: **1 Declared**, **2 Installed**, **3 History**.

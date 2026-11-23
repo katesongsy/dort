@@ -57,6 +57,29 @@ fn key(app: &mut App, code: KeyCode) -> Option<Task> {
     app.key(KeyEvent::new(code, KeyModifiers::NONE), 140, 40)
 }
 #[test]
+fn discover_uses_home_end_and_leaves_g_to_git() {
+    let f = Fixture::new();
+    for reading in [false, true] {
+        let mut app = f.app();
+        render(&app, 140, 40);
+        if reading {
+            key(&mut app, KeyCode::Enter);
+            assert!(app.content.focused);
+        } else {
+            key(&mut app, KeyCode::End);
+            assert_eq!(app.candidate_selected, 1);
+            key(&mut app, KeyCode::Home);
+        }
+        key(&mut app, KeyCode::Char('G'));
+        assert_eq!(app.candidate_selected, 0);
+        assert_eq!(app.content.scroll, 0);
+        key(&mut app, KeyCode::Char('g'));
+        assert!(app.tab == Tab::Git);
+        assert!(!app.content.focused);
+        assert!(app.preview.is_none() && app.confirmation.is_none());
+    }
+}
+#[test]
 fn contextual_content_help_withholds_payload_rejects_late_read_and_restores_focus() {
     let f = Fixture::new();
     let mut app = f.app();
@@ -166,7 +189,7 @@ fn content_focus_uses_wrapped_viewport_without_selection_changes_or_rereads() {
         );
         assert_eq!(app.content.scroll, expected);
     }
-    key(&mut app, KeyCode::Char('G'));
+    key(&mut app, KeyCode::End);
     assert_eq!(app.content.scroll, end);
     key(&mut app, KeyCode::Char('j'));
     assert_eq!(app.content.scroll, end);
@@ -184,7 +207,7 @@ fn content_focus_uses_wrapped_viewport_without_selection_changes_or_rereads() {
     key(&mut app, KeyCode::Enter);
     key(&mut app, KeyCode::Home);
     key(&mut app, KeyCode::Esc);
-    assert!(!app.content.focused && !app.inventory.pending_g);
+    assert!(!app.content.focused);
     key(&mut app, KeyCode::Char('j'));
     assert_eq!(app.candidate_selected, selected + 1);
     key(&mut app, KeyCode::Up);
@@ -234,11 +257,7 @@ fn content_focus_mouse_compact_text_modal_and_floor_guards() {
     let screen = render(&app, 48, 14);
     assert!(screen.contains("Selected content"));
     assert!(!screen.contains("Space mark"));
-    app.key(
-        KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE),
-        48,
-        14,
-    );
+    app.key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE), 48, 14);
     assert_eq!(app.content.scroll, app.content.end.get());
     app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 48, 14);
     assert!(!app.content.focused);
@@ -371,7 +390,7 @@ fn discover_page_is_not_cluttered_and_ineligible_marking_is_prominent() {
     assert!(!app.page_actions().contains(&Action::Inspect));
     assert!(!app.page_actions().contains(&Action::Adopt));
     // A single eligible selection needs no redundant inspection activation.
-    key(&mut app, KeyCode::Char('e'));
+    key(&mut app, KeyCode::Char('a'));
     assert!(matches!(app.shell.overlay, Some(Overlay::Form(_))));
     key(&mut app, KeyCode::Esc);
     std::os::unix::fs::symlink(f.host.home.join(".a"), f.host.home.join(".c-link")).unwrap();

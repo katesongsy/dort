@@ -104,7 +104,7 @@ fn details(app: &App) -> Text<'static> {
             } else {
                 "Adoption requires an eligible regular file."
             }));
-            lines.push(Line::raw(if eligible { "Choose Adopt selected to edit target, ID and source." } else { "Only owned, single-link regular files without special permission bits are candidates." }));
+            lines.push(Line::raw(if eligible { "Choose Adopt to edit target, ID and source." } else { "Only owned, single-link regular files without special permission bits are candidates." }));
             lines.push(Line::raw(
                 "The preview checks paths, sensitivity and remaining limits.",
             ));

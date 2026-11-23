@@ -97,7 +97,7 @@ fn details(app: &App) -> Text<'static> {
     ];
     if rollback(row) {
         app.presented(
-            "Review rollback",
+            "Rollback",
             "b",
             super::input::Target::Action(super::shell::Action::Rollback),
         );
@@ -110,7 +110,7 @@ fn details(app: &App) -> Text<'static> {
     }
     if resume(row) {
         app.presented(
-            "Review resume",
+            "Resume",
             "s",
             super::input::Target::Action(super::shell::Action::Resume),
         );
@@ -128,7 +128,7 @@ fn details(app: &App) -> Text<'static> {
     }
     if abandon(row) {
         app.presented(
-            "Review abandon",
+            "Abandon",
             "x",
             super::input::Target::Action(super::shell::Action::Abandon),
         );
