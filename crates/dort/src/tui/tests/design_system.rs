@@ -217,7 +217,7 @@ fn workflow_components_render_at_every_supported_gallery_size() {
                     assert!(has_style("Tools", Modifier::BOLD));
                     assert!(has_style("Keys in this context", Modifier::BOLD));
                     assert!(has_style("Inspect metadata", Modifier::empty()));
-                    assert!(has_style("Enter", Modifier::BOLD | Modifier::REVERSED));
+                    assert!(has_style("Enter", Modifier::BOLD));
                     assert!(rendered.contains(if ascii {
                         "Keys in this context  ----"
                     } else {
@@ -240,6 +240,23 @@ fn workflow_components_render_at_every_supported_gallery_size() {
 }
 
 #[test]
+fn dashboard_rules_stay_neutral_between_semantic_headings() {
+    let buffer = workflow_gallery("Dashboard", 48, 14, false, false);
+    assert_eq!(buffer[(1, 1)].symbol(), "L");
+    assert_eq!(buffer[(1, 1)].fg, Color::Green);
+    assert!(!buffer[(1, 1)].modifier.contains(Modifier::DIM));
+    assert_eq!(buffer[(25, 1)].symbol(), "U");
+    assert_eq!(buffer[(25, 1)].fg, Color::Yellow);
+    assert!(!buffer[(25, 1)].modifier.contains(Modifier::DIM));
+    for x in [22, 47] {
+        let cell = &buffer[(x, 1)];
+        assert_eq!(cell.symbol(), "─");
+        assert_eq!((cell.fg, cell.bg), (Color::Reset, Color::Reset));
+        assert_eq!(cell.modifier, Modifier::DIM);
+    }
+}
+
+#[test]
 fn compact_shell_keeps_dry_run_and_tools_help_visible() {
     let mut app = super::app::App::new(true);
     app.tab = super::app::Tab::Tools;
@@ -247,9 +264,23 @@ fn compact_shell_keeps_dry_run_and_tools_help_visible() {
     let lines: Vec<_> = rendered.lines().collect();
     assert!(lines[0].contains("[DRY RUN]"));
     assert!(lines.last().unwrap().contains("F1 Help"));
-    app.tools_view.settings_open = true;
-    let rendered = super::tests::render(&app, 48, 14);
-    assert!(rendered.lines().next().unwrap().contains("[DRY RUN]"));
+    let mut terminal = Terminal::new(TestBackend::new(48, 14)).unwrap();
+    terminal
+        .draw(|frame| {
+            ui::chrome::shell(
+                frame,
+                "Tools / Installation needs attention",
+                super::app::Tab::Tools,
+                true,
+                false,
+                &Hits::default(),
+            );
+        })
+        .unwrap();
+    assert_eq!(
+        text(terminal.backend().buffer()).lines().next().unwrap(),
+        "Dort / Tools / Installation needs a... [DRY RUN]"
+    );
 }
 
 fn dialog_gallery(width: u16, height: u16, ascii: bool, mono: bool) -> Buffer {
@@ -355,6 +386,15 @@ fn foreground_gallery_captures_background_and_has_one_action_strip() {
             assert_eq!(footer - title + 2, usize::from((h - 2).min(32)));
             assert!(rows[footer + 1].trim().chars().count() >= usize::from((w - 2).min(144)));
             assert!(footer + 1 < usize::from(h - 1));
+            let (before, _) = rows[footer].split_once("Enter Open").unwrap();
+            let primary = &buffer[(before.chars().count() as u16, footer as u16)];
+            assert!(
+                primary
+                    .modifier
+                    .contains(Modifier::BOLD | Modifier::REVERSED)
+            );
+            assert!(!primary.modifier.contains(Modifier::DIM));
+            assert_eq!(primary.fg == primary.bg, mono);
             if ascii {
                 assert!(rendered.is_ascii());
             }
@@ -486,6 +526,16 @@ fn css(color: Color, background: bool) -> String {
         Color::White | Color::Gray => "#e6edf3".into(),
         Color::DarkGray => "#94a3b8".into(),
         Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
+        Color::Indexed(index @ 16..=231) => {
+            let levels = [0, 95, 135, 175, 215, 255];
+            let index = usize::from(index - 16);
+            let (r, g, b) = (levels[index / 36], levels[index / 6 % 6], levels[index % 6]);
+            format!("#{r:02x}{g:02x}{b:02x}")
+        }
+        Color::Indexed(index @ 232..=255) => {
+            let gray = 8 + (index - 232) * 10;
+            format!("#{gray:02x}{gray:02x}{gray:02x}")
+        }
         Color::Indexed(_) => "#a9b6c7".into(),
     }
 }
@@ -497,6 +547,9 @@ pub(super) fn html(buffer: &Buffer) -> String {
             let mut bg = css(cell.bg, true);
             if cell.modifier.contains(Modifier::REVERSED) {
                 std::mem::swap(&mut fg, &mut bg);
+            }
+            if cell.modifier.contains(Modifier::DIM) {
+                fg = format!("color-mix(in srgb, {fg} 65%, {bg})");
             }
             let weight = if cell.modifier.contains(Modifier::BOLD) {
                 "bold"

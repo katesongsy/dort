@@ -78,7 +78,7 @@ pub fn muted() -> Style {
     Style::default()
 }
 pub fn selected() -> Style {
-    design::selection().add_modifier(Modifier::BOLD)
+    heading().add_modifier(Modifier::REVERSED)
 }
 pub fn heading() -> Style {
     Style::default().add_modifier(Modifier::BOLD)
@@ -104,13 +104,11 @@ pub fn state(label: &str) -> Style {
     }
 }
 pub fn pane(title: &str, focused: bool) -> Block<'static> {
-    Block::default()
-        .borders(Borders::TOP)
-        .title(Span::styled(
-            format!(" {title} "),
-            if focused { accent() } else { heading() },
-        ))
-        .border_style(if focused { accent() } else { muted() })
+    design::titled_block(
+        title,
+        Borders::TOP,
+        if focused { accent() } else { heading() },
+    )
 }
 pub fn inline(value: &str) -> String {
     super::views::safe(value).replace('\n', "\\n")

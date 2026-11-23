@@ -34,13 +34,13 @@ fn locate(buffer: &Buffer, needle: &str) -> (u16, u16) {
 }
 fn report_title(buffer: &Buffer) -> (u16, u16) {
     for y in 0..buffer.area.height {
-        for x in 0..buffer.area.width {
-            if buffer[(x, y)].symbol() == "─" && buffer[(x, y)].fg == Color::Cyan {
-                return (x, y);
-            }
+        if (0..buffer.area.width).any(|x| buffer[(x, y)].symbol() == "─")
+            && let Some(x) = (0..buffer.area.width).find(|&x| buffer[(x, y)].fg == Color::Cyan)
+        {
+            return (x, y);
         }
     }
-    panic!("missing accented report border");
+    panic!("missing accented report title");
 }
 fn synthetic_host() -> dort_core::context::HostContext {
     dort_core::context::HostContext::new(
@@ -65,22 +65,14 @@ fn inspect_all(app: &mut App, w: u16, h: u16) -> String {
         // Reconstruct consecutive rendered cell rows, including paths longer than
         // the entire compact viewport. No model/report strings feed this check.
         let b = buffer(app, w, h);
-        let (title_x, title_y) = report_title(&b);
-        let mut left = title_x;
-        while left > 0 && b[(left - 1, title_y)].fg == Color::Cyan {
-            left -= 1;
-        }
-        let mut right = title_x;
-        while right < w && b[(right, title_y)].fg == Color::Cyan {
-            right += 1;
-        }
-        for x in left..right {
+        let (left, title_y) = report_title(&b);
+        for x in left..w {
             wrapped_rows.push_str(b[(x, title_y + 1)].symbol());
         }
         // At the clamped end, the final wrapped lines never become the first
         // viewport row. Inspect those actual cells too, not model strings.
         for y in title_y + 1..h - 1 {
-            for x in left..right {
+            for x in left..w {
                 text.push_str(b[(x, y)].symbol());
             }
         }
@@ -113,7 +105,7 @@ fn workbench_has_semantic_styles_and_selected_identity_at_all_supported_sizes() 
     let app = files_app();
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let b = buffer(&app, w, h);
-        let active = locate(&b, "Files / Managed");
+        let active = locate(&b, "Managed");
         assert!(b[active].modifier.contains(Modifier::BOLD));
         assert!(!b[active].modifier.contains(Modifier::REVERSED)); // Location is a fact, not selection.
         locate(&b, "STATE");
@@ -172,7 +164,8 @@ fn input_has_a_real_visible_caret_and_field_button_hierarchy() {
             .modifier
             .contains(Modifier::REVERSED | Modifier::BOLD)
     );
-    assert_eq!(b[action].fg, Color::Cyan);
+    assert_eq!(b[action].fg, b[(0, 0)].fg);
+    assert_ne!(b[action].fg, b[action].bg);
 }
 #[test]
 fn arrows_and_tab_do_not_change_destinations() {

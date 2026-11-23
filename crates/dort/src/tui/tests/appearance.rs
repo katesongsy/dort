@@ -165,6 +165,163 @@ fn compatible_cells_preserve_geometry_raw_mouse_identity_and_textual_states() {
     }
 }
 #[test]
+fn signal_tools_chrome_and_focus_keep_their_geometry_without_color() {
+    let fixture = crate::services::declared_tools_tests::Fixture::new();
+    for (w, h) in [(48, 14), (140, 40)] {
+        let mut app = super::tools_tests::app(&fixture, false);
+        app.appearance =
+            appearance(false, false).with_color_depth(Some("xterm-256color"), Some("truecolor"));
+        let color = draw(&app, w, h);
+        let cells = color.backend().buffer();
+        let brand = &cells[(0, 0)];
+        let breadcrumb = &cells[(7, 0)];
+        let leaf = &cells[(15, 0)];
+        let footer = &cells[(w - 1, h - 1)];
+        assert_eq!(locate(&color, "Dort / Tools / Declared tools"), (0, 0));
+        assert_eq!(brand.bg, Color::Rgb(0x16, 0x24, 0x2e));
+        assert_eq!(brand.bg, footer.bg);
+        assert_eq!(brand.bg, leaf.bg);
+        assert_ne!(brand.fg, leaf.fg);
+        assert_ne!(breadcrumb.fg, leaf.fg);
+        assert!(brand.modifier.contains(Modifier::BOLD));
+        assert!(leaf.modifier.contains(Modifier::BOLD));
+        assert!(!breadcrumb.modifier.contains(Modifier::BOLD));
+
+        let primary = locate(&color, "Enter");
+        let secondary = locate(&color, "F1 Help");
+        let tab = locate(&color, "1 Declared");
+        let marker = locate(&color, "› a");
+        let row = locate(&color, "Not checked");
+        let body = locate(&color, "Check declared tools;");
+        let mut focused = vec![primary, tab, row];
+        if w >= 100 {
+            let rail = locate(&color, "Tools t");
+            assert_eq!(rail, (2, 3));
+            assert_eq!(cells[rail].fg, brand.bg);
+            assert!(matches!(
+                app.hits.target(rail.0, rail.1),
+                Some(Target::Destination(Tab::Tools))
+            ));
+            focused.push(rail);
+        }
+        assert_eq!(primary, (1, h - 1));
+        assert_eq!(cells[primary].fg, brand.fg);
+        assert_eq!(cells[marker].bg, brand.fg);
+        assert_eq!(cells[marker].fg, cells[row].fg);
+        assert_ne!(cells[row].fg, cells[primary].fg);
+        assert_eq!(cells[secondary].bg, footer.bg);
+        assert_ne!(
+            cells[secondary].fg,
+            cells[(secondary.0 + 3, secondary.1)].fg
+        );
+        assert!(!cells[secondary].modifier.contains(Modifier::REVERSED));
+        assert!(cells[secondary].modifier.contains(Modifier::BOLD));
+        for pos in [body, (row.0, row.1 + 1)] {
+            assert_eq!((cells[pos].fg, cells[pos].bg), (Color::Reset, Color::Reset));
+            assert!(!cells[pos].modifier.contains(Modifier::REVERSED));
+        }
+        let target = |(x, y)| {
+            app.hits
+                .target(x, y)
+                .map(|target| std::mem::discriminant(&target))
+        };
+        let hits = focused.iter().map(|&pos| target(pos)).collect::<Vec<_>>();
+        assert!(hits.iter().all(Option::is_some));
+
+        for term in ["xterm-256color", "xterm"] {
+            app.appearance = appearance(false, false).with_color_depth(Some(term), None);
+            let fallback = draw(&app, w, h);
+            let fallback_cells = fallback.backend().buffer();
+            for &pos in &focused {
+                let cell = &fallback_cells[pos];
+                assert_eq!(cell.symbol(), cells[pos].symbol());
+                assert!(cell.modifier.contains(Modifier::REVERSED));
+                if term == "xterm-256color" {
+                    assert!(
+                        matches!((cell.fg, cell.bg), (Color::Indexed(fg), Color::Indexed(bg)) if fg != bg)
+                    );
+                } else {
+                    assert_eq!((cell.fg, cell.bg), (Color::Reset, Color::Reset));
+                }
+            }
+        }
+
+        app.appearance = appearance(false, true);
+        let mono = draw(&app, w, h);
+        check_cells(&mono, false, true);
+        let mono_cells = mono.backend().buffer();
+        assert!(
+            cells
+                .content
+                .iter()
+                .map(|c| c.symbol())
+                .eq(mono_cells.content.iter().map(|c| c.symbol()))
+        );
+        for (pos, hit) in focused.into_iter().zip(hits) {
+            assert_ne!(cells[pos].fg, cells[pos].bg);
+            assert!(cells[pos].modifier.contains(Modifier::REVERSED));
+            assert!(mono_cells[pos].modifier.contains(Modifier::REVERSED));
+            assert_eq!(
+                app.hits
+                    .target(pos.0, pos.1)
+                    .map(|target| std::mem::discriminant(&target)),
+                hit
+            );
+        }
+    }
+}
+
+#[test]
+fn signal_check_review_keeps_warning_and_foreground_action_distinct() {
+    let fixture = crate::services::declared_tools_tests::Fixture::new();
+    let mut app = super::tools_tests::app(&fixture, false);
+    let (w, h) = (48, 14);
+    let Some(Task::ToolsCheckPrepare(mut inputs)) = key(&mut app, KeyCode::Char('C'), w, h) else {
+        panic!("Check installed must open a review");
+    };
+    inputs.search_dirs = vec![fixture.bin.clone()];
+    super::tools_tests::run(&fixture, &mut app, Task::ToolsCheckPrepare(inputs));
+    let color = draw(&app, w, h);
+    let cells = color.backend().buffer();
+    let warning = locate(&color, "Checks can run package-manager");
+    let primary = locate(&color, "Enter Check");
+    let rule = locate(&color, "──");
+    assert_eq!(
+        (cells[warning].fg, cells[warning].bg),
+        (Color::Yellow, Color::Reset)
+    );
+    assert!(cells[warning].modifier.contains(Modifier::BOLD));
+    assert_eq!(
+        (cells[rule].fg, cells[rule].bg),
+        (Color::Reset, Color::Reset)
+    );
+    assert!(cells[rule].modifier.contains(Modifier::DIM));
+    assert_eq!(primary, (1, h - 1));
+    assert_eq!(cells[primary].fg, cells[(0, 0)].fg);
+    assert!(
+        cells[primary]
+            .modifier
+            .contains(Modifier::BOLD | Modifier::REVERSED)
+    );
+    assert!(!cells[primary].modifier.contains(Modifier::DIM));
+    assert!(fixture.calls().is_empty());
+
+    app.appearance = appearance(false, true);
+    let mono = draw(&app, w, h);
+    let mono_cells = mono.backend().buffer();
+    check_cells(&mono, false, true);
+    assert_eq!(locate(&mono, "Checks can run package-manager"), warning);
+    assert!(mono_cells[warning].modifier.contains(Modifier::BOLD));
+    assert!(!mono_cells[warning].modifier.contains(Modifier::REVERSED));
+    assert_eq!(locate(&mono, "Enter Check"), primary);
+    assert!(
+        mono_cells[primary]
+            .modifier
+            .contains(Modifier::BOLD | Modifier::REVERSED)
+    );
+}
+
+#[test]
 fn compatible_forms_keep_caret_tab_and_mouse_controls_at_all_sizes() {
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         let mut app = App::new(false);

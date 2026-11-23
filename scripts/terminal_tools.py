@@ -149,6 +149,7 @@ def normal_installs(Session, binary, base, env):
             assert b'root hooks' not in session.screen.text()
             session.resize((14, 48))
             session.wait(b'Enter Install')
+            session.wait(b'F1 Help')
             assert b'F1 Help' in session.screen.text().splitlines()[-1]
             session.resize((24, 80))
             session.wait(b'Enter Install missing')

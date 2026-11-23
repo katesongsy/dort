@@ -42,20 +42,60 @@ impl Tone {
         }
     }
 }
-pub fn selection() -> Style {
-    Style::default().add_modifier(Modifier::REVERSED)
+const SLATE: Color = Color::Rgb(0x16, 0x24, 0x2e);
+const TEXT: Color = Color::Rgb(0xe3, 0xed, 0xf4);
+const TEAL: Color = Color::Rgb(0x77, 0xe2, 0xcd);
+
+pub(super) fn chrome() -> Style {
+    Style::default().fg(TEXT).bg(SLATE)
 }
-pub fn table_heading() -> Style {
-    Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+pub(super) fn brand() -> Style {
+    chrome().fg(TEAL).add_modifier(Modifier::BOLD)
 }
-pub fn primary() -> Style {
-    // Inverse preserves the primary surface when monochrome resets both colors.
+pub(super) fn muted_chrome() -> Style {
+    chrome().fg(Color::Rgb(0xa3, 0xb7, 0xc7))
+}
+pub(super) fn active_rail() -> Style {
+    inverse_pair(TEXT, SLATE)
+}
+pub(super) fn active_tab() -> Style {
+    selection().add_modifier(Modifier::BOLD)
+}
+fn selection() -> Style {
+    inverse_pair(TEXT, Color::Rgb(0x17, 0x36, 0x3c))
+}
+pub(super) fn focus_marker(inverse: Style) -> Style {
+    inverse.bg(TEAL).add_modifier(Modifier::BOLD)
+}
+fn primary() -> Style {
+    inverse_pair(Color::Rgb(0x0c, 0x22, 0x25), TEAL).add_modifier(Modifier::BOLD)
+}
+pub(super) fn secondary_key() -> Style {
+    chrome()
+        .fg(Color::Rgb(0xb9, 0xcb, 0xd8))
+        .add_modifier(Modifier::BOLD)
+}
+fn inverse_pair(ink: Color, fill: Color) -> Style {
     Style::default()
-        .fg(Color::Cyan)
-        .bg(Color::Black)
-        .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+        .fg(fill)
+        .bg(ink)
+        .add_modifier(Modifier::REVERSED)
 }
-pub fn backdrop(style: Style) -> Style {
+pub(super) fn titled_block(title: &str, borders: Borders, style: Style) -> Block<'static> {
+    Block::default()
+        .borders(borders)
+        .border_style(Style::default().add_modifier(Modifier::DIM))
+        .title(Span::styled(
+            format!(" {title} "),
+            style.remove_modifier(Modifier::DIM),
+        ))
+}
+fn backdrop(mut style: Style) -> Style {
+    if style.add_modifier.contains(Modifier::REVERSED)
+        && matches!((style.fg, style.bg), (Some(fg), Some(bg)) if fg != Color::Reset && bg != Color::Reset)
+    {
+        style = style.fg(Color::Reset).bg(Color::Reset);
+    }
     style
         .remove_modifier(Modifier::BOLD | Modifier::REVERSED)
         .add_modifier(Modifier::DIM)
@@ -129,9 +169,7 @@ pub fn choice_dialog(frame: &mut Frame, title: &'static str, hits: &Hits) -> Dia
         hits.click(edge, Target::DismissDialog);
     }
     frame.render_widget(Clear, modal);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(Span::styled(format!(" {title} "), ui::heading()));
+    let block = titled_block(title, Borders::ALL, ui::heading());
     let inner = block.inner(modal);
     frame.render_widget(block, modal);
     let body = Rect::new(
@@ -251,8 +289,13 @@ pub fn pairs_with_disclosure(
                 target(row.identity),
             );
             let current = row.identity == table.selected;
+            let marker = if current {
+                Cell::from(glyphs::SELECTED).style(focus_marker(selection()))
+            } else {
+                Cell::from(" ")
+            };
             Row::new([
-                Cell::from(if current { glyphs::SELECTED } else { " " }).style(ui::accent()),
+                marker,
                 Cell::from(Line::from(vec![
                     Span::raw(ui::clip(
                         row.values[0],
@@ -272,7 +315,7 @@ pub fn pairs_with_disclosure(
                 Tone::Neutral.style()
             })
         });
-    let header = Row::new(["", table.headers[0], table.headers[1]]).style(table_heading());
+    let header = Row::new(["", table.headers[0], table.headers[1]]).style(ui::heading());
     frame.render_widget(
         Table::new(
             rows,
@@ -300,6 +343,10 @@ pub fn action_strip(frame: &mut Frame, area: Rect, actions: &[StripAction], hits
         actions.iter().filter(|action| action.primary).count() <= 1,
         "one foreground primary action"
     );
+    frame.render_widget(
+        Paragraph::default().style(muted_chrome().remove_modifier(Modifier::DIM)),
+        area,
+    );
     let mut x = area.x;
     for action in actions {
         let label = format!(" {} {} ", action.key, action.label);
@@ -312,10 +359,7 @@ pub fn action_strip(frame: &mut Frame, area: Rect, actions: &[StripAction], hits
             Line::styled(label, primary())
         } else {
             Line::from(vec![
-                Span::styled(
-                    format!(" {} ", action.key),
-                    Style::default().add_modifier(Modifier::BOLD | Modifier::REVERSED),
-                ),
+                Span::styled(format!(" {} ", action.key), secondary_key()),
                 Span::raw(format!("{} ", action.label)),
             ])
         };
