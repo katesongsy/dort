@@ -24,6 +24,7 @@ pub struct State {
     pub attempts: Vec<install::Attempt>,
     pub error: Option<String>,
     pub selected: usize,
+    viewport: super::navigation::ListViewport,
     pub fields: [String; 4],
     pub close_npm: bool,
     pub close_brew: bool,
@@ -220,16 +221,30 @@ impl State {
         }
         match key.code {
             KeyCode::Esc => return Some(Outcome::Back),
-            KeyCode::Enter => {
+            KeyCode::Enter if !self.attempts.is_empty() => {
                 self.details = true;
                 self.scroll = 0;
             }
             KeyCode::Char('r') => return Some(Outcome::Task(Box::new(self.open_attempts()))),
             KeyCode::Char('x') => return self.prepare_close().map(|t| Outcome::Task(Box::new(t))),
-            KeyCode::Down => {
-                self.selected = (self.selected + 1).min(self.attempts.len().saturating_sub(1))
+            KeyCode::Down | KeyCode::PageDown => {
+                let count = if key.code == KeyCode::Down {
+                    1
+                } else {
+                    self.viewport.page()
+                };
+                self.selected = (self.selected + count).min(self.attempts.len().saturating_sub(1));
             }
-            KeyCode::Up => self.selected = self.selected.saturating_sub(1),
+            KeyCode::Up | KeyCode::PageUp => {
+                let count = if key.code == KeyCode::Up {
+                    1
+                } else {
+                    self.viewport.page()
+                };
+                self.selected = self.selected.saturating_sub(count);
+            }
+            KeyCode::Home => self.selected = 0,
+            KeyCode::End => self.selected = self.attempts.len().saturating_sub(1),
             _ => (),
         }
         None
@@ -242,6 +257,53 @@ impl State {
             KeyCode::End => self.scroll = u16::MAX,
             _ => (),
         }
+    }
+    fn draw_attempt(&self, frame: &mut Frame, area: Rect) {
+        let mut lines = vec![];
+        if let Some(attempt) = self.attempts.get(self.selected) {
+            let s = attempt.summary();
+            lines.extend([
+                ui::metadata("Record", &attempt.id),
+                ui::metadata("Status", s.status.label()),
+                Line::raw(s.explanation),
+                Line::raw(s.package_note()),
+                Line::raw(s.binary_note),
+            ]);
+            if let Some(scope) = &attempt.scope {
+                lines.push(ui::metadata("Tool", &scope.tool));
+                lines.push(ui::metadata(
+                    "Package",
+                    &format!("{} {}", scope.package, scope.version),
+                ));
+                lines.push(ui::metadata(
+                    "Program",
+                    &scope.executable.display().to_string(),
+                ));
+                lines.push(ui::metadata(
+                    "Repository",
+                    &scope.repository.display().to_string(),
+                ));
+            }
+            lines.push(ui::metadata(
+                "Record closed",
+                if attempt.explicitly_closed {
+                    "Yes; this does not prove installation succeeded"
+                } else {
+                    "No"
+                },
+            ));
+        }
+        if let Some(e) = &self.error {
+            lines.push(ui::metadata("Problem", e));
+        }
+        ui::report(
+            frame,
+            area,
+            "Installation details",
+            lines.into(),
+            self.scroll,
+            false,
+        );
     }
     pub fn draw(&self, frame: &mut Frame, area: Rect, dry_run: bool, hits: &super::input::Hits) {
         let action = |label, key, code| {
@@ -330,83 +392,41 @@ impl State {
             action("Cancel", "Esc", KeyCode::Esc);
             return;
         }
+        let selected = self.attempts.get(self.selected);
         if self.details {
-            let mut lines = vec![];
-            if let Some(attempt) = self.attempts.get(self.selected) {
-                let s = attempt.summary();
-                lines.extend([
-                    ui::metadata("Record", &attempt.id),
-                    ui::metadata("Status", s.status.label()),
-                    Line::raw(s.explanation),
-                    Line::raw(s.package_note()),
-                    Line::raw(s.binary_note),
-                ]);
-                if let Some(scope) = &attempt.scope {
-                    lines.push(ui::metadata("Tool", &scope.tool));
-                    lines.push(ui::metadata(
-                        "Package",
-                        &format!("{} {}", scope.package, scope.version),
-                    ));
-                    lines.push(ui::metadata(
-                        "Program",
-                        &scope.executable.display().to_string(),
-                    ));
-                    lines.push(ui::metadata(
-                        "Repository",
-                        &scope.repository.display().to_string(),
-                    ));
-                }
-                lines.push(ui::metadata(
-                    "Record closed",
-                    if attempt.explicitly_closed {
-                        "Yes; this does not prove installation succeeded"
-                    } else {
-                        "No"
-                    },
-                ));
-                if attempt.unresolved {
-                    action("Close record", "x", KeyCode::Char('x'));
-                }
+            self.draw_attempt(frame, area);
+            if selected.is_some_and(|a| a.unresolved) {
+                action("Close record", "x", KeyCode::Char('x'));
             }
-            if let Some(e) = &self.error {
-                lines.push(ui::metadata("Problem", e));
-            }
-            ui::report(
-                frame,
-                area,
-                "Installation details",
-                lines.into(),
-                self.scroll,
-                false,
-            );
             action("Back", "Esc", KeyCode::Esc);
             return;
         }
-        let labels = self
+        let (list, details) = super::workbench::detail_panes(area);
+        let capacity = ui::design::pair_capacity(list);
+        let first = self.viewport.start(
+            self.attempts.len(),
+            capacity,
+            selected.map(|_| self.selected),
+        );
+        let rows = self
             .attempts
-            .iter()
-            .map(|a| {
-                a.scope
-                    .as_ref()
-                    .map(|s| s.tool.clone())
-                    .unwrap_or_else(|| "Unknown tool".into())
-            })
-            .collect::<Vec<_>>();
-        let statuses = self
-            .attempts
-            .iter()
-            .map(|a| a.summary().status.label())
-            .collect::<Vec<_>>();
-        let capacity = ui::design::pair_capacity(area).max(1);
-        let offset = self.selected.saturating_sub(capacity - 1);
-        let rows = labels
             .iter()
             .enumerate()
-            .skip(offset)
+            .skip(first)
             .take(capacity)
-            .map(|(identity, label)| ui::design::PairRow {
+            .map(|(index, attempt)| {
+                (
+                    index,
+                    attempt
+                        .scope
+                        .as_ref()
+                        .map_or("Unknown tool", |s| s.tool.as_str()),
+                    attempt.summary().status.label(),
+                )
+            })
+            .map(|(identity, tool, status)| ui::design::PairRow {
                 identity,
-                values: [label, statuses[identity]],
+                values: [tool, status],
             })
             .collect::<Vec<_>>();
         if rows.is_empty() {
@@ -430,7 +450,7 @@ impl State {
         } else {
             ui::design::pairs(
                 frame,
-                area,
+                list,
                 ui::design::PairTable {
                     headers: ["TOOL", "OUTCOME"],
                     rows: &rows,
@@ -439,12 +459,11 @@ impl State {
                 hits,
                 Target::ToolAttemptRow,
             );
+            if let Some(pane) = details {
+                self.draw_attempt(frame, pane);
+            }
             action("Install record", "Enter", KeyCode::Enter);
-            if self
-                .attempts
-                .get(self.selected)
-                .is_some_and(|a| a.unresolved)
-            {
+            if selected.is_some_and(|a| a.unresolved) {
                 action("Close record", "x", KeyCode::Char('x'));
             }
         }

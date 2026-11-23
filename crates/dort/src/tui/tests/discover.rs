@@ -415,13 +415,13 @@ fn files_viewport_stays_put_on_up_and_mouse_uses_actual_rendered_offset() {
             .draw(|frame| super::views::draw(frame, &app))
             .unwrap();
     }
-    let before = app.inventory.candidate_offset.get();
+    let before = app.inventory.viewport(true).first();
     assert!(before > 0);
     app.key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), 140, 24);
     terminal
         .draw(|frame| super::views::draw(frame, &app))
         .unwrap();
-    assert_eq!(before, app.inventory.candidate_offset.get());
+    assert_eq!(before, app.inventory.viewport(true).first());
     let old = app.candidate_selected;
     app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), 140, 24);
     terminal
@@ -458,5 +458,5 @@ fn files_viewport_stays_put_on_up_and_mouse_uses_actual_rendered_offset() {
     terminal
         .draw(|frame| super::views::draw(frame, &app))
         .unwrap();
-    assert_eq!(app.inventory.candidate_offset.get(), 0);
+    assert_eq!(app.inventory.viewport(true).first(), 0);
 }

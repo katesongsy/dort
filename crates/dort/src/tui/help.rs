@@ -131,6 +131,7 @@ impl Topic {
                 ("Esc", "Back, retaining draft"),
             ],
             Self::Tools if app.tools_view.installed_open => &[
+                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 (
                     "Enter",
                     "Open the selected package; Run inspection on its explicit review",
@@ -170,12 +171,14 @@ impl Topic {
                 ]
             }
             Self::Tools if app.tools_view.install_open => &[
+                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 ("Enter", "Open the selected installation record"),
                 ("x", "Close an unresolved record"),
                 ("R", "Refresh installation history"),
                 ("Esc", "Back"),
             ],
             Self::Tools => &[
+                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 ("Enter", "Open the selected tool"),
                 ("C", "Check installed"),
                 ("i", "Install missing tools"),
@@ -227,6 +230,7 @@ impl Topic {
             ],
             Self::Discover => &[
                 ("Up/Down, Home/End", "Move selection"),
+                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 ("a / A", "Adopt selected / marked files"),
                 ("Space", "Mark/unmark"),
                 ("i", "Ignore the selected path"),
@@ -235,6 +239,7 @@ impl Topic {
             ],
             Self::Managed => &[
                 ("Up/Down, Home/End", "Move selection"),
+                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 (
                     "u / U",
                     "Unmanage selected / marked files; keep local copies",
@@ -244,7 +249,19 @@ impl Topic {
                 ("a / A", "Apply all active / marked files"),
                 ("Enter", "Read file details"),
             ],
-            Self::Recovery | Self::Git | Self::Ignored | Self::Batch => &[
+            Self::Ignored => &[
+                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
+                ("Home/End", "Select first / last path"),
+                ("F3", "Read the full path"),
+                ("Enter", "Review unignore"),
+            ],
+            Self::Recovery | Self::Git => &[
+                ("Up/Down", "Move selection"),
+                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
+                ("Enter", "Read selected details"),
+                ("F2", "More actions"),
+            ],
+            Self::Batch => &[
                 ("Up/Down", "Traverse displayed rows"),
                 ("Enter", "Inspect, or the named primary action"),
                 ("Space", "Toggle optional membership where offered"),

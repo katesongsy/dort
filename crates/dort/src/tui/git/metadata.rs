@@ -19,6 +19,7 @@ pub(super) struct View<'a> {
     pub search: &'a Search,
     pub visible: &'a [usize],
     pub selected: usize,
+    pub viewport: &'a crate::tui::navigation::ListViewport,
     pub details: bool,
     pub scroll: u16,
     pub busy: bool,
@@ -234,7 +235,11 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         };
         ui::text_view(frame, inner, Text::raw(text), 0);
     } else if let Some(metadata) = view.metadata {
-        let rows = view.visible.iter().filter_map(|&index| match metadata {
+        let selected = view.visible.iter().position(|&i| i == view.selected);
+        let capacity = usize::from(panes[0].height.saturating_sub(2));
+        let first = view.viewport.start(view.visible.len(), capacity, selected);
+        let window = &view.visible[first..(first + capacity).min(view.visible.len())];
+        let rows = window.iter().filter_map(|&index| match metadata {
             Metadata::Status(status) => status.entries.get(index).map(|entry| {
                 Row::new(vec![
                     Cell::from(ui::inline(&entry.path)),
@@ -276,10 +281,10 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
             .block(block)
             .row_highlight_style(ui::selected())
             .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
-        let mut selection = TableState::default()
-            .with_selected(view.visible.iter().position(|&i| i == view.selected));
+        let mut selection =
+            TableState::default().with_selected(window.iter().position(|&i| i == view.selected));
         frame.render_stateful_widget(table, panes[0], &mut selection);
-        view.hits.rows(panes[0], view.visible, selection.offset());
+        view.hits.rows(panes[0], window, 0);
     }
     if wide {
         ui::report(

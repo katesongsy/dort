@@ -291,3 +291,26 @@ fn installed_filter_is_display_only_and_menu_back_preserves_selection() {
     assert!(app.tools_view.installed_open);
     assert_eq!(f.calls(), "Q");
 }
+
+#[test]
+fn installed_packages_project_selected_metadata_while_paging_the_list() {
+    use super::{input::Target, navigation_tests::assert_review_list_navigation};
+    let f = Fixture::new();
+    let formulae = (0..80)
+        .map(|i| {
+            serde_json::json!({
+                "full_name": format!("package-{i:03}"),
+                "installed": [{"version": format!("1.0.{i}")}],
+            })
+        })
+        .collect::<Vec<_>>();
+    f.program("brew", &format!("case \"$*\" in\n'info --json=v2 --installed --formula') printf '%s' '{}' ;;\n*) exit 90;;\nesac", serde_json::json!({"formulae": formulae})));
+    let mut app = app(&f, false);
+    inspect(&f, &mut app);
+    assert_review_list_navigation(
+        &mut app,
+        |t, i| matches!(t, Target::ToolsRow(n) if i == n),
+        "package-078",
+        "package-079",
+    );
+}

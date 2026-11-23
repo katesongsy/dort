@@ -19,6 +19,7 @@ pub struct State {
     pub installed: Option<workflow::Installed>,
     pub result_open: bool,
     pub stale: bool,
+    viewport: super::navigation::ListViewport,
 }
 impl State {
     pub fn clear_reviews(&mut self) {
@@ -228,11 +229,19 @@ pub fn key(app: &mut App, code: KeyCode) -> Option<Option<Task>> {
         }
         KeyCode::Enter | KeyCode::F(3) | KeyCode::F(4) => (),
         KeyCode::Down | KeyCode::PageDown => {
-            let n = if code == KeyCode::Down { 1 } else { 8 };
+            let n = if code == KeyCode::Down {
+                1
+            } else {
+                state.declared.viewport.page()
+            };
             state.declared_selected = (state.declared_selected + n).min(count.saturating_sub(1));
         }
         KeyCode::Up | KeyCode::PageUp => {
-            let n = if code == KeyCode::Up { 1 } else { 8 };
+            let n = if code == KeyCode::Up {
+                1
+            } else {
+                state.declared.viewport.page()
+            };
             state.declared_selected = state.declared_selected.saturating_sub(n);
         }
         KeyCode::Home => state.declared_selected = 0,
@@ -527,6 +536,129 @@ fn result(frame: &mut Frame, area: Rect, app: &App) -> bool {
     action(app, "Done", "Enter", KeyCode::Enter);
     true
 }
+fn draw_tool(frame: &mut Frame, area: Rect, app: &App, tool: &dort_core::model::Tool) {
+    let mut lines = vec![
+        ui::metadata("Tool ID", &tool.id),
+        ui::metadata("Status", app.tools_view.declared.row_status(&tool.id)),
+        ui::metadata("Command", &tool.binary),
+        ui::metadata("Profiles", &tool.profiles.join(", ")),
+        ui::metadata("Requires", &tool.requires.join(", ")),
+    ];
+    if let Some(result) = app
+        .tools_view
+        .declared
+        .installed
+        .as_ref()
+        .and_then(|r| r.results.iter().find(|r| r.tool == tool.id))
+    {
+        if let Some(report) = &result.report {
+            let summary = report.summary();
+            lines.push(ui::metadata("Latest install", summary.status.label()));
+            lines.push(ui::metadata("Package", summary.package_note()));
+            lines.push(ui::metadata("Command", summary.binary_label()));
+        }
+        if let Some(error) = &result.error {
+            lines.push(ui::metadata("Problem", error));
+        }
+    }
+    if let Some(checked) = &app.tools_view.declared.checked
+        && !app.tools_view.declared.stale
+    {
+        for issue in checked.needs_setup.iter().filter(|i| i.tool == tool.id) {
+            lines.push(ui::metadata("Setup", &issue.reason));
+        }
+        if let Some(row) = checked
+            .reconciliation
+            .plan
+            .rows
+            .iter()
+            .find(|r| r.id == tool.id)
+        {
+            if matches!(
+                row.package,
+                dort_core::tools::planning::PackageFinding::Absent
+            ) && !crate::services::installation::eligible(row)
+            {
+                for issue in workflow::install_issues(row) {
+                    lines.push(ui::metadata("Why", &issue.reason));
+                    lines.push(ui::metadata("Next", &issue.next_step));
+                }
+            }
+            use dort_core::tools::planning::{BinaryObservation, Blocker, PackageFinding};
+            if let PackageFinding::Present { versions } = &row.package {
+                lines.push(ui::metadata(
+                    "Reported versions",
+                    &versions
+                        .iter()
+                        .map(|v| v.version.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ));
+            }
+            lines.push(ui::metadata(
+                "Command lookup",
+                match row.binary_observation {
+                    BinaryObservation::Missing => "Not found in checked folders",
+                    BinaryObservation::Candidates { .. } => {
+                        "Found, but version and owner are unverified"
+                    }
+                    _ => "Unavailable or not checked",
+                },
+            ));
+            for blocker in &row.blockers {
+                let reason = match blocker {
+                    Blocker::DependencyNeedsReview { tool } => {
+                        format!("Install {tool} first, then check again")
+                    }
+                    Blocker::DependencyBlocked { tool } => format!("Resolve {tool} first"),
+                    Blocker::DependencyInactive { tool } => {
+                        format!("Select the profile containing {tool}")
+                    }
+                    Blocker::VersionMismatch => {
+                        "Installed version differs. Dort does not upgrade automatically.".into()
+                    }
+                    Blocker::VersionUnverifiable => {
+                        "Reported version does not match this declaration.".into()
+                    }
+                    Blocker::UnattributedBinaryCandidates => {
+                        "An existing command needs a check before install.".into()
+                    }
+                    Blocker::BinaryObservationUnavailable | Blocker::BinaryNotObserved => {
+                        "Check command search folders in Tool settings.".into()
+                    }
+                    Blocker::RuntimeBindingUnverified => {
+                        "Check the runtime's Node and npm settings.".into()
+                    }
+                    _ => "Package manager data is unavailable. Check Tool settings.".into(),
+                };
+                lines.push(ui::metadata("Needs attention", &reason));
+            }
+        }
+    }
+    {
+        let install = &tool.install;
+        lines.push(ui::metadata(
+            "Package manager",
+            workflow::provider_label(install.provider),
+        ));
+        lines.push(ui::metadata("Package", &install.package));
+        lines.push(ui::metadata(
+            "Version",
+            install.version.as_deref().unwrap_or("Default"),
+        ));
+        if let Some(runtime) = &install.runtime_tool {
+            lines.push(ui::metadata("npm runtime", runtime));
+        }
+    }
+    ui::report(
+        frame,
+        area,
+        "Declared tool",
+        lines.into(),
+        app.details_scroll,
+        false,
+    );
+}
 pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     app.hits.wheel(area, super::input::Wheel::Tools);
     if review(frame, area, app) || result(frame, area, app) {
@@ -575,127 +707,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     if app.tools_view.declared_details
         && let Some(tool) = tools.get(selected)
     {
-        let mut lines = vec![
-            ui::metadata("Tool ID", &tool.id),
-            ui::metadata("Status", app.tools_view.declared.row_status(&tool.id)),
-            ui::metadata("Command", &tool.binary),
-            ui::metadata("Profiles", &tool.profiles.join(", ")),
-            ui::metadata("Requires", &tool.requires.join(", ")),
-        ];
-        if let Some(result) = app
-            .tools_view
-            .declared
-            .installed
-            .as_ref()
-            .and_then(|r| r.results.iter().find(|r| r.tool == tool.id))
-        {
-            if let Some(report) = &result.report {
-                let summary = report.summary();
-                lines.push(ui::metadata("Latest install", summary.status.label()));
-                lines.push(ui::metadata("Package", summary.package_note()));
-                lines.push(ui::metadata("Command", summary.binary_label()));
-            }
-            if let Some(error) = &result.error {
-                lines.push(ui::metadata("Problem", error));
-            }
-        }
-        if let Some(checked) = &app.tools_view.declared.checked
-            && !app.tools_view.declared.stale
-        {
-            for issue in checked.needs_setup.iter().filter(|i| i.tool == tool.id) {
-                lines.push(ui::metadata("Setup", &issue.reason));
-            }
-            if let Some(row) = checked
-                .reconciliation
-                .plan
-                .rows
-                .iter()
-                .find(|r| r.id == tool.id)
-            {
-                if matches!(
-                    row.package,
-                    dort_core::tools::planning::PackageFinding::Absent
-                ) && !crate::services::installation::eligible(row)
-                {
-                    for issue in workflow::install_issues(row) {
-                        lines.push(ui::metadata("Why", &issue.reason));
-                        lines.push(ui::metadata("Next", &issue.next_step));
-                    }
-                }
-                use dort_core::tools::planning::{BinaryObservation, Blocker, PackageFinding};
-                if let PackageFinding::Present { versions } = &row.package {
-                    lines.push(ui::metadata(
-                        "Reported versions",
-                        &versions
-                            .iter()
-                            .map(|v| v.version.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                    ));
-                }
-                lines.push(ui::metadata(
-                    "Command lookup",
-                    match row.binary_observation {
-                        BinaryObservation::Missing => "Not found in checked folders",
-                        BinaryObservation::Candidates { .. } => {
-                            "Found, but version and owner are unverified"
-                        }
-                        _ => "Unavailable or not checked",
-                    },
-                ));
-                for blocker in &row.blockers {
-                    let reason = match blocker {
-                        Blocker::DependencyNeedsReview { tool } => {
-                            format!("Install {tool} first, then check again")
-                        }
-                        Blocker::DependencyBlocked { tool } => format!("Resolve {tool} first"),
-                        Blocker::DependencyInactive { tool } => {
-                            format!("Select the profile containing {tool}")
-                        }
-                        Blocker::VersionMismatch => {
-                            "Installed version differs. Dort does not upgrade automatically.".into()
-                        }
-                        Blocker::VersionUnverifiable => {
-                            "Reported version does not match this declaration.".into()
-                        }
-                        Blocker::UnattributedBinaryCandidates => {
-                            "An existing command needs a check before install.".into()
-                        }
-                        Blocker::BinaryObservationUnavailable | Blocker::BinaryNotObserved => {
-                            "Check command search folders in Tool settings.".into()
-                        }
-                        Blocker::RuntimeBindingUnverified => {
-                            "Check the runtime's Node and npm settings.".into()
-                        }
-                        _ => "Package manager data is unavailable. Check Tool settings.".into(),
-                    };
-                    lines.push(ui::metadata("Needs attention", &reason));
-                }
-            }
-        }
-        {
-            let install = &tool.install;
-            lines.push(ui::metadata(
-                "Package manager",
-                workflow::provider_label(install.provider),
-            ));
-            lines.push(ui::metadata("Package", &install.package));
-            lines.push(ui::metadata(
-                "Version",
-                install.version.as_deref().unwrap_or("Default"),
-            ));
-            if let Some(runtime) = &install.runtime_tool {
-                lines.push(ui::metadata("npm runtime", runtime));
-            }
-        }
-        ui::report(
-            frame,
-            area,
-            "Declared tool",
-            lines.into(),
-            app.details_scroll,
-            false,
-        );
+        draw_tool(frame, area, app, tool);
         commands(app);
         action(app, "Back", "Esc", KeyCode::Esc);
         return;
@@ -732,25 +744,26 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         );
         return;
     }
-    let capacity = ui::design::pair_capacity(rows).max(1);
-    let offset = selected.saturating_sub(capacity - 1);
-    let statuses: Vec<_> = tools
-        .iter()
-        .map(|t| app.tools_view.declared.row_status(&t.id))
-        .collect();
+    let (list, details) = super::workbench::detail_panes(rows);
+    let capacity = ui::design::pair_capacity(list);
+    let first = app
+        .tools_view
+        .declared
+        .viewport
+        .start(tools.len(), capacity, Some(selected));
     let visible: Vec<_> = tools
         .iter()
         .enumerate()
-        .skip(offset)
+        .skip(first)
         .take(capacity)
         .map(|(identity, tool)| ui::design::PairRow {
             identity,
-            values: [&tool.id, statuses[identity]],
+            values: [&tool.id, app.tools_view.declared.row_status(&tool.id)],
         })
         .collect();
     ui::design::pairs(
         frame,
-        rows,
+        list,
         ui::design::PairTable {
             headers: ["TOOL", "STATUS"],
             rows: &visible,
@@ -759,4 +772,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         &app.hits,
         Target::ToolsRow,
     );
+    if let (Some(area), Some(tool)) = (details, tools.get(selected)) {
+        draw_tool(frame, area, app, tool);
+    }
 }

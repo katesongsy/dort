@@ -296,7 +296,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             0,
         );
     } else {
-        let table_rows = visible.iter().map(|&i| {
+        let selected = visible.iter().position(|&i| i == app.selected);
+        let capacity = usize::from(panes[0].height.saturating_sub(2));
+        let first = app
+            .history_viewport
+            .start(visible.len(), capacity, selected);
+        let window = &visible[first..(first + capacity).min(visible.len())];
+        let table_rows = window.iter().map(|&i| {
             let row = &data.history[i];
             let (status, style) = state(row);
             Row::new(vec![
@@ -320,9 +326,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         .row_highlight_style(ui::selected())
         .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
         let mut selection =
-            TableState::default().with_selected(visible.iter().position(|&i| i == app.selected));
+            TableState::default().with_selected(window.iter().position(|&i| i == app.selected));
         frame.render_stateful_widget(table, panes[0], &mut selection);
-        app.hits.rows(panes[0], &visible, selection.offset());
+        app.hits.rows(panes[0], window, 0);
     }
     if wide {
         ui::report(

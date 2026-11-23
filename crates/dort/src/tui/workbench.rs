@@ -7,7 +7,12 @@ use super::{
     views,
 };
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{Frame, layout::Rect, text::Text, widgets::Paragraph};
+use ratatui::{
+    Frame,
+    layout::{Constraint, Layout, Rect},
+    text::Text,
+    widgets::Paragraph,
+};
 
 pub fn shortcut(action: Action) -> &'static str {
     match action {
@@ -80,6 +85,16 @@ fn short(action: Action) -> &'static str {
 }
 pub fn wide_details(area: Rect, header_rows: u16) -> bool {
     area.width >= 110 && area.height.saturating_sub(header_rows) >= 14
+}
+pub fn detail_panes(area: Rect) -> (Rect, Option<Rect>) {
+    if wide_details(area, 0) {
+        let [list, details] =
+            Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
+                .areas(area);
+        (list, Some(details))
+    } else {
+        (area, None)
+    }
 }
 /// Foreground-only metadata; no contents, serialized plans or approvals enter this model.
 pub fn actions(app: &App) -> Vec<ui::ActionButton> {

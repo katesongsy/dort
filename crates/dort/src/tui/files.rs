@@ -11,18 +11,6 @@ use ratatui::{
 #[cfg(test)]
 thread_local! { pub(super) static FORMATTED_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 
-fn window_start(len: usize, capacity: usize, retained: usize, selected: Option<usize>) -> usize {
-    let mut first = retained.min(len.saturating_sub(capacity));
-    if let Some(selected) = selected {
-        if selected < first {
-            first = selected;
-        } else if selected >= first + capacity {
-            first = selected.saturating_sub(capacity.saturating_sub(1));
-        }
-    }
-    first.min(len)
-}
-
 fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
     if app.discovering {
         let parts = Layout::vertical([Constraint::Min(3), Constraint::Length(5)]).split(area);
@@ -268,14 +256,10 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             .click(list_area, super::input::Target::DiscoverFocus(false));
     }
     let capacity = list_area.height.saturating_sub(2) as usize;
-    app.inventory.page_capacity.set(capacity);
-    let offset = if app.discovering {
-        &app.inventory.candidate_offset
-    } else {
-        &app.inventory.managed_offset
-    };
-    let first = window_start(nodes.len(), capacity, offset.get(), selected);
-    offset.set(first);
+    let first = app
+        .inventory
+        .viewport(app.discovering)
+        .start(nodes.len(), capacity, selected);
     let window: Vec<_> = nodes.window(first, capacity).collect();
     let visible: Vec<_> = window.iter().map(|n| n.key).collect();
     let total = if app.discovering {

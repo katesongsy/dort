@@ -369,6 +369,7 @@ impl App {
 
     pub(super) fn accept_ignored_paths(&mut self, paths: Vec<PathBuf>) -> Option<Task> {
         self.shell.overlay = Some(Overlay::Ignored { paths, selected: 0 });
+        self.shell.ignored_viewport = Default::default();
         self.shell.scroll = 0;
         self.status =
             "Select an exact ignored path to review Unignore. Ancestor rules still apply.".into();

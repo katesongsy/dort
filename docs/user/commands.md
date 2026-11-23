@@ -25,7 +25,9 @@ Run `dort` or `dort tui`.
 - `Esc`: back.
 - `q` / `Ctrl-C`: quit. Active work finishes first.
 
-Lists use `Enter` for details. Named actions start checks, installs or reviews. Numbers switch collection tabs; in fields and filters they are text.
+Wide review lists show details for the selected row on the right. Use `Enter` for a full view, or `F3` in Ignored paths.
+In Files, Recovery, Git and Tools lists, `Ctrl-F` and `Ctrl-B` work like `PgDn` and `PgUp`. They move selection. Use `/` where a filter is offered.
+Named actions start checks, installs or reviews. Numbers switch collection tabs; in fields and filters they are text.
 
 Reviews show exact effects. Confirm once. Help keeps drafts; choosing another destination drops approval. A window below 48×14 clears approval.
 
@@ -36,6 +38,7 @@ Use `1` for Managed, `2` for Discover and `3` for Ignored paths. `g` opens Git.
 - **Managed:** `u` Unmanage keeps the local file; `U` Unmanage marked does the same for marked files. `m` Manual adopt opens an adoption draft. `a` Apply reviews all active files; `A` Apply marked reviews marked files only.
 - **Discover:** `a` Adopt opens a draft for the selected file; `A` Adopt marked opens a batch draft. `i` Ignore reviews excluding the selected path from discovery.
 - In either list, `Space` marks or unmarks, and `Home` / `End` select the first or last row. Hidden marks still count.
+- **Delete link** and **Delete marked** are separate actions. Review the paths and confirm the exact mapping IDs before deleting links.
 ## Tools
 
 Tools has three tabs: **1 Declared**, **2 Installed**, **3 History**.

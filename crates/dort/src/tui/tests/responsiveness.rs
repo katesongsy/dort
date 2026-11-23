@@ -141,18 +141,18 @@ fn cached_large_navigation_virtualizes_rows_and_preserves_raw_mouse_identity() {
     assert_eq!(tree::visible(&app).len(), 100_000);
     app.candidate_selected = 90_000;
     bounded_render(&app, 140, 40);
-    let offset = app.inventory.candidate_offset.get();
+    let offset = app.inventory.viewport(true).first();
     assert!(offset > 89_900);
     key(&mut app, KeyCode::Up);
     bounded_render(&app, 140, 40);
-    assert_eq!(app.inventory.candidate_offset.get(), offset);
+    assert_eq!(app.inventory.viewport(true).first(), offset);
     for _ in 0..3 {
         key(&mut app, KeyCode::Down);
         bounded_render(&app, 140, 40);
         assert!(Arc::ptr_eq(&snapshot, &discovery_tree::snapshot(&app)));
         assert!(Arc::ptr_eq(&snapshot.all, &tree::visible(&app).all));
     }
-    let expected = app.inventory.candidate_offset.get();
+    let expected = app.inventory.viewport(true).first();
     let (x, y) = (0..40).flat_map(|y| (0..60).map(move |x| (x, y))).find(|&(x,y)| matches!(app.hits.target(x,y), Some(super::input::Target::Row(i)) if i == expected)).unwrap();
     app.mouse(
         ratatui::crossterm::event::MouseEvent {

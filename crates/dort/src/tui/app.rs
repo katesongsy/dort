@@ -99,6 +99,7 @@ pub struct App {
     pub showing_diagnostics: bool,
     pub history_search: super::inventory::Search,
     pub history_details: bool,
+    pub history_viewport: super::navigation::ListViewport,
     pub retry: Option<super::actions::Retry>,
     pub selected: usize,
     pub hits: super::input::Hits,
@@ -191,6 +192,7 @@ impl App {
             showing_diagnostics: false,
             history_search: Default::default(),
             history_details: false,
+            history_viewport: Default::default(),
             retry: None,
             selected: 0,
             hits: Default::default(),
@@ -873,7 +875,49 @@ impl App {
             Control::Back => None,
         }
     }
+    fn paging_list(&self) -> bool {
+        if self.help.is_some()
+            || self.more.is_some()
+            || self.choice.is_some()
+            || self.busy
+            || self.error.is_some()
+            || self.show_result
+            || self.preview.is_some()
+            || self.confirmation.is_some()
+            || self.text_entry()
+            || self.batch_editor.as_ref().is_some_and(|e| e.open)
+        {
+            return false;
+        }
+        if let Some(overlay) = &self.shell.overlay {
+            return matches!(overlay, Overlay::Ignored { .. }) && !self.shell.picker_details;
+        }
+        match self.tab {
+            Tab::Files => !self.inventory.details && !self.content.focused,
+            Tab::Recovery => !self.history_details,
+            Tab::Git => {
+                !self.git_view.browsing_details()
+                    && !self.git_view.navigation_input()
+                    && !self.git_view.sensitive()
+            }
+            Tab::Tools => self.tools_view.collection_visible(),
+            _ => false,
+        }
+    }
     pub fn key(&mut self, mut key: KeyEvent, width: u16, height: u16) -> Option<Task> {
+        if key.modifiers == KeyModifiers::CONTROL
+            && let KeyCode::Char(letter @ ('f' | 'b')) = key.code
+            && self.paging_list()
+        {
+            key = KeyEvent::new(
+                if letter == 'f' {
+                    KeyCode::PageDown
+                } else {
+                    KeyCode::PageUp
+                },
+                KeyModifiers::NONE,
+            );
+        }
         if !self.key_text_entry()
             && self.tab == Tab::Git
             && key.code == KeyCode::Char('P')
@@ -1415,6 +1459,8 @@ impl App {
                     KeyCode::Char('k') | KeyCode::Up => self.content.scroll_by(true, 1),
                     KeyCode::Home => self.content.scroll = 0,
                     KeyCode::End => self.content.scroll = self.content.end.get(),
+                    KeyCode::PageDown => self.content.scroll_by(false, 2),
+                    KeyCode::PageUp => self.content.scroll_by(true, 2),
                     _ => return self.workspace_key(key),
                 }
                 return None;
@@ -1473,45 +1519,20 @@ impl App {
                 _ => (),
             }
         }
-        if self.tab == Tab::Files
-            && self.discovering
-            && !self.text_entry()
-            && !key.modifiers.contains(KeyModifiers::ALT)
-            && matches!(
-                key.code,
-                KeyCode::PageDown | KeyCode::PageUp | KeyCode::Home
-            )
-        {
-            if !self.inventory.details && !self.content.focused {
-                let backwards = key.code != KeyCode::PageDown;
-                let count = if key.code == KeyCode::Home {
-                    usize::MAX
-                } else {
-                    self.inventory.page_capacity.get().max(1)
-                };
-                self.move_files(backwards, count);
-                return None;
-            }
-            if key.code == KeyCode::Home {
-                self.content.scroll = 0;
-            } else {
-                self.content.scroll_by(key.code == KeyCode::PageUp, 2);
-            }
-            return None;
-        }
-        if !self.text_entry()
-            && matches!(
-                key.code,
-                KeyCode::PageDown | KeyCode::PageUp | KeyCode::Home
-            )
-        {
-            let backwards = key.code != KeyCode::PageDown;
-            let count = if key.code == KeyCode::Home {
-                usize::MAX
-            } else {
-                2
+        if !self.text_entry() && !key.modifiers.contains(KeyModifiers::ALT) {
+            let movement = |page| match key.code {
+                KeyCode::PageDown => Some((false, page)),
+                KeyCode::PageUp => Some((true, page)),
+                KeyCode::Home => Some((true, usize::MAX)),
+                KeyCode::End => Some((false, usize::MAX)),
+                _ => None,
             };
-            if self.tab == Tab::Files && !self.inventory.details {
+            if self.tab == Tab::Files
+                && !self.inventory.details
+                && !self.content.focused
+                && let Some((backwards, count)) =
+                    movement(self.inventory.viewport(self.discovering).page())
+            {
                 self.move_files(backwards, count);
                 return None;
             }
@@ -1521,6 +1542,7 @@ impl App {
                     .data
                     .as_ref()
                     .is_some_and(|d| d.history_error.is_none())
+                && let Some((backwards, count)) = movement(self.history_viewport.page())
             {
                 self.page_history(backwards, count);
                 return None;
@@ -1529,6 +1551,7 @@ impl App {
                 && !self.git_view.browsing_details()
                 && !self.git_view.navigation_input()
                 && !self.git_view.sensitive()
+                && let Some((backwards, count)) = movement(self.git_view.viewport.page())
             {
                 self.git_view.page_metadata(backwards, count);
                 return None;
@@ -1584,10 +1607,8 @@ impl App {
             && !self.content.focused
         {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
-                let page = self.inventory.page_capacity.get().max(1);
+                let page = self.inventory.viewport(self.discovering).page();
                 let (backwards, count) = match key.code {
-                    KeyCode::Char('f') => (false, page),
-                    KeyCode::Char('b') => (true, page),
                     KeyCode::Char('d') => (false, (page / 2).max(1)),
                     KeyCode::Char('u') => (true, (page / 2).max(1)),
                     _ => (false, 0),
@@ -1609,18 +1630,19 @@ impl App {
                     self.move_files(true, 1);
                     return None;
                 }
-                KeyCode::Home => {
-                    self.move_files(true, usize::MAX);
-                    return None;
-                }
-                KeyCode::End | KeyCode::Char('G')
-                    if !self.discovering || key.code == KeyCode::End =>
-                {
+                KeyCode::Char('G') if !self.discovering => {
                     self.move_files(false, usize::MAX);
                     return None;
                 }
                 _ => (),
             }
+        }
+        if matches!(key.code, KeyCode::Char(_))
+            && key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
+            return None;
         }
         let opens_overlay = matches!(key.code, KeyCode::Char('?' | '/' | 'p' | 'n'));
         if !matches!(
@@ -1631,9 +1653,6 @@ impl App {
             self.details_scroll = 0;
         }
         if self.tab == Tab::Files
-            && !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
             && let Some(action) = super::context::file_action(key.code, self)
         {
             return self.activate(action);

@@ -20,10 +20,9 @@ impl Search {
 
 #[derive(Default)]
 pub struct Inventory {
-    pub page_capacity: std::cell::Cell<usize>,
     pub tree: std::cell::RefCell<super::discovery_tree::State>,
-    pub candidate_offset: std::cell::Cell<usize>,
-    pub managed_offset: std::cell::Cell<usize>,
+    candidate_viewport: super::navigation::ListViewport,
+    managed_viewport: super::navigation::ListViewport,
     pub managed: Search,
     pub candidates: Search,
     pub details: bool,
@@ -36,6 +35,14 @@ pub struct Inventory {
     pub managed_folded: std::sync::Arc<super::visibility::Folds>,
 }
 impl Inventory {
+    pub fn viewport(&self, discovering: bool) -> &super::navigation::ListViewport {
+        if discovering {
+            &self.candidate_viewport
+        } else {
+            &self.managed_viewport
+        }
+    }
+
     pub fn search(&self, discovering: bool) -> &Search {
         if discovering {
             &self.candidates

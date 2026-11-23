@@ -271,3 +271,33 @@ fn unavailable_history_is_not_a_healthy_empty_list_and_closure_navigation_clears
     assert!(!render(&app, 80, 24).contains("No installation"));
     assert!(f.calls().is_empty());
 }
+
+#[test]
+fn install_history_pages_records_without_starting_closure() {
+    use super::{actions::Output, input::Target, navigation_tests::assert_review_list_navigation};
+    let f = Fixture::new();
+    let root = f.host.state_dir.join("tools-attempts");
+    fs::create_dir(&root).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    for i in 0..80 {
+        let record = root.join(format!("{i:064x}"));
+        fs::create_dir(&record).unwrap();
+        fs::set_permissions(record, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let mut app = app(&f, false);
+    assert!(matches!(
+        key(&mut app, KeyCode::Char('3')),
+        Some(Task::ToolAttempts)
+    ));
+    app.complete(Ok(Output::ToolAttempts(
+        install::diagnose(&f.host).map_err(|e| e.to_string()),
+    )));
+    assert_review_list_navigation(
+        &mut app,
+        |t, i| matches!(t, Target::ToolAttemptRow(n) if i == n),
+        "4e",
+        "4f",
+    );
+    assert!(app.tools_view.installation.mode == Mode::Attempts);
+    assert!(f.calls().is_empty());
+}
