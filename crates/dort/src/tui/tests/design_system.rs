@@ -208,11 +208,20 @@ fn workflow_components_render_at_every_supported_gallery_size() {
                         rendered.contains("Keys in this context")
                             && rendered.contains("Current primary action")
                     );
-                    assert!(buffer.content.windows(5).any(|cells| {
-                        cells.iter().map(|cell| cell.symbol()).collect::<String>() == "Enter"
-                            && cells
-                                .iter()
-                                .all(|cell| cell.modifier.contains(Modifier::REVERSED))
+                    let has_style = |label: &str, emphasis: Modifier| {
+                        buffer.content.windows(label.len()).any(|cells| {
+                            cells.iter().map(|cell| cell.symbol()).collect::<String>() == label
+                                && cells.iter().all(|cell| cell.modifier == emphasis)
+                        })
+                    };
+                    assert!(has_style("Tools", Modifier::BOLD));
+                    assert!(has_style("Keys in this context", Modifier::BOLD));
+                    assert!(has_style("Inspect metadata", Modifier::empty()));
+                    assert!(has_style("Enter", Modifier::BOLD | Modifier::REVERSED));
+                    assert!(rendered.contains(if ascii {
+                        "Keys in this context  ----"
+                    } else {
+                        "Keys in this context  ────"
                     }));
                 }
                 if kind == "Result" {

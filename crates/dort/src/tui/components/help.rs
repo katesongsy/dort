@@ -1,5 +1,5 @@
 //! Read-only Help document.
-use super::{design, heading, inline};
+use super::{accent, design, heading, inline};
 use ratatui::text::{Line, Span, Text};
 
 fn wrap(text: &str, width: usize) -> impl Iterator<Item = String> + use<> {
@@ -18,6 +18,16 @@ fn wrap(text: &str, width: usize) -> impl Iterator<Item = String> + use<> {
     rows.into_iter()
 }
 
+fn section(title: &str, width: usize) -> Line<'static> {
+    let title = inline(title);
+    let rule = width.saturating_sub(title.len() + 2).min(12);
+    Line::styled(format!("{title}  {}", "─".repeat(rule)), heading())
+}
+
+fn paragraph(text: &str, width: usize) -> impl Iterator<Item = Line<'static>> + use<> {
+    wrap(text, width.saturating_sub(2)).map(|row| Line::raw(format!("  {row}")))
+}
+
 pub fn document(
     width: u16,
     title: &'static str,
@@ -26,12 +36,10 @@ pub fn document(
     sections: &[(&str, String)],
 ) -> Text<'static> {
     let width = usize::from(width);
-    let mut lines = vec![Line::styled(title, heading())];
-    lines.extend(wrap(purpose, width).map(Line::raw));
+    let mut lines = vec![Line::styled(title, accent())];
+    lines.extend(paragraph(purpose, width));
     lines.push(Line::default());
-    let section = design::table_heading();
-    lines.push(Line::styled("Keys in this context", section));
-    lines.push(Line::default());
+    lines.push(section("Keys in this context", width));
     let key_width = keys.iter().map(|(key, _)| key.len()).max().unwrap_or(0) + 4;
     let key_style = design::primary();
     for (key, description) in keys {
@@ -56,12 +64,10 @@ pub fn document(
     }
     for (title, body) in sections {
         lines.push(Line::default());
-        lines.push(Line::styled(inline(title), section));
-        lines.push(Line::default());
+        lines.push(section(title, width));
         lines.extend(
             body.lines()
-                .flat_map(|line| wrap(&inline(line), width))
-                .map(Line::raw),
+                .flat_map(|line| paragraph(&inline(line), width)),
         );
     }
     Text::from(lines)

@@ -324,14 +324,16 @@ pub fn text_view_at(frame: &mut Frame, inner: Rect, body: Text<'static>, offset:
     for line in body.lines {
         let mut row = Vec::new();
         let mut used = 0;
+        let line_style = body.style.patch(line.style);
         for span in line.spans {
+            let style = line_style.patch(span.style);
             // Callers supply escaped ASCII text, trusted labels or decoration only.
             for c in span.content.chars() {
                 if used == width {
                     lines.push(Line::from(std::mem::take(&mut row)));
                     used = 0;
                 }
-                row.push(Span::styled(c.to_string(), span.style));
+                row.push(Span::styled(c.to_string(), style));
                 used += 1;
             }
         }
