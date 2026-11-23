@@ -143,8 +143,11 @@ impl Topic {
             ],
             Self::Tools if app.tools_view.declaration_open => &[
                 ("Tab / Shift-Tab", "Edit declaration fields"),
-                ("Space", "Choose the platform package manager"),
-                ("Enter", "Review the declaration change"),
+                ("Enter/Space", "Open Package manager when focused"),
+                (
+                    "Enter",
+                    "Review from another field, or click Review declaration",
+                ),
                 ("F4", "Show/hide dependencies"),
                 ("Esc", "Stop editing, then Back"),
             ],
@@ -168,6 +171,18 @@ impl Topic {
                     ("Up/Down/PgUp/PgDn", "Read scope, reasons and risks"),
                     ("Enter", "Use the shown review action"),
                     ("Esc", "Cancel"),
+                ]
+            }
+            Self::Tools
+                if app.tools_view.install_open
+                    && app.tools_view.installation.mode
+                        == super::tools_install::Mode::CloseInputs =>
+            {
+                &[
+                    ("Tab / Shift-Tab", "Traverse package manager settings"),
+                    ("F4", "Choose the package manager"),
+                    ("Enter", "Review close"),
+                    ("Esc", "Stop editing, then Back"),
                 ]
             }
             Self::Tools if app.tools_view.install_open => &[

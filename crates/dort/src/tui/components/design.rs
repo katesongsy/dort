@@ -222,21 +222,25 @@ pub fn filter(
     input
 }
 
-/// A choice control is visibly editable but never owns a text caret.
 pub fn choice(frame: &mut Frame, area: Rect, value: &str, focused: bool) {
     if area.width < 5 || area.height == 0 {
         return;
     }
-    let width = usize::from(area.width - 4);
-    let escaped = ui::inline(value);
-    let visible = &escaped[escaped.len().saturating_sub(width)..];
+    let hint = " Enter/Space";
+    let hint = if area.width >= 5 + hint.len() as u16 {
+        hint
+    } else {
+        ""
+    };
+    let visible = ui::clip(value, area.width - 4 - hint.len() as u16);
     let boundary = if focused { ui::accent() } else { ui::muted() };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("[", boundary),
-            Span::raw(format!("{visible:width$} ")),
+            Span::raw(format!("{visible} ")),
             Span::styled(glyphs::MENU, boundary),
             Span::styled("]", boundary),
+            Span::styled(hint, ui::muted()),
         ])),
         Rect::new(area.x, area.y, area.width, 1),
     );

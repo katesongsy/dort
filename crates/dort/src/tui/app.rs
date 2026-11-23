@@ -522,7 +522,7 @@ impl App {
         if matches!(
             target,
             Target::FormControl(_, false)
-                | Target::ToolDeclarationControl(_, false)
+                | Target::ToolDeclarationField(_)
                 | Target::ToolsControl(_, false)
                 | Target::BatchControl(_, false)
                 | Target::ToolInstallControl(_, false)
@@ -689,23 +689,21 @@ impl App {
                 height,
             ),
             Target::ConfirmAction | Target::CancelConfirmation => None,
-            Target::ToolDeclarationControl(index, activate) => {
+            Target::ToolDeclarationField(index) => {
                 if self.tab != Tab::Tools || !self.tools_view.declaration_open {
                     return None;
                 }
-                if !activate {
-                    self.tools_view.declaration.focus = index.min(11);
-                }
-                if activate {
-                    return self
-                        .tools_view
-                        .key(
-                            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-                            self.dry_run,
-                        )
-                        .flatten();
+                self.tools_view.declaration.focus = index;
+                if index == super::tool_declaration::PROVIDER_FIELD {
+                    self.open_control_choice(KeyCode::Enter);
                 }
                 None
+            }
+            Target::ToolDeclarationReview => {
+                if self.tab != Tab::Tools || !self.tools_view.declaration_open {
+                    return None;
+                }
+                self.tools_view.declaration.prepare()
             }
             Target::ToolAttemptRow(index) => {
                 if self.tab == Tab::Tools && self.tools_view.install_open {

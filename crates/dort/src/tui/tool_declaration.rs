@@ -8,6 +8,8 @@ use ratatui::{
     text::Line,
 };
 use std::collections::BTreeMap;
+
+pub(super) const PROVIDER_FIELD: usize = 4;
 const LABELS: [&str; 8] = [
     "Tool ID",
     "Command name",
@@ -39,7 +41,7 @@ impl State {
         use dort_core::tools::inspection::Query;
         self.fields[0] = seed.package.clone();
         self.fields[1] = seed.package.clone();
-        let i = 4;
+        let i = PROVIDER_FIELD;
         self.fields[i] = match seed.query {
             Query::BrewFormulae => "brew",
             Query::NpmGlobals => "npm",
@@ -64,7 +66,7 @@ impl State {
         self.fields[3] = tool.requires.join(", ");
         {
             let install = &tool.install;
-            let i = 4;
+            let i = PROVIDER_FIELD;
             self.fields[i] = match install.provider {
                 dort_core::model::Provider::Brew => "brew",
                 dort_core::model::Provider::Npm => "npm",
@@ -84,17 +86,17 @@ impl State {
         if self.advanced {
             controls.push(3);
         }
-        controls.push(4);
-        if self.fields[4..8].iter().any(|s| !s.is_empty()) {
+        controls.push(PROVIDER_FIELD);
+        if self.fields[PROVIDER_FIELD..].iter().any(|s| !s.is_empty()) {
             controls.extend([5, 6]);
-            if self.fields[4] == "npm" || !self.fields[7].is_empty() {
+            if self.fields[PROVIDER_FIELD] == "npm" || !self.fields[7].is_empty() {
                 controls.push(7);
             }
         }
         controls
     }
     pub(super) fn choose_provider(&mut self, field: usize, value: &'static str) {
-        if field != 4 || self.fields[field] == value {
+        if field != PROVIDER_FIELD || self.fields[field] == value {
             return;
         }
         let current = std::array::from_fn(|i| self.fields[field + i].clone());
@@ -175,7 +177,7 @@ impl State {
             }
             KeyCode::Enter => return self.prepare(),
             _ if self.focus < 8
-                && self.focus != 4
+                && self.focus != PROVIDER_FIELD
                 && !(self.focus == 0 && self.change.is_some()) =>
             {
                 edit_text(&mut self.fields[self.focus], key);
@@ -202,7 +204,7 @@ impl State {
             hits.present(ui::ActionButton {
                 label: "Review removal",
                 key: "Enter",
-                target: Target::ToolDeclarationControl(8, true),
+                target: Target::ToolDeclarationReview,
             });
             hits.present(ui::ActionButton {
                 label: "Back",
@@ -215,7 +217,7 @@ impl State {
         let fields: Vec<_> = controls
             .iter()
             .map(|&i| {
-                let value = if i == 4 {
+                let value = if i == PROVIDER_FIELD {
                     match self.fields[i].as_str() {
                         "" => "Choose package manager",
                         "brew" => "Homebrew",
@@ -231,7 +233,7 @@ impl State {
         let choices: Vec<_> = controls
             .iter()
             .enumerate()
-            .filter_map(|(position, i)| (*i == 4).then_some(position))
+            .filter_map(|(position, i)| (*i == PROVIDER_FIELD).then_some(position))
             .collect();
         let editing = self.change.map(|_| {
             format!(
@@ -264,14 +266,14 @@ impl State {
             &fields,
             controls.iter().position(|&i| i == self.focus).unwrap_or(0),
             hits,
-            |i| Target::ToolDeclarationControl(controls[i], false),
+            |i| Target::ToolDeclarationField(controls[i]),
             ui::FormActions {
                 choices: &choices,
                 buttons: &[
                     ui::ActionButton {
                         label: "Review declaration",
                         key: "Enter",
-                        target: Target::ToolDeclarationControl(8, true),
+                        target: Target::ToolDeclarationReview,
                     },
                     ui::ActionButton {
                         label: if self.advanced {

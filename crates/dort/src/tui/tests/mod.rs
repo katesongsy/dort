@@ -182,6 +182,33 @@ pub(super) fn render(app: &App, width: u16, height: u16) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+pub(super) fn click_label(
+    app: &mut App,
+    width: u16,
+    height: u16,
+    label: &str,
+) -> Option<super::actions::Task> {
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let screen = render(app, width, height);
+    let (column, row) = screen
+        .lines()
+        .enumerate()
+        .find_map(|(y, line)| {
+            line.find(label)
+                .map(|x| (line[..x].chars().count() as u16, y as u16))
+        })
+        .unwrap_or_else(|| panic!("{label:?} not visible in:\n{screen}"));
+    app.mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        },
+        width,
+        height,
+    )
+}
 #[test]
 fn compact_forms_and_profile_picker_always_show_focused_control() {
     use super::shell::{Form, Overlay};

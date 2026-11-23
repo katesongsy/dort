@@ -1,7 +1,9 @@
 //! Choice selection for explicit options. Selecting a value runs nothing.
 use super::{
     app::{App, Tab},
-    components as ui, tools_install,
+    components as ui,
+    tool_declaration::PROVIDER_FIELD,
+    tools_install,
 };
 use ratatui::{Frame, crossterm::event::KeyCode};
 #[derive(Clone)]
@@ -71,7 +73,10 @@ impl App {
             return false;
         }
         let tools = &self.tools_view;
-        let opening = matches!(code, KeyCode::Char(' ') | KeyCode::Left | KeyCode::Right);
+        let opening = matches!(
+            code,
+            KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Left | KeyCode::Right
+        );
         let choice = if tools.install_open
             && tools.installation.mode == tools_install::Mode::CloseInputs
             && code == KeyCode::F(4)
@@ -89,8 +94,12 @@ impl App {
                     .collect(),
                 tools.installation.closure_provider(),
             ))
-        } else if tools.declaration_open && tools.declaration.focus == 4 && opening {
-            let field = tools.declaration.focus;
+        } else if self.form_page() == Some("declaration")
+            && self.form_has_focus()
+            && tools.declaration.focus == PROVIDER_FIELD
+            && opening
+        {
+            let field = PROVIDER_FIELD;
             let options = [("Homebrew", "brew"), ("npm", "npm")];
             let selected = options
                 .iter()
