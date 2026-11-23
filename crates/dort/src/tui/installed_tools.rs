@@ -356,7 +356,8 @@ impl State {
                 false,
             );
         } else {
-            let (list, details) = super::workbench::detail_panes(body);
+            let (list, details) =
+                super::workbench::detail_panes(body, super::workbench::wide_details(body, 0));
             let capacity = ui::design::pair_capacity(list);
             let first = self
                 .viewport

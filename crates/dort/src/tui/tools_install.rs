@@ -401,7 +401,8 @@ impl State {
             action("Back", "Esc", KeyCode::Esc);
             return;
         }
-        let (list, details) = super::workbench::detail_panes(area);
+        let (list, details) =
+            super::workbench::detail_panes(area, super::workbench::wide_details(area, 0));
         let capacity = ui::design::pair_capacity(list);
         let first = self.viewport.start(
             self.attempts.len(),

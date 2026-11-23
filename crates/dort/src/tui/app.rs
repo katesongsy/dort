@@ -365,18 +365,13 @@ impl App {
                 MouseEventKind::ScrollDown => Some(KeyCode::PageDown),
                 MouseEventKind::ScrollUp => Some(KeyCode::PageUp),
                 MouseEventKind::Down(ratatui::crossterm::event::MouseButton::Left)
-                    if matches!(
-                        self.hits.target(event.column, event.row),
-                        Some(super::input::Target::Back)
-                    ) =>
+                    if self.hits.size() == (width, height)
+                        && matches!(
+                            self.hits.target(event.column, event.row),
+                            Some(super::input::Target::Back | super::input::Target::DismissDialog)
+                        ) =>
                 {
                     Some(KeyCode::Esc)
-                }
-                MouseEventKind::Down(ratatui::crossterm::event::MouseButton::Left) => {
-                    let reason = "Help dialog open: close it with Esc before navigating.";
-                    self.interaction_notice = Some(reason);
-                    self.status = reason.into();
-                    None
                 }
                 _ => None,
             };
@@ -454,7 +449,7 @@ impl App {
         if self.confirmation.is_some() {
             let code = match self.hits.target(event.column, event.row) {
                 Some(Target::ConfirmAction) => KeyCode::Enter,
-                Some(Target::CancelConfirmation) => KeyCode::Esc,
+                Some(Target::CancelConfirmation | Target::DismissDialog) => KeyCode::Esc,
                 _ => return None,
             };
             return self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height);
@@ -645,6 +640,18 @@ impl App {
                 None
             }
             Target::Action(action) => self.activate(action),
+            Target::DismissDialog => {
+                self.interaction_notice = None;
+                if self.choice.take().is_some() || self.more.take().is_some() {
+                    return None;
+                }
+                self.shell.picker_details = false;
+                self.key(
+                    KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                    width,
+                    height,
+                )
+            }
             Target::Back => self.key(
                 KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
                 width,

@@ -212,11 +212,7 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         );
         return;
     }
-    let panes = if wide {
-        Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)]).split(content)
-    } else {
-        Layout::horizontal([Constraint::Percentage(100)]).split(content)
-    };
+    let (list, pane) = crate::tui::workbench::detail_panes(content, wide);
     let title = view
         .metadata
         .map(|m| format!("Details | {} entries", m.len()))
@@ -226,8 +222,8 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         || view.metadata.is_some_and(|m| m.len() == 0)
         || view.visible.is_empty()
     {
-        let inner = block.inner(panes[0]);
-        frame.render_widget(block, panes[0]);
+        let inner = block.inner(list);
+        frame.render_widget(block, list);
         let text = match view.metadata {
             None => "Summary unavailable/not loaded. Choose scope, then refresh.",
             Some(m) if m.len() == 0 => "No changes in this comparison.",
@@ -236,7 +232,7 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         ui::text_view(frame, inner, Text::raw(text), 0);
     } else if let Some(metadata) = view.metadata {
         let selected = view.visible.iter().position(|&i| i == view.selected);
-        let capacity = usize::from(panes[0].height.saturating_sub(2));
+        let capacity = usize::from(list.height.saturating_sub(2));
         let first = view.viewport.start(view.visible.len(), capacity, selected);
         let window = &view.visible[first..(first + capacity).min(view.visible.len())];
         let rows = window.iter().filter_map(|&index| match metadata {
@@ -283,13 +279,13 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
             .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
         let mut selection =
             TableState::default().with_selected(window.iter().position(|&i| i == view.selected));
-        frame.render_stateful_widget(table, panes[0], &mut selection);
-        view.hits.rows(panes[0], window, 0);
+        frame.render_stateful_widget(table, list, &mut selection);
+        view.hits.rows(list, window, 0);
     }
-    if wide {
+    if let Some(pane) = pane {
         ui::report(
             frame,
-            panes[1],
+            pane,
             "Git details",
             details(&view),
             view.scroll,

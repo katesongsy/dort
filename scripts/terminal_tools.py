@@ -432,12 +432,10 @@ def interaction_surface_workflows(Session, binary, base, env):
             session.send(b'\x1bOP')
             session.wait(b'Enter opens the selected')
             session.settle()
-            footer = session.screen.text().splitlines()[-1]
-            assert b'Back' in footer and b'Review' not in footer
+            rows = session.screen.text().splitlines()
+            footer = next(row for row in rows if b'Esc Back' in row)
+            assert footer != rows[-1] and b'Review' not in footer
             session.mouse(0, 0, 0)
-            session.settle()
-            assert b'Enter opens the selected' in session.screen.text(), 'Outside click dismissed Help'
-            session.send(b'\x1b')
             session.wait(b'q?/')
             session.destination('Checks')
             session.wait(b'Checks')

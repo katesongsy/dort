@@ -67,7 +67,8 @@ pub fn draw(
         Constraint::Length(if wide { 0 } else { 2 }),
     ])
     .areas(area);
-    let (list, pane) = super::workbench::detail_panes(body);
+    let (list, pane) =
+        super::workbench::detail_panes(body, super::workbench::wide_details(body, 0));
     frame.render_widget(
         Paragraph::new("Local HOME discovery preferences").style(ui::muted()),
         heading,

@@ -236,11 +236,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     app.hits.click(sections[1], super::input::Target::Filter);
     let content = sections[2];
     let wide = super::workbench::wide_details(area, 2);
-    let split = if wide {
-        Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)]).split(content)
-    } else {
-        Layout::vertical([Constraint::Percentage(100)]).split(content)
-    };
+    let (list_area, details) = super::workbench::detail_panes(content, wide);
     let focused = !app.discovering || !app.content.focused;
     if app.inventory.details
         || app.content.focused
@@ -250,7 +246,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
     let selected = super::tree::position(app, app.file_selection());
-    let list_area = split[0];
     if app.discovering {
         app.hits
             .click(list_area, super::input::Target::DiscoverFocus(false));
@@ -437,7 +432,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             }
         }
     }
-    if wide {
-        draw_selected(frame, split[1], app);
+    if let Some(area) = details {
+        draw_selected(frame, area, app);
     }
 }

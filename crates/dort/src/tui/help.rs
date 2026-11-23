@@ -357,8 +357,7 @@ pub fn text_input(app: &App) -> bool {
     }
     app.text_entry()
 }
-pub fn draw(frame: &mut Frame, app: &App, help: &State) {
-    let mut area = ui::design::choice_dialog(frame, "Help", &app.hits);
+pub fn draw(frame: &mut Frame, mut area: ratatui::layout::Rect, app: &App, help: &State) {
     if let Some(notice) = app.interaction_notice {
         let height = (1 + notice.len().div_ceil(usize::from(area.width).max(1)) as u16)
             .min(3)
@@ -373,7 +372,9 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
         area.y += height;
         area.height = area.height.saturating_sub(height);
     }
-    let mut sections = vec![("Workbench", "F1: Help. F2: more actions. Esc: back. Outside text entry, o/f/t/r/c/g opens sections. Numbers choose a local page. Fields and filters take digits as text; footer buttons do not join field traversal.".to_owned())];
+    area.x += u16::from(area.width > 2);
+    area.width = area.width.saturating_sub(2);
+    let mut sections = vec![("Switch pages", "o Overview   f Files   t Tools\nr Recovery   c Checks   g Git\nUse the number on a tab to open it. While editing, keys type into the field or filter.".to_owned())];
     if matches!(help.topic, Topic::Tools) {
         sections.insert(0, ("Tools guide", "Tools opens declarations. Check installed asks which package managers to query, then shows each result for approval. Installed means the package manager reports the package, not that the command works. Install missing reviews eligible tools once, installs in order and stops on failure. Earlier installs stay; there is no rollback. Settings and history live under Tools.".to_owned()));
     }
@@ -406,14 +407,15 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
     }
     sections.push((
         "Reading Help",
-        "Up/Down or PgUp/PgDown scrolls. Home returns to the top. Esc or F1 closes Help."
+        "Use the arrows or Page Up and Page Down to scroll. Home jumps to the top. Press Esc or F1 to close Help."
             .to_owned(),
     ));
-    sections.push(("Approval and privacy", "Writes need a fresh review. Outside clicks do not cancel or approve. q/Ctrl-C waits for active work. Backups are private, not encrypted. Selected-file and Git content stays out of Help and reports.".to_owned()));
+    sections.push(("Approval and privacy", "Writes need a fresh review. Click outside a dialog to close it. q/Ctrl-C waits for active work. Backups are private, not encrypted. Selected-file and Git content stays out of Help and reports.".to_owned()));
     ui::text_view(
         frame,
         area,
         ui::help::document(
+            area.width,
             help.topic.title(),
             help.topic.instructions(),
             help.topic.keys(app),

@@ -121,7 +121,8 @@ fn help_footer_precedes_retained_forms_overlays_errors_and_running_work() {
         assert_eq!(hints::keys(&app), [("Esc", "Back")]);
         for (w, h) in [(48, 14), (80, 24), (140, 40)] {
             let screen = render(&app, w, h);
-            let footer = screen.lines().last().unwrap();
+            let footer = screen.lines().find(|row| row.contains("Esc Back")).unwrap();
+            assert_ne!(Some(footer), screen.lines().last());
             assert!(
                 footer.contains("Back") && !footer.contains("More"),
                 "{screen}"

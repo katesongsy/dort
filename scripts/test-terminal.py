@@ -919,7 +919,8 @@ def run():
             assert not (base / "patch-calls").exists(), "Warning opened a patch automatically"
             session.send(b"\x1b")
             session.wait(b"1 entries")
-            session.send(b"w\r")
+            session.send(b"w")
+            session.click_label('Enter View patch')
             session.wait(b"PRIVATE-PATCH\\x1b[31m")
             session.send(b"\x1b")
             session.wait(b"1 entries")
@@ -1006,13 +1007,18 @@ def run():
             session.wait(b"100644 -> 100644")  # loaded diff before content action
             session.more_action('View patch')
             session.wait(b"May expose secrets")
-            session.mouse(0, 20, 8)  # Only the labeled disclosure control can approve.
-            session.send(b"yes")  # Text alone is not an activation.
+            session.wait(b'Esc Cancel')
+            rows = session.screen.text().splitlines()
+            footer_row = next(i for i, row in enumerate(rows) if b'Esc Cancel' in row)
+            assert footer_row < len(rows) - 2 and b'Enter View patch' in rows[footer_row]
+            session.mouse(0, 20, 8)
+            session.send(b"yes")
             session.settle()
             assert b"May expose secrets" in session.screen.text()
-            assert b"PRIVATE-PATCH" not in session.data
-            session.send(b"\x1b")
+            session.mouse(0, 0, 0)
             session.settle()
+            assert b"May expose secrets" not in session.screen.text()
+            assert b"PRIVATE-PATCH" not in session.data
             session.send(b"q")
             session.finish()
         assert (base / "patch-calls").read_text() == patch_calls, "Wide metadata controls disclosed content"

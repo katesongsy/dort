@@ -270,11 +270,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         );
         return;
     }
-    let panes = if wide {
-        Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)]).split(content)
-    } else {
-        Layout::horizontal([Constraint::Percentage(100)]).split(content)
-    };
+    let (list, pane) = super::workbench::detail_panes(content, wide);
     let visible = app.visible_history_rows();
     let title = format!(
         "Operations | {} / {} shown",
@@ -283,8 +279,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     );
     let block = ui::pane(&title, focused);
     if data.history.is_empty() || visible.is_empty() {
-        let inner = block.inner(panes[0]);
-        frame.render_widget(block, panes[0]);
+        let inner = block.inner(list);
+        frame.render_widget(block, list);
         ui::text_view(
             frame,
             inner,
@@ -297,7 +293,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         );
     } else {
         let selected = visible.iter().position(|&i| i == app.selected);
-        let capacity = usize::from(panes[0].height.saturating_sub(2));
+        let capacity = usize::from(list.height.saturating_sub(2));
         let first = app
             .history_viewport
             .start(visible.len(), capacity, selected);
@@ -327,13 +323,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
         let mut selection =
             TableState::default().with_selected(window.iter().position(|&i| i == app.selected));
-        frame.render_stateful_widget(table, panes[0], &mut selection);
-        app.hits.rows(panes[0], window, 0);
+        frame.render_stateful_widget(table, list, &mut selection);
+        app.hits.rows(list, window, 0);
     }
-    if wide {
+    if let Some(pane) = pane {
         ui::report(
             frame,
-            panes[1],
+            pane,
             "Operation details",
             details(app),
             app.details_scroll,

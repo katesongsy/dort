@@ -119,23 +119,34 @@ fn workflow_gallery(kind: &str, width: u16, height: u16, ascii: bool, mono: bool
     terminal.draw(|frame| {
         hits.begin(frame.area());
         let areas = ui::chrome::shell(frame, "Fixture", super::app::Tab::Tools, false, false, &hits);
+        let mut footer = areas.footer;
         match kind {
             "Help" => {
-                let area = design::choice_dialog(frame, "Help", &hits);
+                let dialog = design::choice_dialog(frame, "Help", &hits);
+                let area = dialog.body;
+                footer = dialog.footer;
                 ui::report(frame, area, "", ui::help::document(
-                    "Tools", "Inspect metadata before choosing a change.",
+                    area.width, "Tools", "Inspect metadata before choosing a change.",
                     &[("Enter", "Current primary action"), ("Esc", "Return with drafts retained")],
                     &[("Privacy", "No provider runs merely by opening this dialog.".into())],
                 ), 0, false);
             }
-            "Choices" => ui::choice::draw(frame, &hits, ui::choice::View {
-                title: "Choose package manager", rows: &[("Homebrew", "available"), ("npm", "unavailable")],
-                selected: 1, details: false, scroll: 0, feedback: None,
-            }),
-            "More" => ui::menu::draw(frame, "More", &[
-                ui::menu::Item { action: ui::ActionButton { label: "Details", key: "F3", target: Target::Back }, reason: None },
-                ui::menu::Item { action: ui::ActionButton { label: "Dependencies", key: "F4", target: Target::Back }, reason: None },
-            ], 0, false, None, &hits),
+            "Choices" => {
+                let dialog = design::choice_dialog(frame, "Choose package manager", &hits);
+                footer = dialog.footer;
+                ui::choice::draw(frame, dialog.body, &hits, ui::choice::View {
+                    rows: &[("Homebrew", "available"), ("npm", "unavailable")],
+                    selected: 1, details: false, scroll: 0, feedback: None,
+                });
+            }
+            "More" => {
+                let dialog = design::choice_dialog(frame, "More", &hits);
+                footer = dialog.footer;
+                ui::menu::draw(frame, dialog.body, &[
+                    ui::menu::Item { action: ui::ActionButton { label: "Details", key: "F3", target: Target::Back }, reason: None },
+                    ui::menu::Item { action: ui::ActionButton { label: "Dependencies", key: "F4", target: Target::Back }, reason: None },
+                ], 0, false, None, &hits);
+            }
             "Dashboard" => ui::dashboard::draw(frame, areas.body, "Scope facts", &[
                 ui::dashboard::Metric { label: "Linked", value: "4 linked".into(), compact: "4 linked".into(), style: ui::success() },
                 ui::dashboard::Metric { label: "Unavailable", value: "1 unavailable".into(), compact: "1 unavailable".into(), style: ui::warning() },
@@ -164,7 +175,7 @@ fn workflow_gallery(kind: &str, width: u16, height: u16, ascii: bool, mono: bool
                 StripAction { key: "F1", label: "Help", target: Target::Action(Action::Help), primary: false },
             ]);
         }
-        design::action_strip(frame, areas.footer, &actions, &hits);
+        design::action_strip(frame, footer, &actions, &hits);
     }).unwrap();
     let mut buffer = terminal.backend().buffer().clone();
     Appearance::classify(
@@ -187,7 +198,23 @@ fn workflow_components_render_at_every_supported_gallery_size() {
                 let rendered = text(&buffer);
                 assert!(rendered.contains("Dort / Fixture"), "{kind} {w}");
                 let footer: String = (0..w).map(|x| buffer[(x, h - 1)].symbol()).collect();
-                assert!(!footer.trim().is_empty(), "{kind} {w}");
+                assert_eq!(
+                    footer.trim().is_empty(),
+                    matches!(kind, "Help" | "Choices" | "More"),
+                    "{kind} {w}"
+                );
+                if kind == "Help" {
+                    assert!(
+                        rendered.contains("Keys in this context")
+                            && rendered.contains("Current primary action")
+                    );
+                    assert!(buffer.content.windows(5).any(|cells| {
+                        cells.iter().map(|cell| cell.symbol()).collect::<String>() == "Enter"
+                            && cells
+                                .iter()
+                                .all(|cell| cell.modifier.contains(Modifier::REVERSED))
+                    }));
+                }
                 if kind == "Result" {
                     for fact in [
                         "Installer failed",
@@ -227,7 +254,7 @@ fn dialog_gallery(width: u16, height: u16, ascii: bool, mono: bool) -> Buffer {
                 Paragraph::new("Tools / fixture background").style(ui::heading()),
                 area,
             );
-            let inner = design::choice_dialog(frame, "More actions", &hits);
+            let dialog = design::choice_dialog(frame, "More actions", &hits);
             let rows = [
                 PairRow {
                     identity: 0,
@@ -240,7 +267,7 @@ fn dialog_gallery(width: u16, height: u16, ascii: bool, mono: bool) -> Buffer {
             ];
             design::pairs(
                 frame,
-                inner,
+                dialog.body,
                 PairTable {
                     headers: ["ACTION", "EFFECT"],
                     rows: &rows,
@@ -251,7 +278,7 @@ fn dialog_gallery(width: u16, height: u16, ascii: bool, mono: bool) -> Buffer {
             );
             design::action_strip(
                 frame,
-                Rect::new(0, height - 1, width, 1),
+                dialog.footer,
                 &[
                     StripAction {
                         key: "Enter",
@@ -275,7 +302,16 @@ fn dialog_gallery(width: u16, height: u16, ascii: bool, mono: bool) -> Buffer {
                 &hits,
             );
             assert!(!hits.input_focus_allowed());
-            assert!(matches!(hits.target(0, 0), Some(Target::NavigationBlocked)));
+            assert!(matches!(hits.target(0, 0), Some(Target::DismissDialog)));
+            assert!(matches!(
+                hits.target(0, height - 1),
+                Some(Target::DismissDialog)
+            ));
+            assert!(hits.target(dialog.body.x, dialog.body.y - 1).is_none());
+            assert!(matches!(
+                hits.target(dialog.footer.x, dialog.footer.y),
+                Some(Target::Continue)
+            ));
         })
         .unwrap();
     let mut buffer = terminal.backend().buffer().clone();
@@ -292,13 +328,24 @@ fn dialog_gallery(width: u16, height: u16, ascii: bool, mono: bool) -> Buffer {
 
 #[test]
 fn foreground_gallery_captures_background_and_has_one_action_strip() {
-    for (w, h) in [(48, 14), (80, 24), (140, 40)] {
+    for (w, h) in [(48, 14), (80, 24), (140, 40), (180, 48)] {
         for (ascii, mono) in [(false, false), (true, true)] {
             let buffer = dialog_gallery(w, h, ascii, mono);
             let rendered = text(&buffer);
             assert!(rendered.contains("More actions") && rendered.contains("Inspection details"));
             assert_eq!(rendered.matches("F1 Help").count(), 1);
-            assert!(rendered.lines().last().unwrap().contains("Esc Back"));
+            let rows: Vec<_> = rendered.lines().collect();
+            let title = rows
+                .iter()
+                .position(|row| row.contains("More actions"))
+                .unwrap();
+            let footer = rows
+                .iter()
+                .position(|row| row.contains("Esc Back"))
+                .unwrap();
+            assert_eq!(footer - title + 2, usize::from((h - 2).min(32)));
+            assert!(rows[footer + 1].trim().chars().count() >= usize::from((w - 2).min(144)));
+            assert!(footer + 1 < usize::from(h - 1));
             if ascii {
                 assert!(rendered.is_ascii());
             }

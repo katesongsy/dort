@@ -110,7 +110,7 @@ fn paged_cells(app: &mut App, modal: bool) -> String {
             (0, 48)
         };
         for row in y + 1 + pinned_rows..13 {
-            if modal && b[(left - 1, row)].symbol() == "└" {
+            if modal && b[(left - 1, row + 1)].symbol() == "└" {
                 break;
             }
             for x in left..right {

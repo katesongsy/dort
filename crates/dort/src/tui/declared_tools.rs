@@ -732,7 +732,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         );
         return;
     }
-    let (list, details) = super::workbench::detail_panes(rows);
+    let (list, details) =
+        super::workbench::detail_panes(rows, super::workbench::wide_details(rows, 0));
     let capacity = ui::design::pair_capacity(list);
     let first = app
         .tools_view

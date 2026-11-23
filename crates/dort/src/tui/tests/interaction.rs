@@ -279,9 +279,9 @@ fn profile_app() -> App {
     app
 }
 #[test]
-fn real_dialogs_dim_capture_and_explain_disabled_navigation_without_outside_cancel() {
+fn dialogs_dim_the_background_and_dismiss_outside_without_forwarding_clicks() {
     for size in [(48, 14), (80, 24), (140, 40)] {
-        for which in [0, 1, 3, 4] {
+        for which in 0..6 {
             let mut app = if which == 1 {
                 profile_app()
             } else {
@@ -289,11 +289,23 @@ fn real_dialogs_dim_capture_and_explain_disabled_navigation_without_outside_canc
             };
             match which {
                 0 => app.shell.overlay = Some(Overlay::Repositories { selected: 0 }),
+                1 => app.shell.picker_details = true,
+                2 => {
+                    key(&mut app, KeyCode::F(2), size.0, size.1);
+                    key(&mut app, KeyCode::F(3), size.0, size.1);
+                }
                 3 => app.shell.overlay = Some(Overlay::About),
                 4 => {
                     key(&mut app, KeyCode::F(1), size.0, size.1);
                 }
-                _ => (),
+                5 => {
+                    app.tab = Tab::Tools;
+                    app.tools_view.declare();
+                    app.tools_view.declaration.focus = 4;
+                    assert!(app.open_control_choice(KeyCode::Left));
+                    key(&mut app, KeyCode::F(3), size.0, size.1);
+                }
+                _ => unreachable!(),
             }
             assert!(app.dialog_title().is_some() && !app.navigation_available());
             let mut terminal = Terminal::new(TestBackend::new(size.0, size.1)).unwrap();
@@ -305,11 +317,9 @@ fn real_dialogs_dim_capture_and_explain_disabled_navigation_without_outside_canc
             );
             assert!(render(&app, size.0, size.1).contains(app.dialog_title().unwrap()));
             render(&app, size.0, size.1);
-            assert!(matches!(
-                app.hits.target(0, 0),
-                Some(Target::NavigationBlocked)
-            ));
-            app.mouse(
+            assert!(matches!(app.hits.target(0, 0), Some(Target::DismissDialog)));
+
+            let task = app.mouse(
                 MouseEvent {
                     kind: MouseEventKind::Down(MouseButton::Left),
                     column: 0,
@@ -319,13 +329,10 @@ fn real_dialogs_dim_capture_and_explain_disabled_navigation_without_outside_canc
                 size.0,
                 size.1,
             );
-            assert!(
-                app.dialog_title().is_some()
-                    && app.interaction_notice.is_some()
-                    && !app.quit
-                    && app.confirmation.is_none()
-            );
-            click(&mut app, size.0, size.1, |t| matches!(t, Target::Back));
+            assert!(task.is_none() && !app.quit && app.confirmation.is_none());
+            if which == 5 {
+                assert!(app.tools_view.declaration_open);
+            }
             assert!(
                 app.dialog_title().is_none(),
                 "dialog close at {:?}, case {which}",

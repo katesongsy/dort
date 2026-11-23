@@ -13,14 +13,13 @@ pub struct Item {
 }
 pub fn draw(
     frame: &mut Frame,
-    title: &'static str,
+    area: Rect,
     items: &[Item],
     selected: usize,
     details: bool,
     feedback: Option<&'static str>,
     hits: &Hits,
 ) {
-    let area = design::choice_dialog(frame, title, hits);
     let reason = items
         .get(selected)
         .and_then(|item| item.reason)
