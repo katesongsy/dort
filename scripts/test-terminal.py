@@ -464,7 +464,7 @@ def run():
                 session.wait(b"loaded.")
                 session.navigate("Files", "Managed")
                 session.wait(b"Files / Managed")
-                session.send(b"O")
+                session.send(b"m")
                 session.wait(b"TARGET")
                 session.send(b"\t~/.editor")
                 session.wait(b"~/.editor")
@@ -557,7 +557,7 @@ def run():
             session.wait(b'loaded.')
             session.send(b'F')
             session.wait(b'Filter files')
-            session.more_action('Ignore selected')
+            session.more_action('Ignore')
             session.wait(b'Ignore discovery path')
             assert not ignore_store.exists(), 'Ignore preview wrote preferences'
             session.send(b'\x1bOP')
@@ -787,7 +787,7 @@ def run():
             assert session.screen.text() == scrolled, "Focus round trip changed content or viewport"
             session.send(b"\x1b[H")
             session.wait(b"Eligible hint")
-            session.more_action('Adopt selected')  # The real contextual action, not explanatory prose.
+            session.more_action('Adopt')
             session.edit_fields('TARGET')
             session.click_label("ID")
             session.send(b"\x15mouse-id")
@@ -836,13 +836,13 @@ def run():
             session.send(b'j\x06')  # Content row + full rendered page, not file selection.
             session.settle()
             assert b'second-file-marker' not in session.screen.text()
-            session.send(b'G')
+            session.send(b'\x1b[F')
             session.wait(b'focus-end-marker')
-            session.send(b'\x1b[H')  # Home replaces the old gg chord.
+            session.send(b'\x1b[H')
             session.wait(b'focus-start-marker')
             session.resize((14, 48))
             session.wait(b'Selected content')
-            session.send(b'G')
+            session.send(b'\x1b[F')
             session.wait(b'focus-end-marker')
             session.send(b'\x1b')
             session.wait(b'NAME')
@@ -859,7 +859,7 @@ def run():
             session.wait(b"Eligible hint")
             session.send(b"\r")
             session.wait(b"Selected content")
-            session.send(b"e")  # direct, separate Adopt selected action
+            session.send(b"a")  # Direct adoption action.
             session.edit_fields('TARGET')
             session.send(b"\t\t\t\r")  # fields -> Review, no repository selected
             session.wait(b"Read failed")
@@ -1216,7 +1216,7 @@ def run():
             session.wait(b"Saved steps:")
             session.send(b"\x1b[H")
             session.wait(b"Repository ID:")
-            session.more_action('Review rollback')  # same typed action as b; still preview only
+            session.more_action('Rollback')  # Still opens a preview.
             session.wait(b"Roll back operation")
             session.send(b"\r")
             session.settle()
@@ -1282,7 +1282,7 @@ def run():
         candidate.write_text("ordinary adoption settings\n")
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
-            session.send(b"O")
+            session.send(b"m")
             session.edit_fields('TARGET')
             session.send(b"~/.q?config\tconfig\tfiles/config\r")  # Fields only; Enter previews.
             session.wait(b"Enter Adopt all")
@@ -1363,12 +1363,14 @@ def run():
             session.wait(b'2 marked')
             session.send(b'h')  # Folding does not remove either mark.
             session.wait(b'2 hidden')
-            session.send(b'lE')
+            session.send(b'lA')
             session.wait(b'All editable defaults')
             session.wait(b'Review all')
             session.settle()
             assert b'ADOPTION' not in session.screen.text(), 'Batch editor leaked the Discover table underneath'
             assert b'ordinary settings' not in session.screen.text(), 'Batch editor leaked selected-file content'
+            assert b'a Adopt' not in session.screen.text(), 'Batch editor offered single-file adoption'
+            assert b'i Ignore' not in session.screen.text(), 'Batch editor offered to ignore a discovered path'
             session.send(b'\x1bOR')  # F3 opens scrollable full selected-item paths.
             session.wait(b'Selected draft')
             session.wait(b'files/.config/bundle/only-a')
@@ -1406,7 +1408,7 @@ def run():
         batch_heads(batch_home, 1)
         print('PASS tree marks/folding, editable combined adoption and schema-4 whole rollback')
 
-        for operation in ('K', 'D'):
+        for operation in ('U', 'D'):
             batch_home, batch_repo, targets, batch_env = batch_fixture('batch-' + operation, True)
             with Session([binary, 'tui'], batch_env) as session:
                 session.wait(b'loaded.')
@@ -1443,7 +1445,7 @@ def run():
                 session.finish()
             for name in ('only-a', 'only-b'):
                 assert not (targets / name).is_symlink()
-                if operation == 'K':
+                if operation == 'U':
                     assert (targets / name).read_text() == 'ordinary source settings\n'
                 else:
                     assert not (targets / name).exists()
@@ -1467,14 +1469,14 @@ def run():
             session.settle()
             session.send(b'ljlj')
             session.click_label('only-a')
-            session.send(b' u')  # Mark A, then Keep selected with the advertised key.
+            session.send(b' u')  # Mark A, then unmanage it.
             session.wait(b"Enter Confirm")
             session.wait(b'Confirm')
             session.send(b'\r')
             session.wait(b'File operation completed.')
             session.press(b'\x1b', b'0 marked (0 hidden)')
             session.click_label('only-b')
-            session.send(b' K')
+            session.send(b' U')
             session.wait(b'Exact marked set')
             assert b'only-a' not in session.screen.text(), 'Completed Keep leaked into a later batch'
             session.wait(b'Confirm')
@@ -1491,7 +1493,7 @@ def run():
         remaining = (batch_repo / 'dort.toml').read_text()
         assert 'only-a' not in remaining and 'only-b' not in remaining and 'only-c' in remaining
         assert len(list((batch_home / '.local/state/dort/repositories').glob('*/transactions/*'))) == 3
-        print('PASS selected u Keep and sequential marked Keep without stale hidden marks')
+        print('PASS selected and marked Unmanage without stale hidden marks')
 
         for mode, code in [("normal", 0), ("error", 0), ("panic", 101)]:
             with Session(

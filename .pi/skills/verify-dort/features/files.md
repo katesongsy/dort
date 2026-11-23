@@ -9,13 +9,13 @@ Adopt a real file from HOME into the repository, and manage the resulting link. 
 - **Ignored paths** (`3`): exclusions.
 - **Adopt**: copy one regular file into `files/`, add a base-profile mapping, replace the destination with a symlink.
 - **Apply** (`a` from Managed): deploy all changed active links as one reviewed batch.
-- **Keep**: drop the mapping, leave the current file in place.
+- **Unmanage** (`u`, or `U` for marked files): drop the mapping and keep the local file.
 - **Remove**: delete the managed link, keep the repository source.
 - **History**: per-operation records under `$XDG_STATE_HOME/dort/repositories/<id>/transactions/`.
 
 ## How to get to it (user POV)
 
-TUI: `dort` → `f`. Managed opens first. `2` switches to Discover, `3` to Ignored paths. In Discover, `Enter` opens a candidate's details, `I` ignores one, Space marks entries, then the footer's adopt action.
+Press `f` to open Managed. Press `2` for Discover or `3` for Ignored paths. In Discover, `Enter` opens details, `i` ignores the selected path, and Space marks or unmarks it. Press `a` to adopt the selected file or `A` to adopt marked files. Press `g` to open Git.
 
 CLI:
 

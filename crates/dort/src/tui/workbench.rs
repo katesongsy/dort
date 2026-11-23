@@ -200,6 +200,7 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
         });
     }
     if app.shell.overlay.is_none()
+        && app.batch_editor.as_ref().is_none_or(|editor| !editor.open)
         && app.dialog_title().is_none()
         && (app.page_title().is_none()
             || matches!(app.tab, Tab::Files | Tab::Recovery)

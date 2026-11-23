@@ -46,7 +46,7 @@ python3 .pi/skills/verify-dort/drive.py tui my-proof --label declared \
   "wait:loaded." "send:'t'" "wait:Declared tools" "snap:declared"
 ```
 
-A declaration needs no package manager to appear in the list — that is the safe path to prove the read side. `tools check` and `tools install-missing` ask for approval and then run a real package manager.
+A declaration appears without a package manager. To check list navigation, seed more rows than fit on screen. On a wide terminal, select a row and confirm its details appear on the right. Press End and then Up. The highlight should move up while the last row stays visible. Use Ctrl-B and Ctrl-F to page in both directions.
 
 ## Observable end state
 
