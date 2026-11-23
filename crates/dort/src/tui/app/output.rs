@@ -369,6 +369,7 @@ impl App {
 
     pub(super) fn accept_ignored_paths(&mut self, paths: Vec<PathBuf>) -> Option<Task> {
         self.shell.overlay = Some(Overlay::Ignored { paths, selected: 0 });
+        self.shell.ignored_viewport = Default::default();
         self.shell.scroll = 0;
         self.status =
             "Select an exact ignored path to review Unignore. Ancestor rules still apply.".into();
@@ -407,10 +408,12 @@ impl App {
         completion: Completion,
         activity: Option<crate::tui::task_surfaces::Activity>,
     ) -> Option<Task> {
-        if completion.operation == "Tool declaration" {
-            self.tools_view.declaration_finished();
+        let returned_to_installed = if completion.operation == "Tool declaration" {
             self.form_focus = None;
-        }
+            self.tools_view.declaration_finished()
+        } else {
+            false
+        };
         if completion.operation == "Discovery preferences" {
             self.content = Default::default();
             self.discovery = None;
@@ -432,7 +435,7 @@ impl App {
             transaction_id: completion.transaction_id.clone(),
             activity: activity.or_else(|| self.reviewed_activity.clone()),
         });
-        self.show_result = true;
+        self.show_result = !returned_to_installed;
         self.details_scroll = 0;
         if let Some(editor) = &mut self.batch_editor {
             editor.open = false;

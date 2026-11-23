@@ -13,6 +13,7 @@ pub struct State {
     pub preview: Option<discovery::Preview>,
     pub current: Option<discovery::Current>,
     pub selected: usize,
+    viewport: super::navigation::ListViewport,
     pub details: bool,
     pub searching: bool,
     pub filter: String,
@@ -26,6 +27,7 @@ impl State {
     }
     pub fn completed(&mut self, current: discovery::Current) {
         self.current = Some(current);
+        self.viewport = Default::default();
         self.selected = 0;
         self.details = false;
         self.error = None;
@@ -89,10 +91,7 @@ impl State {
         }
         if self.details {
             match key.code {
-                KeyCode::Esc => {
-                    self.details = false;
-                    self.scroll = 0;
-                }
+                KeyCode::Esc => self.close_details(),
                 _ => self.scroll(key.code),
             }
             return None;
@@ -109,19 +108,30 @@ impl State {
                 self.scroll = 0;
             }
             KeyCode::Down | KeyCode::PageDown => {
-                self.selected = (self.selected + if key.code == KeyCode::Down { 1 } else { 8 })
-                    .min(n.saturating_sub(1))
+                self.selected = (self.selected
+                    + if key.code == KeyCode::Down {
+                        1
+                    } else {
+                        self.viewport.page()
+                    })
+                .min(n.saturating_sub(1))
             }
             KeyCode::Up | KeyCode::PageUp => {
-                self.selected =
-                    self.selected
-                        .saturating_sub(if key.code == KeyCode::Up { 1 } else { 8 })
+                self.selected = self.selected.saturating_sub(if key.code == KeyCode::Up {
+                    1
+                } else {
+                    self.viewport.page()
+                })
             }
             KeyCode::Home => self.selected = 0,
             KeyCode::End => self.selected = n.saturating_sub(1),
             _ => (),
         }
         None
+    }
+    pub(super) fn close_details(&mut self) {
+        self.details = false;
+        self.scroll = 0;
     }
     fn scroll(&mut self, code: KeyCode) {
         match code {
@@ -130,6 +140,38 @@ impl State {
             KeyCode::Home => self.scroll = 0,
             _ => (),
         }
+    }
+    fn draw_package(&self, frame: &mut Frame, area: Rect, row: (usize, usize)) {
+        let Some((scope, package)) = self.current.as_ref().and_then(|c| c.package(row)) else {
+            return;
+        };
+        let mut lines = vec![
+            ui::metadata("Package", &package.package),
+            ui::metadata("Version", &package.version),
+            ui::metadata("Package manager", discovery::label(scope.query)),
+            ui::metadata("Reported by", &scope.executable.display().to_string()),
+            Line::raw(
+                "From the last check. Packages may change; a package does not prove its command works.",
+            ),
+        ];
+        if let Some(prefix) = &scope.npm_global_prefix {
+            lines.push(ui::metadata("Global prefix", &prefix.display().to_string()));
+        }
+        if let Some(npm) = &scope.npm_binding {
+            lines.push(ui::metadata("Node", &npm.node.display().to_string()));
+            lines.push(ui::metadata(
+                "Global prefix",
+                &npm.prefix.display().to_string(),
+            ));
+        }
+        ui::report(
+            frame,
+            area,
+            "Installed package",
+            lines.into(),
+            self.scroll,
+            false,
+        );
     }
     pub fn draw(&self, frame: &mut Frame, area: Rect, dry_run: bool, hits: &super::input::Hits) {
         let action = |label, key, code| {
@@ -233,39 +275,11 @@ impl State {
             action("Back", "Esc", KeyCode::Esc);
             return;
         }
+        let rows = self.rows();
+        let selected = rows.get(self.selected).copied();
         if self.details {
-            if let Some((scope, package)) = self
-                .rows()
-                .get(self.selected)
-                .and_then(|row| self.current.as_ref()?.package(*row))
-            {
-                let mut lines = vec![
-                    ui::metadata("Package", &package.package),
-                    ui::metadata("Version", &package.version),
-                    ui::metadata("Package manager", discovery::label(scope.query)),
-                    ui::metadata("Reported by", &scope.executable.display().to_string()),
-                    Line::raw(
-                        "From the last check. Packages may change; a package does not prove its command works.",
-                    ),
-                ];
-                if let Some(prefix) = &scope.npm_global_prefix {
-                    lines.push(ui::metadata("Global prefix", &prefix.display().to_string()));
-                }
-                if let Some(npm) = &scope.npm_binding {
-                    lines.push(ui::metadata("Node", &npm.node.display().to_string()));
-                    lines.push(ui::metadata(
-                        "Global prefix",
-                        &npm.prefix.display().to_string(),
-                    ));
-                }
-                ui::report(
-                    frame,
-                    area,
-                    "Installed package",
-                    lines.into(),
-                    self.scroll,
-                    false,
-                );
+            if let Some(row) = selected {
+                self.draw_package(frame, area, row);
                 action("Add declaration", "a", KeyCode::Char('a'));
             }
             action("Back", "Esc", KeyCode::Esc);
@@ -305,7 +319,6 @@ impl State {
             area.width,
             area.height.saturating_sub(status + filter_height),
         );
-        let rows = self.rows();
         if rows.is_empty() {
             let mut lines = vec![Line::raw(if !self.filter.is_empty() {
                 "No packages match this filter."
@@ -343,11 +356,16 @@ impl State {
                 false,
             );
         } else {
-            let capacity = ui::design::pair_capacity(body).max(1);
+            let (list, details) =
+                super::workbench::detail_panes(body, super::workbench::wide_details(body, 0));
+            let capacity = ui::design::pair_capacity(list);
+            let first = self
+                .viewport
+                .start(rows.len(), capacity, selected.map(|_| self.selected));
             let values: Vec<_> = rows
                 .iter()
                 .enumerate()
-                .skip(self.selected.saturating_sub(capacity - 1))
+                .skip(first)
                 .take(capacity)
                 .filter_map(|(identity, row)| {
                     self.current.as_ref()?.package(*row).map(|(scope, p)| {
@@ -376,7 +394,7 @@ impl State {
                 .collect::<Vec<_>>();
             ui::design::pairs(
                 frame,
-                body,
+                list,
                 ui::design::PairTable {
                     headers: ["PACKAGE / MANAGER", "VERSION"],
                     rows: &pairs,
@@ -385,6 +403,9 @@ impl State {
                 hits,
                 Target::ToolsRow,
             );
+            if let (Some(area), Some(row)) = (details, selected) {
+                self.draw_package(frame, area, row);
+            }
             action("Package details", "Enter", KeyCode::Enter);
             action("Add declaration", "a", KeyCode::Char('a'));
         }

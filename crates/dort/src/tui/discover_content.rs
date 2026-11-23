@@ -169,7 +169,6 @@ pub fn sync(app: &mut App, width: u16, height: u16) {
         app.content.scroll = 0;
         app.content.focused = false;
         app.content.end.set(0);
-        app.inventory.pending_g = false;
     }
     if app.content.available()
         && app.inventory.details

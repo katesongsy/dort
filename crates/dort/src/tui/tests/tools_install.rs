@@ -140,7 +140,10 @@ fn failed_process_with_package_present_stays_honest_in_result_and_history_for_ev
             )
         ));
         key(&mut app, KeyCode::Enter);
-        let task = key(&mut app, KeyCode::Char('h')).unwrap();
+        if app.tools_view.declared_details {
+            key(&mut app, KeyCode::Esc);
+        }
+        let task = key(&mut app, KeyCode::Char('3')).unwrap();
         run(&f, &mut app, task);
         let calls = f.calls();
         key(&mut app, KeyCode::Enter);
@@ -160,7 +163,7 @@ fn known_history_scope_closes_only_after_one_fresh_review_and_never_reinstalls()
         known_unresolved(&f);
         let calls = f.calls();
         let mut app = app(&f, false);
-        let task = key(&mut app, KeyCode::Char('h')).unwrap();
+        let task = key(&mut app, KeyCode::Char('3')).unwrap();
         run(&f, &mut app, task);
         assert!(render(&app, 80, 24).contains("UNRESOLVED"));
         key(&mut app, KeyCode::Enter);
@@ -197,7 +200,7 @@ fn damaged_history_asks_only_necessary_scope_values_retains_drafts_and_respects_
         let f = fixture(provider);
         damaged(&f);
         let mut app = app(&f, false);
-        let task = key(&mut app, KeyCode::Char('h')).unwrap();
+        let task = key(&mut app, KeyCode::Char('3')).unwrap();
         run(&f, &mut app, task);
         assert!(key(&mut app, KeyCode::Char('x')).is_none());
         assert!(app.tools_view.installation.mode == Mode::CloseInputs);
@@ -265,9 +268,39 @@ fn unavailable_history_is_not_a_healthy_empty_list_and_closure_navigation_clears
     let f = fixture(Provider::Brew);
     let mut app = app(&f, false);
     fs::write(f.host.state_dir.join("tools-attempts"), "unavailable").unwrap();
-    let task = key(&mut app, KeyCode::Char('h')).unwrap();
+    let task = key(&mut app, KeyCode::Char('3')).unwrap();
     run(&f, &mut app, task);
     assert!(app.tools_view.installation.error.is_some());
     assert!(!render(&app, 80, 24).contains("No installation"));
+    assert!(f.calls().is_empty());
+}
+
+#[test]
+fn install_history_pages_records_without_starting_closure() {
+    use super::{actions::Output, input::Target, navigation_tests::assert_review_list_navigation};
+    let f = Fixture::new();
+    let root = f.host.state_dir.join("tools-attempts");
+    fs::create_dir(&root).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    for i in 0..80 {
+        let record = root.join(format!("{i:064x}"));
+        fs::create_dir(&record).unwrap();
+        fs::set_permissions(record, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let mut app = app(&f, false);
+    assert!(matches!(
+        key(&mut app, KeyCode::Char('3')),
+        Some(Task::ToolAttempts)
+    ));
+    app.complete(Ok(Output::ToolAttempts(
+        install::diagnose(&f.host).map_err(|e| e.to_string()),
+    )));
+    assert_review_list_navigation(
+        &mut app,
+        |t, i| matches!(t, Target::ToolAttemptRow(n) if i == n),
+        "4e",
+        "4f",
+    );
+    assert!(app.tools_view.installation.mode == Mode::Attempts);
     assert!(f.calls().is_empty());
 }

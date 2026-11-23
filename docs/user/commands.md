@@ -25,12 +25,20 @@ Run `dort` or `dort tui`.
 - `Esc`: back.
 - `q` / `Ctrl-C`: quit. Active work finishes first.
 
-Lists use `Enter` for details. Named actions start checks, installs or reviews. Numbers switch collection tabs; in fields and filters they are text.
+Wide review lists show details for the selected row on the right. Use `Enter` for a full view, or `F3` in Ignored paths.
+In Files, Recovery, Git and Tools lists, `Ctrl-F` and `Ctrl-B` work like `PgDn` and `PgUp`. They move selection. Use `/` where a filter is offered.
+Named actions start checks, installs or reviews. Numbers switch collection tabs; in fields and filters they are text.
 
 Reviews show exact effects. Confirm once. Help keeps drafts; choosing another destination drops approval. A window below 48×14 clears approval.
 
 After a failure, `R` retries a read or asks for a fresh preview. It never replays an approval. After a failed write, `R` only refreshes; use `h` for Recovery. A blocked earlier operation names its repository and action; open Recovery.
 
+### Files
+Use `1` for Managed, `2` for Discover and `3` for Ignored paths. `g` opens Git.
+- **Managed:** `u` Unmanage keeps the local file; `U` Unmanage marked does the same for marked files. `m` Manual adopt opens an adoption draft. `a` Apply reviews all active files; `A` Apply marked reviews marked files only.
+- **Discover:** `a` Adopt opens a draft for the selected file; `A` Adopt marked opens a batch draft. `i` Ignore reviews excluding the selected path from discovery.
+- In either list, `Space` marks or unmarks, and `Home` / `End` select the first or last row. Hidden marks still count.
+- **Delete link** and **Delete marked** are separate actions. Review the paths and confirm the exact mapping IDs before deleting links.
 ## Tools
 
 Tools has three tabs: **1 Declared**, **2 Installed**, **3 History**.
@@ -50,7 +58,7 @@ Checks are point-in-time. After an install, check again before another install. 
 
 ### Installed packages
 
-`2` opens the current package inventory. `R` prepares a fresh query. `/` filters the display. `Enter` opens package details. `a` starts a declaration with known fields filled in.
+`2` opens the current package inventory. `R` prepares a fresh query. `/` filters the display. `Enter` opens package details. `a` starts a declaration with the package name as the Tool ID and Command name. Edit either field if needed. Saving returns to Installed.
 
 The result needs no repository or tool declaration. Query approval is separate from declaration approval.
 

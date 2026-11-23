@@ -42,6 +42,7 @@ impl Choice {
     pub fn draw(
         &self,
         frame: &mut Frame,
+        area: ratatui::layout::Rect,
         hits: &super::input::Hits,
         feedback: Option<&'static str>,
     ) {
@@ -52,9 +53,9 @@ impl Choice {
             .collect();
         ui::choice::draw(
             frame,
+            area,
             hits,
             ui::choice::View {
-                title: self.title,
                 rows: &rows,
                 selected: self.selected,
                 details: self.details,

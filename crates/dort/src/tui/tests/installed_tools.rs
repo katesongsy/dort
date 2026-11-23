@@ -139,7 +139,7 @@ fn current_inspection_details_and_prefilled_add_have_separate_approvals_and_no_r
     key(&mut app, KeyCode::Char('a'));
     assert!(app.tools_view.declaration_open);
     let draft = &mut app.tools_view.declaration.fields;
-    assert!(draft[0].is_empty() && draft[1].is_empty());
+    assert_eq!(&draft[..2], &["unrelated", "unrelated"]);
     assert_eq!(
         (&draft[4], &draft[5], &draft[6]),
         (&"brew".to_owned(), &"unrelated".to_owned(), &String::new())
@@ -157,8 +157,9 @@ fn current_inspection_details_and_prefilled_add_have_separate_approvals_and_no_r
     let task = key(&mut app, KeyCode::Enter).unwrap();
     assert!(matches!(task, Task::Execute(_)) && app.confirmation.is_none());
     run(&f, &mut app, task);
-    key(&mut app, KeyCode::Enter);
     assert!(app.tools_view.installed_open && !app.tools_view.declaration_open);
+    assert!(!app.tools_view.installed.details && !app.show_result);
+    assert!(render(&app, 80, 24).contains("PACKAGE / MANAGER"));
     assert!(
         std::fs::read_to_string(f.repo.join("dort.toml"))
             .unwrap()
@@ -229,7 +230,7 @@ fn dry_run_shrink_navigation_and_late_preparation_never_execute_inspection() {
     assert!(app.tools_view.installed.preview.is_none() && f.calls().is_empty());
 }
 #[test]
-fn all_supported_providers_seed_only_known_package_version_and_runtime() {
+fn all_supported_providers_seed_package_name_as_tool_id_and_command() {
     use dort_core::{model::Provider, tools::inspection::Query};
     for (provider, query, name, exact) in [
         (Provider::Npm, Query::NpmGlobals, "npm", true),
@@ -264,7 +265,7 @@ fn all_supported_providers_seed_only_known_package_version_and_runtime() {
                 ""
             }
         );
-        assert!(fields[0].is_empty() && fields[1].is_empty());
+        assert_eq!(&fields[..2], &["demo", "demo"]);
         assert!(!f.calls().contains('I') && !f.calls().contains('S'));
     }
 }
@@ -290,4 +291,27 @@ fn installed_filter_is_display_only_and_menu_back_preserves_selection() {
     key(&mut app, KeyCode::Esc);
     assert!(app.tools_view.installed_open);
     assert_eq!(f.calls(), "Q");
+}
+
+#[test]
+fn installed_packages_project_selected_metadata_while_paging_the_list() {
+    use super::{input::Target, navigation_tests::assert_review_list_navigation};
+    let f = Fixture::new();
+    let formulae = (0..80)
+        .map(|i| {
+            serde_json::json!({
+                "full_name": format!("package-{i:03}"),
+                "installed": [{"version": format!("1.0.{i}")}],
+            })
+        })
+        .collect::<Vec<_>>();
+    f.program("brew", &format!("case \"$*\" in\n'info --json=v2 --installed --formula') printf '%s' '{}' ;;\n*) exit 90;;\nesac", serde_json::json!({"formulae": formulae})));
+    let mut app = app(&f, false);
+    inspect(&f, &mut app);
+    assert_review_list_navigation(
+        &mut app,
+        |t, i| matches!(t, Target::ToolsRow(n) if i == n),
+        "package-078",
+        "package-079",
+    );
 }

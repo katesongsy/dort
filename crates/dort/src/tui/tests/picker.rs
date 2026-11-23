@@ -110,7 +110,7 @@ fn paged_cells(app: &mut App, modal: bool) -> String {
             (0, 48)
         };
         for row in y + 1 + pinned_rows..13 {
-            if modal && b[(left - 1, row)].symbol() == "└" {
+            if modal && b[(left - 1, row + 1)].symbol() == "└" {
                 break;
             }
             for x in left..right {
@@ -273,7 +273,7 @@ fn repository_picker_preserves_raw_indices_and_retained_create_adopt_drafts() {
     assert!(text.contains(&super::components::inline(&path)));
     assert!(text.contains("explicit/session"));
     key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Char('O'));
+    key(&mut app, KeyCode::Char('m'));
     super::tests::focus_form(&mut app);
     app.shell.adoption.target = "~/.keep-draft".into();
     key(&mut app, KeyCode::Char('p')); // text in target, not navigation

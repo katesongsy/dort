@@ -78,14 +78,12 @@ pub fn entries(app: &App) -> Vec<Entry> {
     let (primary, other): (Vec<Action>, Vec<Action>) = match app.tab {
         Tab::Overview => (vec![Apply], vec![Profiles, Refresh]),
         Tab::Files if app.discovering => (
-            vec![IgnoreSelected, AdoptSelected, BatchAdopt],
+            vec![AdoptSelected, IgnoreSelected, ToggleMark, BatchAdopt],
             vec![
-                ToggleMark,
                 ClearMarks,
                 ExpandAll,
                 CollapseAll,
                 Adopt,
-                Discover,
                 ClearFilter,
                 Refresh,
                 Profiles,
@@ -95,7 +93,6 @@ pub fn entries(app: &App) -> Vec<Entry> {
             vec![
                 Apply,
                 Keep,
-                Discover,
                 ApplyMarked,
                 KeepMarked,
                 RemoveMarked,
@@ -161,4 +158,18 @@ pub fn page_actions(app: &App) -> Vec<Action> {
         .collect();
     rows.sort_by_key(|e| e.primary);
     rows.into_iter().map(|e| e.action).collect()
+}
+
+pub(super) fn file_action(key: ratatui::crossterm::event::KeyCode, app: &App) -> Option<Action> {
+    use ratatui::crossterm::event::KeyCode;
+    let KeyCode::Char(c) = key else { return None };
+    let mut buf = [0; 4];
+    let shortcut = if c == ' ' {
+        "Space"
+    } else {
+        c.encode_utf8(&mut buf)
+    };
+    entries(app).into_iter().map(|e| e.action).find(|&action| {
+        super::navigation::context_key(super::workbench::shortcut(action)) == shortcut
+    })
 }

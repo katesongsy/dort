@@ -7,6 +7,34 @@ use super::{
 };
 use ratatui::{Frame, layout::Rect};
 
+#[derive(Default)]
+pub struct ListViewport {
+    first: std::cell::Cell<usize>,
+    capacity: std::cell::Cell<usize>,
+}
+impl ListViewport {
+    pub fn start(&self, len: usize, capacity: usize, selected: Option<usize>) -> usize {
+        self.capacity.set(capacity);
+        let mut first = self.first.get().min(len.saturating_sub(capacity));
+        if let Some(selected) = selected.filter(|&row| row < len && capacity > 0) {
+            if selected < first {
+                first = selected;
+            } else if selected - first >= capacity {
+                first = selected - (capacity - 1);
+            }
+        }
+        self.first.set(first);
+        first
+    }
+    #[cfg(test)]
+    pub fn first(&self) -> usize {
+        self.first.get()
+    }
+    pub fn page(&self) -> usize {
+        self.capacity.get().max(1)
+    }
+}
+
 /// Stable internal IDs are separate from presentation order; rail and keys share this order.
 pub const SECTION_ORDER: [usize; 7] = [1, 2, 6, 3, 4, 5, 0];
 pub fn section_tab(group: usize) -> Option<Tab> {

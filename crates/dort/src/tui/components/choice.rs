@@ -6,15 +6,13 @@ use super::{
 use crate::tui::input::{Hits, Target};
 use ratatui::{Frame, layout::Rect};
 pub struct View<'a> {
-    pub title: &'static str,
     pub rows: &'a [(&'a str, &'a str)],
     pub selected: usize,
     pub details: bool,
     pub scroll: u16,
     pub feedback: Option<&'static str>,
 }
-pub fn draw(frame: &mut Frame, hits: &Hits, view: View<'_>) {
-    let area = design::choice_dialog(frame, view.title, hits);
+pub fn draw(frame: &mut Frame, area: Rect, hits: &Hits, view: View<'_>) {
     if view.details {
         let text = view
             .rows

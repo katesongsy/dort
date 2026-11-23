@@ -11,18 +11,6 @@ use ratatui::{
 #[cfg(test)]
 thread_local! { pub(super) static FORMATTED_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 
-fn window_start(len: usize, capacity: usize, retained: usize, selected: Option<usize>) -> usize {
-    let mut first = retained.min(len.saturating_sub(capacity));
-    if let Some(selected) = selected {
-        if selected < first {
-            first = selected;
-        } else if selected >= first + capacity {
-            first = selected.saturating_sub(capacity.saturating_sub(1));
-        }
-    }
-    first.min(len)
-}
-
 fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
     if app.discovering {
         let parts = Layout::vertical([Constraint::Min(3), Constraint::Length(5)]).split(area);
@@ -104,7 +92,7 @@ fn details(app: &App) -> Text<'static> {
             } else {
                 "Adoption requires an eligible regular file."
             }));
-            lines.push(Line::raw(if eligible { "Choose Adopt selected to edit target, ID and source." } else { "Only owned, single-link regular files without special permission bits are candidates." }));
+            lines.push(Line::raw(if eligible { "Choose Adopt to edit target, ID and source." } else { "Only owned, single-link regular files without special permission bits are candidates." }));
             lines.push(Line::raw(
                 "The preview checks paths, sensitivity and remaining limits.",
             ));
@@ -248,11 +236,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     app.hits.click(sections[1], super::input::Target::Filter);
     let content = sections[2];
     let wide = super::workbench::wide_details(area, 2);
-    let split = if wide {
-        Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)]).split(content)
-    } else {
-        Layout::vertical([Constraint::Percentage(100)]).split(content)
-    };
+    let (list_area, details) = super::workbench::detail_panes(content, wide);
     let focused = !app.discovering || !app.content.focused;
     if app.inventory.details
         || app.content.focused
@@ -262,20 +246,15 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
     let selected = super::tree::position(app, app.file_selection());
-    let list_area = split[0];
     if app.discovering {
         app.hits
             .click(list_area, super::input::Target::DiscoverFocus(false));
     }
     let capacity = list_area.height.saturating_sub(2) as usize;
-    app.inventory.page_capacity.set(capacity);
-    let offset = if app.discovering {
-        &app.inventory.candidate_offset
-    } else {
-        &app.inventory.managed_offset
-    };
-    let first = window_start(nodes.len(), capacity, offset.get(), selected);
-    offset.set(first);
+    let first = app
+        .inventory
+        .viewport(app.discovering)
+        .start(nodes.len(), capacity, selected);
     let window: Vec<_> = nodes.window(first, capacity).collect();
     let visible: Vec<_> = window.iter().map(|n| n.key).collect();
     let total = if app.discovering {
@@ -453,7 +432,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             }
         }
     }
-    if wide {
-        draw_selected(frame, split[1], app);
+    if let Some(area) = details {
+        draw_selected(frame, area, app);
     }
 }

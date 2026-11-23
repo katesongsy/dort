@@ -14,6 +14,7 @@ pub enum Target {
     DiscoverFocus(bool),
     Action(Action),
     NavigationBlocked,
+    DismissDialog,
     Key(ratatui::crossterm::event::KeyEvent),
     More,
     MoreRow(usize),

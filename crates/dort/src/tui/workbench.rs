@@ -7,30 +7,32 @@ use super::{
     views,
 };
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{Frame, layout::Rect, text::Text, widgets::Paragraph};
+use ratatui::{
+    Frame,
+    layout::{Constraint, Layout, Rect},
+    text::Text,
+    widgets::Paragraph,
+};
 
 pub fn shortcut(action: Action) -> &'static str {
     match action {
         Action::ToolsCheck => "C",
         Action::ToolsInstallMissing => "i",
         Action::ToolsConfigure => "s",
-        Action::ToolsInstalled => "v",
         Action::ToolDeclaration => "a",
-        Action::ToolAttempts => "h",
         Action::Init => "n",
         Action::Choose => "p",
         Action::Discover => "f",
         Action::Apply => "a",
         Action::Inspect => "Enter",
-        Action::BatchAdopt => "E",
+        Action::BatchAdopt => "A",
         Action::ApplyMarked => "A",
-        Action::KeepMarked => "K",
+        Action::KeepMarked => "U",
         Action::RemoveMarked => "D",
         Action::ToggleMark => "Space",
-        Action::IgnoreSelected => "I",
-        Action::ManageIgnored => "U",
-        Action::AdoptSelected => "e",
-        Action::Adopt => "o",
+        Action::IgnoreSelected => "i",
+        Action::AdoptSelected => "a",
+        Action::Adopt => "m",
         Action::Keep => "u",
         Action::Remove => "d",
         Action::Rollback => "b",
@@ -52,21 +54,22 @@ fn short(action: Action) -> &'static str {
         Action::Init => "Create/attach",
         Action::Choose => "Choose repository",
         Action::Discover => "Discover files",
-        Action::Apply => "Review apply",
+        Action::Apply => "Apply",
         Action::Inspect => "Details",
         Action::BatchAdopt => "Adopt marked",
+        Action::ToggleMark => "Mark/unmark",
         Action::ApplyMarked => "Apply marked",
-        Action::KeepMarked => "Keep marked",
+        Action::KeepMarked => "Unmanage marked",
         Action::RemoveMarked => "Delete marked",
-        Action::IgnoreSelected => "Ignore selected",
+        Action::IgnoreSelected => "Ignore",
         Action::ManageIgnored => "Ignored paths",
-        Action::AdoptSelected => "Adopt selected",
-        Action::Adopt => "Manual adoption",
-        Action::Keep => "Keep local file",
+        Action::AdoptSelected => "Adopt",
+        Action::Adopt => "Manual adopt",
+        Action::Keep => "Unmanage",
         Action::Remove => "Delete link",
-        Action::Rollback => "Review rollback",
-        Action::Resume => "Review resume",
-        Action::Abandon => "Review abandon",
+        Action::Rollback => "Rollback",
+        Action::Resume => "Resume",
+        Action::Abandon => "Abandon",
         Action::CheckCurrent => "Check repository",
         Action::CheckStandalone => "Standalone check",
         Action::Diagnostics => "Diagnostics",
@@ -80,6 +83,17 @@ fn short(action: Action) -> &'static str {
 }
 pub fn wide_details(area: Rect, header_rows: u16) -> bool {
     area.width >= 110 && area.height.saturating_sub(header_rows) >= 14
+}
+pub fn detail_panes(area: Rect, wide: bool) -> (Rect, Option<Rect>) {
+    if wide {
+        let [list, details] =
+            Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
+                .spacing(2)
+                .areas(area);
+        (list, Some(details))
+    } else {
+        (area, None)
+    }
 }
 /// Foreground-only metadata; no contents, serialized plans or approvals enter this model.
 pub fn actions(app: &App) -> Vec<ui::ActionButton> {
@@ -185,6 +199,7 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
         });
     }
     if app.shell.overlay.is_none()
+        && app.batch_editor.as_ref().is_none_or(|editor| !editor.open)
         && app.dialog_title().is_none()
         && (app.page_title().is_none()
             || matches!(app.tab, Tab::Files | Tab::Recovery)
@@ -252,7 +267,7 @@ fn compact(label: &'static str) -> &'static str {
         "Continue"
     } else if label == "Run checks" || label.starts_with("Check") {
         "Check"
-    } else if label.starts_with("Apply") {
+    } else if label.starts_with("Apply") && label != "Apply marked" {
         "Apply"
     } else if label.starts_with("Read") {
         "Read"
@@ -270,6 +285,11 @@ pub(super) fn strip_actions(
     width: u16,
 ) -> (Vec<ui::design::StripAction>, Vec<ui::ActionButton>) {
     use ui::design::StripAction;
+    let footer_width = if app.dialog_title().is_some() {
+        ui::design::dialog_inner_width(width)
+    } else {
+        width
+    };
     let mut available = actions(app);
     if app.help.is_none() && !available.iter().any(|a| a.key == "F1") {
         available.push(ui::ActionButton {
@@ -323,7 +343,7 @@ pub(super) fn strip_actions(
             && !overflowed
             && shown.len() + anchors.len() < 8
             && !shown.iter().any(|a| a.key == action.key)
-            && used + cells + reserved <= usize::from(width)
+            && used + cells + reserved <= usize::from(footer_width)
         {
             used += cells;
             shown.push(action);
@@ -336,7 +356,7 @@ pub(super) fn strip_actions(
         let more_width = " F2 More ".len();
         while !shown.is_empty()
             && (shown.len() + anchors.len() >= 8
-                || used + reserved + 1 + more_width > usize::from(width))
+                || used + reserved + 1 + more_width > usize::from(footer_width))
         {
             let action = shown.pop().expect("nonempty");
             let label = if width < 80 {
@@ -387,7 +407,7 @@ pub(super) fn strip_actions(
     (output, hidden)
 }
 fn strip(frame: &mut Frame, area: Rect, app: &App) {
-    let (output, _) = strip_actions(app, area.width);
+    let (output, _) = strip_actions(app, frame.area().width);
     ui::design::action_strip(frame, area, &output, &app.hits);
 }
 fn title(app: &App) -> &'static str {
@@ -446,17 +466,7 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
         Target::Key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE)),
     );
 }
-fn overlay(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
-    let inner = if matches!(overlay, Overlay::Form(_) | Overlay::Ignored { .. }) {
-        area
-    } else {
-        super::surface::dialog(
-            frame,
-            app,
-            app.dialog_title().unwrap_or("Session choice"),
-            false,
-        )
-    };
+fn overlay(frame: &mut Frame, inner: Rect, app: &App, overlay: &Overlay) {
     app.hits.wheel(inner, Wheel::Overlay);
     match overlay {
         Overlay::Ignored { paths, selected } => {
@@ -503,7 +513,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
             ui::warning(),
         );
         if let Some(help) = &app.help {
-            super::help::draw(frame, app, help);
+            let dialog = ui::design::choice_dialog(frame, "Help", &app.hits);
+            super::help::draw(frame, dialog.body, app, help);
+            strip(frame, dialog.footer, app);
         }
         return;
     }
@@ -554,6 +566,12 @@ pub fn draw(frame: &mut Frame, app: &App) {
             body.height = body.height.saturating_sub(1);
         }
     }
+    let (body, footer) = if let Some(title) = app.dialog_title() {
+        let dialog = ui::design::choice_dialog(frame, title, &app.hits);
+        (dialog.body, dialog.footer)
+    } else {
+        (body, areas.footer)
+    };
     if !foreground {
         if app.error.is_some() || app.busy || (app.show_result && app.preview.is_none()) {
             super::task_surfaces::draw(
@@ -563,8 +581,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 app,
             );
         } else if app.confirmation.is_some() {
-            let inner = super::surface::dialog(frame, app, "Confirm reviewed changes", true);
-            app.hits.wheel(inner, Wheel::Confirmation);
+            app.hits.wheel(body, Wheel::Confirmation);
             let ids = app.batch_removal_ids();
             let removal = app.preview.as_ref().and_then(|p| p.pending.removal_id());
             let prompt = if !ids.is_empty() {
@@ -585,7 +602,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             };
             ui::text_view(
                 frame,
-                inner,
+                body,
                 Text::from(prompt),
                 app.confirmation.as_ref().unwrap().prompt_scroll,
             );
@@ -599,8 +616,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             }
             app.presented("Cancel", "Esc", Target::CancelConfirmation);
         } else if app.tab == Tab::Git && app.git_view.disclosure_pending() {
-            let inner = super::surface::dialog(frame, app, "View Git patch content", true);
-            app.git_view.draw(frame, inner, app.busy, &app.hits);
+            app.git_view.draw(frame, body, app.busy, &app.hits);
         } else if app.preview.is_some() {
             preview(frame, body, app);
         } else if let Some(editor) = app.batch_editor.as_ref().filter(|e| e.open) {
@@ -622,10 +638,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
         }
     }
     if let Some(help) = &app.help {
-        super::help::draw(frame, app, help);
+        super::help::draw(frame, body, app, help);
     } else if let Some(choice) = &app.choice {
         choice.draw(
             frame,
+            body,
             &app.hits,
             app.interaction_notice.or(app
                 .write_warning
@@ -634,7 +651,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
     } else if let Some(menu) = &app.more {
         ui::menu::draw(
             frame,
-            menu.title,
+            body,
             &menu.items,
             menu.selected,
             menu.details,
@@ -644,5 +661,5 @@ pub fn draw(frame: &mut Frame, app: &App) {
             &app.hits,
         );
     }
-    strip(frame, areas.footer, app);
+    strip(frame, footer, app);
 }

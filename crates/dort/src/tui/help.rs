@@ -131,6 +131,7 @@ impl Topic {
                 ("Esc", "Back, retaining draft"),
             ],
             Self::Tools if app.tools_view.installed_open => &[
+                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 (
                     "Enter",
                     "Open the selected package; Run inspection on its explicit review",
@@ -170,19 +171,21 @@ impl Topic {
                 ]
             }
             Self::Tools if app.tools_view.install_open => &[
+                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 ("Enter", "Open the selected installation record"),
                 ("x", "Close an unresolved record"),
                 ("R", "Refresh installation history"),
                 ("Esc", "Back"),
             ],
             Self::Tools => &[
+                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 ("Enter", "Open the selected tool"),
                 ("C", "Check installed"),
                 ("i", "Install missing tools"),
                 ("e / d", "Edit / remove the selected declaration"),
                 ("a", "Add a declaration"),
                 ("s", "Tool settings when configuration needs attention"),
-                ("h", "Installation history"),
+                ("2 / 3", "Open Installed / History"),
                 ("Esc", "Back"),
             ],
             Self::Picker => &[
@@ -225,12 +228,40 @@ impl Topic {
                 ("Alt-PgUp/PgDown", "Read selected details"),
                 ("Esc", "Return to list"),
             ],
-            Self::Discover
-            | Self::Managed
-            | Self::Recovery
-            | Self::Git
-            | Self::Ignored
-            | Self::Batch => &[
+            Self::Discover => &[
+                ("Up/Down, Home/End", "Move selection"),
+                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
+                ("a / A", "Adopt selected / marked files"),
+                ("Space", "Mark/unmark"),
+                ("i", "Ignore the selected path"),
+                ("g", "Open Git"),
+                ("Enter", "Read the selected file"),
+            ],
+            Self::Managed => &[
+                ("Up/Down, Home/End", "Move selection"),
+                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
+                (
+                    "u / U",
+                    "Unmanage selected / marked files; keep local copies",
+                ),
+                ("Space", "Mark/unmark"),
+                ("m", "Manual adopt"),
+                ("a / A", "Apply all active / marked files"),
+                ("Enter", "Read file details"),
+            ],
+            Self::Ignored => &[
+                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
+                ("Home/End", "Select first / last path"),
+                ("F3", "Read the full path"),
+                ("Enter", "Review unignore"),
+            ],
+            Self::Recovery | Self::Git => &[
+                ("Up/Down", "Move selection"),
+                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
+                ("Enter", "Read selected details"),
+                ("F2", "More actions"),
+            ],
+            Self::Batch => &[
                 ("Up/Down", "Traverse displayed rows"),
                 ("Enter", "Inspect, or the named primary action"),
                 ("Space", "Toggle optional membership where offered"),
@@ -326,8 +357,7 @@ pub fn text_input(app: &App) -> bool {
     }
     app.text_entry()
 }
-pub fn draw(frame: &mut Frame, app: &App, help: &State) {
-    let mut area = ui::design::choice_dialog(frame, "Help", &app.hits);
+pub fn draw(frame: &mut Frame, mut area: ratatui::layout::Rect, app: &App, help: &State) {
     if let Some(notice) = app.interaction_notice {
         let height = (1 + notice.len().div_ceil(usize::from(area.width).max(1)) as u16)
             .min(3)
@@ -342,7 +372,9 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
         area.y += height;
         area.height = area.height.saturating_sub(height);
     }
-    let mut sections = vec![("Workbench", "F1: Help. F2: more actions. Esc: back. Outside text entry, o/f/t/r/c/g opens sections. Numbers choose a local page. Fields and filters take digits as text; footer buttons do not join field traversal.".to_owned())];
+    area.x += u16::from(area.width > 2);
+    area.width = area.width.saturating_sub(2);
+    let mut sections = vec![("Switch pages", "o Overview   f Files   t Tools\nr Recovery   c Checks   g Git\nUse the number on a tab to open it. While editing, keys type into the field or filter.".to_owned())];
     if matches!(help.topic, Topic::Tools) {
         sections.insert(0, ("Tools guide", "Tools opens declarations. Check installed asks which package managers to query, then shows each result for approval. Installed means the package manager reports the package, not that the command works. Install missing reviews eligible tools once, installs in order and stops on failure. Earlier installs stay; there is no rollback. Settings and history live under Tools.".to_owned()));
     }
@@ -375,14 +407,15 @@ pub fn draw(frame: &mut Frame, app: &App, help: &State) {
     }
     sections.push((
         "Reading Help",
-        "Up/Down or PgUp/PgDown scrolls. Home returns to the top. Esc or F1 closes Help."
+        "Use the arrows or Page Up and Page Down to scroll. Home jumps to the top. Press Esc or F1 to close Help."
             .to_owned(),
     ));
-    sections.push(("Approval and privacy", "Writes need a fresh review. Outside clicks do not cancel or approve. q/Ctrl-C waits for active work. Backups are private, not encrypted. Selected-file and Git content stays out of Help and reports.".to_owned()));
+    sections.push(("Approval and privacy", "Writes need a fresh review. Click outside a dialog to close it. q/Ctrl-C waits for active work. Backups are private, not encrypted. Selected-file and Git content stays out of Help and reports.".to_owned()));
     ui::text_view(
         frame,
         area,
         ui::help::document(
+            area.width,
             help.topic.title(),
             help.topic.instructions(),
             help.topic.keys(app),

@@ -159,7 +159,7 @@ def normal_installs(Session, binary, base, env):
             session.wait(b'Tool details')
             session.send(b'\x1b')
             session.wait(b'Installed')
-            session.send(b'h')
+            session.send(b'3')
             session.wait(b'Installation history')
             before = calls(home)
             session.send(b'\r')
@@ -244,7 +244,7 @@ def discovery_declarations(Session, binary, base, env):
     program(bin_dir / 'brew', '''printf Q >> "$HOME/calls"; printf '{"formulae":[{"name":"observed","full_name":"observed","tap":"homebrew/core","installed":[{"version":"1.2.3"}]}]}' ''')
     with Session([binary, 'tui'], scoped, (14, 48)) as session:
         session.wait(b'loaded.')
-        session.send(b'tv')
+        session.send(b't2')
         session.wait(b'Inspect installed tools')
         assert calls(home) == ''
         session.send(b'\r')
@@ -258,16 +258,16 @@ def discovery_declarations(Session, binary, base, env):
         assert calls(home) == before == 'Q'
         session.send(b'a')
         session.wait(b'Tool ID')
-        session.send(b'\tobserved\tobserved\r')
+        session.send(b'\r')
         session.wait(b'Add tool declaration')
         session.wait(b'Enter Confirm')
         assert 'observed' not in (repo / 'dort.toml').read_text()
         session.send(b'\r')
-        session.wait(b'Tool declaration completed.')
-        session.settle()
-        session.send(b'\r')
         session.wait(b'Installed packages')
+        session.wait(b'PACKAGE / MANAGER')
         session.wait(b'observed')
+        manifest = (repo / 'dort.toml').read_text()
+        assert 'id = "observed"' in manifest and 'binary = "observed"' in manifest
         assert calls(home) == 'Q', 'Adding a declaration replayed inspection'
         session.navigate('Tools', 'Declared tools [1]')
         session.wait(b'observed')
@@ -295,7 +295,7 @@ def discovery_declarations(Session, binary, base, env):
     print('PASS current installed inspection, package details, prefilled declaration, edit/remove and separate approvals')
     with Session([binary, '--dry-run', 'tui'], scoped) as session:
         session.wait(b'loaded.')
-        session.send(b'tv')
+        session.send(b't2')
         session.wait(b'Inspect installed tools')
         session.send(b'\r')
         session.settle()
@@ -313,7 +313,7 @@ def damaged_history(Session, binary, base, env):
     damaged.mkdir(mode=0o700)
     with Session([binary, 'tui'], scoped, (14, 48)) as session:
         session.wait(b'loaded.')
-        session.send(b'th')
+        session.send(b't3')
         session.wait(b'Unknown tool')
         session.send(b'\r')
         session.wait(b'Installation details')
@@ -339,7 +339,7 @@ def npm_without_repository(Session, binary, base, env):
     (home / 'installed').write_text('installed')
     with Session([binary, 'tui'], scoped, (24, 80)) as session:
         session.wait(b'loaded.')
-        session.send(b'tv')
+        session.send(b't2')
         session.wait(b'Inspect installed tools')
         session.wait(b'prefix --global')
         assert calls(home) == '', 'Preparing PATH inventory executed npm'
@@ -432,12 +432,10 @@ def interaction_surface_workflows(Session, binary, base, env):
             session.send(b'\x1bOP')
             session.wait(b'Enter opens the selected')
             session.settle()
-            footer = session.screen.text().splitlines()[-1]
-            assert b'Back' in footer and b'Review' not in footer
+            rows = session.screen.text().splitlines()
+            footer = next(row for row in rows if b'Esc Back' in row)
+            assert footer != rows[-1] and b'Review' not in footer
             session.mouse(0, 0, 0)
-            session.settle()
-            assert b'Enter opens the selected' in session.screen.text(), 'Outside click dismissed Help'
-            session.send(b'\x1b')
             session.wait(b'q?/')
             session.destination('Checks')
             session.wait(b'Checks')

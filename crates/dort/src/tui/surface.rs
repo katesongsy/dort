@@ -169,4 +169,3 @@ impl App {
         self.interaction_notice = None;
     }
 }
-pub(super) use super::components::surface::dialog;

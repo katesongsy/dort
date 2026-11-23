@@ -39,9 +39,9 @@ fn footer_preserves_context_relevance_then_more_back_help_at_every_size() {
             .iter()
             .map(|a| a.key)
             .chain(hidden.iter().map(|a| a.key))
-            .filter(|k| ["Enter", "i", "C", "e", "a", "d", "h"].contains(k))
+            .filter(|k| ["Enter", "i", "C", "e", "a", "d"].contains(k))
             .collect();
-        assert_eq!(ordered, ["Enter", "i", "C", "e", "a", "d", "h"]);
+        assert_eq!(ordered, ["Enter", "i", "C", "e", "a", "d"]);
         assert_eq!(shown[0].key, "Enter");
         assert!(shown.len() <= 8);
         let hidden_labels: Vec<_> = hidden.iter().map(|a| a.label).collect();
@@ -136,9 +136,16 @@ fn tools_collections_share_numbered_tabs_clicks_and_guarded_keyboard_navigation(
     for (width, height) in [(48, 14), (80, 24), (140, 40)] {
         let f = Fixture::new();
         let mut app = app(&f, false);
+        let text = render(&app, width, height);
         for label in ["1 Declared", "2 Installed", "3 History"] {
-            assert!(render(&app, width, height).contains(label));
+            assert!(text.contains(label));
         }
+        assert!(super::workbench::actions(&app).iter().all(|action| {
+            !matches!(
+                action.target,
+                Target::Action(Action::ToolsInstalled | Action::ToolAttempts)
+            )
+        }));
         let position = (0..height)
             .flat_map(|y| (0..width).map(move |x| (x, y)))
             .find(|(x, y)| {
@@ -192,6 +199,12 @@ fn tools_collections_share_numbered_tabs_clicks_and_guarded_keyboard_navigation(
         key(&mut app, KeyCode::Tab);
         key(&mut app, KeyCode::Char('2'));
         assert_eq!(app.tools_view.declaration.fields[0], "2");
+        key(&mut app, KeyCode::Esc);
+        key(&mut app, KeyCode::Esc);
+        for letter in ['v', 'h'] {
+            assert!(key(&mut app, KeyCode::Char(letter)).is_none());
+            assert!(app.tab == Tab::Tools && app.tools_view.at_root());
+        }
         assert!(
             f.calls().is_empty(),
             "tabs, filtering and drafts execute no provider"

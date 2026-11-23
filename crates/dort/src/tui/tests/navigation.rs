@@ -40,9 +40,9 @@ fn ctrl(app: &mut App, c: char) {
     );
 }
 #[test]
-fn vim_pages_use_the_rendered_viewport_and_chords_reset() {
+fn vim_pages_use_the_rendered_viewport_and_filters_keep_text() {
     let mut app = app();
-    let page = app.inventory.page_capacity.get();
+    let page = app.inventory.viewport(false).page();
     assert!(page > 1);
     key(&mut app, KeyCode::Char('j'));
     assert_eq!(app.selected, 1);
@@ -72,7 +72,7 @@ fn vim_pages_use_the_rendered_viewport_and_chords_reset() {
         key(&mut app, KeyCode::Char(c));
     }
     assert_eq!(app.inventory.managed.query, "gg ;jk");
-    assert!(!app.inventory.pending_g && !app.quit);
+    assert!(!app.quit);
 }
 #[test]
 fn selected_keep_uses_u_while_jk_and_ctrl_u_keep_their_navigation_meaning() {
@@ -88,7 +88,7 @@ fn selected_keep_uses_u_while_jk_and_ctrl_u_keep_their_navigation_meaning() {
             assert_eq!(app.selected, want);
             assert!(app.preview.is_none() && app.confirmation.is_none());
         }
-        let page = app.inventory.page_capacity.get().max(1);
+        let page = app.inventory.viewport(false).page();
         assert!(
             app.key(
                 KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
@@ -155,4 +155,199 @@ fn double_click_marks_once_without_a_draw_and_keyboard_timeout_resize_invalidate
     assert_eq!(app.inventory.managed_marks.len(), 1);
     click(&mut app, point, now + Duration::from_millis(550));
     assert_eq!(app.inventory.managed_marks.len(), 2);
+}
+
+pub(super) fn assert_review_list_navigation(
+    app: &mut App,
+    is_row: impl Fn(Target, usize) -> bool,
+    previous_details: &str,
+    last_details: &str,
+) {
+    use super::tests::target_position;
+    let right_contains = |screen: &str, value: &str| {
+        screen
+            .lines()
+            .any(|line| line.chars().skip(58).collect::<String>().contains(value))
+    };
+    let initial = render(app, 140, 40);
+    key(app, KeyCode::PageDown);
+    let paged = render(app, 140, 40);
+    assert_ne!(paged, initial);
+    key(app, KeyCode::PageUp);
+    assert_eq!(render(app, 140, 40), initial);
+    ctrl(app, 'f');
+    assert_eq!(render(app, 140, 40), paged);
+    ctrl(app, 'b');
+    assert_eq!(render(app, 140, 40), initial);
+
+    key(app, KeyCode::End);
+    let end = render(app, 140, 40);
+    assert!(right_contains(&end, last_details), "{end}");
+    let position = |app: &App, index| target_position(app, 140, 40, |t| is_row(t, index)).1;
+    let previous_y = position(app, 78);
+    let last_y = position(app, 79);
+    assert_eq!(previous_y + 1, last_y);
+    key(app, KeyCode::Up);
+    let up = render(app, 140, 40);
+    assert_eq!(position(app, 78), previous_y);
+    assert_eq!(position(app, 79), last_y);
+    assert!(right_contains(&up, previous_details), "{up}");
+    assert!(!right_contains(&up, last_details), "{up}");
+    assert!(app.preview.is_none() && app.confirmation.is_none());
+}
+
+#[test]
+fn retained_review_viewports_keep_action_rows_aligned_for_recovery_git_and_ignored_paths() {
+    let mut app = App::new(false);
+    app.tab = Tab::Recovery;
+    app.complete(Ok(Output::History {
+        rows: (0..80)
+            .map(|i| dort_core::journal::Diagnosis {
+                repository_id: format!("{i:064x}"),
+                transaction_id: format!("{:064x}", i + 100),
+                journal_schema: Some(2),
+                phase: Some(dort_core::journal::Phase::Completed),
+                valid_checkpoints: 3,
+                problem: None,
+            })
+            .collect(),
+        error: None,
+    }));
+    assert_review_list_navigation(
+        &mut app,
+        |t, i| matches!(t, Target::Row(n) if i == n),
+        "4e",
+        "4f",
+    );
+    key(&mut app, KeyCode::Char('/'));
+    let before = render(&app, 140, 40);
+    ctrl(&mut app, 'f');
+    ctrl(&mut app, 'b');
+    assert_eq!(render(&app, 140, 40), before);
+
+    let mut app = App::new(false);
+    app.tab = Tab::Git;
+    app.git_view.accept(
+        super::git::Report::Summary(super::git::Metadata::Status(dort_core::git::Status {
+            schema: 1,
+            read_only: true,
+            branch: vec![],
+            entries: (0..80)
+                .map(|i| dort_core::git::StatusEntry {
+                    kind: "renamed".into(),
+                    xy: Some("R.".into()),
+                    path: format!("file-{i:03}"),
+                    original_path: Some(format!("old-{i:03}")),
+                })
+                .collect(),
+        })),
+        true,
+    );
+    assert_review_list_navigation(
+        &mut app,
+        |t, i| matches!(t, Target::Row(n) if i == n),
+        "old-078",
+        "old-079",
+    );
+
+    let mut app = App::new(false);
+    app.tab = Tab::Files;
+    app.complete(Ok(Output::IgnoredPaths(
+        (0..80)
+            .map(|i| format!("/synthetic/.ignored-{i:03}").into())
+            .collect(),
+    )));
+    assert_review_list_navigation(
+        &mut app,
+        |t, i| matches!(t, Target::Picker(n, false) if i == n),
+        "ignored-078",
+        "ignored-079",
+    );
+}
+
+#[test]
+fn declared_tools_project_the_selected_command_beside_the_list() {
+    use dort_core::model::{InstallSpec, Provider, Tool};
+    let mut app = App::new(false);
+    app.tab = Tab::Tools;
+    app.complete(Ok(Output::Data(Data {
+        tools: Some(Ok((0..80)
+            .map(|i| Tool {
+                id: format!("tool-{i:03}"),
+                binary: format!("command-{i:03}"),
+                profiles: vec!["base".into()],
+                requires: vec![],
+                install: InstallSpec {
+                    provider: Provider::Brew,
+                    package: format!("package-{i:03}"),
+                    version: None,
+                    runtime_tool: None,
+                },
+            })
+            .collect())),
+        ..Default::default()
+    })));
+    assert_review_list_navigation(
+        &mut app,
+        |t, i| matches!(t, Target::ToolsRow(n) if i == n),
+        "command-078",
+        "command-079",
+    );
+    assert!(!render(&app, 80, 24).contains("command-078"));
+    assert!(
+        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 80, 24)
+            .is_none()
+    );
+    assert!(render(&app, 80, 24).contains("command-078"));
+}
+
+#[test]
+fn files_show_the_contextual_actions_that_their_keys_dispatch() {
+    use super::{actions::Task, shell::Action, workbench};
+    let mut app = app();
+    for (discovering, expected) in [
+        (
+            false,
+            vec![
+                (Action::Keep, "u", "Unmanage"),
+                (Action::KeepMarked, "U", "Unmanage marked"),
+                (Action::ToggleMark, "Space", "Mark/unmark"),
+                (Action::Adopt, "m", "Manual adopt"),
+                (Action::Apply, "a", "Apply"),
+                (Action::ApplyMarked, "A", "Apply marked"),
+            ],
+        ),
+        (
+            true,
+            vec![
+                (Action::AdoptSelected, "a", "Adopt"),
+                (Action::BatchAdopt, "A", "Adopt marked"),
+                (Action::IgnoreSelected, "i", "Ignore"),
+            ],
+        ),
+    ] {
+        app.discovering = discovering;
+        render(&app, 140, 40);
+        let actions = workbench::actions(&app);
+        for (action, key, label) in expected {
+            assert!(
+                actions.iter().any(
+                    |a| matches!(a.target, Target::Action(value) if value == action)
+                        && a.key == key
+                        && a.label == label
+                ),
+                "missing {key} {label}"
+            );
+        }
+    }
+    app.discovering = false;
+    let request = app.key(
+        KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
+        140,
+        40,
+    );
+    assert!(
+        matches!(request, Some(Task::Files(dort_core::planner::Request::Unmanage { id, mode: dort_core::planner::UnmanageMode::Remove })) if id == "/synthetic/.row-000")
+    );
+    assert!(app.preview.is_none() && app.confirmation.is_none());
 }

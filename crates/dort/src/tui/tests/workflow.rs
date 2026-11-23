@@ -107,7 +107,7 @@ fn submit_path(app: &mut App) -> Task {
 fn adopt_selected(app: &mut App) {
     key(app, KeyCode::Esc); // Return to list before inspecting.
     key(app, KeyCode::Enter); // Inspect row, never open a draft directly.
-    key(app, KeyCode::Char('e')); // Separate labeled Adopt selected action.
+    key(app, KeyCode::Char('a')); // Opens the selected file's adoption draft.
 }
 fn type_text(app: &mut App, value: &str) {
     if app.form_page().is_some() && !app.form_has_focus() {
@@ -875,7 +875,7 @@ fn wide_candidate_inspection_then_direct_action_opens_exact_draft() {
     );
     assert!(
         app.key(
-            KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE),
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
             140,
             40
         )
@@ -926,7 +926,7 @@ fn discovery_protects_selected_root_and_rejects_invalid_scope_without_fallback()
 }
 
 fn adoption_fields(app: &mut App, target: &str, id: &str, source: &str) {
-    key(app, KeyCode::Char('O'));
+    key(app, KeyCode::Char('m'));
     type_text(app, target);
     key(app, KeyCode::Tab);
     type_text(app, id);
@@ -1039,7 +1039,7 @@ fn adoption_blockers_dry_run_and_back_never_write_or_lose_drafts() {
     assert!(app.confirmation.is_none());
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Char('O'));
+    key(&mut app, KeyCode::Char('m'));
     assert_eq!(app.shell.adoption.target, "~/.ordinary");
     assert!(!fixture.host.config_dir.exists() && !fixture.host.state_dir.exists());
     assert!(!fixture.root.join("files").exists());
@@ -1374,7 +1374,7 @@ fn candidate_search_retains_raw_selection_and_does_not_change_manual_drafts() {
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Delete);
     assert_eq!(app.visible_file_rows().len(), 2);
-    key(&mut app, KeyCode::Char('O'));
+    key(&mut app, KeyCode::Char('m'));
     assert!(app.shell.adoption.target.ends_with(".q?config"));
     assert!(!fixture.host.state_dir.exists() && !fixture.host.config_dir.exists());
 }

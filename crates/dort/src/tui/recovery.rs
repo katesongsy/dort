@@ -97,7 +97,7 @@ fn details(app: &App) -> Text<'static> {
     ];
     if rollback(row) {
         app.presented(
-            "Review rollback",
+            "Rollback",
             "b",
             super::input::Target::Action(super::shell::Action::Rollback),
         );
@@ -110,7 +110,7 @@ fn details(app: &App) -> Text<'static> {
     }
     if resume(row) {
         app.presented(
-            "Review resume",
+            "Resume",
             "s",
             super::input::Target::Action(super::shell::Action::Resume),
         );
@@ -128,7 +128,7 @@ fn details(app: &App) -> Text<'static> {
     }
     if abandon(row) {
         app.presented(
-            "Review abandon",
+            "Abandon",
             "x",
             super::input::Target::Action(super::shell::Action::Abandon),
         );
@@ -270,11 +270,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         );
         return;
     }
-    let panes = if wide {
-        Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)]).split(content)
-    } else {
-        Layout::horizontal([Constraint::Percentage(100)]).split(content)
-    };
+    let (list, pane) = super::workbench::detail_panes(content, wide);
     let visible = app.visible_history_rows();
     let title = format!(
         "Operations | {} / {} shown",
@@ -283,8 +279,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     );
     let block = ui::pane(&title, focused);
     if data.history.is_empty() || visible.is_empty() {
-        let inner = block.inner(panes[0]);
-        frame.render_widget(block, panes[0]);
+        let inner = block.inner(list);
+        frame.render_widget(block, list);
         ui::text_view(
             frame,
             inner,
@@ -296,7 +292,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             0,
         );
     } else {
-        let table_rows = visible.iter().map(|&i| {
+        let selected = visible.iter().position(|&i| i == app.selected);
+        let capacity = usize::from(list.height.saturating_sub(2));
+        let first = app
+            .history_viewport
+            .start(visible.len(), capacity, selected);
+        let window = &visible[first..(first + capacity).min(visible.len())];
+        let table_rows = window.iter().map(|&i| {
             let row = &data.history[i];
             let (status, style) = state(row);
             Row::new(vec![
@@ -320,14 +322,14 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         .row_highlight_style(ui::selected())
         .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
         let mut selection =
-            TableState::default().with_selected(visible.iter().position(|&i| i == app.selected));
-        frame.render_stateful_widget(table, panes[0], &mut selection);
-        app.hits.rows(panes[0], &visible, selection.offset());
+            TableState::default().with_selected(window.iter().position(|&i| i == app.selected));
+        frame.render_stateful_widget(table, list, &mut selection);
+        app.hits.rows(list, window, 0);
     }
-    if wide {
+    if let Some(pane) = pane {
         ui::report(
             frame,
-            panes[1],
+            pane,
             "Operation details",
             details(app),
             app.details_scroll,

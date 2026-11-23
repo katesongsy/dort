@@ -300,7 +300,7 @@ fn long_lists_keep_selection_visible_through_resize_and_form_back() {
     assert!(render(&app, 48, 14).contains("› /repository-199"));
     app.key(key(KeyCode::Esc), 48, 14);
     assert_eq!(app.selected, 120);
-    app.key(key(KeyCode::Char('O')), 48, 14);
+    app.key(key(KeyCode::Char('m')), 48, 14);
     app.shell.adoption.target = "q?/".repeat(100);
     app.key(key(KeyCode::PageDown), 48, 14);
     app.key(key(KeyCode::Tab), 48, 14);

@@ -82,30 +82,66 @@ pub fn notice(frame: &mut Frame, area: Rect, title: &'static str, body: &str, to
     }
 }
 
-/// Bounded foreground choice surface; the caller renders the one global action strip.
-pub fn choice_dialog(frame: &mut Frame, title: &'static str, hits: &Hits) -> Rect {
+pub struct DialogAreas {
+    pub body: Rect,
+    pub footer: Rect,
+}
+
+pub fn dialog_inner_width(width: u16) -> u16 {
+    dialog_width(width).saturating_sub(2)
+}
+
+fn dialog_width(width: u16) -> u16 {
+    width.saturating_sub(2).min(144)
+}
+
+pub fn choice_dialog(frame: &mut Frame, title: &'static str, hits: &Hits) -> DialogAreas {
     let area = frame.area();
     for cell in &mut frame.buffer_mut().content {
         cell.set_style(backdrop(cell.style()));
     }
     hits.clear();
     hits.input_focus(false);
-    hits.click(area, Target::NavigationBlocked);
-    let width = area.width.saturating_sub(2).min(72);
-    let height = area.height.saturating_sub(3).min(16);
+    let width = dialog_width(area.width);
+    let height = area.height.saturating_sub(2).min(32);
     let modal = Rect::new(
         area.x + (area.width - width) / 2,
-        area.y + (area.height.saturating_sub(1) - height) / 2,
+        area.y + (area.height - height) / 2,
         width,
         height,
     );
+    for edge in [
+        Rect::new(area.x, area.y, area.width, modal.y - area.y),
+        Rect::new(
+            area.x,
+            modal.bottom(),
+            area.width,
+            area.bottom() - modal.bottom(),
+        ),
+        Rect::new(area.x, modal.y, modal.x - area.x, modal.height),
+        Rect::new(
+            modal.right(),
+            modal.y,
+            area.right() - modal.right(),
+            modal.height,
+        ),
+    ] {
+        hits.click(edge, Target::DismissDialog);
+    }
     frame.render_widget(Clear, modal);
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(format!(" {title} "), ui::heading()));
     let inner = block.inner(modal);
     frame.render_widget(block, modal);
-    inner
+    let body = Rect::new(
+        inner.x,
+        inner.y,
+        inner.width,
+        inner.height.saturating_sub(1),
+    );
+    let footer = Rect::new(inner.x, body.bottom(), inner.width, inner.height.min(1));
+    DialogAreas { body, footer }
 }
 
 /// One-row filter. Raw metadata is escaped; only the caller registers its typed hit.

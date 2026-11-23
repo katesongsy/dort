@@ -211,6 +211,7 @@ pub struct Shell {
     pub form_details: bool,
     pub form_feedback: Option<(Form, &'static str)>,
     pub picker_details: bool,
+    pub ignored_viewport: super::navigation::ListViewport,
     pub choose_draft: String,
     pub adoption: AdoptionDraft,
     pub return_to_adopt: bool,
@@ -242,6 +243,7 @@ impl Shell {
             form_details: false,
             form_feedback: None,
             picker_details: false,
+            ignored_viewport: Default::default(),
             choose_draft: String::new(),
             adoption: AdoptionDraft::new(),
             return_to_adopt: false,
@@ -389,8 +391,13 @@ impl Shell {
                     *selected = (*selected + 1).min(paths.len().saturating_sub(1))
                 }
                 KeyCode::Up | KeyCode::Char('k') => *selected = selected.saturating_sub(1),
-                KeyCode::PageDown => *selected = (*selected + 8).min(paths.len().saturating_sub(1)),
-                KeyCode::PageUp => *selected = selected.saturating_sub(8),
+                KeyCode::PageDown => {
+                    *selected = (*selected + self.ignored_viewport.page())
+                        .min(paths.len().saturating_sub(1))
+                }
+                KeyCode::PageUp => {
+                    *selected = selected.saturating_sub(self.ignored_viewport.page())
+                }
                 KeyCode::Home => *selected = 0,
                 KeyCode::End => *selected = paths.len().saturating_sub(1),
                 KeyCode::Enter => {

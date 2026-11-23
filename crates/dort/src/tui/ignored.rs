@@ -28,7 +28,7 @@ pub fn draw(
             Target::Key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE)),
         );
     }
-    if app.shell.picker_details {
+    let details = |frame: &mut Frame, area| {
         let lines = vec![
             ui::metadata(
                 "Saved ignored path",
@@ -47,49 +47,62 @@ pub fn draw(
             app.shell.scroll,
             false,
         );
+    };
+    if app.shell.picker_details {
+        details(frame, area);
         app.presented("Back", "Esc", Target::Back);
         return;
     }
     if paths.get(selected).is_some() {
         app.presented(
-            "Review unignore",
+            "Unignore",
             "Enter",
             Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         );
     }
-    let parts = Layout::vertical([
+    let wide = super::workbench::wide_details(area, 1);
+    let [heading, body, footer] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(3),
-        Constraint::Length(2),
+        Constraint::Length(if wide { 0 } else { 2 }),
     ])
-    .split(area);
+    .areas(area);
+    let (list, pane) =
+        super::workbench::detail_panes(body, super::workbench::wide_details(body, 0));
     frame.render_widget(
         Paragraph::new("Local HOME discovery preferences").style(ui::muted()),
-        parts[0],
+        heading,
     );
-    app.hits.wheel(parts[1], super::input::Wheel::Choices);
-    let rows = paths.iter().map(|path| {
+    app.hits.wheel(list, super::input::Wheel::Choices);
+    let capacity = usize::from(list.height.saturating_sub(1));
+    let current = paths.get(selected).map(|_| selected);
+    let first = app
+        .shell
+        .ignored_viewport
+        .start(paths.len(), capacity, current);
+    let rows = paths.iter().skip(first).take(capacity).map(|path| {
         Row::new(vec![ui::inline(
             path.to_str().expect("validated ignore path"),
         )])
     });
-    let mut state = TableState::default().with_selected((!paths.is_empty()).then_some(selected));
+    let mut state = TableState::default().with_selected(current.and_then(|i| i.checked_sub(first)));
     frame.render_stateful_widget(
         Table::new(rows, [Constraint::Percentage(100)])
             .block(ui::pane("Ignored exact paths and descendants", true))
             .row_highlight_style(ui::selected())
             .highlight_symbol(format!("{} ", ui::glyphs::SELECTED)),
-        parts[1],
+        list,
         &mut state,
     );
-    for (y, index) in (state.offset()..paths.len())
-        .take(usize::from(parts[1].height.saturating_sub(1)))
-        .enumerate()
-    {
+    for (y, index) in (first..paths.len()).take(capacity).enumerate() {
         app.hits.click(
-            Rect::new(parts[1].x, parts[1].y + 1 + y as u16, parts[1].width, 1),
+            Rect::new(list.x, list.y + 1 + y as u16, list.width, 1),
             super::input::Target::Picker(index, false),
         );
+    }
+    if let Some(pane) = pane {
+        details(frame, pane);
+        return;
     }
     let detail = paths
         .get(selected)
@@ -105,6 +118,6 @@ pub fn draw(
             Line::raw(detail),
             Line::raw("Ancestor rules and safety exclusions still apply."),
         ]),
-        parts[2],
+        footer,
     );
 }

@@ -76,7 +76,7 @@ fn ignore_folder_confirm_refresh_manage_and_unignore_are_complete_tui_workflows(
     let task = app.activate(shell::Action::ManageIgnored).unwrap();
     f.finish(&mut app, task);
     assert!(matches!(app.shell.overlay, Some(Overlay::Ignored { .. })));
-    assert!(super::tests::has_action(&app, "Review unignore"));
+    assert!(super::tests::has_action(&app, "Unignore"));
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.finish(&mut app, task);
     assert!(
@@ -192,7 +192,7 @@ fn visible_ignore_controls_mouse_and_keyboard_work_at_all_supported_sizes() {
         f.finish(&mut app, task);
         key(&mut app, KeyCode::Esc);
         let task = app
-            .key(KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE), w, h)
+            .key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE), w, h)
             .unwrap();
         f.finish(&mut app, task);
         let task = approve(&mut app);
@@ -221,15 +221,15 @@ fn visible_ignore_controls_mouse_and_keyboard_work_at_all_supported_sizes() {
         let footer = screen.lines().last().unwrap();
         assert!(
             footer.contains("Enter")
-                && footer.contains("Review")
-                && super::tests::has_action(&app, "Review unignore"),
+                && footer.contains("Unignore")
+                && super::tests::has_action(&app, "Unignore"),
             "contextual footer at {w}"
         );
         assert!(!footer.contains("Actions") && !footer.contains("Menu"));
         assert!(app.preview.is_none() && app.confirmation.is_none());
         key(&mut app, KeyCode::Esc);
         let task = app
-            .key(KeyEvent::new(KeyCode::Char('U'), KeyModifiers::NONE), w, h)
+            .key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE), w, h)
             .unwrap();
         f.finish(&mut app, task);
         let task = key(&mut app, KeyCode::Enter).unwrap();
@@ -248,7 +248,7 @@ fn visible_ignore_controls_mouse_and_keyboard_work_at_all_supported_sizes() {
 fn help_retains_real_preview_confirmation_and_shrink_still_clears_approval() {
     let f = Fixture::new();
     let mut app = f.app(false);
-    let task = key(&mut app, KeyCode::Char('I')).unwrap();
+    let task = key(&mut app, KeyCode::Char('i')).unwrap();
     f.finish(&mut app, task);
     let original = app.preview.as_ref().unwrap().text.clone();
     key(&mut app, KeyCode::F(1));
@@ -286,7 +286,7 @@ fn help_retains_real_preview_confirmation_and_shrink_still_clears_approval() {
 fn plain_section_navigation_drops_real_preview_ownership_without_any_write() {
     let f = Fixture::new();
     let mut app = f.app(false);
-    let task = key(&mut app, KeyCode::Char('I')).unwrap();
+    let task = key(&mut app, KeyCode::Char('i')).unwrap();
     f.finish(&mut app, task);
     assert!(app.preview.is_some());
     app.key(

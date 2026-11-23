@@ -37,6 +37,8 @@ fn list(s: &str) -> Vec<String> {
 impl State {
     pub(super) fn seed_installed(&mut self, seed: crate::services::installed_tools::Seed) {
         use dort_core::tools::inspection::Query;
+        self.fields[0] = seed.package.clone();
+        self.fields[1] = seed.package.clone();
         let i = 4;
         self.fields[i] = match seed.query {
             Query::BrewFormulae => "brew",

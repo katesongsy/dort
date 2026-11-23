@@ -32,7 +32,7 @@ ARCHITECTURES = {
 HOST_SUFFIXES = {"Darwin": "apple-darwin", "Linux": "unknown-linux-gnu"}
 # Tools install.sh calls, mirrored into a symlink farm. Git, Homebrew and Node.js stay out.
 FARM_TOOLS = (
-    "uname", "mktemp", "tar", "curl", "wget", "shasum", "sha256sum", "awk",
+    "uname", "mktemp", "tar", "gzip", "curl", "wget", "shasum", "sha256sum", "awk",
     "cp", "chmod", "mv", "rm", "mkdir", "id", "cat",
 )
 

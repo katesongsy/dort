@@ -291,7 +291,7 @@ fn tree_folds_marks_hidden_items_and_batch_editor_retains_real_fields_at_floor()
     text(&mut app, "only-a");
     key(&mut app, KeyCode::Enter);
     assert!(render(&app, 48, 14).contains("2 marked (1 hidden)"));
-    assert!(key(&mut app, KeyCode::Char('E')).is_none());
+    assert!(key(&mut app, KeyCode::Char('A')).is_none());
     let screen = render(&app, 48, 14);
     assert!(
         screen.contains("TARGET")
@@ -324,7 +324,7 @@ fn tree_folds_marks_hidden_items_and_batch_editor_retains_real_fields_at_floor()
     key(&mut app, KeyCode::Tab); // Next list row.
     assert_eq!(app.batch_editor.as_ref().unwrap().item, 1);
     key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Char('E'));
+    key(&mut app, KeyCode::Char('A'));
     assert_eq!(app.batch_editor.as_ref().unwrap().drafts[0].id, "custom-a");
     let task = click(&mut app, "Review all", 0).expect("explicit real combined review button");
     f.run(&mut app, task);
@@ -380,7 +380,7 @@ fn same_named_files_adopt_into_preserved_subtrees_without_moving_existing_mappin
     key(&mut app, KeyCode::Enter);
     key(&mut app, KeyCode::Char(' ')); // Closed .config group marks both matches.
     assert_eq!(app.inventory.candidate_marks.len(), 2);
-    key(&mut app, KeyCode::Char('E'));
+    key(&mut app, KeyCode::Char('A'));
     let task = key(&mut app, KeyCode::Enter).unwrap();
     f.run(&mut app, task);
     assert!(!app.preview.as_ref().unwrap().pending.blocked());
@@ -419,7 +419,7 @@ fn same_named_files_adopt_into_preserved_subtrees_without_moving_existing_mappin
 
 #[test]
 fn selected_apply_keep_delete_use_one_review_bound_to_every_selected_id() {
-    for operation in ['K', 'D'] {
+    for operation in ['U', 'D'] {
         let f = Fixture::new(true);
         let mut app = f.app(false);
         select(&mut app, "only-a");
@@ -458,7 +458,7 @@ fn selected_apply_keep_delete_use_one_review_bound_to_every_selected_id() {
         assert!(app.inventory.managed_marks.is_empty());
         for id in ["only-a", "only-b"] {
             let path = f.host.home.join(".config/editor").join(id);
-            if operation == 'K' {
+            if operation == 'U' {
                 assert!(!path.is_symlink());
                 assert!(path.is_file());
             } else {
@@ -492,7 +492,7 @@ fn selected_apply_keep_delete_use_one_review_bound_to_every_selected_id() {
 }
 #[test]
 fn sequential_keep_removes_completed_marks_and_preserves_other_hidden_marks() {
-    for first in ['u', 'K'] {
+    for first in ['u', 'U'] {
         let f = Fixture::new(true);
         let mut app = f.app(false);
         let task = key(&mut app, KeyCode::Char('a')).unwrap();
@@ -526,7 +526,7 @@ fn sequential_keep_removes_completed_marks_and_preserves_other_hidden_marks() {
         key(&mut app, KeyCode::Delete);
         select(&mut app, "only-b");
         key(&mut app, KeyCode::Char(' '));
-        let task = key(&mut app, KeyCode::Char('K')).unwrap();
+        let task = key(&mut app, KeyCode::Char('U')).unwrap();
         assert!(
             matches!(&task, Task::Batch(dort_core::batch::Request::Keep(ids)) if ids.contains(&"only-b".to_owned()) && !ids.contains(&"only-a".to_owned()) && ids.len() == if first == 'u' { 2 } else { 1 })
         );

@@ -5,8 +5,8 @@ Declare a tool in the manifest, find out whether the package manager reports it 
 ## Sub-features
 
 - **Declared tools** (`1`, `t`): status Installed / Missing / Version differs / Couldn't check / Needs attention.
-- **Installed packages** (`2`, `v`): current inventory, no declaration or repository needed. `a` turns a package into a declaration with the fields filled in.
-- **Installation history** (`3`, `h`): install records including failures. `x` prepares closure of an unresolved record; closure re-queries and only acknowledges the unchanged record.
+- **Installed packages** (`2`): current inventory, no declaration or repository needed. `a` turns a package into a declaration with the fields filled in.
+- **Installation history** (`3`): install records including failures. `x` prepares closure of an unresolved record; closure re-queries and only acknowledges the unchanged record.
 - **Check installed** (`C`): reviews the detected package-manager queries, then runs them once.
 - **Install missing** (`i`): review one eligible set, then install serially. First failure stops the run; earlier effects stay.
 - **Declaration editing**: `a` add, `e` edit, `d` remove.
@@ -14,7 +14,7 @@ Declare a tool in the manifest, find out whether the package manager reports it 
 
 ## How to get to it (user POV)
 
-TUI: `t`. Footer shows `a Add declaration`, `v Installed packages`, `h Installation history`. Numbers `1`/`2`/`3` switch tabs.
+Press `t` for Tools. Use `1`, `2`, or `3` to switch tabs. From Installed, press `a` to add a declaration. The package name fills both Tool ID and Command name. After confirmation, check that the Installed list returns without another query.
 
 CLI:
 
@@ -46,7 +46,7 @@ python3 .pi/skills/verify-dort/drive.py tui my-proof --label declared \
   "wait:loaded." "send:'t'" "wait:Declared tools" "snap:declared"
 ```
 
-A declaration needs no package manager to appear in the list — that is the safe path to prove the read side. `tools check` and `tools install-missing` ask for approval and then run a real package manager.
+A declaration appears without a package manager. To check list navigation, seed more rows than fit on screen. On a wide terminal, select a row and confirm its details appear on the right. Press End and then Up. The highlight should move up while the last row stays visible. Use Ctrl-B and Ctrl-F to page in both directions.
 
 ## Observable end state
 
