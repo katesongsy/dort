@@ -47,7 +47,7 @@
       <figure class="capture">
         <figcaption><span><span class="eyebrow">Terminal capture</span><strong>Queue and detail reader</strong></span><a href="captures/workspace-wide.html">Open wide workspace capture</a></figcaption>
         <div class="frame-window" role="group" aria-label="Terminal capture. Scroll sideways for more columns." tabindex="0">
-          <iframe loading="lazy" src="captures/workspace-wide.html" title="Wide workspace with a queue, selected record, and detail reader" sandbox></iframe>
+          <iframe src="captures/workspace-wide.html" title="Wide workspace with a queue, selected record, and detail reader" style="--columns: 100; --rows: 19" sandbox></iframe>
         </div>
       </figure>
     </section>
@@ -57,6 +57,11 @@
         <p>Open <a href="reference/">the reference source</a> for the standalone example. Run it from the repository root:</p>
       </div>
       <pre tabindex="0"><code>cargo run --locked --manifest-path design-system/reference/Cargo.toml --</code></pre>
+      <details>
+        <summary>Refresh the examples</summary>
+        <pre tabindex="0"><code>cargo run --locked --manifest-path design-system/reference/Cargo.toml -- gallery design-system/captures
+python3 design-system/check.py</code></pre>
+      </details>
     </section>
   </main>
   <footer class="footer"><span>Dort TUI design reference</span><a href="#top">Back to top</a></footer>

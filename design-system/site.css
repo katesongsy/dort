@@ -102,9 +102,16 @@ kbd { white-space: nowrap; padding: .08em .28em; border: 1px solid var(--line); 
 .capture figcaption a { font-size: .875rem; }
 .frame-window { overflow-x: auto; background: var(--terminal); }
 .frame-window:focus-visible { outline-color: #90ddba; outline-offset: -4px; }
-.capture iframe { display: block; width: 100%; min-width: 60rem; height: 29rem; border: 0; background: var(--terminal); }
+.capture iframe {
+  display: block;
+  width: 100%;
+  min-width: calc(var(--columns) * 1ch + 1px);
+  height: calc(var(--rows) * 1.35em + 1px);
+  border: 0;
+  font: 13px/1.35 ui-monospace, Menlo, Consolas, monospace;
+  background: var(--terminal);
+}
 .capture-compact { max-width: 43rem; }
-.capture-compact iframe { min-width: 31rem; }
 
 .footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem 1rem; padding-block: 1.15rem 1.6rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .875rem; }
 
