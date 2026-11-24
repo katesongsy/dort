@@ -18,7 +18,7 @@ The script detects your host, offers to install missing prerequisites, verifies 
 
 | Option | Effect |
 | --- | --- |
-| `--tag TAG` | Install a specific release, for example `v0.1.0`. Default: the latest release. |
+| `--tag TAG` | Install a specific release, for example `v0.2.0`. Default: the latest release. |
 | `--install-dir DIR` | Install `dort` into `DIR`. |
 | `--yes` | Accept every prerequisite install. |
 | `--skip-deps` | Leave Homebrew, Git and Node.js alone. |
@@ -28,7 +28,7 @@ The script detects your host, offers to install missing prerequisites, verifies 
 Pass options through the pipe with `bash -s --`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/katesongsy/dort/main/install.sh | bash -s -- --tag v0.1.0
+curl -fsSL https://raw.githubusercontent.com/katesongsy/dort/main/install.sh | bash -s -- --tag v0.2.0
 ```
 
 The install needs `curl` or `wget`, and `sha256sum` or `shasum`. The checksum matches the archive against the release `SHA256SUMS` file, which detects a corrupt download.
@@ -45,21 +45,23 @@ This supports macOS 15+ and Ubuntu 24.04+ (glibc 2.39+).
 
 ### Prebuilt archives
 
-Download the archive for your host from [GitHub Releases](https://github.com/katesongsy/dort/releases):
+Download `SHA256SUMS` and the archive for your host from the same [GitHub release](https://github.com/katesongsy/dort/releases):
 
-| Host | Archive |
+| Host | Archive ends with |
 | --- | --- |
-| macOS, Apple Silicon | `dort-v0.1.0-aarch64-apple-darwin.tar.gz` |
-| macOS, Intel | `dort-v0.1.0-x86_64-apple-darwin.tar.gz` |
-| Linux, ARM64 | `dort-v0.1.0-aarch64-unknown-linux-gnu.tar.gz` |
-| Linux, x86_64 | `dort-v0.1.0-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS, Apple Silicon | `aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `x86_64-apple-darwin.tar.gz` |
+| Linux, ARM64 | `aarch64-unknown-linux-gnu.tar.gz` |
+| Linux, x86_64 | `x86_64-unknown-linux-gnu.tar.gz` |
 
-Verify the checksum before extracting:
+Verify the checksum before extracting. Set `archive` to the filename you downloaded:
 
 ```sh
-shasum -a 256 -c selected.sha256
+archive=dort-v0.2.0-aarch64-apple-darwin.tar.gz
+# macOS:
+grep -F "  $archive" SHA256SUMS | shasum -a 256 -c -
 # Linux:
-sha256sum -c selected.sha256
+grep -F "  $archive" SHA256SUMS | sha256sum -c -
 ```
 
 Use an empty download directory, not an environment repository. Archives contain `dort`, the license, notices and build info.
@@ -84,7 +86,8 @@ target/debug/dort --version
 Use a temporary HOME. Do not point Dort at real dotfiles yet.
 
 ```sh
-tmp=$(mktemp -d /tmp/dort-demo.XXXXXX)
+tmp=$(mktemp -d)
+tmp=$(cd "$tmp" && pwd -P)
 mkdir -p "$tmp/home"
 export HOME="$tmp/home"
 export XDG_CONFIG_HOME="$HOME/.config"
