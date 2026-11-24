@@ -58,7 +58,7 @@ fn selected_declaration_edit_remove_use_one_exact_approval_and_refresh_list() {
                 && report.contains("latest")
         );
         assert!(f.calls().is_empty());
-        let task = key(&mut app, KeyCode::Char('y'), width, height).unwrap();
+        let task = super::tests::approve_ready(&mut app, width, height).unwrap();
         assert!(app.confirmation.is_none() && app.preview.is_none());
         perform(&f, &mut app, task);
         key(&mut app, KeyCode::Enter, width, height);
@@ -72,7 +72,7 @@ fn selected_declaration_edit_remove_use_one_exact_approval_and_refresh_list() {
                 .text
                 .contains("Remove tool declaration")
         );
-        let task = key(&mut app, KeyCode::Char('y'), width, height).unwrap();
+        let task = super::tests::approve_ready(&mut app, width, height).unwrap();
         perform(&f, &mut app, task);
         key(&mut app, KeyCode::Enter, width, height);
         let text = std::fs::read_to_string(f.repo.join("dort.toml")).unwrap();
@@ -100,7 +100,7 @@ fn selected_declaration_edit_remove_use_one_exact_approval_and_refresh_list() {
         let task = app.activate(Action::Rollback).unwrap();
         perform(&f, &mut app, task);
         assert!(app.preview.is_some());
-        let task = key(&mut app, KeyCode::Char('y'), width, height).unwrap();
+        let task = super::tests::approve_ready(&mut app, width, height).unwrap();
         perform(&f, &mut app, task);
         assert!(
             std::fs::read_to_string(f.repo.join("dort.toml"))

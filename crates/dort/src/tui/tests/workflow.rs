@@ -118,7 +118,8 @@ fn type_text(app: &mut App, value: &str) {
     }
 }
 fn approve(app: &mut App) -> Task {
-    key(app, KeyCode::Char('y')).expect("one explicit approval consumes the displayed preview")
+    super::tests::approve_ready(app, 80, 24)
+        .expect("one explicit approval consumes the displayed preview")
 }
 #[test]
 fn welcome_next_steps_are_visible_at_the_floor_without_creating_state() {
@@ -155,18 +156,22 @@ fn preview_scroll_is_bounded_by_escaped_metadata_and_resets_on_home() {
     // Exercise only full-report presentation offsets; retain the real opaque core preview.
     app.preview.as_mut().unwrap().full = true;
     app.preview.as_mut().unwrap().text = format!("{}\n{}\nEND", "é".repeat(20), "row\n".repeat(30));
+    super::tests::render(&app, 48, 14);
     for _ in 0..100 {
         app.key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), 48, 14);
         app.key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), 48, 14);
     }
     let p = app.preview.as_ref().unwrap();
     assert_eq!(p.horizontal, 120 - 46); // Each é becomes six ASCII escape bytes.
-    assert_eq!(p.scroll, 33 - 7);
     app.key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), 48, 14);
     assert_eq!(app.preview.as_ref().unwrap().horizontal, 120 - 46 - 8);
+    for _ in 0..12 {
+        app.key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), 48, 14);
+    }
+    assert!(super::tests::render(&app, 48, 14).contains("END"));
     app.resize(140, 60);
-    let p = app.preview.as_ref().unwrap();
-    assert_eq!((p.scroll, p.horizontal), (0, 0));
+    let wide = super::tests::render(&app, 140, 60);
+    assert!(wide.contains("\\u{e9}") && wide.contains("END"));
     app.resize(48, 14);
     app.key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), 48, 14);
     app.key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), 48, 14);
@@ -367,6 +372,7 @@ fn review_exposes_one_clickable_approval_action_and_consumes_the_review_once() {
             assert!(app.key(event, width, height).is_none());
             assert!(app.preview.is_some());
         }
+        super::tests::render(&app, width, height);
         assert!(
             app.mouse(
                 MouseEvent {
@@ -392,6 +398,47 @@ fn review_exposes_one_clickable_approval_action_and_consumes_the_review_once() {
         );
     }
 }
+#[test]
+fn confirmation_dialog_ignores_enter_and_escape_discards_approval() {
+    let fixture = Fixture::new(false);
+    let mut app = App::new(false);
+    app.complete(Ok(fixture.prepare(Request::Apply)));
+    app.confirmation = Some(super::app::Confirmation { prompt_scroll: 0 });
+    let screen = super::tests::render(&app, 80, 24);
+    assert!(screen.contains("y Confirm") && !screen.contains("Enter Confirm"));
+    for code in [KeyCode::Enter, KeyCode::Tab, KeyCode::Enter, KeyCode::Esc] {
+        assert!(key(&mut app, code).is_none());
+    }
+    assert!(key(&mut app, KeyCode::Char('y')).is_none());
+    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(!fixture.host.state_dir.exists());
+}
+
+#[test]
+fn full_review_requires_the_effect_tail_to_be_drawn_before_approval() {
+    let fixture = Fixture::new(true);
+    let mut app = App::new(false);
+    app.complete(Ok(fixture.prepare(Request::Apply)));
+    let (w, h) = (48, 14);
+    let press = |app: &mut App, code| app.key(KeyEvent::new(code, KeyModifiers::NONE), w, h);
+    let draw = |app: &App| super::tests::render(app, w, h);
+    assert!(press(&mut app, KeyCode::F(3)).is_none());
+    assert!(draw(&app).contains("End Read"));
+    assert!(press(&mut app, KeyCode::Char('y')).is_none());
+    assert!(press(&mut app, KeyCode::End).is_none());
+    assert!(press(&mut app, KeyCode::Char('y')).is_none());
+    assert!(draw(&app).contains("y Confirm"));
+    assert!(press(&mut app, KeyCode::Home).is_none());
+    assert!(press(&mut app, KeyCode::Char('y')).is_none());
+    assert!(draw(&app).contains("End Read"));
+    assert!(!fixture.host.home.join(".editor").exists());
+    assert!(press(&mut app, KeyCode::End).is_none());
+    let task = super::tests::click_label(&mut app, w, h, "y Confirm").unwrap();
+    fixture.execute(task);
+    assert!(fixture.host.home.join(".editor").is_symlink());
+    assert!(press(&mut app, KeyCode::Char('y')).is_none());
+}
+
 #[test]
 fn ascii_monochrome_real_removal_keeps_consent_and_shrink_guards() {
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {

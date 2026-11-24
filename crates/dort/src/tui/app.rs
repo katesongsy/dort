@@ -9,7 +9,7 @@ use dort_core::{
     planner::{Request, UnmanageMode},
 };
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::path::PathBuf;
+use std::{cell::Cell, path::PathBuf};
 
 mod output;
 
@@ -30,22 +30,51 @@ pub struct Preview {
     pub full: bool,
     pub selected: usize,
     pub effect_scroll: u16,
+    report_window: Cell<Option<ReportWindow>>,
+}
+#[derive(Clone, Copy)]
+struct ReportWindow {
+    size: (u16, u16),
+    end: u16,
+    tail_drawn: bool,
 }
 impl Preview {
-    fn clamp_scroll(&mut self, width: u16, height: u16) {
-        // Header, navigation, status, footer, approval row and preview borders.
-        // Escaped report bytes are ASCII, so byte lengths equal terminal columns.
+    pub(super) fn observe_report(&self, size: (u16, u16), end: u16) -> u16 {
+        let offset = self.scroll.min(end);
+        self.report_window.set(Some(ReportWindow {
+            size,
+            end,
+            tail_drawn: offset == end,
+        }));
+        offset
+    }
+
+    fn report_window(&self, size: (u16, u16)) -> Option<ReportWindow> {
+        self.report_window
+            .get()
+            .filter(|window| window.size == size)
+    }
+
+    fn reading_report(&self) -> bool {
+        self.full || self.pending.review_len().is_none()
+    }
+
+    fn effects_visible(&self, size: (u16, u16)) -> bool {
+        !self.reading_report()
+            || self
+                .report_window(size)
+                .is_some_and(|w| w.tail_drawn && self.scroll >= w.end)
+    }
+
+    fn clamp_scroll(&mut self, size: (u16, u16)) {
+        if let Some(window) = self.report_window(size) {
+            self.scroll = self.scroll.min(window.end);
+        }
         let escaped = super::views::safe(&self.text);
-        let lines = escaped.lines().count();
         let columns = escaped.lines().map(str::len).max().unwrap_or(0);
-        self.scroll = self.scroll.min(
-            lines
-                .saturating_sub(usize::from(height.saturating_sub(7)))
-                .min(u16::MAX as usize) as u16,
-        );
         self.horizontal = self.horizontal.min(
             columns
-                .saturating_sub(usize::from(width.saturating_sub(2)))
+                .saturating_sub(usize::from(size.0.saturating_sub(2)))
                 .min(u16::MAX as usize) as u16,
         );
     }
@@ -1260,6 +1289,7 @@ impl App {
                     return None;
                 }
                 KeyCode::Tab => return None,
+                code if code == Approval::event().code => return None,
                 _ => None,
             };
             if let Some(control) = control {
@@ -1269,9 +1299,9 @@ impl App {
             self.details_scroll = 0;
         }
         if self.confirmation.is_some() {
-            return self.confirm_key(key);
+            return self.confirm_key(key, (width, height));
         }
-        if self.preview_approval().accepts(key) {
+        if self.preview_approval((width, height)).accepts(key) {
             return self.approve_preview();
         }
         if let Some(preview) = &mut self.preview {
@@ -1279,6 +1309,7 @@ impl App {
             match key.code {
                 KeyCode::Char('i') if file_review => {
                     preview.full = !preview.full;
+                    preview.report_window.set(None);
                     preview.scroll = 0;
                     preview.horizontal = 0;
                     preview.effect_scroll = 0;
@@ -1309,18 +1340,13 @@ impl App {
                     self.preview = None;
                     self.status = "Returned to the draft.".into();
                 }
+                KeyCode::End if preview.reading_report() => preview.scroll = u16::MAX,
                 KeyCode::Down | KeyCode::PageDown => {
-                    preview.scroll = preview
-                        .scroll
-                        .saturating_add(if key.code == KeyCode::Down { 1 } else { 8 })
-                        .min(
-                            preview
-                                .text
-                                .lines()
-                                .count()
-                                .saturating_sub(1)
-                                .min(u16::MAX as usize) as u16,
-                        )
+                    preview.scroll = preview.scroll.saturating_add(if key.code == KeyCode::Down {
+                        1
+                    } else {
+                        8
+                    });
                 }
                 KeyCode::Up | KeyCode::PageUp => {
                     preview.scroll =
@@ -1333,7 +1359,7 @@ impl App {
                 _ => (),
             }
             if let Some(preview) = &mut self.preview {
-                preview.clamp_scroll(width, height);
+                preview.clamp_scroll((width, height));
             }
             return None;
         }
@@ -1712,6 +1738,11 @@ impl App {
             self.hits.clear();
         }
         self.viewport = (width, height);
+        if let Some(preview) = &self.preview
+            && preview.report_window((width, height)).is_none()
+        {
+            preview.report_window.set(None);
+        }
         if width < 48 || height < 14 {
             self.more = None;
             self.choice = None;
@@ -1719,7 +1750,7 @@ impl App {
             self.git_view.discard_preview();
             self.tools_view.shrink();
         } else if let Some(preview) = &mut self.preview {
-            preview.clamp_scroll(width, height);
+            preview.clamp_scroll((width, height));
         }
         super::discover_content::sync(self, width, height);
     }
@@ -2736,10 +2767,12 @@ impl App {
             _ => vec![],
         }
     }
-    pub(super) fn preview_approval(&self) -> Approval {
+    pub(super) fn preview_approval(&self, size: (u16, u16)) -> Approval {
         Approval::new(
             self.dry_run,
-            self.preview.as_ref().is_none_or(|p| p.pending.blocked()),
+            self.preview.as_ref().is_none_or(|p| {
+                p.pending.blocked() || self.confirmation.is_none() && !p.effects_visible(size)
+            }),
         )
     }
     fn approve_preview(&mut self) -> Option<Task> {
@@ -2778,8 +2811,8 @@ impl App {
             }
         }
     }
-    fn confirm_key(&mut self, key: KeyEvent) -> Option<Task> {
-        if self.preview_approval().accepts(key) {
+    fn confirm_key(&mut self, key: KeyEvent, size: (u16, u16)) -> Option<Task> {
+        if self.preview_approval(size).accepts(key) {
             return self.approve_preview();
         }
         let confirmation = self.confirmation.as_mut()?;
@@ -2788,14 +2821,11 @@ impl App {
                 self.confirmation = None;
                 self.preview = None;
             }
-            KeyCode::PageDown => {
-                confirmation.prompt_scroll = confirmation.prompt_scroll.saturating_add(4)
+            code => {
+                super::components::reader::ScrollKeys::new(1, 4)
+                    .with_end()
+                    .apply(&mut confirmation.prompt_scroll, code);
             }
-            KeyCode::PageUp => {
-                confirmation.prompt_scroll = confirmation.prompt_scroll.saturating_sub(4)
-            }
-            KeyCode::Home => confirmation.prompt_scroll = 0,
-            _ => (),
         }
         None
     }

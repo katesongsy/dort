@@ -426,24 +426,30 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
     {
         super::review::draw_batch(frame, area, plan, preview, &app.hits);
     } else {
+        let text = ui::review_text(&preview.text);
+        let end = text.height().saturating_sub(usize::from(area.height));
+        let offset = preview.observe_report(app.hits.size(), end.min(u16::MAX as usize) as u16);
         ui::reader::Reader::new(&app.hits)
             .with_wheel(Wheel::Preview)
-            .pannable(
-                frame,
-                area,
-                ui::review_text(&preview.text),
-                (preview.scroll, preview.horizontal),
-            );
+            .pannable(frame, area, text, (offset, preview.horizontal));
     }
-    app.preview_approval().present(
-        &app.hits,
-        if preview.pending.adoption() {
-            "Adopt all"
-        } else {
-            "Confirm changes"
-        },
-        Target::Continue,
-    );
+    let approval = app.preview_approval(app.hits.size());
+    if approval.allowed() {
+        approval.present_key(
+            &app.hits,
+            if preview.pending.adoption() {
+                "Adopt all"
+            } else {
+                "Confirm changes"
+            },
+        );
+    } else if !app.dry_run && !preview.pending.blocked() {
+        app.presented(
+            "Read remaining effects",
+            "End",
+            Target::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)),
+        );
+    }
     app.presented("Back", "Esc", Target::Back);
     app.presented(
         "Full report",
@@ -594,8 +600,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
                     Text::from(prompt),
                     app.confirmation.as_ref().unwrap().prompt_scroll,
                 );
-            app.preview_approval()
-                .present(&app.hits, "Confirm", Target::ConfirmAction);
+            app.preview_approval(app.hits.size()).present(
+                &app.hits,
+                "Confirm",
+                Target::ConfirmAction,
+            );
             app.presented("Cancel", "Esc", Target::CancelConfirmation);
         } else if app.preview.is_some() {
             preview(frame, body, app);

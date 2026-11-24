@@ -137,6 +137,22 @@ pub(super) fn assert_primary_action(terminal: &Terminal<TestBackend>) {
         && c.fg != c.bg
         && c.modifier.contains(Modifier::BOLD | Modifier::REVERSED)));
 }
+pub(super) fn approve_ready(
+    app: &mut App,
+    width: u16,
+    height: u16,
+) -> Option<super::actions::Task> {
+    if render(app, width, height)
+        .lines()
+        .last()
+        .unwrap()
+        .contains("End Read")
+    {
+        assert!(app.key(key(KeyCode::End), width, height).is_none());
+        render(app, width, height);
+    }
+    app.key(key(KeyCode::Char('y')), width, height)
+}
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }

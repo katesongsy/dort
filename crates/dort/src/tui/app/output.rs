@@ -381,6 +381,7 @@ impl App {
                     full: false,
                     selected: 0,
                     effect_scroll: 0,
+                    report_window: Default::default(),
                 });
                 self.status = if self.preview.as_ref().is_some_and(|p| p.pending.adoption()) {
                     "Review all mappings; Adopt all approves this exact set once."

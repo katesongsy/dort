@@ -609,7 +609,8 @@ fn blocked_item_never_silently_skips_and_dry_run_cannot_approve_batch() {
     for size in [(48, 14), (140, 24)] {
         assert!(!render(&app, size.0, size.1).contains("y Confirm"));
     }
-    key(&mut app, KeyCode::Enter);
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(key(&mut app, KeyCode::Char('y')).is_none());
     assert!(app.confirmation.is_none());
     assert!(journal::diagnose(&f.host).unwrap().is_empty());
     let mut dry = f.app(true);
