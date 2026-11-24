@@ -254,7 +254,7 @@ def discovery_declarations(Session, binary, base, env):
         session.wait(b'loaded.')
         session.send(b't2')
         session.wait(b'Inspect installed tools')
-        session.ready_review(b'y Check installed')
+        session.ready_review(b'y Check')
         assert calls(home) == ''
         session.send(b'y')
         session.wait(b'observed')
@@ -351,7 +351,7 @@ def npm_without_repository(Session, binary, base, env):
         session.send(b't2')
         session.wait(b'Inspect installed tools')
         session.wait(b'prefix --global')
-        session.ready_review(b'y Check installed')
+        session.ready_review(b'y Check')
         assert calls(home) == '', 'Preparing PATH inventory executed npm'
         session.send(b'y')
         session.wait(b'demo')

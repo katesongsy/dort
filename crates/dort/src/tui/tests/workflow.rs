@@ -395,6 +395,24 @@ fn review_exposes_one_clickable_approval_action_and_consumes_the_review_once() {
     }
 }
 #[test]
+fn short_full_review_is_ready_without_scrolling_only_at_its_rendered_size() {
+    let fixture = Fixture::new(true);
+    let mut app = App::new(false);
+    app.complete(Ok(fixture.prepare(Request::Apply)));
+    let press = |app: &mut App, code, w, h| app.key(KeyEvent::new(code, KeyModifiers::NONE), w, h);
+    assert!(press(&mut app, KeyCode::F(3), 48, 14).is_none());
+    let screen = super::tests::render(&app, 140, 40);
+    assert!(screen.contains("Link { target:") && screen.contains("y Confirm"));
+    assert!(press(&mut app, KeyCode::Char('y'), 48, 14).is_none());
+    assert!(press(&mut app, KeyCode::Char('y'), 140, 40).is_none());
+    let screen = super::tests::render(&app, 140, 40);
+    assert!(screen.contains("y Confirm"));
+    let task = press(&mut app, KeyCode::Char('y'), 140, 40).unwrap();
+    fixture.execute(task);
+    assert!(fixture.host.home.join(".editor").is_symlink());
+}
+
+#[test]
 fn full_review_requires_the_effect_tail_to_be_drawn_before_approval() {
     let fixture = Fixture::new(true);
     let mut app = App::new(false);

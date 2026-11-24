@@ -1762,10 +1762,10 @@ impl App {
         if self.viewport != (width, height) {
             self.last_click = None;
             self.hits.clear();
-            if self.hits.size() != (width, height) {
-                self.hits.invalidate_review();
-                self.hits.invalidate_workspace();
-            }
+        }
+        if self.hits.size() != (width, height) {
+            self.hits.invalidate_review();
+            self.hits.invalidate_workspace();
         }
         self.viewport = (width, height);
         if width < 48 || height < 14 {
