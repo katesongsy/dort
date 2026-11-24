@@ -107,6 +107,7 @@ def violations(path, source):
     if path != APPROVAL_OWNER:
         primary = r'(?:\w+\s*::\s*)*Target\s*::\s*(?:ConfirmAction|Continue)\b'
         rules.append(('unshared-approval-control', rf'\bpresented\s*\([^;]*,\s*{primary}\s*,?\s*\)|\bActionButton\s*\{{[^{{}}]*\btarget\s*:\s*{primary}', code))
+        rules.append(('private-approval-key', r"\bChar\s*\(\s*'y'\s*\)", literals))
     rules.append(('literal-selection-marker', r'\.\s*highlight_symbol\s*\(\s*(?:"|r#*")', literals))
     rules.append(('blocking-animation', r'\bthread\s*::\s*sleep\s*\(', code))
     found = []
@@ -173,6 +174,8 @@ class StyleCheckerTests(unittest.TestCase):
         self.assertEqual(violations(path, 'approval.present(hits, label, Target::Continue);'), [])
         self.assertEqual(violations(path, 'Paragraph::new(patch_text);'), [])
         self.assertEqual(violations(path, 'match target { Target::Continue => apply(), _ => {} }'), [])
+        self.assertEqual(violations(path, "KeyCode::Char('y')")[0][2], 'private-approval-key')
+        self.assertEqual(violations(APPROVAL_OWNER, "KeyCode::Char('y')"), [])
 
     def test_owners_are_exact_not_any_file_in_component_folder(self):
         source = 'let s = Color::Red; let icon = "✓";'
