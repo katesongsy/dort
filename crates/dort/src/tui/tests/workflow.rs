@@ -153,7 +153,6 @@ fn review_wraps_escaped_metadata_and_returns_to_top_on_home() {
     let fixture = Fixture::new(false);
     let mut app = App::new(true);
     app.complete(Ok(fixture.prepare(Request::Apply)));
-    app.preview.as_mut().unwrap().full = true;
     app.preview.as_mut().unwrap().text = format!("{}\n{}\nEND", "é".repeat(20), "row\n".repeat(30));
     let draw = |app: &App| super::tests::render(app, 48, 14);
     let press = |app: &mut App, code| app.key(KeyEvent::new(code, KeyModifiers::NONE), 48, 14);
@@ -176,14 +175,14 @@ fn review_wraps_escaped_metadata_and_returns_to_top_on_home() {
 }
 
 #[test]
-fn structured_review_selection_never_reduces_scope_and_full_report_remains_available() {
+fn structured_review_keeps_scope_and_shows_the_full_effects_report() {
     let fixture = Fixture::new(false);
     let mut manifest = fs::read_to_string(fixture.root.join("dort.toml")).unwrap();
     manifest
         .push_str("\n[[files]]\nid='second'\nsource='second'\ntarget='~/.second'\nmode='link'\n");
     fs::write(fixture.root.join("dort.toml"), manifest).unwrap();
     fs::write(fixture.root.join("second"), "ordinary settings\n").unwrap();
-    let mut app = App::new(true);
+    let mut app = App::new(false);
     app.complete(Ok(fixture.prepare(Request::Apply)));
     let snapshot = |app: &App| {
         let actions::Pending::Files(plan) = &app.preview.as_ref().unwrap().pending else {
@@ -193,14 +192,22 @@ fn structured_review_selection_never_reduces_scope_and_full_report_remains_avail
     };
     let original = snapshot(&app);
     let screen = super::tests::render(&app, 80, 24);
-    assert!(screen.contains("2 changes") && screen.contains("PLANNED CHANGE"));
-    assert!(super::tests::click_label(&mut app, 80, 24, "second").is_none());
-    assert!(super::tests::render(&app, 80, 24).contains("› second"));
-    assert_eq!(app.preview.as_ref().unwrap().selected, 1);
-    key(&mut app, KeyCode::F(3));
-    assert!(app.preview.as_ref().unwrap().full);
-    assert!(super::tests::render(&app, 140, 40).contains("permissions:"));
+    assert!(screen.starts_with("Dort / Review changes"), "{screen}");
+    assert!(
+        screen.contains("Warning:") && !screen.contains("y Confirm"),
+        "{screen}"
+    );
     assert_eq!(snapshot(&app), original);
+    let stage = super::components::reader::ReviewStage::Changes;
+    assert!(!app.hits.review_tail_drawn(stage));
+    key(&mut app, KeyCode::End);
+    let tail = super::tests::render(&app, 140, 40);
+    assert!(
+        tail.contains("second") && tail.contains("permissions:"),
+        "{tail}"
+    );
+    assert!(tail.contains("y Confirm"), "{tail}");
+    assert!(app.hits.review_tail_drawn(stage));
     key(&mut app, KeyCode::Enter);
     key(&mut app, KeyCode::Esc);
     assert!(!fixture.host.state_dir.exists() && !fixture.host.config_dir.exists());
@@ -292,7 +299,10 @@ fn confirmation_snapshots_and_resize_guard() {
     let mut app = App::new(false);
     app.complete(Ok(fixture.prepare(Request::Apply)));
     let screen = super::tests::render(&app, 48, 14);
-    assert!(screen.contains("F3 Full effects") && !screen.contains("y Confirm"));
+    assert!(
+        screen.contains("Warning:") && !screen.contains("y Confirm"),
+        "{screen}"
+    );
     assert!(
         app.key(
             KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
@@ -320,10 +330,11 @@ fn mouse_confirmation_binds_displayed_exact_id_without_typing() {
         mode: UnmanageMode::Remove,
     })));
     let screen = super::tests::render(&app, 48, 14);
-    assert!(screen.contains("editor") && !screen.contains("Type exact"));
+    assert!(
+        screen.contains("Warning:") && !screen.contains("Type exact"),
+        "{screen}"
+    );
     let press = |app: &mut App, code| app.key(KeyEvent::new(code, KeyModifiers::NONE), 48, 14);
-    press(&mut app, KeyCode::F(3));
-    super::tests::render(&app, 48, 14);
     press(&mut app, KeyCode::End);
     super::tests::render(&app, 48, 14);
     let (x, y) = super::tests::target_position(&app, 48, 14, |target| {
@@ -458,15 +469,11 @@ fn ascii_monochrome_real_removal_keeps_consent_and_shrink_guards() {
             id: "editor".into(),
             mode: UnmanageMode::Remove,
         })));
-        let press = |app: &mut App, code| app.key(KeyEvent::new(code, KeyModifiers::NONE), w, h);
         let screen = super::tests::render(&app, w, h);
-        assert!(
-            screen.is_ascii() && screen.contains("editor") && screen.contains("F3 Full effects")
-        );
+        assert!(screen.is_ascii(), "{screen}");
         app.resize(47, 13);
         app.resize(w, h);
         assert!(fixture.host.home.join(".editor").is_symlink());
-        assert!(press(&mut app, KeyCode::Char('y')).is_none());
         let task = super::tests::approve_ready(&mut app, w, h).unwrap();
         fixture.execute(task);
         assert!(!fixture.host.home.join(".editor").exists());
@@ -850,7 +857,7 @@ fn discovery_marks_ineligible_entries_and_enter_preserves_existing_draft() {
     app.candidate_selected = index;
     for (width, height) in [(48, 14), (80, 24), (140, 40)] {
         let screen = super::tests::render(&app, width, height);
-        assert!(screen.contains("Not eligible"));
+        assert!(screen.contains("Ineligible"), "{width}x{height}: {screen}");
     }
     adopt_selected(&mut app);
     assert!(app.shell.overlay.is_none());
@@ -872,7 +879,11 @@ fn discovery_marks_ineligible_entries_and_enter_preserves_existing_draft() {
             .iter()
             .position(|c| c.entry.path == *path)
             .unwrap();
-        assert!(super::tests::render(&app, 80, 24).contains("Not eligible"));
+        let shot = super::tests::render(&app, 80, 24);
+        assert!(
+            shot.contains("Ineligible") || shot.contains("Not eligible for adoption"),
+            "{shot}"
+        );
         adopt_selected(&mut app);
         assert!(app.shell.overlay.is_none());
         assert_eq!(app.shell.adoption.target, "retained target");
@@ -894,7 +905,7 @@ fn discovery_marks_ineligible_entries_and_enter_preserves_existing_draft() {
         .iter()
         .position(|c| c.entry.path == file)
         .unwrap();
-    assert!(super::tests::render(&app, 80, 24).contains("Eligible hint"));
+    assert!(super::tests::render(&app, 80, 24).contains("Eligible"));
     key(&mut app, KeyCode::Enter);
     assert!(app.shell.overlay.is_none());
     assert_eq!(app.shell.adoption.target, "retained target");
@@ -922,7 +933,7 @@ fn discovery_is_independent_metadata_only_and_keeps_exact_candidate_identity() {
     assert_observation_parity(&discovery.report, &core);
     let screen = super::tests::render(&app, 240, 50);
     assert!(
-        screen.contains(".q?config") && screen.contains("Eligible hint"),
+        screen.contains(".q?config") && screen.contains("Eligible"),
         "selected candidate metadata should be visible"
     );
     assert!(!screen.contains("private-body-marker"));

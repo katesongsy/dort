@@ -30,14 +30,6 @@ pub struct Preview {
     pub pending: Pending,
     pub text: String,
     pub reader: ReviewScroll,
-    pub full: bool,
-    pub selected: usize,
-    pub effect_scroll: u16,
-}
-impl Preview {
-    pub(super) fn reading_report(&self) -> bool {
-        self.full || self.pending.review_len().is_none()
-    }
 }
 struct RowClick {
     at: std::time::Instant,
@@ -408,7 +400,7 @@ impl App {
                     _ => (),
                 }
             }
-            if matches!(wheel, Wheel::Choices | Wheel::PreviewRows) {
+            if matches!(wheel, Wheel::Choices) {
                 let code = if code == KeyCode::PageDown {
                     KeyCode::Down
                 } else {
@@ -589,15 +581,6 @@ impl App {
             }
             Target::Feedback(control) => self.feedback(control, width, height),
             Target::Continue => self.action_key(Approval::event(), width, height),
-            Target::PreviewRow(index) => {
-                if let Some(preview) = &mut self.preview
-                    && preview.pending.review_len().is_some_and(|len| index < len)
-                {
-                    preview.selected = index;
-                    preview.effect_scroll = 0;
-                }
-                None
-            }
             Target::DiscoverFocus(content) => {
                 self.content.focused = content && self.content.available();
                 self.inventory.details = false;
@@ -1340,41 +1323,13 @@ impl App {
             return self.approve_preview();
         }
         if let Some(preview) = &mut self.preview {
-            let file_review = preview.pending.review_len().is_some();
             match key.code {
-                KeyCode::Char('i') if file_review => {
-                    preview.full = !preview.full;
-                    self.hits.invalidate_review();
-                    preview.reader = ReviewScroll::default();
-                    preview.effect_scroll = 0;
-                }
-                KeyCode::Down | KeyCode::Up if file_review && !preview.full => {
-                    if let Some(len) = preview.pending.review_len() {
-                        preview.selected = if key.code == KeyCode::Down {
-                            (preview.selected + 1).min(len.saturating_sub(1))
-                        } else {
-                            preview.selected.saturating_sub(1)
-                        };
-                        preview.effect_scroll = 0;
-                    }
-                }
-                KeyCode::PageDown | KeyCode::PageUp if file_review && !preview.full => {
-                    preview.effect_scroll = if key.code == KeyCode::PageDown {
-                        preview.effect_scroll.saturating_add(4)
-                    } else {
-                        preview.effect_scroll.saturating_sub(4)
-                    };
-                }
-                KeyCode::Home if !preview.reading_report() => preview.effect_scroll = 0,
                 KeyCode::Esc => {
                     self.preview = None;
                     self.hits.invalidate_review();
                     self.status = "Returned to the draft.".into();
                 }
-                code if preview.reading_report() => {
-                    preview.reader.key(&self.hits, ReviewStage::Changes, code);
-                }
-                _ => (),
+                code => preview.reader.key(&self.hits, ReviewStage::Changes, code),
             }
             return None;
         }
@@ -1680,8 +1635,11 @@ impl App {
             KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(2),
             KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(2),
             KeyCode::Home => self.details_scroll = 0,
-            KeyCode::Char('h') if self.tab == Tab::Files => super::tree::fold(self, true),
+            KeyCode::Char('h') | KeyCode::Left if self.tab == Tab::Files => {
+                super::tree::fold(self, true)
+            }
             KeyCode::Char('l') if self.tab == Tab::Files => super::tree::fold(self, false),
+            KeyCode::Right if self.tab == Tab::Files => super::tree::expand(self),
             KeyCode::Esc => {
                 self.inventory.details = false;
                 self.history_region = Region::Queue;
@@ -2731,12 +2689,26 @@ impl App {
                     .discovery
                     .as_ref()
                     .and_then(|d| d.report.candidates.get(self.candidate_selected))
+                    .is_some_and(|c| {
+                        self.data
+                            .as_ref()
+                            .is_some_and(|d| d.managed.iter().any(|row| row.target == c.entry.path))
+                    }) =>
+            {
+                Some("Already managed. Change the existing entry in Managed instead.")
+            }
+            Action::AdoptSelected
+                if self
+                    .discovery
+                    .as_ref()
+                    .and_then(|d| d.report.candidates.get(self.candidate_selected))
                     .is_none_or(|c| !c.supported_for_adoption) =>
             {
                 Some(
                     "Not eligible for adoption. Only owned regular files with one link can be added.",
                 )
             }
+
             Action::Rollback
                 if self.tab != Tab::Recovery
                     || self
@@ -2794,9 +2766,7 @@ impl App {
             &self.hits,
             ReviewStage::Changes,
             self.dry_run,
-            self.preview
-                .as_ref()
-                .is_none_or(|p| p.pending.blocked() || !p.reading_report()),
+            self.preview.as_ref().is_none_or(|p| p.pending.blocked()),
         )
     }
     fn approve_preview(&mut self) -> Option<Task> {

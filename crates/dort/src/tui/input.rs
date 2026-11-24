@@ -40,7 +40,6 @@ pub enum Target {
     PickerDetails,
     Back,
     Continue,
-    PreviewRow(usize),
 }
 #[derive(Clone, Copy)]
 pub enum Wheel {
@@ -50,7 +49,6 @@ pub enum Wheel {
     Details,
     Overlay,
     Preview,
-    PreviewRows,
     GitPatch,
     Tools,
 }

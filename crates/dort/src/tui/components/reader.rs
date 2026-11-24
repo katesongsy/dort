@@ -203,7 +203,9 @@ impl ReviewScroll {
         if !ScrollKeys::new(1, 4).with_end().apply_at(&mut offset, code) {
             return;
         }
-        if let Some(end) = hits.review_end(stage) {
+        if code != KeyCode::End
+            && let Some(end) = hits.review_end(stage)
+        {
             offset = offset.min(end);
         }
         if offset != old {

@@ -114,7 +114,7 @@ pub(super) fn titled_block(title: &str, borders: Borders, style: Style) -> Block
         .borders(borders)
         .border_style(Style::default().add_modifier(Modifier::DIM))
         .title(Span::styled(
-            format!(" {} ", ui::inline(title)),
+            format!(" {} ", ui::chrome_text(title)),
             style.remove_modifier(Modifier::DIM),
         ))
 }

@@ -99,14 +99,30 @@ pub fn success() -> Style {
 pub fn state(label: &str) -> Style {
     match label {
         "Damaged" => danger(),
-        "Blocked" | "Not eligible" => warning(),
-        "Linked" => success(),
-        "Needs apply" | "Eligible hint" => warning(),
+        "Blocked" => warning(),
+        "Not eligible" | "Ineligible" => muted(),
+        "Eligible" | "Linked" => success(),
+        "Managed" => accent(),
+        "Needs apply" => warning(),
         _ => Style::default(),
     }
 }
 pub fn inline(value: &str) -> String {
     super::views::safe(value).replace('\n', "\\n")
+}
+/// Chrome text: escape control characters, keep printable Unicode such as
+/// spinner frames and box drawing. Titles are app-composed, never provider output.
+pub fn chrome_text(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|c| {
+            if c.is_control() {
+                c.escape_default().collect::<Vec<_>>()
+            } else {
+                vec![c]
+            }
+        })
+        .collect()
 }
 pub fn clip(value: &str, width: u16) -> String {
     chrome_clip(&inline(value), width)

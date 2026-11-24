@@ -412,47 +412,25 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
     let Some(preview) = &app.preview else {
         return;
     };
-    app.hits.wheel(area, Wheel::Preview);
-    if let super::actions::Pending::Files(plan) = &preview.pending
-        && !preview.full
-    {
-        super::review::draw(frame, area, plan, preview, &app.hits);
-    } else if let super::actions::Pending::Batch(plan) = &preview.pending
-        && !preview.full
-    {
-        super::review::draw_batch(frame, area, plan, preview, &app.hits);
-    } else {
-        ui::reader::Reader::new(&app.hits)
-            .with_wheel(Wheel::Preview)
-            .review(
-                frame,
-                area,
-                None,
-                ui::review_text(&preview.text),
-                ui::reader::ReviewStage::Changes,
-                &preview.reader,
-            );
-        app.preview_approval().present_key(
-            &app.hits,
-            if preview.pending.adoption() {
-                "Adopt all"
-            } else {
-                "Confirm changes"
-            },
+    ui::reader::Reader::new(&app.hits)
+        .with_wheel(Wheel::Preview)
+        .review(
+            frame,
+            area,
+            None,
+            ui::review_text(&preview.text),
+            ui::reader::ReviewStage::Changes,
+            &preview.reader,
         );
-    }
+    app.preview_approval().present_key(
+        &app.hits,
+        if preview.pending.adoption() {
+            "Adopt all"
+        } else {
+            "Confirm changes"
+        },
+    );
     app.presented("Back", "Esc", Target::Back);
-    if preview.pending.review_len().is_some() {
-        app.presented(
-            if preview.full {
-                "Summary"
-            } else {
-                "Full effects"
-            },
-            "F3",
-            Target::Key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE)),
-        );
-    }
 }
 fn overlay(frame: &mut Frame, inner: Rect, app: &App, overlay: &Overlay) {
     app.hits.wheel(inner, Wheel::Overlay);

@@ -146,7 +146,7 @@ fn workbench_has_semantic_styles_and_selected_identity_at_all_supported_sizes() 
 fn file_details_show_selected_blocker_before_file_types_and_old_result() {
     let mut app = files_app();
     app.result = Some("Earlier operation finished".into());
-    let (w, h) = (80, 24);
+    let (w, h) = (80, 40);
     app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), w, h);
     let b = buffer(&app, w, h);
     assert_style(&b, "Status:", Color::Reset, Modifier::BOLD);
@@ -675,6 +675,33 @@ fn shared_collection_keeps_row_targets_on_visible_lines() {
         assert!(matches!(hits.scroll(x, y), Some(Wheel::Rows)));
     }
     assert!(hits.target(3, 4).is_none());
+}
+#[test]
+fn pane_titles_keep_spinner_glyphs_and_escape_controls() {
+    let mut terminal = Terminal::new(TestBackend::new(24, 3)).unwrap();
+    terminal
+        .draw(|frame| {
+            frame.render_widget(
+                ui::pane(&format!("{} Reading", ui::glyphs::SPINNER[0]), false),
+                frame.area(),
+            );
+        })
+        .unwrap();
+    let b = terminal.backend().buffer();
+    let title: String = (0..b.area.width).map(|x| b[(x, 0)].symbol()).collect();
+    assert!(
+        title.contains(&format!("{} Reading", ui::glyphs::SPINNER[0])),
+        "{title}"
+    );
+    terminal
+        .draw(|frame| {
+            frame.render_widget(ui::pane("a\u{1b}b", false), frame.area());
+        })
+        .unwrap();
+    let escaped: String = (0..24)
+        .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+        .collect();
+    assert!(escaped.contains("a\\u{1b}b"), "{escaped}");
 }
 #[test]
 fn report_wraps_trusted_glyphs_at_terminal_cell_boundaries() {
