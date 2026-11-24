@@ -27,12 +27,12 @@ impl Read {
         }
     }
 }
-pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &State) {
+pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &State, focused: bool) {
     use ratatui::{
         text::{Line, Span, Text},
         widgets::Paragraph,
     };
-    let block = super::components::pane("Selected content", state.focused);
+    let block = super::components::pane("Selected content", focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let gutter = usize::from(inner.width.min(7));

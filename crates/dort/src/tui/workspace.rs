@@ -2,8 +2,8 @@ use ratatui::layout::Rect;
 
 use super::input::{Hits, Target};
 
-const QUEUE_MIN: u16 = 33;
-const READER_MIN: u16 = 55;
+const QUEUE_MIN: u16 = 38;
+const READER_MIN: u16 = 50;
 const GUTTER: u16 = 2;
 const PANE_MIN_HEIGHT: u16 = 10;
 pub const SPLIT_MIN_WIDTH: u16 = QUEUE_MIN + GUTTER + READER_MIN;
@@ -26,6 +26,8 @@ impl Region {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
     Recovery,
+    Files { discovering: bool },
+    Git,
 }
 
 #[derive(Clone, Copy)]

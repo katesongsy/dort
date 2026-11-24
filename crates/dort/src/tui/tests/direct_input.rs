@@ -432,3 +432,47 @@ fn wide_full_paths_and_ids_are_reachable_in_cells_using_only_detail_page_keys() 
         assert_eq!(app.details_scroll, 0);
     }
 }
+
+#[test]
+fn files_and_git_split_tab_moves_the_keyboard_owner_not_the_row() {
+    for (tab, reader) in [(Tab::Files, "Selected item"), (Tab::Git, "Git details")] {
+        let mut app = fixture(tab);
+        let wide = (100, 24);
+        let narrow = (80, 24);
+        let before = render(&app, wide.0, wide.1);
+        assert!(before.contains(reader), "{before}");
+        assert!(
+            before.contains("› ") && before.matches("[Active]").count() == 1,
+            "{before}"
+        );
+        press(&mut app, KeyCode::Tab, wide);
+        press(&mut app, KeyCode::Down, wide);
+        let focused = render(&app, wide.0, wide.1);
+        assert!(focused.contains(&format!("{reader} [Active]")), "{focused}");
+        assert_eq!(focused.matches("[Active]").count(), 1, "{focused}");
+        let row = |screen: &str| {
+            screen
+                .lines()
+                .find_map(|line| line.split_once("› "))
+                .map(|(_, text)| {
+                    text.split_whitespace()
+                        .take(2)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+        };
+        assert_eq!(row(&before), row(&focused));
+        let compact = render(&app, narrow.0, narrow.1);
+        assert!(
+            compact.contains(&format!("{reader} [Active]")) && !compact.contains("› "),
+            "{compact}"
+        );
+        press(&mut app, KeyCode::Esc, narrow);
+        let returned = render(&app, wide.0, wide.1);
+        assert!(
+            !returned.contains(&format!("{reader} [Active]")),
+            "{returned}"
+        );
+        assert_eq!(row(&before), row(&returned));
+    }
+}

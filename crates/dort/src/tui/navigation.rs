@@ -240,8 +240,10 @@ pub fn local_available(app: &App) -> bool {
         || app.show_result
         || app.confirmation.is_some()
         || app.shell.overlay.is_some() && !ignored
+        || app.tab == Tab::Git && app.git_view.editing_root
         || app.page_title().is_some()
             && !ignored
+            && !matches!(app.tab, Tab::Files | Tab::Git)
             && !(app.tab == Tab::Tools && app.tools_view.collection_visible())
     {
         return false;

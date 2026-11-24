@@ -729,6 +729,7 @@ impl App {
             }
             Target::Filter => {
                 if self.tab == Tab::Files {
+                    self.inventory.details = false;
                     self.inventory.search_mut(self.discovering).editing = true;
                 }
                 if self.tab == Tab::Recovery {
@@ -933,9 +934,22 @@ impl App {
         }
     }
     fn workspace_region(&self, scope: Scope) -> Option<Region> {
+        if self.shell.overlay.is_some() {
+            return None;
+        }
         match scope {
-            Scope::Recovery if self.tab == Tab::Recovery && self.shell.overlay.is_none() => {
-                Some(self.history_region)
+            Scope::Recovery if self.tab == Tab::Recovery => Some(self.history_region),
+            Scope::Files { discovering }
+                if self.tab == Tab::Files && self.discovering == discovering =>
+            {
+                Some(if self.inventory.details || self.content.focused {
+                    Region::Details
+                } else {
+                    Region::Queue
+                })
+            }
+            Scope::Git if self.tab == Tab::Git && !self.git_view.editing_root => {
+                Some(self.git_view.region)
             }
             _ => None,
         }
@@ -944,6 +958,12 @@ impl App {
         if self.workspace_region(scope).is_some() {
             match scope {
                 Scope::Recovery => self.history_region = region,
+                Scope::Files { discovering } => {
+                    self.inventory.details = region == Region::Details;
+                    self.content.focused =
+                        discovering && self.content.available() && self.inventory.details;
+                }
+                Scope::Git => self.git_view.region = region,
             }
         }
     }
@@ -1707,6 +1727,7 @@ impl App {
                 self.result = None;
             }
             KeyCode::Char('/') if self.tab == Tab::Files => {
+                self.inventory.details = false;
                 self.inventory.search_mut(self.discovering).editing = true
             }
             KeyCode::Char('/') if self.tab == Tab::Recovery => {
@@ -1747,10 +1768,6 @@ impl App {
             KeyCode::Enter if self.tab == Tab::Checks => {
                 return self.activate(self.checks_primary());
             }
-            KeyCode::Enter if self.tab == Tab::Files && self.discovering => {
-                self.inventory.details = true;
-                self.details_scroll = 0;
-            }
             KeyCode::Enter if self.tab == Tab::Files => return self.activate(Action::Inspect),
             KeyCode::Down if self.tab == Tab::Files => self.move_file_selection(false),
             KeyCode::Up if self.tab == Tab::Files => self.move_file_selection(true),
@@ -1783,7 +1800,9 @@ impl App {
         if self.viewport != (width, height) {
             self.last_click = None;
             self.hits.clear();
-            self.hits.invalidate_workspace();
+            if self.hits.size() != (width, height) {
+                self.hits.invalidate_workspace();
+            }
         }
         self.viewport = (width, height);
         if let Some(preview) = &self.preview

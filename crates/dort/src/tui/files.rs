@@ -1,5 +1,6 @@
 //! Files workspace built from typed rows.
 use super::input::{Target, Wheel};
+use super::workspace::{Region, Scope, Workspace};
 use super::{app::App, components as ui, views::safe};
 use dort_core::observation::Kind;
 use ratatui::{
@@ -13,10 +14,10 @@ use ui::collection::{Collection, Header, RowTargets};
 #[cfg(test)]
 thread_local! { pub(super) static FORMATTED_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 
-fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
-    if app.discovering {
+fn draw_selected(frame: &mut Frame, area: Rect, app: &App, focused: bool) {
+    if app.discovering && app.content.available() {
         let parts = Layout::vertical([Constraint::Min(3), Constraint::Length(5)]).split(area);
-        super::discover_content::draw(frame, parts[0], &app.content);
+        super::discover_content::draw(frame, parts[0], &app.content, focused);
         app.hits.wheel(parts[0], super::input::Wheel::Content);
         app.hits
             .click(parts[0], super::input::Target::DiscoverFocus(true));
@@ -35,7 +36,7 @@ fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
             "Selected item",
             details(app),
             app.details_scroll,
-            true,
+            focused,
         );
     }
 }
@@ -237,21 +238,28 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     }
     app.hits.click(sections[1], super::input::Target::Filter);
     let content = sections[2];
-    let wide = ui::reader::wide_details(area, 2);
-    let (list_area, details) = ui::reader::detail_panes(content, wide);
-    let focused = !app.discovering || !app.content.focused;
-    if app.inventory.details
-        || app.content.focused
-        || (!wide && app.result.is_some() && app.receipt.is_none())
-    {
-        draw_selected(frame, content, app);
+    let active = if !search.editing && (app.inventory.details || app.content.focused) {
+        Region::Details
+    } else {
+        Region::Queue
+    };
+    let scope = Scope::Files {
+        discovering: app.discovering,
+    };
+    let workspace = Workspace::new(scope, content, active, !nodes.is_empty());
+    if !workspace.is_split() && app.result.is_some() && app.receipt.is_none() && !search.editing {
+        draw_selected(frame, content, app, true);
         return;
     }
-    let selected = super::tree::position(app, app.file_selection());
-    if app.discovering {
-        app.hits
-            .click(list_area, super::input::Target::DiscoverFocus(false));
+    workspace.bind(&app.hits);
+    if let Some(area) = workspace.details {
+        draw_selected(frame, area, app, active == Region::Details);
     }
+    let Some(list_area) = workspace.queue else {
+        return;
+    };
+    let focused = active == Region::Queue;
+    let selected = super::tree::position(app, app.file_selection());
     let total = if app.discovering {
         app.discovery
             .as_ref()
@@ -441,8 +449,5 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                 );
             }
         }
-    }
-    if let Some(area) = details {
-        draw_selected(frame, area, app);
     }
 }

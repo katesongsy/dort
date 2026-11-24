@@ -1,5 +1,6 @@
 use super::{Comparison, Metadata, Reader, preview};
 use crate::tui::input::{Target, Wheel};
+use crate::tui::workspace::{Region, Scope, Workspace};
 use crate::tui::{components as ui, inventory::Search};
 use ratatui::{
     Frame,
@@ -22,6 +23,7 @@ pub(super) struct View<'a> {
     pub selected: usize,
     pub viewport: &'a crate::tui::navigation::ListViewport,
     pub reader: Reader,
+    pub active: Region,
     pub preview: &'a preview::State,
     pub scroll: u16,
     pub busy: bool,
@@ -124,10 +126,6 @@ fn filter(frame: &mut Frame, area: Rect, view: &View<'_>) {
     );
 }
 
-pub(super) fn wide_details(area: Rect, metadata: Option<&Metadata>) -> bool {
-    let branch = matches!(metadata, Some(Metadata::Status(_))) && area.height >= 12;
-    ui::reader::wide_details(area, 2 + u16::from(branch))
-}
 pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
     let branch = match view.metadata {
         Some(Metadata::Status(status)) if area.height >= 12 => Some(status.branch.join(" | ")),
@@ -160,14 +158,17 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
     );
     filter(frame, sections[1], &view);
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    let wide = wide_details(area, view.metadata);
+    let content = sections[3];
+    let workspace = Workspace::new(Scope::Git, content, view.active, !view.visible.is_empty());
+    let wide = workspace.is_split();
+    workspace.bind(view.hits);
     let action = if view.search.editing {
         Some((
             "Done",
             "Enter",
             crate::tui::input::Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         ))
-    } else if view.reader != Reader::Entries {
+    } else if view.active == Region::Details {
         Some(("Back", "Esc", crate::tui::input::Target::Back))
     } else if view.metadata.is_some_and(|metadata| metadata.len() > 0) && !view.visible.is_empty() {
         Some((
@@ -192,7 +193,7 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         view.hits.present(ui::ActionButton { label, key, target });
     }
     view.hits.present(ui::ActionButton {
-        label: if view.reader == Reader::Details {
+        label: if view.reader == Reader::Metadata && view.active == Region::Details {
             "Entries"
         } else {
             "Scope details"
@@ -208,21 +209,18 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
             sections[2],
         );
     }
-    let content = sections[3];
-    if view.reader == Reader::Details {
-        draw_details(frame, content, &view, view.preview.fallback());
-        return;
+    if let Some(pane) = workspace.details {
+        let focused = workspace.active == Region::Details;
+        if view.reader == Reader::Metadata || !view.preview.draw(frame, pane, view.hits, focused) {
+            draw_details(frame, pane, &view, view.preview.fallback(), focused);
+        }
     }
-    if view.reader == Reader::Patch && !wide {
-        draw_preview(frame, content, &view);
-        return;
-    }
-    let (list, pane) = ui::reader::detail_panes(content, wide);
+    let Some(list) = workspace.queue else { return };
     let title = view
         .metadata
         .map(|m| format!("Details | {} entries", m.len()))
         .unwrap_or_else(|| "Details | Unknown".into());
-    let focused = view.reader == Reader::Entries;
+    let focused = view.active == Region::Queue;
     if view.metadata.is_none()
         || view.metadata.is_some_and(|m| m.len() == 0)
         || view.visible.is_empty()
@@ -292,25 +290,20 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
             },
         );
     }
-    if let Some(pane) = pane {
-        draw_preview(frame, pane, &view);
-    }
 }
-fn draw_preview(frame: &mut Frame, area: Rect, view: &View<'_>) {
-    if !view
-        .preview
-        .draw(frame, area, view.hits, view.reader == Reader::Patch)
-    {
-        draw_details(frame, area, view, view.preview.fallback());
-    }
-}
-fn draw_details(frame: &mut Frame, area: Rect, view: &View<'_>, fallback: Option<&str>) {
+fn draw_details(
+    frame: &mut Frame,
+    area: Rect,
+    view: &View<'_>,
+    fallback: Option<&str>,
+    focused: bool,
+) {
     ui::reader::Reader::new(view.hits).report(
         frame,
         area,
         "Git details",
         details(view, fallback),
         view.scroll,
-        true,
+        focused,
     );
 }
