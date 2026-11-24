@@ -1,6 +1,8 @@
 //! Shared visual components. Metadata is escaped before styling.
+pub mod approval;
 pub mod choice;
 pub mod chrome;
+pub mod collection;
 pub mod dashboard;
 pub mod design;
 pub mod glyphs;
@@ -8,6 +10,9 @@ pub mod help;
 pub mod menu;
 pub mod motion;
 pub mod navigation;
+pub mod reader;
+pub use design::pane;
+pub use reader::{metadata, report, review_text, text_view};
 
 pub fn short_field(label: &str, value: &str, width: u16) -> String {
     let escaped = inline(&format!("{value:?}"));
@@ -22,12 +27,13 @@ pub fn short_field(label: &str, value: &str, width: u16) -> String {
     format!("{label}: {shown}")
 }
 
+use super::appearance::TextRole;
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Paragraph, Wrap},
 };
 
 /// Status messages distinguish controlled UI decoration from runtime metadata.
@@ -70,26 +76,26 @@ impl std::fmt::Display for StatusText {
     }
 }
 pub fn accent() -> Style {
-    Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD)
+    TextRole::Heading.style()
+}
+/// Subdued secondary text, such as a directory name in a mixed list.
+pub fn note() -> Style {
+    crate::tui::appearance::TextRole::Note.style()
 }
 pub fn muted() -> Style {
-    Style::default()
+    TextRole::Value.style()
 }
 pub fn selected() -> Style {
-    heading().add_modifier(Modifier::REVERSED)
+    TextRole::Label.style().add_modifier(Modifier::REVERSED)
 }
 pub fn heading() -> Style {
-    Style::default().add_modifier(Modifier::BOLD)
+    TextRole::Label.style()
 }
 pub fn warning() -> Style {
-    Style::default()
-        .fg(Color::Yellow)
-        .add_modifier(Modifier::BOLD)
+    TextRole::Warning.style()
 }
 pub fn danger() -> Style {
-    design::Tone::Error.style()
+    TextRole::Blocker.style()
 }
 pub fn success() -> Style {
     design::Tone::Success.style()
@@ -97,21 +103,30 @@ pub fn success() -> Style {
 pub fn state(label: &str) -> Style {
     match label {
         "Damaged" => danger(),
-        "Blocked" | "Not eligible" => warning(),
-        "Linked" => Style::default().fg(Color::Green),
-        "Needs apply" | "Eligible hint" => warning(),
+        "Blocked" => warning(),
+        "Not eligible" | "Ineligible" => muted(),
+        "Eligible" | "Linked" => success(),
+        "Managed" => accent(),
+        "Needs apply" => warning(),
         _ => Style::default(),
     }
 }
-pub fn pane(title: &str, focused: bool) -> Block<'static> {
-    design::titled_block(
-        title,
-        Borders::TOP,
-        if focused { accent() } else { heading() },
-    )
-}
 pub fn inline(value: &str) -> String {
     super::views::safe(value).replace('\n', "\\n")
+}
+/// Chrome text: escape control characters, keep printable Unicode such as
+/// spinner frames and box drawing. Titles are app-composed, never provider output.
+pub fn chrome_text(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|c| {
+            if c.is_control() {
+                c.escape_default().collect::<Vec<_>>()
+            } else {
+                vec![c]
+            }
+        })
+        .collect()
 }
 pub fn clip(value: &str, width: u16) -> String {
     chrome_clip(&inline(value), width)
@@ -176,7 +191,7 @@ pub fn field_page(
         }
         let active = i == focus && hits.input_focus_allowed();
         frame.render_widget(
-            Paragraph::new(fields[i].0).style(if active { heading() } else { muted() }),
+            Paragraph::new(inline(fields[i].0)).style(TextRole::Label.style()),
             Rect::new(fields_area.x, y, fields_area.width, 1),
         );
         let rect = Rect::new(fields_area.x, y + 1, fields_area.width, 1);
@@ -224,140 +239,6 @@ pub fn action_bar(
     } else {
         area
     }
-}
-fn metadata_lines(
-    value: &serde_json::Value,
-    label: &str,
-    depth: usize,
-    lines: &mut Vec<Line<'static>>,
-) {
-    let title = inline(label);
-    match value {
-        serde_json::Value::Object(values) if depth < 24 => {
-            if !title.is_empty() {
-                lines.push(Line::styled(
-                    format!("{}{title}", "  ".repeat(depth.min(6))),
-                    accent(),
-                ));
-            }
-            if values.is_empty() {
-                lines.push(metadata(&title, "None recorded"));
-            }
-            for (key, value) in values {
-                metadata_lines(value, key, depth + 1, lines);
-            }
-        }
-        serde_json::Value::Array(values) if depth < 24 => {
-            lines.push(Line::styled(
-                format!("{}{title} ({})", "  ".repeat(depth.min(6)), values.len()),
-                accent(),
-            ));
-            if values.is_empty() {
-                lines.push(Line::raw("None recorded"));
-            }
-            for (index, value) in values.iter().enumerate() {
-                metadata_lines(value, &format!("{}", index + 1), depth + 1, lines);
-            }
-        }
-        serde_json::Value::String(value) => lines.push(metadata(&title, value)),
-        serde_json::Value::Null => lines.push(metadata(&title, "Not recorded")),
-        value => lines.push(metadata(&title, &value.to_string())),
-    }
-}
-/// Visual hierarchy for an operation's existing human report. This presentation
-/// never supplies identity, eligibility or approval data to the executor.
-pub fn review_text(body: &str) -> Text<'static> {
-    // Public metadata reports are presented as labeled facts, never used to reconstruct approval.
-    if body.trim_start().starts_with(['{', '['])
-        && let Ok(value) = serde_json::from_str::<serde_json::Value>(body)
-    {
-        let mut lines = Vec::new();
-        metadata_lines(&value, "", 0, &mut lines);
-        return Text::from(lines);
-    }
-    let escaped = super::views::safe(body);
-    let lines = escaped.lines().enumerate().map(|(index, line)| {
-        let trimmed = line.trim_start();
-        if trimmed.ends_with(':') {
-            Line::styled(line.to_owned(), accent())
-        } else if trimmed.starts_with("BLOCKED") || trimmed.starts_with("Blocker") {
-            Line::styled(line.to_owned(), danger())
-        } else if index != 0
-            && let Some(effect) = trimmed.strip_prefix("- ")
-        {
-            Line::from(vec![
-                Span::styled(format!("{} ", glyphs::PENDING), muted()),
-                Span::raw(effect.to_owned()),
-            ])
-        } else if let Some((label, value)) = line.split_once(": ") {
-            Line::from(vec![
-                Span::styled(format!("{label}: "), heading()),
-                Span::raw(value.to_owned()),
-            ])
-        } else if index == 0 {
-            Line::styled(line.to_owned(), heading())
-        } else {
-            Line::raw(line.to_owned())
-        }
-    });
-    Text::from(lines.collect::<Vec<_>>())
-}
-/// Scroll an ASCII-safe report by rendered cells, not unbounded paragraph offsets.
-/// Splitting long lines at cells preserves all metadata and avoids silently clipped paths.
-pub fn report(
-    frame: &mut Frame,
-    area: Rect,
-    title: &str,
-    body: Text<'static>,
-    offset: u16,
-    focused: bool,
-) {
-    let block = pane(title, focused);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    text_view(frame, inner, body, offset);
-}
-pub fn text_view(frame: &mut Frame, inner: Rect, body: Text<'static>, offset: u16) {
-    text_view_at(frame, inner, body, usize::from(offset));
-}
-pub fn text_view_at(frame: &mut Frame, inner: Rect, body: Text<'static>, offset: usize) {
-    let width = usize::from(inner.width).max(1);
-    let mut lines = Vec::new();
-    for line in body.lines {
-        let mut row = Vec::new();
-        let mut used = 0;
-        let line_style = body.style.patch(line.style);
-        for span in line.spans {
-            let style = line_style.patch(span.style);
-            // Callers supply escaped ASCII text, trusted labels or decoration only.
-            for c in span.content.chars() {
-                if used == width {
-                    lines.push(Line::from(std::mem::take(&mut row)));
-                    used = 0;
-                }
-                row.push(Span::styled(c.to_string(), style));
-                used += 1;
-            }
-        }
-        lines.push(Line::from(row));
-    }
-    let start = offset.min(lines.len().saturating_sub(usize::from(inner.height)));
-    frame.render_widget(
-        Paragraph::new(Text::from(
-            lines
-                .into_iter()
-                .skip(start)
-                .take(usize::from(inner.height))
-                .collect::<Vec<_>>(),
-        )),
-        inner,
-    );
-}
-pub fn metadata(label: &str, value: &str) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(format!("{:<13} ", inline(label)), heading()),
-        Span::raw(inline(value)),
-    ])
 }
 /// Trusted UI prose composed only with escaped metadata at dynamic boundaries.
 pub fn chrome_prose(frame: &mut Frame, area: Rect, text: &str, style: Style) {

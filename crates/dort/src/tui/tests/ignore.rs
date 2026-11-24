@@ -47,7 +47,7 @@ fn action(app: &mut App, query: &str) -> Task {
         .expect("primary action task")
 }
 fn approve(app: &mut App) -> Task {
-    key(app, KeyCode::Enter).expect("one explicit preview approval")
+    super::tests::approve_ready(app, 100, 30).expect("one explicit preview approval")
 }
 #[test]
 fn ignore_folder_confirm_refresh_manage_and_unignore_are_complete_tui_workflows() {
@@ -226,7 +226,7 @@ fn visible_ignore_controls_mouse_and_keyboard_work_at_all_supported_sizes() {
             "contextual footer at {w}"
         );
         assert!(!footer.contains("Actions") && !footer.contains("Menu"));
-        assert!(app.preview.is_none() && app.confirmation.is_none());
+        assert!(app.preview.is_none());
         key(&mut app, KeyCode::Esc);
         let task = app
             .key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE), w, h)
@@ -262,18 +262,16 @@ fn help_retains_real_preview_confirmation_and_shrink_still_clears_approval() {
     ] {
         assert!(key(&mut app, code).is_none());
     }
-    assert!(app.confirmation.is_none());
     assert!(!render(&app, 140, 40).contains(".tool"));
     key(&mut app, KeyCode::Esc);
     assert_eq!(app.preview.as_ref().unwrap().text, original);
-    assert!(app.confirmation.is_none());
     key(&mut app, KeyCode::F(1));
     for code in [KeyCode::Char('s'), KeyCode::Enter] {
         assert!(key(&mut app, code).is_none());
     }
-    assert!(app.preview.is_some() && app.confirmation.is_none());
+    assert!(app.preview.is_some());
     app.resize(47, 13);
-    assert!(app.confirmation.is_none() && app.help.is_some() && app.preview.is_some());
+    assert!(app.help.is_some() && app.preview.is_some());
     app.resize(80, 24);
     key(&mut app, KeyCode::Esc);
     assert!(!f.host.config_dir.exists() && !f.host.state_dir.exists());
@@ -294,7 +292,7 @@ fn plain_section_navigation_drops_real_preview_ownership_without_any_write() {
         80,
         24,
     );
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none());
     assert!(app.tab == super::app::Tab::Overview);
     assert!(!f.host.config_dir.exists() && !f.host.state_dir.exists());
 }
@@ -305,20 +303,22 @@ fn ignore_preview_cancel_dry_run_and_small_layout_cannot_write() {
     let mut app = f.app(true);
     let task = action(&mut app, "Ignore selected");
     f.finish(&mut app, task);
-    assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(app.confirmation.is_none());
+    assert!(key(&mut app, KeyCode::Char('y')).is_none());
     key(&mut app, KeyCode::Esc);
     assert!(!f.host.config_dir.exists() && !f.host.state_dir.exists());
     let mut app = f.app(false);
     let task = action(&mut app, "Ignore selected");
     f.finish(&mut app, task);
     assert!(
-        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 47, 13)
-            .is_none()
+        app.key(
+            KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+            47,
+            13
+        )
+        .is_none()
     );
-    assert!(app.confirmation.is_none());
-    key(&mut app, KeyCode::Char('y'));
-    assert!(app.preview.is_some() && app.confirmation.is_none()); // text is not an activation
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(app.preview.is_some());
     assert!(!f.host.config_dir.exists());
     key(&mut app, KeyCode::Esc);
     assert!(!f.host.config_dir.exists() && !f.host.state_dir.exists());

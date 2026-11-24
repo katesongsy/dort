@@ -24,7 +24,7 @@ fn local_shortcuts_keep_guards() {
             key(&mut app, KeyCode::Char('3'), w, h),
             Some(Task::IgnoredPaths)
         ));
-        assert!(app.preview.is_none() && app.confirmation.is_none());
+        assert!(app.preview.is_none());
         let mut dry = App::new(true);
         assert!(dry.activate(Action::PreviewOnly).is_none());
         assert!(dry.dry_run && dry.interaction_notice.is_some());
@@ -58,7 +58,7 @@ fn form_pages_keep_controls_draft_focus_and_explicit_metadata_at_all_sizes() {
             assert!(screen.contains("Draft details"));
             assert_eq!(app.shell.adoption.target, before);
             assert_eq!(app.shell.adoption.focused, 0);
-            assert!(app.preview.is_none() && app.confirmation.is_none());
+            assert!(app.preview.is_none());
         }
         key(&mut app, KeyCode::Home, w, h);
         assert_eq!(app.shell.scroll, 0);
@@ -154,7 +154,7 @@ fn active_task_pages_scroll_activity_instead_of_the_retained_form() {
     assert_eq!(app.details_scroll, 0);
     assert_eq!(app.shell.scroll, 9);
     assert_eq!(app.shell.adoption.target, "~/.retained");
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none());
 }
 #[test]
 fn paging_copy_describes_scrolling_instead_of_opening_details() {

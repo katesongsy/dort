@@ -5,7 +5,7 @@ Inspect every local operation record and act on an interrupted one. Recovery is 
 ## Sub-features
 
 - **All repositories** (`r`): operations across every registered repository, with a blocked-writes count.
-- **Details** (`Enter`): one record's effects and state.
+- **Details** (`Enter`): one record's effects and state. In a wide split, `Tab` moves focus between the list and details without changing the selected record.
 - **`R` retry**: after a failure, retries a read or asks for a fresh preview. It never replays an approval.
 - **Rollback**: reverse an unchanged file or declaration operation. Refuses changed state.
 - **Resume**: continue an intact repository setup.
@@ -49,6 +49,7 @@ dort rollback <REPOSITORY_ID> <OPERATION_ID> --dry-run
 - `history` lists operations with type, state and status. A completed `Repository setup` and a completed file operation are the expected pair after `new` plus an adoption.
 - The TUI header reads `Recovery / All repositories` with `N/N shown | Blocked writes: 0`.
 - Operation details has cyan section headings, bold field labels and a green `Finished` status in a color terminal.
+- A guarded review shows `y` only after its effects reach the bottom of the pane. `Enter` opens a review and never approves.
 - A rollback that succeeds removes the mapping and restores the destination; a rollback over changed state exits nonzero with a diagnosis and touches nothing.
 - `Blocked writes: 0` after a clean teardown is the signal that nothing is left to resolve.
 

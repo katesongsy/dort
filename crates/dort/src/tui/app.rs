@@ -1,5 +1,10 @@
+use super::workspace::{Region, Scope};
 use super::{
     actions::{Data, Output, Pending, Task},
+    components::{
+        approval::Approval,
+        reader::{ReviewScroll, ReviewStage},
+    },
     input::Target,
     shell::{Action, Form, Intent, Overlay, ProfilePicker, Shell},
 };
@@ -24,33 +29,7 @@ pub enum Tab {
 pub struct Preview {
     pub pending: Pending,
     pub text: String,
-    pub scroll: u16,
-    pub horizontal: u16,
-    pub full: bool,
-    pub selected: usize,
-    pub effect_scroll: u16,
-}
-impl Preview {
-    fn clamp_scroll(&mut self, width: u16, height: u16) {
-        // Header, navigation, status, footer, approval row and preview borders.
-        // Escaped report bytes are ASCII, so byte lengths equal terminal columns.
-        let escaped = super::views::safe(&self.text);
-        let lines = escaped.lines().count();
-        let columns = escaped.lines().map(str::len).max().unwrap_or(0);
-        self.scroll = self.scroll.min(
-            lines
-                .saturating_sub(usize::from(height.saturating_sub(7)))
-                .min(u16::MAX as usize) as u16,
-        );
-        self.horizontal = self.horizontal.min(
-            columns
-                .saturating_sub(usize::from(width.saturating_sub(2)))
-                .min(u16::MAX as usize) as u16,
-        );
-    }
-}
-pub struct Confirmation {
-    pub prompt_scroll: u16,
+    pub reader: ReviewScroll,
 }
 struct RowClick {
     at: std::time::Instant,
@@ -98,7 +77,7 @@ pub struct App {
     pub diagnostics: Option<super::actions::Diagnostics>,
     pub showing_diagnostics: bool,
     pub history_search: super::inventory::Search,
-    pub history_details: bool,
+    pub history_region: Region,
     pub history_viewport: super::navigation::ListViewport,
     pub retry: Option<super::actions::Retry>,
     pub selected: usize,
@@ -107,7 +86,8 @@ pub struct App {
     pub details_scroll: u16,
     viewport: (u16, u16),
     pub preview: Option<Preview>,
-    pub confirmation: Option<Confirmation>,
+    #[cfg(test)]
+    pub confirmation: Option<()>,
     pub busy: bool,
     pub writing: bool,
     pub exit_requested: bool,
@@ -191,7 +171,7 @@ impl App {
             diagnostics: None,
             showing_diagnostics: false,
             history_search: Default::default(),
-            history_details: false,
+            history_region: Region::Queue,
             history_viewport: Default::default(),
             retry: None,
             selected: 0,
@@ -200,6 +180,7 @@ impl App {
             details_scroll: 0,
             viewport: (48, 14),
             preview: None,
+            #[cfg(test)]
             confirmation: None,
             busy: false,
             writing: false,
@@ -213,6 +194,7 @@ impl App {
         }
     }
     pub fn start(&mut self, writing: bool) {
+        self.hits.invalidate_review();
         self.motion.reset();
         self.last_click = None;
         self.hits.clear();
@@ -251,6 +233,7 @@ impl App {
             }
             return None;
         }
+        self.hits.invalidate_review();
         let writing = self.writing;
         let activity = self.activity.take();
         self.failed_write = (writing || blocked) && result.is_err();
@@ -303,7 +286,6 @@ impl App {
                     format!("Read failed: {error}\nEsc returns to retained input and scope.").into()
                 };
                 self.preview = None;
-                self.confirmation = None;
                 if writing {
                     self.retry = None;
                 }
@@ -407,7 +389,18 @@ impl App {
         if let Some(code) = code {
             self.last_click = None;
             let wheel = self.hits.scroll(event.column, event.row)?;
-            if matches!(wheel, Wheel::Choices | Wheel::PreviewRows) {
+            if let Some(workspace) = self.hits.workspace((width, height))
+                && workspace.is_split()
+            {
+                match workspace.region_at(event.column, event.row) {
+                    Some(region) if !self.text_entry() => {
+                        self.focus_workspace(workspace.scope, region)
+                    }
+                    None if matches!(wheel, Wheel::Details | Wheel::Tools) => return None,
+                    _ => (),
+                }
+            }
+            if matches!(wheel, Wheel::Choices) {
                 let code = if code == KeyCode::PageDown {
                     KeyCode::Down
                 } else {
@@ -428,7 +421,8 @@ impl App {
                 if self.tab == Tab::Git {
                     self.git_view.scroll_metadata_details(code);
                 } else {
-                    super::shell::scroll_details(&mut self.details_scroll, code);
+                    super::components::reader::ScrollKeys::DETAILS
+                        .apply(&mut self.details_scroll, code);
                 }
                 return None;
             }
@@ -460,15 +454,14 @@ impl App {
             self.status = reason.into();
             return None;
         }
-        if self.confirmation.is_some() {
-            let code = match self.hits.target(event.column, event.row) {
-                Some(Target::ConfirmAction) => KeyCode::Enter,
-                Some(Target::CancelConfirmation | Target::DismissDialog) => KeyCode::Esc,
-                _ => return None,
-            };
-            return self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height);
-        }
         let target = self.hits.target(event.column, event.row)?;
+        if let Some(workspace) = self.hits.workspace((width, height))
+            && workspace.is_split()
+            && !self.text_entry()
+            && let Some(region) = workspace.region_at(event.column, event.row)
+        {
+            self.focus_workspace(workspace.scope, region);
+        }
         if matches!(target, Target::More) {
             let (_, hidden) = super::workbench::strip_actions(self, width);
             let mut actions = super::workbench::actions(self);
@@ -491,7 +484,9 @@ impl App {
         let row_click = matches!(target, Target::Row(_)) && self.tab == Tab::Files && !self.busy;
         // Row selection does not alter layout: retain render-owned hits for coalesced clicks.
         // Checkbox/chevron hits remain single-click controls, never double-click marks.
-        if !row_click {
+        if row_click {
+            self.hits.retain_file_rows();
+        } else {
             self.hits.clear();
         }
         if row_click && let Target::Row(index) = target {
@@ -585,26 +580,7 @@ impl App {
                 self.go_place(place)
             }
             Target::Feedback(control) => self.feedback(control, width, height),
-            Target::Continue => {
-                if self.preview.is_some() {
-                    self.key(
-                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-                        width,
-                        height,
-                    )
-                } else {
-                    None
-                }
-            }
-            Target::PreviewRow(index) => {
-                if let Some(preview) = &mut self.preview
-                    && preview.pending.review_len().is_some_and(|len| index < len)
-                {
-                    preview.selected = index;
-                    preview.effect_scroll = 0;
-                }
-                None
-            }
+            Target::Continue => self.action_key(Approval::event(), width, height),
             Target::DiscoverFocus(content) => {
                 self.content.focused = content && self.content.available();
                 self.inventory.details = false;
@@ -653,6 +629,12 @@ impl App {
                 self.details_scroll = 0;
                 None
             }
+            Target::Workspace(scope, region) => {
+                if !self.text_entry() {
+                    self.focus_workspace(scope, region);
+                }
+                None
+            }
             Target::Action(action) => self.activate(action),
             Target::DismissDialog => {
                 self.interaction_notice = None;
@@ -678,7 +660,7 @@ impl App {
                 } else if self.tab == Tab::Recovery && self.visible_history_rows().contains(&index)
                 {
                     self.selected = index;
-                    self.history_details = false;
+                    self.history_region = Region::Queue;
                 } else if self.tab == Tab::Git {
                     self.git_view.select_metadata(index);
                 }
@@ -687,9 +669,11 @@ impl App {
             }
             Target::Filter => {
                 if self.tab == Tab::Files {
+                    self.inventory.details = false;
                     self.inventory.search_mut(self.discovering).editing = true;
                 }
                 if self.tab == Tab::Recovery {
+                    self.history_region = Region::Queue;
                     self.history_search.editing = true;
                 }
                 if self.tab == Tab::Git {
@@ -697,7 +681,6 @@ impl App {
                 }
                 None
             }
-            Target::ConfirmAction | Target::CancelConfirmation => None,
             Target::ToolDeclarationField(index) => {
                 if self.tab != Tab::Tools || !self.tools_view.declaration_open {
                     return None;
@@ -844,6 +827,7 @@ impl App {
                     }
                     _ => return None,
                 }
+                self.shell.scroll = 0;
                 if activate {
                     self.key(KeyEvent::new(key, modifiers), width, height)
                 } else {
@@ -889,6 +873,71 @@ impl App {
             Control::Back => None,
         }
     }
+    fn workspace_region(&self, scope: Scope) -> Option<Region> {
+        if let Some(overlay) = &self.shell.overlay {
+            return match (scope, overlay) {
+                (Scope::Ignored, Overlay::Ignored { .. })
+                | (Scope::Repositories, Overlay::Repositories { .. })
+                | (Scope::Profiles, Overlay::Profiles(_)) => {
+                    Some(Region::from_details(self.shell.picker_details))
+                }
+                _ => None,
+            };
+        }
+        match scope {
+            Scope::Recovery if self.tab == Tab::Recovery => Some(self.history_region),
+            Scope::Files { discovering }
+                if self.tab == Tab::Files && self.discovering == discovering =>
+            {
+                Some(if self.inventory.details || self.content.focused {
+                    Region::Details
+                } else {
+                    Region::Queue
+                })
+            }
+            Scope::Git if self.tab == Tab::Git && !self.git_view.editing_root => {
+                Some(self.git_view.region)
+            }
+            scope if self.tab == Tab::Tools && self.tools_view.workspace_visible() => match scope {
+                Scope::DeclaredTools if self.tools_view.landing() => {
+                    Some(Region::from_details(self.tools_view.declared_details))
+                }
+                Scope::InstalledTools if self.tools_view.installed_open => {
+                    Some(Region::from_details(self.tools_view.installed.details))
+                }
+                Scope::InstallAttempts if self.tools_view.install_open => {
+                    Some(Region::from_details(self.tools_view.installation.details))
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+    fn focus_workspace(&mut self, scope: Scope, region: Region) {
+        if self.workspace_region(scope).is_some() {
+            match scope {
+                Scope::Recovery => self.history_region = region,
+                Scope::Ignored | Scope::Repositories | Scope::Profiles => {
+                    self.shell.picker_details = region == Region::Details
+                }
+                Scope::Files { discovering } => {
+                    self.inventory.details = region == Region::Details;
+                    self.content.focused =
+                        discovering && self.content.available() && self.inventory.details;
+                }
+                Scope::Git => self.git_view.region = region,
+                Scope::DeclaredTools => {
+                    self.tools_view.declared_details = region == Region::Details
+                }
+                Scope::InstalledTools => {
+                    self.tools_view.installed.details = region == Region::Details
+                }
+                Scope::InstallAttempts => {
+                    self.tools_view.installation.details = region == Region::Details
+                }
+            }
+        }
+    }
     fn paging_list(&self) -> bool {
         if self.help.is_some()
             || self.more.is_some()
@@ -897,7 +946,6 @@ impl App {
             || self.error.is_some()
             || self.show_result
             || self.preview.is_some()
-            || self.confirmation.is_some()
             || self.text_entry()
             || self.batch_editor.as_ref().is_some_and(|e| e.open)
         {
@@ -908,7 +956,7 @@ impl App {
         }
         match self.tab {
             Tab::Files => !self.inventory.details && !self.content.focused,
-            Tab::Recovery => !self.history_details,
+            Tab::Recovery => self.history_region == Region::Queue,
             Tab::Git => self.git_view.browsing_entries(),
             Tab::Tools => self.tools_view.collection_visible(),
             _ => false,
@@ -981,6 +1029,9 @@ impl App {
         let task = self.key_inner(key, width, height, more_actions, section_shortcuts);
         self.sync_git_preview();
         let transient_after = self.help.is_some() || self.more.is_some() || self.choice.is_some();
+        if transient_before != transient_after {
+            self.hits.invalidate_review();
+        }
         if !transient_before && !transient_after && form_before != self.form_page() {
             self.form_focus = None;
         }
@@ -1012,12 +1063,11 @@ impl App {
                 && self.more.is_none()
                 && self.choice.is_none()
                 && (self.help.is_some()
-                    || self.confirmation.is_none()
-                        && (self.error.is_some()
-                            || self.show_result
-                            || self.busy
-                            || self.preview.is_some()
-                            || !self.text_entry())))
+                    || (self.error.is_some()
+                        || self.show_result
+                        || self.busy
+                        || self.preview.is_some()
+                        || !self.text_entry())))
         {
             self.git_view.discard_preview();
             if self.busy {
@@ -1105,7 +1155,7 @@ impl App {
                     self.inventory.search_mut(self.discovering).editing = false;
                     self.inventory.details = false;
                     self.history_search.editing = false;
-                    self.history_details = false;
+                    self.history_region = Region::Queue;
                 }
             }
             self.status = "Resize to at least 48x14 to review and approve.".into();
@@ -1124,11 +1174,7 @@ impl App {
             }
             return None;
         }
-        if key.code == KeyCode::F(3)
-            && self.preview.is_some()
-            && self.confirmation.is_none()
-            && !self.busy
-        {
+        if key.code == KeyCode::F(3) && self.preview.is_some() && !self.busy {
             return self.key(
                 KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
                 width,
@@ -1142,7 +1188,6 @@ impl App {
             && self.error.is_none()
             && !self.show_result
             && self.preview.is_none()
-            && self.confirmation.is_none()
         {
             match key.code {
                 KeyCode::Enter if !self.overview_details => {
@@ -1211,7 +1256,6 @@ impl App {
                 KeyCode::Char('h') => {
                     self.error = None;
                     self.preview = None;
-                    self.confirmation = None;
                     self.retry = None;
                     self.tab = Tab::Recovery;
                     self.shell.overlay = None;
@@ -1222,7 +1266,6 @@ impl App {
                 KeyCode::Char('r') => {
                     self.error = None;
                     self.preview = None;
-                    self.confirmation = None;
                     self.details_scroll = 0;
                     if let Some(intent) = self.retry.take() {
                         return Some(intent.task());
@@ -1262,10 +1305,12 @@ impl App {
                 KeyCode::Char('h') => Some(Control::Recovery),
                 KeyCode::Enter | KeyCode::Esc => Some(Control::Back),
                 KeyCode::Home | KeyCode::PageDown | KeyCode::PageUp => {
-                    super::shell::scroll_details(&mut self.details_scroll, key.code);
+                    super::components::reader::ScrollKeys::DETAILS
+                        .apply(&mut self.details_scroll, key.code);
                     return None;
                 }
                 KeyCode::Tab => return None,
+                code if code == Approval::event().code => return None,
                 _ => None,
             };
             if let Some(control) = control {
@@ -1274,101 +1319,17 @@ impl App {
             self.show_result = false;
             self.details_scroll = 0;
         }
-        if self.confirmation.is_some() {
-            if self
-                .preview
-                .as_ref()
-                .is_some_and(|p| matches!(p.pending, Pending::Batch(_)))
-            {
-                return self.batch_confirm_key(key);
-            }
-            return self.confirm_key(key);
-        }
-        if key.code == KeyCode::Enter
-            && !self.dry_run
-            && self
-                .preview
-                .as_ref()
-                .is_some_and(|p| p.pending.adoption() && !p.pending.blocked())
-        {
-            let preview = self.preview.take().expect("review retained");
-            return match preview.pending.approve(None) {
-                Ok(approved) => {
-                    self.return_to_discover = true;
-                    Some(Task::Execute(approved))
-                }
-                Err(error) => {
-                    self.status = super::actions::diagnostic(&error).into();
-                    None
-                }
-            };
+        if self.preview_approval().accepts(key) {
+            return self.approve_preview();
         }
         if let Some(preview) = &mut self.preview {
-            let file_review = preview.pending.review_len().is_some();
             match key.code {
-                KeyCode::Char('i') if file_review => {
-                    preview.full = !preview.full;
-                    preview.scroll = 0;
-                    preview.horizontal = 0;
-                    preview.effect_scroll = 0;
-                }
-                KeyCode::Down | KeyCode::Up if file_review && !preview.full => {
-                    if let Some(len) = preview.pending.review_len() {
-                        preview.selected = if key.code == KeyCode::Down {
-                            (preview.selected + 1).min(len.saturating_sub(1))
-                        } else {
-                            preview.selected.saturating_sub(1)
-                        };
-                        preview.effect_scroll = 0;
-                    }
-                }
-                KeyCode::PageDown | KeyCode::PageUp if file_review && !preview.full => {
-                    preview.effect_scroll = if key.code == KeyCode::PageDown {
-                        preview.effect_scroll.saturating_add(4)
-                    } else {
-                        preview.effect_scroll.saturating_sub(4)
-                    };
-                }
-                KeyCode::Home => {
-                    preview.scroll = 0;
-                    preview.horizontal = 0;
-                    preview.effect_scroll = 0;
-                }
                 KeyCode::Esc => {
                     self.preview = None;
+                    self.hits.invalidate_review();
                     self.status = "Returned to the draft.".into();
                 }
-                KeyCode::Down | KeyCode::PageDown => {
-                    preview.scroll = preview
-                        .scroll
-                        .saturating_add(if key.code == KeyCode::Down { 1 } else { 8 })
-                        .min(
-                            preview
-                                .text
-                                .lines()
-                                .count()
-                                .saturating_sub(1)
-                                .min(u16::MAX as usize) as u16,
-                        )
-                }
-                KeyCode::Up | KeyCode::PageUp => {
-                    preview.scroll =
-                        preview
-                            .scroll
-                            .saturating_sub(if key.code == KeyCode::Up { 1 } else { 8 })
-                }
-                KeyCode::Right => preview.horizontal = preview.horizontal.saturating_add(8),
-                KeyCode::Left => preview.horizontal = preview.horizontal.saturating_sub(8),
-                KeyCode::Enter if !preview.pending.blocked() && !self.dry_run => {
-                    return self.approve_preview();
-                }
-                KeyCode::Enter => {
-                    self.status = "Approval disabled: blocked preview or --dry-run.".into()
-                }
-                _ => (),
-            }
-            if let Some(preview) = &mut self.preview {
-                preview.clamp_scroll(width, height);
+                code => preview.reader.key(&self.hits, ReviewStage::Changes, code),
             }
             return None;
         }
@@ -1405,6 +1366,18 @@ impl App {
         if let Some(editor) = self.batch_editor.as_mut().filter(|e| e.open) {
             return editor.key(key);
         }
+        if matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            && !self.text_entry()
+            && let Some(workspace) = self.hits.workspace((width, height))
+            && workspace.is_split()
+            && let Some(active) = self.workspace_region(workspace.scope)
+        {
+            self.focus_workspace(workspace.scope, active.other());
+            return None;
+        }
         if self.shell.overlay.is_some() {
             let report_scroll = !self.shell.form_details
                 && !self.shell.picker_details
@@ -1431,12 +1404,12 @@ impl App {
         }
         if self.tab == Tab::Tools
             && self.tools_view.landing()
-            && let Some(task) = super::declared_tools::key(self, key.code)
+            && let Some(task) = super::declared_tools::key(self, key)
         {
             return task;
         }
         if self.tab == Tab::Tools
-            && let Some(task) = self.tools_view.key(key, self.dry_run)
+            && let Some(task) = self.tools_view.key(key, self.dry_run, &self.hits)
         {
             return task;
         }
@@ -1480,22 +1453,18 @@ impl App {
         self.workspace_key(key)
     }
     fn workspace_key(&mut self, key: KeyEvent) -> Option<Task> {
-        if self.tab == Tab::Recovery && self.history_details && !self.history_search.editing {
+        if self.tab == Tab::Recovery
+            && self.history_region == Region::Details
+            && !self.history_search.editing
+        {
+            if super::components::reader::ScrollKeys::DETAILS
+                .apply(&mut self.details_scroll, key.code)
+            {
+                return None;
+            }
             match key.code {
-                KeyCode::Down | KeyCode::PageDown | KeyCode::Char('j') => {
-                    self.details_scroll = self.details_scroll.saturating_add(2);
-                    return None;
-                }
-                KeyCode::Up | KeyCode::PageUp | KeyCode::Char('k') => {
-                    self.details_scroll = self.details_scroll.saturating_sub(2);
-                    return None;
-                }
-                KeyCode::Home => {
-                    self.details_scroll = 0;
-                    return None;
-                }
                 KeyCode::Esc => {
-                    self.history_details = false;
+                    self.history_region = Region::Queue;
                     self.details_scroll = 0;
                     return None;
                 }
@@ -1548,7 +1517,7 @@ impl App {
                 return None;
             }
             if self.tab == Tab::Recovery
-                && !self.history_details
+                && self.history_region == Region::Queue
                 && self
                     .data
                     .as_ref()
@@ -1653,6 +1622,7 @@ impl App {
             key.code,
             KeyCode::PageDown | KeyCode::PageUp | KeyCode::Tab | KeyCode::BackTab
         ) && !opens_overlay
+            && !matches!(self.tab, Tab::Files | Tab::Recovery)
         {
             self.details_scroll = 0;
         }
@@ -1665,24 +1635,33 @@ impl App {
             KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(2),
             KeyCode::PageUp => self.details_scroll = self.details_scroll.saturating_sub(2),
             KeyCode::Home => self.details_scroll = 0,
-            KeyCode::Char('h') if self.tab == Tab::Files => super::tree::fold(self, true),
+            KeyCode::Char('h') | KeyCode::Left if self.tab == Tab::Files => {
+                super::tree::fold(self, true)
+            }
             KeyCode::Char('l') if self.tab == Tab::Files => super::tree::fold(self, false),
+            KeyCode::Right if self.tab == Tab::Files => super::tree::expand(self),
             KeyCode::Esc => {
                 self.inventory.details = false;
-                self.history_details = false;
+                self.history_region = Region::Queue;
 
                 self.result = None;
             }
             KeyCode::Char('/') if self.tab == Tab::Files => {
+                self.inventory.details = false;
                 self.inventory.search_mut(self.discovering).editing = true
             }
-            KeyCode::Char('/') if self.tab == Tab::Recovery => self.history_search.editing = true,
+            KeyCode::Char('/') if self.tab == Tab::Recovery => {
+                self.history_region = Region::Queue;
+                self.history_search.editing = true;
+            }
             KeyCode::Delete if self.tab == Tab::Recovery => {
                 self.history_search.query.clear();
                 self.clamp_history_selection();
             }
             KeyCode::Enter if self.tab == Tab::Recovery => {
-                self.history_details = true;
+                if self.history_selection().is_some() {
+                    self.history_region = Region::Details;
+                }
                 self.details_scroll = 0;
             }
             KeyCode::Down if self.tab == Tab::Recovery => self.move_history_selection(false),
@@ -1708,10 +1687,6 @@ impl App {
             KeyCode::Char('m') if self.tab != Tab::Files => return self.activate(Action::Adopt),
             KeyCode::Enter if self.tab == Tab::Checks => {
                 return self.activate(self.checks_primary());
-            }
-            KeyCode::Enter if self.tab == Tab::Files && self.discovering => {
-                self.inventory.details = true;
-                self.details_scroll = 0;
             }
             KeyCode::Enter if self.tab == Tab::Files => return self.activate(Action::Inspect),
             KeyCode::Down if self.tab == Tab::Files => self.move_file_selection(false),
@@ -1746,15 +1721,16 @@ impl App {
             self.last_click = None;
             self.hits.clear();
         }
+        if self.hits.size() != (width, height) {
+            self.hits.invalidate_review();
+            self.hits.invalidate_workspace();
+        }
         self.viewport = (width, height);
         if width < 48 || height < 14 {
             self.more = None;
             self.choice = None;
-            self.confirmation = None;
             self.git_view.discard_preview();
             self.tools_view.shrink();
-        } else if let Some(preview) = &mut self.preview {
-            preview.clamp_scroll(width, height);
         }
         super::discover_content::sync(self, width, height);
     }
@@ -2092,7 +2068,7 @@ impl App {
             }
             Action::Inspect if self.tab == Tab::Git => self.git_view.inspect_metadata(),
             Action::Inspect if self.tab == Tab::Recovery => {
-                self.history_details = true;
+                self.history_region = Region::Details;
                 self.details_scroll = 0;
             }
             Action::Inspect if self.tab == Tab::Files => {
@@ -2168,7 +2144,7 @@ impl App {
                         _ => super::recovery::abandon(row),
                     };
                     if !eligible {
-                        self.history_details = true;
+                        self.history_region = Region::Details;
                         self.status = "Action unavailable for this diagnosis. Inspect details and request an eligible recovery preview. Refresh if history changed.".into();
                         return None;
                     }
@@ -2198,7 +2174,6 @@ impl App {
             && self.error.is_none()
             && !self.show_result
             && self.preview.is_none()
-            && self.confirmation.is_none()
             && self.text_entry()
     }
     /// Stable identity of the foreground form, independent of its selected field.
@@ -2210,7 +2185,6 @@ impl App {
             || self.error.is_some()
             || self.show_result
             || self.preview.is_some()
-            || self.confirmation.is_some()
         {
             return None;
         }
@@ -2420,8 +2394,11 @@ impl App {
                 .saturating_add(count)
                 .min(visible.len().saturating_sub(1))
         };
-        if let Some(&index) = visible.get(next) {
+        if let Some(&index) = visible.get(next)
+            && self.selected != index
+        {
             self.selected = index;
+            self.details_scroll = 0;
         }
     }
     fn reset_repository_scope(&mut self) {
@@ -2446,7 +2423,6 @@ impl App {
             self.check = None;
         }
         self.preview = None;
-        self.confirmation = None;
     }
     fn check_task(&mut self, standalone: bool, profiles: bool) -> Option<Task> {
         let manifest = if standalone {
@@ -2713,12 +2689,26 @@ impl App {
                     .discovery
                     .as_ref()
                     .and_then(|d| d.report.candidates.get(self.candidate_selected))
+                    .is_some_and(|c| {
+                        self.data
+                            .as_ref()
+                            .is_some_and(|d| d.managed.iter().any(|row| row.target == c.entry.path))
+                    }) =>
+            {
+                Some("Already managed. Change the existing entry in Managed instead.")
+            }
+            Action::AdoptSelected
+                if self
+                    .discovery
+                    .as_ref()
+                    .and_then(|d| d.report.candidates.get(self.candidate_selected))
                     .is_none_or(|c| !c.supported_for_adoption) =>
             {
                 Some(
                     "Not eligible for adoption. Only owned regular files with one link can be added.",
                 )
             }
+
             Action::Rollback
                 if self.tab != Tab::Recovery
                     || self
@@ -2771,59 +2761,36 @@ impl App {
             _ => vec![],
         }
     }
-    fn batch_confirm_key(&mut self, key: KeyEvent) -> Option<Task> {
-        if key.code != KeyCode::Enter {
-            return self.confirm_key(key);
-        }
-        let acks = self.batch_removal_ids();
-        let Pending::Batch(plan) = self.preview.take()?.pending else {
-            return None;
-        };
-        self.confirmation = None;
-        let approval = if plan.inputs.action == dort_core::batch::Action::Remove {
-            dort_core::batch::Approval::from_removal_plan(
-                *plan,
-                dort_core::batch::RemovalAcknowledgements::confirm(acks),
-            )
-        } else {
-            dort_core::batch::Approval::from_plan(*plan)
-        };
-        match approval {
-            Ok(a) => Some(Task::Execute(super::actions::Approved::Batch(Box::new(a)))),
-            Err(error) => {
-                self.error = Some(format!(
-                    "Approval refused: {}",
-                    super::actions::diagnostic(&error)
-                ));
-                self.retry = None;
-                self.failure = None;
-                self.failed_write = false;
-                self.status = "Approval refused; a fresh review is required.".into();
-                None
-            }
-        }
+    pub(super) fn preview_approval(&self) -> Approval {
+        Approval::review(
+            &self.hits,
+            ReviewStage::Changes,
+            self.dry_run,
+            self.preview.as_ref().is_none_or(|p| p.pending.blocked()),
+        )
     }
     fn approve_preview(&mut self) -> Option<Task> {
-        if self.preview.as_ref().is_none_or(|p| p.pending.blocked()) || self.dry_run {
-            return None;
-        }
-        if self
-            .preview
-            .as_ref()
-            .is_some_and(|p| matches!(p.pending, Pending::Batch(_)))
-        {
-            return self.batch_confirm_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        }
-        let ack = self
-            .preview
-            .as_ref()?
-            .pending
-            .removal_id()
-            .map(str::to_owned);
+        let removal_ids = self.batch_removal_ids();
         let pending = self.preview.take()?.pending;
-        self.confirmation = None;
-        match pending.approve(ack.as_deref()) {
-            Ok(approval) => Some(Task::Execute(approval)),
+        let adopting = pending.adoption();
+        let approval = match pending {
+            Pending::Batch(plan) if plan.inputs.action == dort_core::batch::Action::Remove => {
+                dort_core::batch::Approval::from_removal_plan(
+                    *plan,
+                    dort_core::batch::RemovalAcknowledgements::confirm(removal_ids),
+                )
+                .map(|approval| super::actions::Approved::Batch(Box::new(approval)))
+            }
+            pending => {
+                let id = pending.removal_id().map(str::to_owned);
+                pending.approve(id.as_deref())
+            }
+        };
+        match approval {
+            Ok(approval) => {
+                self.return_to_discover = adopting;
+                Some(Task::Execute(approval))
+            }
             Err(error) => {
                 self.error = Some(format!(
                     "Approval refused: {}",
@@ -2836,21 +2803,5 @@ impl App {
                 None
             }
         }
-    }
-    fn confirm_key(&mut self, key: KeyEvent) -> Option<Task> {
-        let confirmation = self.confirmation.as_mut()?;
-        match key.code {
-            KeyCode::Esc => self.confirmation = None,
-            KeyCode::PageDown => {
-                confirmation.prompt_scroll = confirmation.prompt_scroll.saturating_add(4)
-            }
-            KeyCode::PageUp => {
-                confirmation.prompt_scroll = confirmation.prompt_scroll.saturating_sub(4)
-            }
-            KeyCode::Home => confirmation.prompt_scroll = 0,
-            KeyCode::Enter => return self.approve_preview(),
-            _ => (),
-        }
-        None
     }
 }

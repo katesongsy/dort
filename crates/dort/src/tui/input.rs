@@ -1,10 +1,14 @@
 //! Render-owned hit regions.
-use super::shell::Action;
+use super::{
+    components::reader::{ReviewStage, VisibleRows},
+    shell::Action,
+};
 use ratatui::layout::{Position, Rect};
 use std::cell::{Cell, RefCell};
 
 #[derive(Clone, Copy)]
 pub enum Target {
+    Workspace(super::workspace::Scope, super::workspace::Region),
     Feedback(super::task_surfaces::Control),
     TreeFold(usize),
     TreeMark(usize),
@@ -25,8 +29,6 @@ pub enum Target {
     Filter,
     FormControl(usize, bool),
     FormAction(super::forms::Command),
-    ConfirmAction,
-    CancelConfirmation,
     ToolInstallControl(usize, bool),
     ToolInstallProvider,
     ToolAttemptRow(usize),
@@ -38,7 +40,6 @@ pub enum Target {
     PickerDetails,
     Back,
     Continue,
-    PreviewRow(usize),
 }
 #[derive(Clone, Copy)]
 pub enum Wheel {
@@ -48,28 +49,64 @@ pub enum Wheel {
     Details,
     Overlay,
     Preview,
-    PreviewRows,
-    Confirmation,
     GitPatch,
     Tools,
 }
-struct Region {
+struct Hit {
     area: Rect,
     click: Option<Target>,
     wheel: Option<Wheel>,
 }
+#[derive(Clone, Copy)]
+struct RenderedReview {
+    stage: ReviewStage,
+    rows: VisibleRows,
+    current: bool,
+}
+
 #[derive(Default)]
 pub struct Hits {
-    regions: RefCell<Vec<Region>>,
+    regions: RefCell<Vec<Hit>>,
     size: Cell<(u16, u16)>,
     input_focus: Cell<bool>,
+    workspace: Cell<Option<super::workspace::Workspace>>,
     actions: RefCell<Vec<super::components::ActionButton>>,
+    review: Cell<Option<RenderedReview>>,
 }
 impl Hits {
     pub fn begin(&self, area: Rect) {
         self.clear();
+        self.invalidate_review();
+        self.workspace.set(None);
         self.size.set((area.width, area.height));
         self.input_focus.set(true);
+    }
+    pub fn observe_review(&self, stage: ReviewStage, rows: VisibleRows) {
+        self.review.set(Some(RenderedReview {
+            stage,
+            rows,
+            current: true,
+        }));
+    }
+    pub fn invalidate_review(&self) {
+        self.review.set(None);
+    }
+    pub fn hide_review_tail(&self) {
+        self.review.set(self.review.get().map(|mut review| {
+            review.current = false;
+            review
+        }));
+    }
+    pub fn review_end(&self, stage: ReviewStage) -> Option<usize> {
+        self.review
+            .get()
+            .filter(|review| review.stage == stage)
+            .map(|review| review.rows.end)
+    }
+    pub fn review_tail_drawn(&self, stage: ReviewStage) -> bool {
+        self.review.get().is_some_and(|review| {
+            review.stage == stage && review.current && review.rows.shows_tail()
+        })
     }
     pub fn input_focus_allowed(&self) -> bool {
         self.input_focus.get()
@@ -84,6 +121,12 @@ impl Hits {
         self.regions.borrow_mut().clear();
         self.actions.borrow_mut().clear();
     }
+    pub fn retain_file_rows(&self) {
+        self.regions
+            .borrow_mut()
+            .retain(|hit| matches!(hit.click, Some(Target::Row(_))));
+        self.actions.borrow_mut().clear();
+    }
     pub fn present(&self, mut action: super::components::ActionButton) {
         action.key = super::navigation::context_key(action.key);
         if !self
@@ -95,18 +138,29 @@ impl Hits {
             self.actions.borrow_mut().push(action);
         }
     }
+    pub fn invalidate_workspace(&self) {
+        self.workspace.set(None);
+    }
+    pub fn bind_workspace(&self, workspace: super::workspace::Workspace) {
+        self.workspace.set(Some(workspace));
+    }
+    pub fn workspace(&self, size: (u16, u16)) -> Option<super::workspace::Workspace> {
+        (self.size() == size)
+            .then(|| self.workspace.get())
+            .flatten()
+    }
     pub fn actions(&self) -> Vec<super::components::ActionButton> {
         self.actions.borrow().clone()
     }
     pub fn click(&self, area: Rect, target: Target) {
-        self.regions.borrow_mut().push(Region {
+        self.regions.borrow_mut().push(Hit {
             area,
             click: Some(target),
             wheel: None,
         });
     }
     pub fn wheel(&self, area: Rect, target: Wheel) {
-        self.regions.borrow_mut().push(Region {
+        self.regions.borrow_mut().push(Hit {
             area,
             click: None,
             wheel: Some(target),
@@ -127,25 +181,5 @@ impl Hits {
                 .then_some(r.wheel)
                 .flatten()
         })
-    }
-    pub fn rows(&self, area: Rect, visible: &[usize], offset: usize) {
-        let rows = Rect::new(
-            area.x,
-            area.y + 2,
-            area.width,
-            area.height.saturating_sub(2),
-        );
-        self.wheel(area, Wheel::Rows);
-        for (y, &index) in visible
-            .iter()
-            .skip(offset)
-            .take(usize::from(rows.height))
-            .enumerate()
-        {
-            self.click(
-                Rect::new(rows.x, rows.y + y as u16, rows.width, 1),
-                Target::Row(index),
-            );
-        }
     }
 }

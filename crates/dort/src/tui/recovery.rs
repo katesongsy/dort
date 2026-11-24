@@ -1,13 +1,17 @@
 //! Content-free history presentation. Recovery previews make the final decision.
+use super::input::{Target, Wheel};
+use super::workspace::{Region, Scope, Workspace};
 use super::{app::App, components as ui};
 use dort_core::journal::{Diagnosis, Phase};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::Style,
     text::{Line, Span, Text},
-    widgets::{Cell, Paragraph, Row, Table, TableState},
+    widgets::{Cell, Paragraph, Row},
 };
+use ui::collection::{Collection, Header, RowTargets};
+use ui::design::Tone;
+use ui::reader::{field, section};
 
 pub fn rollback(row: &Diagnosis) -> bool {
     row.problem.is_none()
@@ -45,7 +49,7 @@ fn kind(row: &Diagnosis) -> &'static str {
         Some(3) => "Repository setup",
         Some(4) => "File batch",
         Some(5 | 6) => "Tool declaration",
-        _ => "Unknown",
+        _ => "Unknown operation",
     }
 }
 fn phase(row: &Diagnosis) -> &'static str {
@@ -59,108 +63,98 @@ fn phase(row: &Diagnosis) -> &'static str {
         None => "Unknown",
     }
 }
-fn state(row: &Diagnosis) -> (&'static str, Style) {
+fn state(row: &Diagnosis) -> (&'static str, Tone) {
     if row.problem.is_some() {
-        ("Damaged", ui::danger())
+        ("Damaged", Tone::Error)
     } else if row.blocks_writes() {
-        ("Blocks writes", ui::warning())
+        ("Blocks writes", Tone::Error)
     } else {
-        ("Finished", ui::success())
+        ("Finished", Tone::Success)
     }
-}
-fn field(label: &str, value: impl ToString) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(format!("{label}: "), ui::heading()),
-        Span::raw(ui::inline(&value.to_string())),
-    ])
-}
-fn note(value: &str, style: Style) -> Line<'static> {
-    Line::styled(ui::inline(value), style)
 }
 fn details(app: &App) -> Text<'static> {
     let Some(row) = app.history_selection() else {
         return Text::raw("No operation record selected. Clear the filter.");
     };
-    let (status, style) = state(row);
+    let (status, tone) = state(row);
     let mut lines = vec![
-        Line::styled(format!("[{status}]"), style),
-        Line::styled("Operation", ui::accent()),
-        field("Repository ID", &row.repository_id),
-        field("Operation ID", &row.transaction_id),
-        field("Type", kind(row)),
-        field("State", phase(row)),
-        field("Saved steps", row.valid_checkpoints),
-        field("Integrity", row.problem.as_deref().unwrap_or("Valid")),
-        field("Blocks writes", row.blocks_writes()),
+        section(kind(row)),
+        field("Status", &format!("[{status}]"), tone),
+        field("State", phase(row), Tone::Neutral),
         Line::default(),
-        Line::styled("Recovery options", ui::accent()),
+        section("Recovery options"),
     ];
-    if rollback(row) {
-        app.presented(
-            "Rollback",
-            "b",
-            super::input::Target::Action(super::shell::Action::Rollback),
-        );
-        lines.push(field("Rollback", "Available for review"));
-    } else {
-        lines.push(note(
-            "Rollback is unavailable for this record.",
-            ui::muted(),
-        ));
+    use super::shell::Action;
+    let options = [
+        (rollback(row), "Rollback", "b", Action::Rollback),
+        (resume(row), "Resume", "s", Action::Resume),
+        (abandon(row), "Abandon", "x", Action::Abandon),
+    ];
+    for (_, label, key, action) in options.into_iter().filter(|option| option.0) {
+        app.presented(label, key, Target::Action(action));
+        lines.push(field(label, "Available for review", Tone::Neutral));
     }
-    if resume(row) {
-        app.presented(
-            "Resume",
-            "s",
-            super::input::Target::Action(super::shell::Action::Resume),
-        );
-        lines.push(field("Resume", "Available for review"));
+    if row.problem.is_some() {
+        lines.push(field(
+            "Blocked",
+            "Recovery record could not be verified.",
+            Tone::Error,
+        ));
     } else if abandon(row) && row.phase == Some(Phase::Preparing) {
-        lines.push(note(
-            "Resume is unavailable: setup is incomplete. Abandon it, then create or attach again.",
-            ui::warning(),
+        lines.push(field(
+            "Resume blocked",
+            "Repository setup is incomplete.",
+            Tone::Error,
         ));
-    } else {
-        lines.push(note(
-            "Resume is unavailable: setup is not intact.",
-            ui::muted(),
+        lines.push(field(
+            "Next",
+            "Abandon, then create or attach again.",
+            Tone::Neutral,
         ));
+    } else if !options.iter().any(|option| option.0) {
+        lines.push(Line::raw("No recovery action available."));
     }
     if abandon(row) {
-        app.presented(
-            "Abandon",
-            "x",
-            super::input::Target::Action(super::shell::Action::Abandon),
-        );
-        lines.push(field("Abandon", "Available for review"));
-        lines.push(note(
-            "Keeps the published repository, registration and private files.",
-            ui::warning(),
-        ));
-    } else {
-        lines.push(note(
-            "Abandon is unavailable: setup is incomplete or not intact.",
-            ui::muted(),
+        lines.push(Line::styled(
+            "Abandon keeps the published repository, registration and private files.",
+            Tone::Attention.style(),
         ));
     }
-    lines.push(Line::default());
-    lines.push(Line::styled("What recovery keeps", ui::accent()));
-    lines.push(note(
-        "Recovery checks current paths and files before each action.",
-        Style::default(),
-    ));
-    lines.push(note(
-        "Rollback restores files only when they still match.",
-        ui::warning(),
-    ));
-    lines.push(note(
-        "Tool declarations restore only an unchanged manifest.",
-        ui::warning(),
-    ));
-    lines.push(note(
-        "Packages are not removed. Private backups stay.",
-        ui::warning(),
-    ));
+    lines.extend([
+        Line::default(),
+        section("What recovery keeps"),
+        Line::raw("Recovery checks current paths and files before each action."),
+        Line::styled(
+            "Rollback restores files only when they still match.",
+            Tone::Attention.style(),
+        ),
+        Line::styled(
+            "Tool declarations restore only an unchanged manifest.",
+            Tone::Attention.style(),
+        ),
+        Line::styled(
+            "Packages are not removed. Private backups stay.",
+            Tone::Attention.style(),
+        ),
+        Line::default(),
+        section("Operation record"),
+        field("Repository ID", &row.repository_id, Tone::Neutral),
+        field("Operation ID", &row.transaction_id, Tone::Neutral),
+        field(
+            "Integrity",
+            row.problem.as_deref().unwrap_or("Valid"),
+            if row.problem.is_some() {
+                Tone::Error
+            } else {
+                Tone::Neutral
+            },
+        ),
+        field(
+            "Saved steps",
+            &row.valid_checkpoints.to_string(),
+            Tone::Neutral,
+        ),
+    ]);
     Text::from(lines)
 }
 
@@ -221,7 +215,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                 ratatui::crossterm::event::KeyModifiers::NONE,
             )),
         );
-    } else if app.history_details {
+    } else if app.history_region == Region::Details {
         app.presented("Back", "Esc", super::input::Target::Back);
     } else if available.is_some() && !app.visible_history_rows().is_empty() {
         app.presented(
@@ -232,53 +226,59 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     }
     app.hits.click(rows[1], super::input::Target::Filter);
     let content = rows[2];
-    let focused = true;
     let Some(data) = &app.data else {
-        ui::report(
+        ui::reader::Reader::new(&app.hits).report(
             frame,
             content,
             "Recovery | Not loaded",
             Text::raw("Recovery has not loaded yet."),
             0,
-            focused,
+            true,
         );
         return;
     };
     if let Some(error) = &data.history_error {
-        ui::report(
+        ui::reader::Reader::new(&app.hits).report(
             frame,
             content,
             "Recovery unavailable",
             Text::from(vec![
-                note(error, ui::warning()),
-                Line::raw("Writes stay blocked until recovery loads."),
+                field(
+                    "Blocked",
+                    "Writes stay blocked until recovery loads.",
+                    Tone::Error,
+                ),
+                field("Next", "Refresh Recovery.", Tone::Neutral),
+                field("History error", error, Tone::Attention),
             ]),
             app.details_scroll,
-            focused,
+            true,
         );
         return;
     }
-    let wide = super::workbench::wide_details(area, 2);
-    if app.history_details {
-        ui::report(
+    let visible = app.visible_history_rows();
+    let active = if app.history_search.editing {
+        Region::Queue
+    } else {
+        app.history_region
+    };
+    let workspace = Workspace::new(Scope::Recovery, content, active, !visible.is_empty());
+    workspace.bind(&app.hits);
+    if let Some(pane) = workspace.details {
+        ui::reader::Reader::new(&app.hits).report(
             frame,
-            content,
+            pane,
             "Operation details",
             details(app),
             app.details_scroll,
-            focused,
+            active == Region::Details,
         );
-        return;
     }
-    let (list, pane) = super::workbench::detail_panes(content, wide);
-    let visible = app.visible_history_rows();
-    let title = format!(
-        "Operations | {} / {} shown",
-        visible.len(),
-        data.history.len()
-    );
-    let block = ui::pane(&title, focused);
+    let Some(list) = workspace.queue else { return };
+    let title = "Operations";
+    let focused = active == Region::Queue;
     if data.history.is_empty() || visible.is_empty() {
+        let block = ui::pane(title, focused);
         let inner = block.inner(list);
         frame.render_widget(block, list);
         ui::text_view(
@@ -292,48 +292,41 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             0,
         );
     } else {
-        let selected = visible.iter().position(|&i| i == app.selected);
-        let capacity = usize::from(list.height.saturating_sub(2));
-        let first = app
-            .history_viewport
-            .start(visible.len(), capacity, selected);
-        let window = &visible[first..(first + capacity).min(visible.len())];
-        let table_rows = window.iter().map(|&i| {
-            let row = &data.history[i];
-            let (status, style) = state(row);
-            Row::new(vec![
-                Cell::from(ui::inline(row.transaction_id.get(..8).unwrap_or("invalid"))),
-                Cell::from(kind(row)),
-                Cell::from(phase(row)),
-                Cell::from(status).style(style),
-            ])
-        });
-        let table = Table::new(
-            table_rows,
+        let collection = Collection::new(
             [
                 Constraint::Min(8),
-                Constraint::Length(16),
-                Constraint::Length(12),
-                Constraint::Length(13),
+                Constraint::Length(if list.width < 44 { 4 } else { 12 }),
+                Constraint::Length(9),
+                Constraint::Length(if list.width < 44 { 7 } else { 12 }),
             ],
+            Header::Heading(["OP ID", "TYPE", "STATE", "STATUS"]),
         )
-        .header(Row::new(["OP ID", "TYPE", "STATE", "STATUS"]).style(ui::heading()))
-        .block(block)
-        .row_highlight_style(ui::selected())
-        .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
-        let mut selection =
-            TableState::default().with_selected(window.iter().position(|&i| i == app.selected));
-        frame.render_stateful_widget(table, list, &mut selection);
-        app.hits.rows(list, window, 0);
-    }
-    if let Some(pane) = pane {
-        ui::report(
+        .titled(title, focused);
+        let selected = visible.iter().position(|&i| i == app.selected);
+        let window = collection.window(list, &app.history_viewport, visible.len(), selected);
+        let rows = visible[window.range].iter().map(|&i| {
+            let row = &data.history[i];
+            let (status, tone) = state(row);
+            (
+                i,
+                Row::new([
+                    Cell::from(ui::inline(row.transaction_id.get(..8).unwrap_or("invalid"))),
+                    Cell::from(kind(row)),
+                    Cell::from(phase(row)),
+                    Cell::from(status).style(tone.style()),
+                ]),
+            )
+        });
+        collection.draw(
             frame,
-            pane,
-            "Operation details",
-            details(app),
-            app.details_scroll,
-            true,
+            list,
+            rows,
+            window.selection,
+            RowTargets {
+                hits: &app.hits,
+                wheel: Some(Wheel::Rows),
+                target: Target::Row,
+            },
         );
     }
 }

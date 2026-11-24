@@ -8,6 +8,10 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 TUI = Path('crates/dort/src/tui')
 STYLE_OWNERS = {TUI / 'components/mod.rs', TUI / 'components/design.rs', TUI / 'appearance.rs'}
+COLLECTION_OWNER = TUI / 'components/collection.rs'
+TABLE_OWNERS = {COLLECTION_OWNER, TUI / 'components/design.rs'}
+READER_OWNER = TUI / 'components/reader.rs'
+APPROVAL_OWNER = TUI / 'components/approval.rs'
 GLYPH_OWNER = TUI / 'components/glyphs.rs'
 CLOCK_OWNER = TUI / 'mod.rs'
 CLOCK_OWNERS = {CLOCK_OWNER, TUI / 'app.rs'}  # Event loop and timestamped mouse boundary.
@@ -91,6 +95,19 @@ def violations(path, source):
         rules.append(('semantic-glyph', r'[✓×▸▾›█░\u2800-\u28ff]', literals))
     if path not in CLOCK_OWNERS:
         rules.append(('private-clock', r'\bInstant\s*::|\b(?:set_interval|setInterval)\s*\(', code))
+    if path not in TABLE_OWNERS:
+        rules.append(('raw-table', r'\b(?:Table|TableState)\b|\.\s*row_highlight_style\s*\(', code))
+    if path != COLLECTION_OWNER:
+        rules += [
+            ('private-selection-marker', r'\.\s*highlight_(?:symbol|spacing)\s*\(', code),
+            ('private-row-wheel', r'\.\s*wheel\s*\([^;]*,\s*(?:\w+\s*::\s*)*Wheel\s*::\s*(?:Rows|Choices|PreviewRows)\s*\)', code),
+        ]
+    if path != READER_OWNER:
+        rules.append(('unshared-report-reader', r'\bParagraph\s*::\s*new\s*\(\s*(?:\w+\s*::\s*)*review_text\s*\(', code))
+    if path != APPROVAL_OWNER:
+        primary = r'(?:\w+\s*::\s*)*Target\s*::\s*(?:ConfirmAction|Continue)\b'
+        rules.append(('unshared-approval-control', rf'\bpresented\s*\([^;]*,\s*{primary}\s*,?\s*\)|\bActionButton\s*\{{[^{{}}]*\btarget\s*:\s*{primary}', code))
+        rules.append(('private-approval-key', r"\bChar\s*\(\s*'y'\s*\)", literals))
     rules.append(('literal-selection-marker', r'\.\s*highlight_symbol\s*\(\s*(?:"|r#*")', literals))
     rules.append(('blocking-animation', r'\bthread\s*::\s*sleep\s*\(', code))
     found = []
@@ -130,9 +147,35 @@ class StyleCheckerTests(unittest.TestCase):
 
     def test_selection_marker_uses_shared_glyph_even_for_ascii(self):
         for literal in ['"> "', 'r#"> "#']:
-            self.assertEqual({v[2] for v in violations(TUI / 'page.rs', '.highlight_symbol(' + literal + ')')}, {'literal-selection-marker'})
-        self.assertEqual(violations(TUI / 'page.rs', '.highlight_symbol(format!("{} ", ui::glyphs::SELECTED))'), [])
+            self.assertEqual({v[2] for v in violations(COLLECTION_OWNER, '.highlight_symbol(' + literal + ')')}, {'literal-selection-marker'})
+        symbol = '.highlight_symbol(format!("{} ", ui::glyphs::SELECTED))'
+        self.assertEqual(violations(COLLECTION_OWNER, symbol), [])
+        self.assertEqual(violations(TUI / 'page.rs', symbol)[0][2], 'private-selection-marker')
         self.assertEqual(violations(TUI / 'page.rs', '// .highlight_symbol("> ")'), [])
+
+    def test_table_and_wheel_bypasses_include_aliases_and_qualified_paths(self):
+        source = ('use ratatui::widgets::{Table as Grid, TableState as GridState};\n'
+                  'hits.wheel(area, crate::tui::input::Wheel::PreviewRows);\n'
+                  'let x = grid.row_highlight_style(ui::selected());')
+        self.assertEqual({v[2] for v in violations(TUI / 'page.rs', source)}, {'raw-table', 'private-row-wheel'})
+        self.assertEqual(violations(COLLECTION_OWNER, source), [])
+        self.assertEqual(violations(TUI / 'components/design.rs', 'Table::new(rows, widths)'), [])
+        self.assertEqual(violations(TUI / 'components/new_widget.rs', 'Table::new(rows, widths)')[0][2], 'raw-table')
+        self.assertEqual(violations(TUI / 'page.rs', 'Row::new(facts); hits.wheel(area, Wheel::Content);'), [])
+
+    def test_review_uses_reader_and_approval_control(self):
+        path = TUI / 'workbench.rs'
+        source = ('Paragraph::new(ui::review_text(&preview.text));\n'
+                  'app.presented(label, "Enter", Target::Continue);\n'
+                  'hits.present(ui::ActionButton { label, key, target: Target::ConfirmAction });')
+        self.assertEqual([(v[1], v[2]) for v in violations(path, source)], [
+            (1, 'unshared-report-reader'), (2, 'unshared-approval-control'), (3, 'unshared-approval-control'),
+        ])
+        self.assertEqual(violations(path, 'approval.present(hits, label, Target::Continue);'), [])
+        self.assertEqual(violations(path, 'Paragraph::new(patch_text);'), [])
+        self.assertEqual(violations(path, 'match target { Target::Continue => apply(), _ => {} }'), [])
+        self.assertEqual(violations(path, "KeyCode::Char('y')")[0][2], 'private-approval-key')
+        self.assertEqual(violations(APPROVAL_OWNER, "KeyCode::Char('y')"), [])
 
     def test_owners_are_exact_not_any_file_in_component_folder(self):
         source = 'let s = Color::Red; let icon = "✓";'
@@ -161,4 +204,4 @@ if __name__ == '__main__':
             print(f'{path}:{line}: {rule}: use the shared components/ design-system vocabulary')
         if errors:
             raise SystemExit(1)
-        print('PASS TUI shared styling/glyph/motion boundaries; no legacy exceptions or automatic baseline updates')
+        print('PASS TUI shared styling, collection, reader, approval and motion boundaries')

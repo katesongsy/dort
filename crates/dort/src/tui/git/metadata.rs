@@ -1,13 +1,17 @@
 use super::{Comparison, Metadata, Reader, preview};
+use crate::tui::input::{Target, Wheel};
+use crate::tui::workspace::{Region, Scope, Workspace};
 use crate::tui::{components as ui, inventory::Search};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::Style,
     text::{Line, Span, Text},
-    widgets::{Cell, Paragraph, Row, Table, TableState},
+    widgets::{Cell, Paragraph, Row},
 };
 use std::path::Path;
+use ui::collection::{Collection, Header, RowTargets};
+use ui::design::Tone;
+use ui::reader::{field, section};
 
 pub(super) struct View<'a> {
     pub hits: &'a crate::tui::input::Hits,
@@ -20,49 +24,48 @@ pub(super) struct View<'a> {
     pub selected: usize,
     pub viewport: &'a crate::tui::navigation::ListViewport,
     pub reader: Reader,
+    pub active: Region,
     pub preview: &'a preview::State,
     pub scroll: u16,
     pub busy: bool,
 }
-fn field(label: &str, value: impl ToString) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(format!("{label}: "), ui::muted()),
-        Span::raw(ui::inline(&value.to_string())),
-    ])
-}
-fn note(value: &str, style: Style) -> Line<'static> {
-    Line::styled(ui::inline(value), style)
-}
-fn status_style(kind: &str) -> Style {
+fn status_tone(kind: &str) -> Tone {
     match kind {
-        "unmerged" => ui::danger(),
-        "untracked" | "renamed" => ui::warning(),
-        _ => Style::default(),
+        "unmerged" => Tone::Error,
+        "untracked" | "renamed" => Tone::Attention,
+        _ => Tone::Neutral,
     }
 }
 fn details(view: &View<'_>, fallback: Option<&str>) -> Text<'static> {
     let mut lines = Vec::new();
-    if let Some(reason) = fallback {
-        lines.push(note(reason, ui::muted()));
-    }
+    let mut entry_facts = Vec::new();
     if view.visible.contains(&view.selected) {
         match view.metadata {
             Some(Metadata::Status(status)) => {
                 if let Some(entry) = status.entries.get(view.selected) {
-                    lines.push(note(&entry.kind, status_style(&entry.kind)));
-                    lines.push(field("XY", entry.xy.as_deref().unwrap_or("-")));
-                    lines.push(field("Path", format!("{:?}", entry.path)));
-                    lines.push(field("Original path", format!("{:?}", entry.original_path)));
+                    lines.push(field("Path", &format!("{:?}", entry.path), Tone::Neutral));
+                    lines.push(field("Status", &entry.kind, status_tone(&entry.kind)));
+                    if entry.original_path.is_some() {
+                        lines.push(field(
+                            "Original path",
+                            &format!("{:?}", entry.original_path),
+                            Tone::Neutral,
+                        ));
+                    }
+                    if let Some(xy) = &entry.xy {
+                        entry_facts.push(field("XY", xy, Tone::Neutral));
+                    }
                 }
             }
             Some(Metadata::Diff(diff)) => {
                 if let Some(entry) = diff.entries.get(view.selected) {
-                    lines.push(field("Change", &entry.change));
-                    lines.push(field(
+                    lines.push(field("Path", &format!("{:?}", entry.path), Tone::Neutral));
+                    lines.push(field("Change", &entry.change, Tone::Neutral));
+                    entry_facts.push(field(
                         "Modes",
-                        format!("{} -> {}", entry.old_mode, entry.new_mode),
+                        &format!("{} -> {}", entry.old_mode, entry.new_mode),
+                        Tone::Neutral,
                     ));
-                    lines.push(field("Path", format!("{:?}", entry.path)));
                 }
             }
             None => {}
@@ -74,9 +77,18 @@ fn details(view: &View<'_>, fallback: Option<&str>) -> Text<'static> {
             Some(_) => "No displayed entry selected. Clear the filter or refresh.",
         }));
     }
+    if let Some(reason) = fallback {
+        lines.push(Line::styled(ui::inline(reason), Tone::Attention.style()));
+    }
+    lines.push(Line::raw("No staging, commits, network or live-file writes. Untracked contents are not included in diffs."));
     lines.push(Line::default());
-    lines.push(Line::styled("Git scope | read-only", ui::heading()));
-    lines.push(field("Git-only root", format!("{:?}", view.root)));
+    lines.push(section("Git scope | read-only"));
+    lines.push(field("Comparison", view.comparison.label(), Tone::Neutral));
+    lines.push(field(
+        "Git-only root",
+        &format!("{:?}", view.root),
+        Tone::Neutral,
+    ));
     lines.push(field(
         "Selection",
         if view.follows_files {
@@ -84,32 +96,37 @@ fn details(view: &View<'_>, fallback: Option<&str>) -> Text<'static> {
         } else {
             "independent session choice"
         },
+        Tone::Neutral,
     ));
-    lines.push(field("Comparison", view.comparison.label()));
+    lines.extend(entry_facts);
     if let Some(metadata) = view.metadata {
-        lines.push(field("Entries", metadata.len()));
+        lines.push(field("Entries", &metadata.len().to_string(), Tone::Neutral));
         match metadata {
             Metadata::Status(status) => {
-                lines.push(Line::default());
-                lines.push(Line::styled("Branch headers", ui::heading()));
-                for header in &status.branch {
-                    lines.push(note(header, Style::default()));
-                }
-                if status.branch.is_empty() {
-                    lines.push(Line::raw("No branch headers reported."));
+                if !status.branch.is_empty() {
+                    lines.push(Line::default());
+                    lines.push(section("Branch headers"));
+                    lines.extend(
+                        status
+                            .branch
+                            .iter()
+                            .map(|header| Line::raw(ui::inline(header))),
+                    );
                 }
             }
             Metadata::Diff(diff) => {
-                lines.push(field("Staged", diff.staged));
+                lines.push(field(
+                    "Staged",
+                    if diff.staged { "Yes" } else { "No" },
+                    Tone::Neutral,
+                ));
             }
         }
     } else {
-        lines.push(field("Entries", "Unknown (summary unavailable/not loaded)"));
+        lines.push(field("Entries", "Unknown", Tone::Neutral));
     }
     lines.push(Line::default());
-    lines.push(Line::styled("Details", ui::heading()));
-    lines.push(Line::raw("Git requires a trusted executable and exact non-bare root; no manifest or registration required."));
-    lines.push(Line::raw("No staging, commits, network or live-file writes. Untracked contents are not included in diffs."));
+    lines.push(Line::raw("Git needs a trusted executable and an exact non-bare root. No manifest or registration needed."));
     Text::from(lines)
 }
 fn filter(frame: &mut Frame, area: Rect, view: &View<'_>) {
@@ -122,10 +139,6 @@ fn filter(frame: &mut Frame, area: Rect, view: &View<'_>) {
     );
 }
 
-pub(super) fn wide_details(area: Rect, metadata: Option<&Metadata>) -> bool {
-    let branch = matches!(metadata, Some(Metadata::Status(_))) && area.height >= 12;
-    crate::tui::workbench::wide_details(area, 2 + u16::from(branch))
-}
 pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
     let branch = match view.metadata {
         Some(Metadata::Status(status)) if area.height >= 12 => Some(status.branch.join(" | ")),
@@ -158,14 +171,17 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
     );
     filter(frame, sections[1], &view);
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    let wide = wide_details(area, view.metadata);
+    let content = sections[3];
+    let workspace = Workspace::new(Scope::Git, content, view.active, !view.visible.is_empty());
+    let wide = workspace.is_split();
+    workspace.bind(view.hits);
     let action = if view.search.editing {
         Some((
             "Done",
             "Enter",
             crate::tui::input::Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         ))
-    } else if view.reader != Reader::Entries {
+    } else if view.active == Region::Details {
         Some(("Back", "Esc", crate::tui::input::Target::Back))
     } else if view.metadata.is_some_and(|metadata| metadata.len() > 0) && !view.visible.is_empty() {
         Some((
@@ -190,7 +206,7 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         view.hits.present(ui::ActionButton { label, key, target });
     }
     view.hits.present(ui::ActionButton {
-        label: if view.reader == Reader::Details {
+        label: if view.reader == Reader::Metadata && view.active == Region::Details {
             "Entries"
         } else {
             "Scope details"
@@ -206,25 +222,23 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
             sections[2],
         );
     }
-    let content = sections[3];
-    if view.reader == Reader::Details {
-        draw_details(frame, content, &view, view.preview.fallback());
-        return;
+    if let Some(pane) = workspace.details {
+        let focused = workspace.active == Region::Details;
+        if view.reader == Reader::Metadata || !view.preview.draw(frame, pane, view.hits, focused) {
+            draw_details(frame, pane, &view, view.preview.fallback(), focused);
+        }
     }
-    if view.reader == Reader::Patch && !wide {
-        draw_preview(frame, content, &view);
-        return;
-    }
-    let (list, pane) = crate::tui::workbench::detail_panes(content, wide);
+    let Some(list) = workspace.queue else { return };
     let title = view
         .metadata
         .map(|m| format!("Details | {} entries", m.len()))
         .unwrap_or_else(|| "Details | Unknown".into());
-    let block = ui::pane(&title, view.reader == Reader::Entries);
+    let focused = view.active == Region::Queue;
     if view.metadata.is_none()
         || view.metadata.is_some_and(|m| m.len() == 0)
         || view.visible.is_empty()
     {
+        let block = ui::pane(&title, focused);
         let inner = block.inner(list);
         frame.render_widget(block, list);
         let text = match view.metadata {
@@ -234,29 +248,6 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         };
         ui::text_view(frame, inner, Text::raw(text), 0);
     } else if let Some(metadata) = view.metadata {
-        let selected = view.visible.iter().position(|&i| i == view.selected);
-        let capacity = usize::from(list.height.saturating_sub(2));
-        let first = view.viewport.start(view.visible.len(), capacity, selected);
-        let window = &view.visible[first..(first + capacity).min(view.visible.len())];
-        let rows = window.iter().filter_map(|&index| match metadata {
-            Metadata::Status(status) => status.entries.get(index).map(|entry| {
-                Row::new(vec![
-                    Cell::from(ui::inline(&entry.path)),
-                    Cell::from(ui::inline(&entry.kind)).style(status_style(&entry.kind)),
-                    Cell::from(ui::inline(entry.xy.as_deref().unwrap_or("-"))),
-                ])
-            }),
-            Metadata::Diff(diff) => diff.entries.get(index).map(|entry| {
-                Row::new(vec![
-                    Cell::from(ui::inline(&entry.path)),
-                    Cell::from(ui::inline(&entry.change)).style(ui::warning()),
-                    Cell::from(ui::inline(&format!(
-                        "{} -> {}",
-                        entry.old_mode, entry.new_mode
-                    ))),
-                ])
-            }),
-        });
         let (widths, labels) = match metadata {
             Metadata::Status(_) => (
                 [
@@ -275,36 +266,57 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
                 ["PATH", "CHANGE", "MODES"],
             ),
         };
-        let table = Table::new(rows, widths)
-            .header(Row::new(labels).style(ui::heading()))
-            .block(block)
-            .row_highlight_style(ui::selected())
-            .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
-        let mut selection =
-            TableState::default().with_selected(window.iter().position(|&i| i == view.selected));
-        frame.render_stateful_widget(table, list, &mut selection);
-        view.hits.rows(list, window, 0);
-    }
-    if let Some(pane) = pane {
-        draw_preview(frame, pane, &view);
+        let collection = Collection::new(widths, Header::Heading(labels)).titled(&title, focused);
+        let selected = view.visible.iter().position(|&i| i == view.selected);
+        let window = collection.window(list, view.viewport, view.visible.len(), selected);
+        let rows = view.visible[window.range].iter().filter_map(|&index| {
+            let cells = match metadata {
+                Metadata::Status(status) => status.entries.get(index).map(|entry| {
+                    [
+                        Cell::from(ui::inline(&entry.path)),
+                        Cell::from(ui::inline(&entry.kind)).style(status_tone(&entry.kind).style()),
+                        Cell::from(ui::inline(entry.xy.as_deref().unwrap_or("-"))),
+                    ]
+                }),
+                Metadata::Diff(diff) => diff.entries.get(index).map(|entry| {
+                    [
+                        Cell::from(ui::inline(&entry.path)),
+                        Cell::from(ui::inline(&entry.change)).style(ui::warning()),
+                        Cell::from(ui::inline(&format!(
+                            "{} -> {}",
+                            entry.old_mode, entry.new_mode
+                        ))),
+                    ]
+                }),
+            }?;
+            Some((index, Row::new(cells)))
+        });
+        collection.draw(
+            frame,
+            list,
+            rows,
+            window.selection,
+            RowTargets {
+                hits: view.hits,
+                wheel: Some(Wheel::Rows),
+                target: Target::Row,
+            },
+        );
     }
 }
-fn draw_preview(frame: &mut Frame, area: Rect, view: &View<'_>) {
-    if !view
-        .preview
-        .draw(frame, area, view.hits, view.reader == Reader::Patch)
-    {
-        draw_details(frame, area, view, view.preview.fallback());
-    }
-}
-fn draw_details(frame: &mut Frame, area: Rect, view: &View<'_>, fallback: Option<&str>) {
-    view.hits.wheel(area, crate::tui::input::Wheel::Details);
-    ui::report(
+fn draw_details(
+    frame: &mut Frame,
+    area: Rect,
+    view: &View<'_>,
+    fallback: Option<&str>,
+    focused: bool,
+) {
+    ui::reader::Reader::new(view.hits).report(
         frame,
         area,
         "Git details",
         details(view, fallback),
         view.scroll,
-        true,
+        focused,
     );
 }

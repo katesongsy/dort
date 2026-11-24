@@ -1,4 +1,5 @@
 //! One current installed-package inventory and an independently reviewed declaration draft.
+use super::input::Hits;
 use super::{actions::Task, components as ui, input::Target, shell::edit_text};
 use crate::services::installed_tools as discovery;
 use ratatui::{
@@ -7,6 +8,7 @@ use ratatui::{
     layout::Rect,
     text::Line,
 };
+use ui::reader::{ReviewScroll, ReviewStage};
 #[derive(Default)]
 pub struct State {
     pub waiting: bool,
@@ -19,8 +21,17 @@ pub struct State {
     pub filter: String,
     pub error: Option<String>,
     scroll: u16,
+    pub reader: ReviewScroll,
 }
 impl State {
+    fn approval(&self, dry_run: bool, hits: &Hits) -> ui::approval::Approval {
+        ui::approval::Approval::review(
+            hits,
+            ReviewStage::InstalledInspect,
+            dry_run,
+            self.preview.as_ref().is_none_or(|p| p.is_empty()),
+        )
+    }
     pub fn clear_review(&mut self) {
         self.waiting = false;
         self.preview = None;
@@ -56,7 +67,7 @@ impl State {
         })?;
         self.current.as_ref().unwrap().seed(row)
     }
-    pub fn key(&mut self, key: KeyEvent, dry_run: bool) -> Option<Task> {
+    pub fn key(&mut self, key: KeyEvent, dry_run: bool, hits: &Hits) -> Option<Task> {
         if self.error.is_some() {
             if key.code == KeyCode::Esc {
                 self.error = None;
@@ -75,17 +86,20 @@ impl State {
         }
         if self.preview.is_some() {
             match key.code {
-                KeyCode::Esc => self.clear_review(),
-                KeyCode::Enter
-                    if !dry_run && self.preview.as_ref().is_some_and(|p| !p.is_empty()) =>
-                {
+                KeyCode::Esc => {
+                    hits.invalidate_review();
+                    self.clear_review();
+                }
+                _ if self.approval(dry_run, hits).accepts(key) => {
                     self.current = None;
                     return self
                         .preview
                         .take()
                         .map(|p| Task::ToolsInstalledInspect(p.approve()));
                 }
-                _ => self.scroll(key.code),
+                _ => self
+                    .reader
+                    .key(hits, ReviewStage::InstalledInspect, key.code),
             }
             return None;
         }
@@ -134,14 +148,16 @@ impl State {
         self.scroll = 0;
     }
     fn scroll(&mut self, code: KeyCode) {
-        match code {
-            KeyCode::Down | KeyCode::PageDown => self.scroll = self.scroll.saturating_add(2),
-            KeyCode::Up | KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(2),
-            KeyCode::Home => self.scroll = 0,
-            _ => (),
-        }
+        ui::reader::ScrollKeys::new(2, 2).apply(&mut self.scroll, code);
     }
-    fn draw_package(&self, frame: &mut Frame, area: Rect, row: (usize, usize)) {
+    fn draw_package(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        row: (usize, usize),
+        hits: &super::input::Hits,
+        focused: bool,
+    ) {
         let Some((scope, package)) = self.current.as_ref().and_then(|c| c.package(row)) else {
             return;
         };
@@ -164,14 +180,16 @@ impl State {
                 &npm.prefix.display().to_string(),
             ));
         }
-        ui::report(
-            frame,
-            area,
-            "Installed package",
-            lines.into(),
-            self.scroll,
-            false,
-        );
+        ui::reader::Reader::new(hits)
+            .with_wheel(super::input::Wheel::Tools)
+            .report(
+                frame,
+                area,
+                "Installed package",
+                lines.into(),
+                self.scroll,
+                focused,
+            );
     }
     pub fn draw(&self, frame: &mut Frame, area: Rect, dry_run: bool, hits: &super::input::Hits) {
         let action = |label, key, code| {
@@ -245,22 +263,23 @@ impl State {
                     ui::warning(),
                 );
             }
-            ui::report(
-                frame,
-                Rect::new(
-                    area.x,
-                    area.y + top,
-                    area.width,
-                    area.height.saturating_sub(top),
-                ),
-                "Inspect installed tools",
-                lines.into(),
-                self.scroll,
-                false,
-            );
-            if !preview.is_empty() && !dry_run {
-                action("Check installed", "Enter", KeyCode::Enter);
-            }
+            ui::reader::Reader::new(hits)
+                .with_wheel(super::input::Wheel::Tools)
+                .review(
+                    frame,
+                    Rect::new(
+                        area.x,
+                        area.y + top,
+                        area.width,
+                        area.height.saturating_sub(top),
+                    ),
+                    Some("Inspect installed tools"),
+                    lines.into(),
+                    ReviewStage::InstalledInspect,
+                    &self.reader,
+                );
+            self.approval(dry_run, hits)
+                .present_key(hits, "Check installed");
             action("Back", "Esc", KeyCode::Esc);
             return;
         }
@@ -277,14 +296,6 @@ impl State {
         }
         let rows = self.rows();
         let selected = rows.get(self.selected).copied();
-        if self.details {
-            if let Some(row) = selected {
-                self.draw_package(frame, area, row);
-                action("Add declaration", "a", KeyCode::Char('a'));
-            }
-            action("Back", "Esc", KeyCode::Esc);
-            return;
-        }
         let status = u16::from(self.current.is_some()).min(area.height);
         if let Some(current) = &self.current {
             let unavailable = current.reports.iter().filter(|r| !r.available()).count();
@@ -347,17 +358,34 @@ impl State {
                     }
                 }
             }
-            ui::report(
-                frame,
-                body,
-                "Installed packages",
-                lines.into(),
-                self.scroll,
-                false,
-            );
+            ui::reader::Reader::new(hits)
+                .with_wheel(super::input::Wheel::Tools)
+                .report(
+                    frame,
+                    body,
+                    "Installed packages",
+                    lines.into(),
+                    self.scroll,
+                    false,
+                );
         } else {
-            let (list, details) =
-                super::workbench::detail_panes(body, super::workbench::wide_details(body, 0));
+            use super::workspace::{Region, Scope, Workspace};
+            let active = Region::from_details(self.details && !self.searching);
+            let workspace = Workspace::new(Scope::InstalledTools, body, active, true);
+            workspace.bind(hits);
+            if let (Some(pane), Some(row)) = (workspace.details, selected) {
+                self.draw_package(frame, pane, row, hits, active == Region::Details);
+            }
+            if active == Region::Details {
+                action("Add declaration", "a", KeyCode::Char('a'));
+                action("Back", "Esc", KeyCode::Esc);
+                if !workspace.is_split() {
+                    return;
+                }
+            }
+            let list = workspace
+                .queue_content(frame, "Installed packages")
+                .expect("visible queue");
             let capacity = ui::design::pair_capacity(list);
             let first = self
                 .viewport
@@ -403,10 +431,9 @@ impl State {
                 hits,
                 Target::ToolsRow,
             );
-            if let (Some(area), Some(row)) = (details, selected) {
-                self.draw_package(frame, area, row);
+            if active == Region::Queue {
+                action("Package details", "Enter", KeyCode::Enter);
             }
-            action("Package details", "Enter", KeyCode::Enter);
             action("Add declaration", "a", KeyCode::Char('a'));
         }
         action("Check installed", "R", KeyCode::Char('R'));

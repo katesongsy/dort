@@ -1,4 +1,5 @@
 //! Declared tools, approved automatic checks and serial missing-package reviews.
+use super::input::Hits;
 use super::{actions::Task, app::App, components as ui, input::Target, shell::Action};
 use crate::services::declared_tools as workflow;
 use ratatui::{
@@ -8,6 +9,7 @@ use ratatui::{
     text::Line,
 };
 use std::sync::Arc;
+use ui::reader::{ReviewScroll, ReviewStage};
 
 #[derive(Default)]
 pub struct State {
@@ -19,12 +21,30 @@ pub struct State {
     pub installed: Option<workflow::Installed>,
     pub result_open: bool,
     pub stale: bool,
+    pub reader: ReviewScroll,
     viewport: super::navigation::ListViewport,
 }
 impl State {
+    fn stage(&self) -> ReviewStage {
+        if self.check_preview.is_some() {
+            ReviewStage::DeclaredCheck
+        } else {
+            ReviewStage::InstallMissing
+        }
+    }
+    fn approval(&self, dry_run: bool, hits: &Hits) -> ui::approval::Approval {
+        ui::approval::Approval::review(
+            hits,
+            self.stage(),
+            dry_run,
+            self.check_preview.is_none()
+                && self.install_preview.as_ref().is_none_or(|p| p.is_empty()),
+        )
+    }
     pub fn clear_reviews(&mut self) {
         self.check_waiting = false;
         self.install_waiting = false;
+        self.reader = ReviewScroll::default();
         self.check_preview = None;
         self.install_preview = None;
     }
@@ -90,23 +110,12 @@ impl State {
     }
 }
 fn scroll(app: &mut App, code: KeyCode) {
-    match code {
-        KeyCode::Down | KeyCode::PageDown => {
-            app.details_scroll =
-                app.details_scroll
-                    .saturating_add(if code == KeyCode::Down { 1 } else { 6 })
-        }
-        KeyCode::Up | KeyCode::PageUp => {
-            app.details_scroll =
-                app.details_scroll
-                    .saturating_sub(if code == KeyCode::Up { 1 } else { 6 })
-        }
-        KeyCode::Home => app.details_scroll = 0,
-        KeyCode::End => app.details_scroll = u16::MAX,
-        _ => (),
-    }
+    ui::reader::ScrollKeys::new(1, 6)
+        .with_end()
+        .apply(&mut app.details_scroll, code);
 }
-pub fn key(app: &mut App, code: KeyCode) -> Option<Option<Task>> {
+pub fn key(app: &mut App, key: KeyEvent) -> Option<Option<Task>> {
+    let code = key.code;
     let state = &mut app.tools_view.declared;
     if state.result_open {
         match code {
@@ -149,8 +158,11 @@ pub fn key(app: &mut App, code: KeyCode) -> Option<Option<Task>> {
     }
     if state.check_preview.is_some() || state.install_preview.is_some() {
         match code {
-            KeyCode::Esc => state.clear_reviews(),
-            KeyCode::Enter if !app.dry_run => {
+            KeyCode::Esc => {
+                app.hits.invalidate_review();
+                state.clear_reviews();
+            }
+            _ if state.approval(app.dry_run, &app.hits).accepts(key) => {
                 if let Some(preview) = state.check_preview.take() {
                     return Some(Some(Task::ToolsCheck(Box::new(preview.approve()))));
                 }
@@ -168,7 +180,7 @@ pub fn key(app: &mut App, code: KeyCode) -> Option<Option<Task>> {
                     );
                 }
             }
-            _ => scroll(app, code),
+            _ => state.reader.key(&app.hits, state.stage(), code),
         }
         return Some(None);
     }
@@ -448,22 +460,24 @@ fn review(frame: &mut Frame, area: Rect, app: &App) -> bool {
         warning,
         ui::warning(),
     );
-    ui::report(
-        frame,
-        Rect::new(
-            area.x,
-            area.y + top,
-            area.width,
-            area.height.saturating_sub(top),
-        ),
-        heading,
-        body.into(),
-        app.details_scroll,
-        false,
-    );
-    if !app.dry_run && !empty {
-        action(app, primary, "Enter", KeyCode::Enter);
-    }
+    ui::reader::Reader::new(&app.hits)
+        .with_wheel(super::input::Wheel::Tools)
+        .review(
+            frame,
+            Rect::new(
+                area.x,
+                area.y + top,
+                area.width,
+                area.height.saturating_sub(top),
+            ),
+            Some(heading),
+            body.into(),
+            state.stage(),
+            &state.reader,
+        );
+    state
+        .approval(app.dry_run, &app.hits)
+        .present_key(&app.hits, primary);
     if empty
         && state
             .install_preview
@@ -513,18 +527,26 @@ fn result(frame: &mut Frame, area: Rect, app: &App) -> bool {
         ));
     }
     lines.push(Line::raw("Check installed again before another install."));
-    ui::report(
-        frame,
-        area,
-        "Install results",
-        lines.into(),
-        app.details_scroll,
-        false,
-    );
+    ui::reader::Reader::new(&app.hits)
+        .with_wheel(super::input::Wheel::Tools)
+        .report(
+            frame,
+            area,
+            "Install results",
+            lines.into(),
+            app.details_scroll,
+            false,
+        );
     action(app, "Done", "Enter", KeyCode::Enter);
     true
 }
-fn draw_tool(frame: &mut Frame, area: Rect, app: &App, tool: &dort_core::model::Tool) {
+fn draw_tool(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    tool: &dort_core::model::Tool,
+    focused: bool,
+) {
     let mut lines = vec![
         ui::metadata("Tool ID", &tool.id),
         ui::metadata("Status", app.tools_view.declared.row_status(&tool.id)),
@@ -638,14 +660,16 @@ fn draw_tool(frame: &mut Frame, area: Rect, app: &App, tool: &dort_core::model::
             lines.push(ui::metadata("npm runtime", runtime));
         }
     }
-    ui::report(
-        frame,
-        area,
-        "Declared tool",
-        lines.into(),
-        app.details_scroll,
-        false,
-    );
+    ui::reader::Reader::new(&app.hits)
+        .with_wheel(super::input::Wheel::Tools)
+        .report(
+            frame,
+            area,
+            "Declared tool",
+            lines.into(),
+            app.details_scroll,
+            focused,
+        );
 }
 pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     app.hits.wheel(area, super::input::Wheel::Tools);
@@ -692,14 +716,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         .tools_view
         .declared_selected
         .min(tools.len().saturating_sub(1));
-    if app.tools_view.declared_details
-        && let Some(tool) = tools.get(selected)
-    {
-        draw_tool(frame, area, app, tool);
-        commands(app);
-        action(app, "Back", "Esc", KeyCode::Esc);
-        return;
-    }
     let intro = if app.tools_view.declared.stale {
         "Reviewed installation results are shown.\nCheck installed again to refresh other tools."
             .to_owned()
@@ -732,8 +748,20 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         );
         return;
     }
-    let (list, details) =
-        super::workbench::detail_panes(rows, super::workbench::wide_details(rows, 0));
+    use super::workspace::{Region, Scope, Workspace};
+    let active = Region::from_details(app.tools_view.declared_details);
+    let workspace = Workspace::new(Scope::DeclaredTools, rows, active, true);
+    workspace.bind(&app.hits);
+    if let (Some(area), Some(tool)) = (workspace.details, tools.get(selected)) {
+        draw_tool(frame, area, app, tool, active == Region::Details);
+    }
+    if active == Region::Details {
+        commands(app);
+        action(app, "Back", "Esc", KeyCode::Esc);
+    }
+    let Some(list) = workspace.queue_content(frame, "Declared tools") else {
+        return;
+    };
     let capacity = ui::design::pair_capacity(list);
     let first = app
         .tools_view
@@ -761,7 +789,4 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         &app.hits,
         Target::ToolsRow,
     );
-    if let (Some(area), Some(tool)) = (details, tools.get(selected)) {
-        draw_tool(frame, area, app, tool);
-    }
 }

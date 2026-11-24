@@ -238,11 +238,13 @@ pub fn local_available(app: &App) -> bool {
         || app.error.is_some()
         || app.preview.is_some()
         || app.show_result
-        || app.confirmation.is_some()
+        || app.batch_editor.as_ref().is_some_and(|editor| editor.open)
         || app.shell.overlay.is_some() && !ignored
+        || app.tab == Tab::Git && app.git_view.editing_root
         || app.page_title().is_some()
             && !ignored
-            && !(app.tab == Tab::Tools && app.tools_view.collection_visible())
+            && !matches!(app.tab, Tab::Files | Tab::Git)
+            && !(app.tab == Tab::Tools && app.tools_view.workspace_visible())
     {
         return false;
     }

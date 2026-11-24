@@ -132,7 +132,7 @@ fn list_enter_opens_details_and_only_explicit_review_approves_checks_once() {
         assert!(!s.contains("Snapshot") && !s.contains("\\u{b7}"));
     }
     assert!(f.calls().is_empty());
-    let task = key(&mut app, KeyCode::Enter, 80, 24).unwrap();
+    let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     assert!(matches!(task, Task::ToolsCheck(_)));
     app.start(false);
     assert!(key(&mut app, KeyCode::Enter, 80, 24).is_none());
@@ -331,7 +331,7 @@ fn dialogs_dim_the_background_and_dismiss_outside_without_forwarding_clicks() {
                 size.0,
                 size.1,
             );
-            assert!(task.is_none() && !app.quit && app.confirmation.is_none());
+            assert!(task.is_none() && !app.quit);
             if which == 5 {
                 assert!(app.tools_view.declaration_open);
             }
@@ -378,7 +378,6 @@ fn direct_field_submission_is_preview_only_and_busy_navigation_explains_joined_w
     incomplete.shell.adoption.target = "~/.ordinary".into();
     assert!(key(&mut incomplete, KeyCode::Enter, 48, 14).is_none());
     assert_eq!(incomplete.shell.adoption.focused, 1);
-    assert!(incomplete.preview.is_none() && incomplete.confirmation.is_none());
     let mut app = App::new(false);
     app.shell.overlay = Some(Overlay::Form(Form::Init));
     super::tests::focus_form(&mut app);
@@ -389,7 +388,7 @@ fn direct_field_submission_is_preview_only_and_busy_navigation_explains_joined_w
         key(&mut app, KeyCode::Enter, 80, 24),
         Some(Task::Init { .. })
     ));
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none());
     let mut app = App::new(false);
     app.shell.overlay = Some(Overlay::Form(Form::Check));
     super::tests::focus_form(&mut app);
@@ -400,8 +399,8 @@ fn direct_field_submission_is_preview_only_and_busy_navigation_explains_joined_w
     ));
     app.shell.overlay = None;
     app.start(true);
-    render(&app, 100, 30);
-    let (column, row) = super::tests::target_position(&app, 100, 30, |target| {
+    render(&app, 110, 30);
+    let (column, row) = super::tests::target_position(&app, 110, 30, |target| {
         matches!(target, Target::NavigationBlocked)
     });
     app.mouse(
@@ -411,7 +410,7 @@ fn direct_field_submission_is_preview_only_and_busy_navigation_explains_joined_w
             row,
             modifiers: KeyModifiers::NONE,
         },
-        100,
+        110,
         30,
     );
     assert!(app.busy && app.interaction_notice.is_some());

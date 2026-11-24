@@ -268,6 +268,13 @@ class Session:
         # The single foreground strip owns actions; body prose is never a hit.
         self.click_label(label, min_row=len(self.screen.cells) - 1)
 
+    def ready_review(self, action=b'y Confirm'):
+        self.settle()
+        if b'End Read' in self.screen.text().splitlines()[-1]:
+            self.send(b'\x1b[F')
+        self.wait(action)
+        assert action in self.screen.text().splitlines()[-1]
+
     def navigate(self, group, item):
         self.settle()
         if self.screen.cursor_visible:
@@ -375,6 +382,92 @@ def has_color_sgr(data):
                for value in [int(part or b"0") for part in match[1].split(b";")])
 
 
+def guarded_effects(binary):
+    with tempfile.TemporaryDirectory(prefix='dort-effects-') as temporary:
+        base = Path(temporary).resolve()
+        for mode in ('cancel', 'mouse', 'key', 'dry-run', 'blocked'):
+            home, repo = base / mode / 'h', base / mode / 'r'
+            home.mkdir(parents=True, mode=0o700)
+            (repo / '.git').mkdir(parents=True)
+            manifest = 'schema=1\n'
+            sources = [f'source-{index:02}' for index in range(12)] + ['tail']
+            for source in sources:
+                manifest += (f"[[files]]\nid='{source}'\nsource='{source}'\n"
+                             f"target='~/.{source}'\nmode='link'\n")
+                if not (mode == 'blocked' and source == 'tail'):
+                    (repo / source).write_text('disposable settings\n')
+            (repo / 'dort.toml').write_text(manifest)
+            identity = hashlib.sha256(os.fsencode(repo)).hexdigest()
+            config = home / '.config/dort'
+            config.mkdir(parents=True, mode=0o700)
+            local = config / 'local.toml'
+            local.write_text(f'schema=1\nactive_repository="{identity}"\n'
+                             f'[repositories."{identity}"]\nroot={json.dumps(str(repo))}\n')
+            local.chmod(0o600)
+            state = home / '.local/state/dort/repositories'
+            env = {'HOME': str(home), 'XDG_CONFIG_HOME': str(home / '.config'),
+                   'XDG_STATE_HOME': str(home / '.local/state'), 'PATH': '/no-external-programs',
+                   'TERM': 'xterm-256color', 'LANG': 'C.UTF-8'}
+            args = [binary, '--dry-run', 'tui'] if mode == 'dry-run' else [binary, 'tui']
+            tail = b'tail" }'
+            with Session(args, env, (14, 48)) as session:
+                session.wait(b'loaded.')
+                session.press(b'a', b'Review effects before confirming')
+                session.send(b'yy')
+                session.settle()
+                footer = session.screen.text().splitlines()[-1]
+                assert b'y Confirm' not in footer, footer
+                if mode in ('dry-run', 'blocked'):
+                    assert b'End Read' not in footer, footer
+                else:
+                    assert b'End Read' in footer, footer
+                assert tail not in session.screen.text()
+                assert not state.exists()
+                session.send(b'y')
+                session.settle()
+                assert not state.exists()
+                if mode in ('dry-run', 'blocked'):
+                    session.send(b'\x1b[Fy')
+                    session.settle()
+                    assert b'y Confirm' not in session.screen.text().splitlines()[-1]
+                else:
+                    session.wait(b'End Read')
+                    session.click_action('Read')
+                    session.wait(tail)
+                    session.wait(b'y Confirm')
+                    session.wait(b'F1 Help')
+                    footer = session.screen.text().splitlines()[-1]
+                    assert all(key in footer for key in (b'y Confirm', b'Esc Back', b'F1 Help')), footer
+                    row = 13
+                    column = footer.index(b'y Confirm')
+                    session.send(b'\x1b[Hy')
+                    session.wait(b'End Read')
+                    session.mouse(0, column, row)
+                    session.settle()
+                    assert not state.exists()
+                    session.ready_review()
+                    if mode == 'mouse':
+                        session.click_action('Confirm')
+                    elif mode == 'key':
+                        session.send(b'yy')
+                    else:
+                        session.send(b'\x1b')
+                        session.send(b'y')
+                    if mode in ('mouse', 'key'):
+                        session.wait(b'File operation completed.')
+                        session.send(b'yy')
+                session.send(b'q')
+                session.finish()
+            published = mode in ('mouse', 'key')
+            if published:
+                assert all((home / ('.' + source)).resolve() == repo / source for source in sources)
+            else:
+                assert all(not (home / ('.' + source)).exists() for source in sources)
+            count = len(list(state.glob('*/transactions/*')))
+            assert count == int(published), (mode, count)
+            print('PASS guarded effects', mode, flush=True)
+
+
 def run():
     screen = Screen((2, 20))
     screen.feed(b"Git executes\x1b[")
@@ -383,6 +476,7 @@ def run():
     assert b"label" in screen.text()
     binary = artifact(["build", "-p", "dort"], "binary")
     probe = artifact(["test", "-p", "dort", "--bin", "dort", "--no-run"], "test")
+    guarded_effects(binary)
     with tempfile.TemporaryDirectory(prefix="dort-terminal-") as temporary:
         base = Path(temporary).resolve()
         home = base / "home"
@@ -567,14 +661,14 @@ def run():
             assert not ignore_store.exists(), 'Help approved a preview'
             session.send(b'\x1b')
             session.wait(b'Ignore discovery path')
-            session.send(b'ye\x1bOP')
+            session.send(b'\r\r\x1bOP')
             session.wait(b'Keys in this context')
-            session.send(b's\r')
+            session.send(b'y\r')
             session.settle()
             assert not ignore_store.exists(), 'Help submitted confirmation input'
             session.send(b'\x1b')
             session.wait(b'Ignore discovery path')
-            session.send(b's')  # Printable text alone cannot approve.
+            session.send(b'Y')  # Only lowercase y can approve.
             session.send(b'\x1bOP')
             session.wait(b'Keys in this context')
             session.resize((13,47))
@@ -583,7 +677,8 @@ def run():
             session.wait(b'Keys in this context')
             session.send(b'\x1b')  # Help closes to preview; fresh confirmation required
             session.wait(b'Ignore discovery path')
-            session.send(b'\r')
+            session.ready_review()
+            session.send(b'y')
             session.wait(b'Filter files')
             session.send(b'q')
             session.finish()
@@ -597,12 +692,12 @@ def run():
             session.send(b'F')
             session.wait(b'Filter files')
             session.navigate('Files', 'Ignored paths [3]')
-            session.wait(b'Ignored exact paths')
+            session.wait(b'Ignored paths [Active]')
             assert b'Enter' in session.screen.text().splitlines()[-1]
             session.send(b'\r')
             session.wait(b'Unignore discovery path')
-            session.wait(b'Confirm')
-            session.send(b'\r')
+            session.ready_review()
+            session.send(b'y')
             session.wait(b'Filter files')
             session.send(b'q')
             session.finish()
@@ -774,7 +869,7 @@ def run():
         with Session([binary, "tui"], env, (24, 110)) as session:
             session.wait(b"loaded.")
             session.navigate("Files", "Discover [f]")
-            session.wait(b"Eligible hint")
+            session.wait(b"Eligible")
             session.click_label(".q?config")  # selection only; content is automatic
             session.send(b"\r")  # retain inspection when shrinking to compact
             session.wait(b"private-body-marker")
@@ -786,7 +881,7 @@ def run():
             session.settle()
             assert session.screen.text() == scrolled, "Focus round trip changed content or viewport"
             session.send(b"\x1b[H")
-            session.wait(b"Eligible hint")
+            session.wait(b"Eligible")
             session.more_action('Adopt')
             session.edit_fields('TARGET')
             session.click_label("ID")
@@ -856,7 +951,7 @@ def run():
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"F")
-            session.wait(b"Eligible hint")
+            session.wait(b"Eligible")
             session.send(b"\r")
             session.wait(b"Selected content")
             session.send(b"a")  # Direct adoption action.
@@ -954,6 +1049,8 @@ def run():
             session.wait(b"1 entries")
             session.wait(b"PATH")
             session.send(b"\x1bOR")
+            session.wait(b"Git details")
+            session.send(b"\x1b[6~" * 4)
             session.wait(b"Modes: 100644 -> 100644")
             assert b"PRIVATE-PATCH" not in session.screen.text(), "Scope details showed patch content"
             session.send(b"q")
@@ -1027,8 +1124,8 @@ def run():
                     assert not created.exists(), "Preview created repository"
                 session.send(b"\r")  # retained draft -> fresh preview
                 session.settle()
-                session.wait(b"Confirm")
-                session.send(b"\r")
+                session.ready_review()
+                session.send(b"y")
                 session.wait(b"Operation result")
                 session.send(b"q")
                 session.finish()
@@ -1062,8 +1159,8 @@ def run():
             session.wait(b"loaded.")
             session.send(b"a")
             session.wait(b"Review effects before confirming")
-            session.wait(b"Confirm")
-            session.send(b"yes\x1b")
+            session.ready_review()
+            session.send(b"\r\r\x1by")
             session.settle()
             session.send(b"\x1b")
             session.settle()
@@ -1076,9 +1173,9 @@ def run():
             session.wait(b"loaded.")
             session.send(b"a")
             session.wait(b"Review effects before confirming")
-            session.send(b"\r")
+            session.send(b"\r\ry")
             session.settle()
-            assert b"Confirm" not in session.data, "Dry-run opened confirmation"
+            assert b"y Confirm" not in session.screen.text(), "Dry-run opened confirmation"
             session.send(b"q")
             session.finish()
         assert not target.exists() and not target.is_symlink() and not state.exists()
@@ -1088,15 +1185,20 @@ def run():
             session.wait(b"loaded.")
             session.send(b"a")
             session.wait(b"Review effects before confirming")
-            session.wait(b"Confirm")
-            session.send(b"\r")
+            session.ready_review()
+            session.send(b"\r\r")
+            session.settle()
+            session.click_label('Read-only plan')
+            session.settle()
+            assert not target.exists() and not state.exists(), 'Enter or a body click approved apply'
+            session.click_action('Confirm changes')
             deadline = time.monotonic() + TIMEOUT
             while not target.is_symlink() and time.monotonic() < deadline:
                 session.pump()
             assert target.is_symlink(), "Approved TUI apply did not publish the link"
             session.wait(b"Operation result")
             session.wait(b"File operation completed.")
-            session.send(b"q")
+            session.send(b"yyq")
             session.finish()
         assert target.resolve() == repo / "source"
         assert (repo / "source").read_text() == "ordinary settings\n"
@@ -1108,8 +1210,8 @@ def run():
             session.wait(b"loaded.")
             session.send(b"a")
             session.wait(b"Review effects before confirming")
-            session.wait(b"Confirm")
-            session.send(b"\r")
+            session.ready_review()
+            session.send(b"y")
             session.wait(b"Operation result")
             session.wait(b"Everything is up to date.")
             session.more_action('Refresh data')
@@ -1131,8 +1233,8 @@ def run():
                 session.wait(b"loaded.")
                 session.send(b"a")
                 session.wait(b"Review effects before confirming")
-                session.wait(b"Confirm")
-                session.send(b"\r")
+                session.ready_review()
+                session.send(b"y")
                 session.wait(b"Possible partial effects")
                 session.send(b"\x1b[6~" * 4)
                 session.settle()
@@ -1158,6 +1260,8 @@ def run():
             session.send(b"\x1b[3~")  # clear display filter, no ID transcription
             session.wait(b"1/1 shown")
             session.send(b"\r")
+            session.wait(b"Recovery options")
+            session.send(b"\x1b[6~" * 16)
             session.wait(b"Repository ID:")
             session.wait(b"Operation ID:")
             session.send(b"b")
@@ -1168,8 +1272,8 @@ def run():
             assert target.is_symlink(), "Preview/back performed rollback"
             session.send(b"b")
             session.wait(b"Roll back operation")
-            session.wait(b"Confirm")
-            session.send(b"\r")
+            session.ready_review()
+            session.send(b"y")
             session.wait(b"Operation result")
             assert not target.exists() and not target.is_symlink()
             # Return from the retained receipt before navigating.
@@ -1178,8 +1282,8 @@ def run():
             session.destination("Overview")
             session.send(b"a")
             session.wait(b"Review effects before confirming")
-            session.wait(b"Confirm")
-            session.send(b"\r")
+            session.ready_review()
+            session.send(b"y")
             session.wait(b"Operation result")
             session.send(b"q")
             session.finish()
@@ -1197,16 +1301,17 @@ def run():
             session.wait(b"Completed")
             session.send(b"\r")  # selected row inspects; never requests rollback
             session.wait(b"Operation details")
-            session.wait(b"Repository ID:")
-            session.send(b"\x1b[6~" * 4)
+            session.wait(b"Recovery options")
+            assert b"Repository ID:" not in session.screen.text()
+            session.send(b"\x1b[6~" * 16)
             session.wait(b"Saved steps:")
             session.send(b"\x1b[H")
-            session.wait(b"Repository ID:")
+            session.wait(b"Recovery options")
             session.more_action('Rollback')  # Still opens a preview.
             session.wait(b"Roll back operation")
-            session.send(b"\r")
+            session.send(b"\r\ry")
             session.settle()
-            assert b"Confirm" not in session.data, "Dry-run Recovery opened approval"
+            assert b"y Confirm" not in session.screen.text(), "Dry-run Recovery opened approval"
             session.send(b"\x1b")
             session.wait(b"Operation details")
             session.send(b"q")
@@ -1222,25 +1327,34 @@ def run():
             session.send(b"/Completed\r")
             session.wait(b"1/2 shown")
             session.click_label("Completed", min_row=5)  # phase cell, below the retained filter
-            session.send(b"\r")
+            session.wait(b"Operations [Active]")
             session.wait(b"Operation details")
+            session.send(b"\t")
+            session.wait(b"Operation details [Active]")
+            assert session.screen.text().count(b"[Active]") == 1
             session.mouse(65, 90, 10)
             session.settle()
             scrolled = session.screen.text()
-            session.send(b"\t\x1b[Z")
-            session.settle()
-            assert scrolled == session.screen.text(), "Tab changed Recovery detail scroll"
-            session.send(b"\x1b[H")
-            session.wait(b"Operation")
+            session.send(b"\x1b[Z")
+            session.wait(b"Operations [Active]")
+            session.send(b"\t")
+            session.wait(b"Operation details [Active]")
+            assert scrolled == session.screen.text(), "Tab changed Recovery detail scroll or row"
+            for width in (100, 99, 90):
+                session.resize((24, width))
+                session.wait(b"Operation details [Active]")
+                session.wait(b"OP ID")
             session.resize((14, 48))
-            session.wait(b"Operation details")
+            session.wait(b"Operation details [Active]")
+            assert b"OP ID" not in session.screen.text()
             session.send(b"\x1b")
-            session.wait(b"OP ID")
+            session.wait(b"Operations [Active]")
+            session.wait(b"1/2 shown")
             session.click_label("Completed", min_row=5)
             session.send(b"\r")
-            session.wait(b"Operation details")
+            session.wait(b"Operation details [Active]")
             session.send(b"\x1b")
-            session.wait(b"OP ID")
+            session.wait(b"Operations [Active]")
             session.send(b"q")
             session.finish()
         assert checkpoints == {str(path.relative_to(state)): hashlib.sha256(path.read_bytes()).digest()
@@ -1255,8 +1369,8 @@ def run():
             session.settle()
             session.wait(b"No matches")
             session.send(b"a")
-            session.wait(b"Enter Confirm")
-            session.wait(b"Filters do not narrow it.")
+            session.wait(b"Scope: every mapping selected by this request.")
+            session.ready_review()
             session.send(b"\x1b")
             session.settle()
             session.send(b"q")
@@ -1271,13 +1385,13 @@ def run():
             session.send(b"m")
             session.edit_fields('TARGET')
             session.send(b"~/.q?config\tconfig\tfiles/config\r")  # Fields only; Enter previews.
-            session.wait(b"Enter Adopt all")
+            session.ready_review(b"y Adopt all")
             session.send(b"\x1b")
             session.settle()
             assert not candidate.is_symlink() and not (repo / "files/config").exists()
             session.send(b"\r")  # retained Review -> fresh preview
-            session.settle()
-            session.send(b"\r")  # Adopt all: one explicit approval, no typed yes.
+            session.ready_review(b"y Adopt all")
+            session.send(b"y")  # Adopt all: one explicit approval, no typed yes.
             session.wait(b"Enter Details")
             session.send(b"q")
             session.finish()
@@ -1293,10 +1407,10 @@ def run():
             session.more_action('Delete managed link: enter exact mapping ID')
             session.edit_fields('Exact ID')
             session.send(b"config\r")
-            session.wait(b"Enter Confirm")
+            session.ready_review()
             session.wait(b"config")
             assert candidate.is_symlink(), "Preview executed without activation"
-            session.send(b"\r")
+            session.send(b"y")
             session.wait(b"Operation result")
             session.send(b"q")
             session.finish()
@@ -1372,8 +1486,9 @@ def run():
             session.click_label('Done')  # Return only; never review/adopt an individual item.
             session.wait(b'Review all')
             session.click_label('Review all')
-            session.wait(b'Exact marked set')
-            session.send(b'\r')  # Adopt all consumes the real combined preview once.
+            session.wait(b'One approval / one transaction')
+            session.ready_review(b'y Adopt all')
+            session.send(b'y')  # Adopt all consumes the real combined preview once.
             session.wait(b'Enter Details')
             assert all((targets / name).is_symlink() for name in ('only-a', 'only-b'))
             for name in ('only-a', 'only-b'):
@@ -1382,8 +1497,8 @@ def run():
             session.destination("Recovery")
             session.send(b'b')
             session.wait(b'Roll back operation')
-            session.wait(b'Confirm')
-            session.send(b'\r')
+            session.ready_review()
+            session.send(b'y')
             session.wait(b'Operation result')
             session.send(b'q')
             session.finish()
@@ -1403,9 +1518,9 @@ def run():
                 session.click_label('[ ] only-a')
                 session.click_label('[ ] only-b')
                 session.send(b'/only-a\rA')  # Hidden only-b remains explicitly included.
-                session.wait(b'Exact marked set')
-                session.wait(b'Confirm')
-                session.send(b'\r')
+                session.wait(b'One approval / one transaction')
+                session.ready_review()
+                session.send(b'y')
                 session.wait(b'Operation result')
                 assert all((targets / name).is_symlink() for name in ('only-a', 'only-b'))
                 assert not (targets / 'only-c').is_symlink()
@@ -1413,19 +1528,20 @@ def run():
                 session.send(b'\x1b')
                 session.settle()
                 session.send(operation.encode())
-                session.wait(b'Exact marked set')
-                session.wait(b'Confirm')
+                session.wait(b'One approval / one transaction')
                 if operation == 'D':
                     session.wait(b'only-a')
+                    session.send(b'\x1b[F')
                     session.wait(b'only-b')
                     assert all((targets / name).is_symlink() for name in ('only-a', 'only-b'))
                     session.resize((14, 47))
                     session.wait(b'terminal too small')
                     session.resize((24, 80))
-                    session.wait(b'Exact marked set')
+                    session.wait(b'y Confirm changes')
                     session.settle()
                     assert all((targets / name).is_symlink() for name in ('only-a', 'only-b')), 'Resize executed changes'
-                session.send(b'\r')
+                session.ready_review()
+                session.send(b'y')
                 session.wait(b'Batch file operation completed.')
                 session.send(b'q')
                 session.finish()
@@ -1447,9 +1563,8 @@ def run():
             session.wait(b'loaded.')
             session.destination('Files')
             session.send(b'a')
-            session.wait(b"Enter Confirm")
-            session.wait(b'Confirm')
-            session.send(b'\r')
+            session.ready_review()
+            session.send(b'y')
             session.wait(b'Operation result')
             session.press(b'\x1b', b'Dort / Files / Managed')
             session.press(b'l', b'bundle')
@@ -1457,19 +1572,18 @@ def run():
             session.press(b'l', b'only-a')
             session.press(b'j', '›     [ ] only-a'.encode())
             session.send(b' u')  # Mark A, then unmanage it.
-            session.wait(b"Enter Confirm")
-            session.wait(b'Confirm')
-            session.send(b'\r')
+            session.ready_review()
+            session.send(b'y')
             session.wait(b'File operation completed.')
             session.press(b'\x1b', b'0 marked (0 hidden)')
             session.press(b'\x1b[H', '› [v] .config'.encode())
             session.press(b'j', '›   [v] bundle'.encode())
             session.press(b'j', '›     [ ] only-b'.encode())
             session.send(b' U')
-            session.wait(b'Exact marked set')
+            session.wait(b'One approval / one transaction')
             assert b'only-a' not in session.screen.text(), 'Completed Keep leaked into a later batch'
-            session.wait(b'Confirm')
-            session.send(b'\r')
+            session.ready_review()
+            session.send(b'y')
             session.wait(b'Batch file operation completed.')
             session.press(b'\x1b', b'0 marked (0 hidden)')
             session.send(b'q')
@@ -1495,4 +1609,7 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    if sys.argv[1:] == ["--guarded-effects"]:
+        guarded_effects(artifact(["build", "-p", "dort"], "binary"))
+    else:
+        run()

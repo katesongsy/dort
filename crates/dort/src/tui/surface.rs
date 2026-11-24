@@ -15,9 +15,6 @@ impl App {
         if let Some(menu) = &self.more {
             return Some(menu.title);
         }
-        if self.confirmation.is_some() {
-            return Some("Confirm reviewed changes");
-        }
         if self.error.is_some() || self.busy || self.show_result || self.preview.is_some() {
             return None; // A retained choice is not the currently displayed surface.
         }
@@ -83,7 +80,7 @@ impl App {
                 "Files / File details"
             });
         }
-        if self.tab == Tab::Recovery && self.history_details {
+        if self.tab == Tab::Recovery && self.history_region == super::workspace::Region::Details {
             return Some("Recovery / Operation details");
         }
         if self.tab == Tab::Git && self.git_view.browsing_details() && !self.git_view.editing_root {
@@ -144,10 +141,10 @@ impl App {
     /// Called only after choosing another destination. Retain drafts and
     /// historical metadata, discard one-use approvals.
     pub(super) fn leave_page_for_navigation(&mut self) {
+        self.hits.invalidate_review();
         self.more = None;
         self.choice = None;
         self.preview = None;
-        self.confirmation = None;
         self.error = None;
         self.failure = None;
         self.retry = None;

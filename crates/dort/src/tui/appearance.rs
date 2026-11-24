@@ -1,8 +1,40 @@
 //! Pure terminal capabilities and a geometry-preserving rendering adaptation.
 use ratatui::{
     buffer::Buffer,
-    style::{Color, Modifier},
+    style::{Color, Modifier, Style},
 };
+
+#[derive(Clone, Copy)]
+pub(super) enum TextRole {
+    Heading,
+    Label,
+    Value,
+    Information,
+    Note,
+    Success,
+    Warning,
+    Blocker,
+}
+
+impl TextRole {
+    pub(super) fn style(self) -> Style {
+        let (color, emphasis) = match self {
+            Self::Heading => (Some(Color::Cyan), Modifier::BOLD),
+            Self::Label => (None, Modifier::BOLD),
+            Self::Value => (None, Modifier::empty()),
+            Self::Information => (Some(Color::Blue), Modifier::empty()),
+            Self::Note => (Some(Color::DarkGray), Modifier::empty()),
+            Self::Success => (Some(Color::Green), Modifier::empty()),
+            Self::Warning => (Some(Color::Yellow), Modifier::BOLD),
+            Self::Blocker => (Some(Color::Red), Modifier::BOLD),
+        };
+        let style = Style::default().add_modifier(emphasis);
+        match color {
+            Some(color) => style.fg(color),
+            None => style,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 enum ColorDepth {
@@ -97,6 +129,8 @@ impl Appearance {
     }
 
     pub(super) fn apply(self, buffer: &mut Buffer) {
+        let heading = TextRole::Heading.style();
+        let success = TextRole::Success.style();
         for cell in &mut buffer.content {
             if self.ascii {
                 // Only trusted, single-cell decoration. Unknown symbols are not
@@ -107,6 +141,12 @@ impl Appearance {
                 }
             }
             if self.monochrome {
+                // ANSI cyan + bold is reserved for headings and focus accents.
+                if Some(cell.fg) == heading.fg && cell.modifier.contains(heading.add_modifier) {
+                    cell.modifier.insert(Modifier::UNDERLINED);
+                } else if Some(cell.fg) == success.fg {
+                    cell.modifier.insert(Modifier::BOLD);
+                }
                 cell.fg = Color::Reset;
                 cell.bg = Color::Reset;
                 cell.modifier.remove(Modifier::DIM);

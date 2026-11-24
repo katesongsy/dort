@@ -107,16 +107,24 @@ impl State {
             && self.declared.install_preview.is_none()
             && !self.declared.result_open
     }
-    pub fn collection_visible(&self) -> bool {
-        self.at_root()
+    pub fn workspace_visible(&self) -> bool {
+        self.landing()
+            && self.declared.check_preview.is_none()
+            && self.declared.install_preview.is_none()
+            && !self.declared.result_open
             || self.installed_open
                 && !self.installed.waiting
-                && !self.installed.details
                 && self.installed.preview.is_none()
                 && self.installed.error.is_none()
             || self.install_open
                 && self.installation.mode == super::tools_install::Mode::Attempts
-                && !self.installation.details
+                && self.installation.close_preview.is_none()
+    }
+    pub fn collection_visible(&self) -> bool {
+        self.workspace_visible()
+            && !(self.landing() && self.declared_details
+                || self.installed_open && self.installed.details
+                || self.install_open && self.installation.details)
     }
     pub fn text_entry(&self) -> bool {
         self.installed_open && self.installed.searching
@@ -305,7 +313,12 @@ impl State {
         self.install_open = true;
         self.installation.open_attempts()
     }
-    pub fn key(&mut self, key: KeyEvent, dry_run: bool) -> Option<Option<Task>> {
+    pub fn key(
+        &mut self,
+        key: KeyEvent,
+        dry_run: bool,
+        hits: &super::input::Hits,
+    ) -> Option<Option<Task>> {
         if self.installed_open {
             if !self.installed.searching
                 && self.installed.preview.is_none()
@@ -321,10 +334,10 @@ impl State {
                     _ => (),
                 }
             }
-            return Some(self.installed.key(key, dry_run));
+            return Some(self.installed.key(key, dry_run, hits));
         }
         if self.install_open {
-            return match self.installation.key(key, dry_run) {
+            return match self.installation.key(key, dry_run, hits) {
                 Some(super::tools_install::Outcome::Back) => Some(self.back()),
                 Some(super::tools_install::Outcome::Task(task)) => Some(Some(*task)),
                 None => Some(None),

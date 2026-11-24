@@ -7,12 +7,7 @@ use super::{
     views,
 };
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{
-    Frame,
-    layout::{Constraint, Layout, Rect},
-    text::Text,
-    widgets::Paragraph,
-};
+use ratatui::{Frame, layout::Rect, text::Text, widgets::Paragraph};
 
 pub fn shortcut(action: Action) -> &'static str {
     match action {
@@ -77,20 +72,6 @@ fn short(action: Action) -> &'static str {
         Action::GitUnstaged => "Unstaged",
         Action::GitStaged => "Staged",
         _ => action.label(),
-    }
-}
-pub fn wide_details(area: Rect, header_rows: u16) -> bool {
-    area.width >= 110 && area.height.saturating_sub(header_rows) >= 14
-}
-pub fn detail_panes(area: Rect, wide: bool) -> (Rect, Option<Rect>) {
-    if wide {
-        let [list, details] =
-            Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
-                .spacing(2)
-                .areas(area);
-        (list, Some(details))
-    } else {
-        (area, None)
     }
 }
 /// Foreground-only metadata; no contents, serialized plans or approvals enter this model.
@@ -161,7 +142,7 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
         return actions;
     }
     let mut result = app.hits.actions();
-    if app.confirmation.is_some() || app.preview.is_some() {
+    if app.preview.is_some() {
         return result;
     }
     if !app.busy
@@ -297,7 +278,8 @@ pub(super) fn strip_actions(
         });
     }
     // Controllers supply relevance order; navigation keeps reserved trailing positions.
-    available.sort_by_key(|a| usize::from(a.key != "Enter"));
+    available
+        .sort_by_key(|a| usize::from(!matches!(a.target, Target::Continue) && a.key != "Enter"));
     let mut anchors: Vec<_> = available
         .iter()
         .copied()
@@ -336,7 +318,7 @@ pub(super) fn strip_actions(
         let enabled =
             !matches!(action.target, Target::Action(value) if app.action_reason(value).is_some());
         if !action.key.is_empty()
-            && !(app.text_entry() && (action.key.chars().count() == 1 || action.key == "Space"))
+            && !(app.key_text_entry() && (action.key.chars().count() == 1 || action.key == "Space"))
             && enabled
             && !overflowed
             && shown.len() + anchors.len() < 8
@@ -381,7 +363,7 @@ pub(super) fn strip_actions(
                 a.label
             },
             target: a.target,
-            primary: a.key == "Enter",
+            primary: a.key == "Enter" || matches!(a.target, Target::Continue),
         })
         .collect();
     if !hidden.is_empty() {
@@ -430,39 +412,25 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
     let Some(preview) = &app.preview else {
         return;
     };
-    app.hits.wheel(area, Wheel::Preview);
-    if let super::actions::Pending::Files(plan) = &preview.pending
-        && !preview.full
-    {
-        super::review::draw(frame, area, plan, preview, &app.hits);
-    } else if let super::actions::Pending::Batch(plan) = &preview.pending
-        && !preview.full
-    {
-        super::review::draw_batch(frame, area, plan, preview, &app.hits);
-    } else {
-        frame.render_widget(
-            Paragraph::new(ui::review_text(&preview.text))
-                .scroll((preview.scroll, preview.horizontal)),
+    ui::reader::Reader::new(&app.hits)
+        .with_wheel(Wheel::Preview)
+        .review(
+            frame,
             area,
+            None,
+            ui::review_text(&preview.text),
+            ui::reader::ReviewStage::Changes,
+            &preview.reader,
         );
-    }
-    if !preview.pending.blocked() && !app.dry_run {
-        app.presented(
-            if preview.pending.adoption() {
-                "Adopt all"
-            } else {
-                "Confirm changes"
-            },
-            "Enter",
-            Target::Continue,
-        );
-    }
-    app.presented("Back", "Esc", Target::Back);
-    app.presented(
-        "Full report",
-        "F3",
-        Target::Key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE)),
+    app.preview_approval().present_key(
+        &app.hits,
+        if preview.pending.adoption() {
+            "Adopt all"
+        } else {
+            "Confirm changes"
+        },
     );
+    app.presented("Back", "Esc", Target::Back);
 }
 fn overlay(frame: &mut Frame, inner: Rect, app: &App, overlay: &Overlay) {
     app.hits.wheel(inner, Wheel::Overlay);
@@ -473,14 +441,16 @@ fn overlay(frame: &mut Frame, inner: Rect, app: &App, overlay: &Overlay) {
         Overlay::Profiles(_) | Overlay::Repositories { .. } => {
             super::pickers::draw(frame, inner, app, overlay)
         }
-        Overlay::Form(_) if app.shell.form_details => ui::report(
-            frame,
-            inner,
-            "Draft details",
-            document(views::overlay_text(app, overlay, inner.height, inner.width)),
-            app.shell.scroll,
-            true,
-        ),
+        Overlay::Form(_) if app.shell.form_details => ui::reader::Reader::new(&app.hits)
+            .with_wheel(Wheel::Overlay)
+            .report(
+                frame,
+                inner,
+                "Draft details",
+                document(views::overlay_text(app, overlay, inner.height, inner.width)),
+                app.shell.scroll,
+                true,
+            ),
         Overlay::Form(form) => super::forms::draw(frame, inner, app, *form),
         _ => ui::text_view(
             frame,
@@ -578,41 +548,6 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 Rect::new(body.x, body.bottom(), body.width, 0),
                 app,
             );
-        } else if app.confirmation.is_some() {
-            app.hits.wheel(body, Wheel::Confirmation);
-            let ids = app.batch_removal_ids();
-            let removal = app.preview.as_ref().and_then(|p| p.pending.removal_id());
-            let prompt = if !ids.is_empty() {
-                format!(
-                    "Delete managed links for these exact IDs:\n{}\nRepository sources are retained.",
-                    ids.iter()
-                        .map(|id| views::safe(id))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                )
-            } else if let Some(id) = removal {
-                format!(
-                    "Delete managed link for ID: {}\nRepository source is retained.",
-                    views::safe(id)
-                )
-            } else {
-                "Proceed with the reviewed changes?".into()
-            };
-            ui::text_view(
-                frame,
-                body,
-                Text::from(prompt),
-                app.confirmation.as_ref().unwrap().prompt_scroll,
-            );
-            if !app.dry_run
-                && app
-                    .preview
-                    .as_ref()
-                    .is_some_and(|preview| !preview.pending.blocked())
-            {
-                app.presented("Confirm", "Enter", Target::ConfirmAction);
-            }
-            app.presented("Cancel", "Esc", Target::CancelConfirmation);
         } else if app.preview.is_some() {
             preview(frame, body, app);
         } else if let Some(editor) = app.batch_editor.as_ref().filter(|e| e.open) {

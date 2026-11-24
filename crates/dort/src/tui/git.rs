@@ -1,4 +1,5 @@
 //! Read-only Git view. Patch content stays out of reports.
+use super::workspace::Region;
 use super::{actions::Task, components as ui, input::Target, shell::edit_text};
 use dort_core::git::{Diff, Git, Status};
 use ratatui::{
@@ -87,9 +88,8 @@ impl Read {
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum Reader {
     #[default]
-    Entries,
-    Details,
-    Patch,
+    Auto,
+    Metadata,
 }
 
 #[derive(Default)]
@@ -106,6 +106,7 @@ pub struct State {
     pub viewport: super::navigation::ListViewport,
     scroll: u16,
     reader: Reader,
+    pub region: super::workspace::Region,
     preview: preview::State,
     awaiting_summary: bool,
 }
@@ -123,14 +124,12 @@ impl State {
         self.editing_root = false;
         self.root_details = false;
         self.search.editing = false;
-        self.reader = Reader::Entries;
+        self.reader = Reader::Auto;
+        self.region = Region::Queue;
         self.discard_preview();
     }
     pub fn discard_preview(&mut self) {
         self.preview.sync(None);
-        if self.reader == Reader::Patch {
-            self.reader = Reader::Entries;
-        }
     }
     pub fn failed(&mut self) {
         if self.awaiting_summary {
@@ -143,7 +142,8 @@ impl State {
         self.discard_preview();
         self.metadata = None;
         self.selected = 0;
-        self.reader = Reader::Entries;
+        self.reader = Reader::Auto;
+        self.region = Region::Queue;
         self.scroll = 0;
     }
     pub fn accept(&mut self, metadata: Metadata) {
@@ -286,11 +286,13 @@ impl State {
         }
         if key.code == KeyCode::F(3) {
             self.search.editing = false;
-            self.reader = if self.reader == Reader::Details {
-                Reader::Entries
+            if self.region == Region::Details && self.reader == Reader::Metadata {
+                self.region = Region::Queue;
+                self.reader = Reader::Auto;
             } else {
-                Reader::Details
-            };
+                self.region = Region::Details;
+                self.reader = Reader::Metadata;
+            }
             self.scroll = 0;
             return Some(None);
         }
@@ -300,21 +302,29 @@ impl State {
             self.clamp();
             return Some(None);
         }
-        if self.reader != Reader::Entries {
+        if self.region == Region::Details {
             match key.code {
                 KeyCode::Esc => {
-                    self.reader = Reader::Entries;
-                    self.scroll = 0;
+                    self.region = Region::Queue;
                     return Some(None);
                 }
                 KeyCode::Enter => return Some(None),
-                code if self.reader == Reader::Patch && self.preview.scroll(code) => {
+                code if self.reader == Reader::Auto
+                    && self.preview.available()
+                    && self.preview.scroll(code) =>
+                {
                     return Some(None);
                 }
-                KeyCode::Left | KeyCode::Right if self.reader == Reader::Patch => {
+                KeyCode::Left | KeyCode::Right
+                    if self.reader == Reader::Auto && self.preview.available() =>
+                {
                     return Some(None);
                 }
-                code if super::shell::scroll_details(&mut self.scroll, code) => return Some(None),
+                code if super::components::reader::ScrollKeys::DETAILS
+                    .apply(&mut self.scroll, code) =>
+                {
+                    return Some(None);
+                }
                 _ => (),
             }
         }
@@ -326,11 +336,8 @@ impl State {
                 if self.metadata.is_none() {
                     self.editing_root = true;
                 } else if self.has_selection() {
-                    self.reader = if self.preview.available() {
-                        Reader::Patch
-                    } else {
-                        Reader::Details
-                    };
+                    self.reader = Reader::Auto;
+                    self.region = Region::Details;
                 }
                 self.scroll = 0;
             }
@@ -342,10 +349,10 @@ impl State {
         self.editing_root && self.root_details
     }
     pub fn browsing_details(&self) -> bool {
-        self.reader == Reader::Details
+        self.region == Region::Details
     }
     pub fn browsing_entries(&self) -> bool {
-        self.reader == Reader::Entries && !self.editing_root
+        self.region == Region::Queue && !self.editing_root
     }
     pub fn page_metadata(&mut self, backwards: bool, count: usize) {
         let visible = self.visible();
@@ -372,19 +379,22 @@ impl State {
     }
     pub fn edit_filter(&mut self) {
         self.search.editing = true;
-        self.reader = Reader::Entries;
+        self.reader = Reader::Auto;
+        self.region = Region::Queue;
         self.scroll = 0;
     }
     pub fn inspect_metadata(&mut self) {
         if !self.editing_root {
-            self.reader = Reader::Details;
+            self.reader = Reader::Metadata;
+            self.region = Region::Details;
             self.scroll = 0;
         }
     }
     pub fn select_metadata(&mut self, index: usize) {
         if !self.editing_root && self.visible().contains(&index) {
             self.selected = index;
-            self.reader = Reader::Entries;
+            self.reader = Reader::Auto;
+            self.region = Region::Queue;
             self.scroll = 0;
         }
     }
@@ -404,7 +414,7 @@ impl State {
         }
     }
     pub fn scroll_metadata_details(&mut self, code: KeyCode) -> bool {
-        super::shell::scroll_details(&mut self.scroll, code)
+        super::components::reader::ScrollKeys::DETAILS.apply(&mut self.scroll, code)
     }
     pub fn scroll_patch(&mut self, code: KeyCode) {
         self.preview.scroll(code);
@@ -422,7 +432,7 @@ impl State {
                 target: Target::Key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE)),
             });
             if self.root_details {
-                ui::report(frame, area, "Git root draft", vec![ui::metadata("Full root draft", &self.draft), ratatui::text::Line::raw("Relative paths resolve from the launch directory. This draft is not saved and shows no patch content.")].into(), self.scroll, false);
+                ui::reader::Reader::new(hits).report(frame, area, "Git root draft", vec![ui::metadata("Full root draft", &self.draft), ratatui::text::Line::raw("Relative paths resolve from the launch directory. This draft is not saved and shows no patch content.")].into(), self.scroll, false);
                 hits.present(ui::ActionButton {
                     label: "Back",
                     key: "Esc",
@@ -473,6 +483,7 @@ impl State {
                     selected: self.selected,
                     viewport: &self.viewport,
                     reader: self.reader,
+                    active: self.region,
                     preview: &self.preview,
                     scroll: self.scroll,
                     busy,

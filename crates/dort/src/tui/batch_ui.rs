@@ -1,12 +1,19 @@
 //! Batch adoption pages. Editing a draft does not approve a write.
-use super::{actions::Task, app::App, components as ui, input::Target, shell::AdoptionDraft};
+use super::{
+    actions::Task,
+    app::App,
+    components as ui,
+    input::{Target, Wheel},
+    shell::AdoptionDraft,
+};
 use ratatui::{
     Frame,
     crossterm::event::{KeyCode, KeyEvent},
     layout::{Constraint, Layout, Rect},
     text::{Line, Text},
-    widgets::{Cell, Clear, Row, Table, TableState},
+    widgets::{Cell, Clear, Row},
 };
+use ui::collection::{Collection, Header, RowTargets, Selection};
 pub struct Editor {
     pub drafts: Vec<AdoptionDraft>,
     paths: Vec<std::path::PathBuf>,
@@ -197,7 +204,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
             },
         );
         editor.page_rows.set(content.height.max(1));
-        ui::text_view(frame, content, editor.metadata(), editor.scroll);
+        ui::reader::Reader::new(&app.hits)
+            .with_wheel(Wheel::Overlay)
+            .wrapped(frame, content, editor.metadata(), editor.scroll);
         return;
     }
     if editor.item_form {
@@ -273,39 +282,34 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
             Cell::from(ui::inline(&d.source)),
         ])
     });
-    let table = Table::new(
-        rows,
+    let collection = Collection::new(
         [
             Constraint::Percentage(45),
             Constraint::Percentage(20),
             Constraint::Percentage(35),
         ],
+        Header::Heading(["TARGET", "ID", "SOURCE"]),
     )
-    .header(Row::new(["TARGET", "ID", "SOURCE"]).style(ui::heading()))
-    .block(ui::pane("All editable defaults", false))
-    .row_highlight_style(ui::selected());
-    let mut state = TableState::default()
-        .with_selected(Some(editor.item))
-        .with_offset(editor.offset.get());
-    frame.render_stateful_widget(table, sections[0], &mut state);
-    editor.offset.set(state.offset());
+    .titled("All editable defaults", false)
+    .highlight_only();
     editor
         .page_rows
-        .set(sections[0].height.saturating_sub(2).max(1));
-    for (line, index) in (state.offset()..editor.drafts.len())
-        .take(usize::from(sections[0].height.saturating_sub(2)))
-        .enumerate()
-    {
-        app.hits.click(
-            Rect::new(
-                sections[0].x,
-                sections[0].y + 2 + line as u16,
-                sections[0].width,
-                1,
-            ),
-            Target::BatchControl(index * 3, false),
-        );
-    }
+        .set(collection.capacity(sections[0]).max(1) as u16);
+    let rendered = collection.draw(
+        frame,
+        sections[0],
+        rows.enumerate(),
+        Selection {
+            selected: Some(editor.item),
+            offset: editor.offset.get(),
+        },
+        RowTargets {
+            hits: &app.hits,
+            wheel: None,
+            target: |index| Target::BatchControl(index * 3, false),
+        },
+    );
+    editor.offset.set(rendered.offset);
     if sections[1].height > 0 {
         ui::text_view(frame, sections[1], editor.metadata(), 0);
     }

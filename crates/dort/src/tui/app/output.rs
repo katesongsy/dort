@@ -18,6 +18,7 @@ impl App {
             && !self.quit
         {
             self.tools_view.installed.waiting = false;
+            self.tools_view.installed.reader = ReviewScroll::default();
             self.tools_view.installed.preview = Some(preview);
         }
 
@@ -41,6 +42,7 @@ impl App {
     ) -> Option<Task> {
         if self.tab == Tab::Tools && self.tools_view.declared.check_waiting {
             self.tools_view.declared.check_waiting = false;
+            self.tools_view.declared.reader = ReviewScroll::default();
             self.tools_view.declared.check_preview = Some(preview);
             self.details_scroll = 0;
         }
@@ -69,6 +71,7 @@ impl App {
     ) -> Option<Task> {
         if self.tab == Tab::Tools && self.tools_view.declared.install_waiting {
             self.tools_view.declared.install_waiting = false;
+            self.tools_view.declared.reader = ReviewScroll::default();
             self.tools_view.declared.install_preview = Some(preview);
             self.details_scroll = 0;
         }
@@ -253,7 +256,6 @@ impl App {
         apply: bool,
     ) -> Option<Task> {
         self.preview = None;
-        self.confirmation = None;
         if apply {
             if standalone {
                 self.shell.check_profiles = requested;
@@ -350,7 +352,6 @@ impl App {
         self.selected = 0;
         self.details_scroll = 0;
         self.preview = None;
-        self.confirmation = None;
         self.shell.back();
         self.replace_data(data);
         self.status = "Repository selected for this session only; configuration unchanged.".into();
@@ -371,16 +372,17 @@ impl App {
     pub(super) fn accept_preview(&mut self, pending: Pending) -> Option<Task> {
         match pending.report() {
             Ok(text) => {
+                let text = if pending.review_len().is_some() {
+                    crate::tui::review::effects_report(&text)
+                } else {
+                    text
+                };
                 self.reviewed_activity =
                     Some(crate::tui::task_surfaces::Activity::for_pending(&pending));
                 self.preview = Some(Preview {
                     pending,
                     text,
-                    scroll: 0,
-                    horizontal: 0,
-                    full: false,
-                    selected: 0,
-                    effect_scroll: 0,
+                    reader: ReviewScroll::default(),
                 });
                 self.status = if self.preview.as_ref().is_some_and(|p| p.pending.adoption()) {
                     "Review all mappings; Adopt all approves this exact set once."

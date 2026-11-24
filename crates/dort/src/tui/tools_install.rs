@@ -1,4 +1,5 @@
 //! Install records and record close. Closing does not replay an install.
+use super::input::Hits;
 use super::{actions::Task, components as ui, input::Target, shell::edit_text};
 use dort_core::tools::{inspection::NpmBinding, install};
 use ratatui::{
@@ -8,6 +9,7 @@ use ratatui::{
     text::Line,
 };
 use std::path::PathBuf;
+use ui::reader::{ReviewScroll, ReviewStage};
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     #[default]
@@ -32,6 +34,7 @@ pub struct State {
     pub focus: usize,
     pub details: bool,
     pub scroll: u16,
+    reader: ReviewScroll,
     pub scope: Option<install::Scope>,
 }
 pub enum Outcome {
@@ -127,6 +130,7 @@ impl State {
         self.focus = 0;
     }
     pub fn close_reviewed(&mut self, preview: install::ClosePreview) {
+        self.reader = ReviewScroll::default();
         self.close_preview = Some(preview);
         self.mode = Mode::CloseReview;
         self.scroll = 0;
@@ -169,7 +173,16 @@ impl State {
         self.mode = Mode::LoadingClose;
         Some(Task::ToolClosePrepare(request.clone()))
     }
-    pub fn key(&mut self, key: KeyEvent, dry_run: bool) -> Option<Outcome> {
+    fn approval(&self, dry_run: bool, hits: &Hits) -> ui::approval::Approval {
+        ui::approval::Approval::review(
+            hits,
+            ReviewStage::CloseRecord,
+            dry_run,
+            self.close_preview.is_none(),
+        )
+    }
+
+    pub fn key(&mut self, key: KeyEvent, dry_run: bool, hits: &Hits) -> Option<Outcome> {
         if self.mode == Mode::CloseInputs {
             let n = self.close_field_count();
             let task = match key.code {
@@ -195,14 +208,17 @@ impl State {
         }
         if self.mode == Mode::CloseReview {
             match key.code {
-                KeyCode::Esc => self.clear_approvals(),
-                KeyCode::Enter if !dry_run => {
+                KeyCode::Esc => {
+                    hits.invalidate_review();
+                    self.clear_approvals();
+                }
+                _ if self.approval(dry_run, hits).accepts(key) => {
                     return self
                         .close_preview
                         .take()
                         .map(|p| Outcome::Task(Box::new(Task::ToolClose(Box::new(p.approve())))));
                 }
-                _ => self.scroll(key.code),
+                _ => self.reader.key(hits, ReviewStage::CloseRecord, key.code),
             }
             return None;
         }
@@ -250,15 +266,17 @@ impl State {
         None
     }
     fn scroll(&mut self, code: KeyCode) {
-        match code {
-            KeyCode::Down | KeyCode::PageDown => self.scroll = self.scroll.saturating_add(2),
-            KeyCode::Up | KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(2),
-            KeyCode::Home => self.scroll = 0,
-            KeyCode::End => self.scroll = u16::MAX,
-            _ => (),
-        }
+        ui::reader::ScrollKeys::new(2, 2)
+            .with_end()
+            .apply(&mut self.scroll, code);
     }
-    fn draw_attempt(&self, frame: &mut Frame, area: Rect) {
+    fn draw_attempt(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        hits: &super::input::Hits,
+        focused: bool,
+    ) {
         let mut lines = vec![];
         if let Some(attempt) = self.attempts.get(self.selected) {
             let s = attempt.summary();
@@ -296,14 +314,16 @@ impl State {
         if let Some(e) = &self.error {
             lines.push(ui::metadata("Problem", e));
         }
-        ui::report(
-            frame,
-            area,
-            "Installation details",
-            lines.into(),
-            self.scroll,
-            false,
-        );
+        ui::reader::Reader::new(hits)
+            .with_wheel(super::input::Wheel::Tools)
+            .report(
+                frame,
+                area,
+                "Installation details",
+                lines.into(),
+                self.scroll,
+                focused,
+            );
     }
     pub fn draw(&self, frame: &mut Frame, area: Rect, dry_run: bool, hits: &super::input::Hits) {
         let action = |label, key, code| {
@@ -378,31 +398,45 @@ impl State {
             for args in &r.fresh_probes {
                 lines.push(ui::metadata("Fresh probe arguments", &args.join(" ")));
             }
-            ui::report(
-                frame,
-                area,
-                "Close installation record",
-                lines.into(),
-                self.scroll,
-                false,
-            );
-            if !dry_run {
-                action("Confirm close", "Enter", KeyCode::Enter);
-            }
+            ui::reader::Reader::new(hits)
+                .with_wheel(super::input::Wheel::Tools)
+                .review(
+                    frame,
+                    area,
+                    Some("Close installation record"),
+                    lines.into(),
+                    ReviewStage::CloseRecord,
+                    &self.reader,
+                );
+            self.approval(dry_run, hits)
+                .present_key(hits, "Confirm close");
             action("Cancel", "Esc", KeyCode::Esc);
             return;
         }
         let selected = self.attempts.get(self.selected);
-        if self.details {
-            self.draw_attempt(frame, area);
+        use super::workspace::{Region, Scope, Workspace};
+        let active = Region::from_details(self.details && selected.is_some());
+        let workspace = Workspace::new(Scope::InstallAttempts, area, active, selected.is_some());
+        workspace.bind(hits);
+        if let Some(pane) = workspace.details {
+            self.draw_attempt(frame, pane, hits, active == Region::Details);
+        }
+        if active == Region::Details {
             if selected.is_some_and(|a| a.unresolved) {
                 action("Close record", "x", KeyCode::Char('x'));
             }
             action("Back", "Esc", KeyCode::Esc);
-            return;
+            if !workspace.is_split() {
+                return;
+            }
         }
-        let (list, details) =
-            super::workbench::detail_panes(area, super::workbench::wide_details(area, 0));
+        let list = if selected.is_some() {
+            workspace
+                .queue_content(frame, "Installation history")
+                .expect("visible queue")
+        } else {
+            area
+        };
         let capacity = ui::design::pair_capacity(list);
         let first = self.viewport.start(
             self.attempts.len(),
@@ -460,10 +494,9 @@ impl State {
                 hits,
                 Target::ToolAttemptRow,
             );
-            if let Some(pane) = details {
-                self.draw_attempt(frame, pane);
+            if active == Region::Queue {
+                action("Install record", "Enter", KeyCode::Enter);
             }
-            action("Install record", "Enter", KeyCode::Enter);
             if selected.is_some_and(|a| a.unresolved) {
                 action("Close record", "x", KeyCode::Char('x'));
             }

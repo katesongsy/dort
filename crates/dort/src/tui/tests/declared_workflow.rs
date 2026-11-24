@@ -41,7 +41,7 @@ fn declaration_list_checks_and_installs_without_internal_choices_or_contextual_e
         assert!(text.contains("Runs package-manager") && text.contains("no rollback"));
         assert!(!text.contains("root hooks"));
     }
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     run(&f, &mut app, task);
     assert!(
         app.tools_view
@@ -108,11 +108,11 @@ fn review_help_dry_run_and_shrink_keep_the_real_approval_boundary() {
     inputs.search_dirs = vec![f.bin.clone()];
     run(&f, &mut app, Task::ToolsCheckPrepare(inputs));
     key(&mut app, KeyCode::F(1));
-    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(key(&mut app, KeyCode::Char('y')).is_none());
     key(&mut app, KeyCode::Esc);
     assert!(app.tools_view.declared.check_preview.is_some() && f.calls().is_empty());
     app.dry_run = true;
-    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(key(&mut app, KeyCode::Char('y')).is_none());
     app.dry_run = false;
     app.resize(47, 13);
     assert!(app.tools_view.declared.check_preview.is_none());
@@ -123,7 +123,7 @@ fn review_help_dry_run_and_shrink_keep_the_real_approval_boundary() {
     let task = key(&mut app, KeyCode::Char('i')).unwrap();
     run(&f, &mut app, task);
     key(&mut app, KeyCode::F(1));
-    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(key(&mut app, KeyCode::Char('y')).is_none());
     key(&mut app, KeyCode::Esc);
     assert!(app.tools_view.declared.install_preview.is_some());
     app.resize(47, 13);
@@ -168,7 +168,7 @@ fn combined_failure_keeps_prior_results_and_does_not_replay_or_start_later_items
     check(&f, &mut app);
     let task = key(&mut app, KeyCode::Char('i')).unwrap();
     run(&f, &mut app, task);
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     run(&f, &mut app, task);
     let result = app.tools_view.declared.installed.as_ref().unwrap();
     assert!(!result.succeeded());
@@ -220,7 +220,7 @@ fn declared_workflow_gallery_export_probe() {
                 run(&f, &mut app, Task::ToolsCheckPrepare(inputs));
             }
             "Missing tools" | "Install results" => {
-                let task = key(&mut app, KeyCode::Enter).unwrap();
+                let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
                 run(&f, &mut app, task);
             }
             "Install review" => {
@@ -280,7 +280,7 @@ fn declared_workflow_gallery_export_probe() {
     ] {
         match stage {
             "Installed packages" => {
-                let task = key(&mut discovery, KeyCode::Enter).unwrap();
+                let task = super::tests::approve_ready(&mut discovery, 80, 24).unwrap();
                 run(&discovered, &mut discovery, task);
             }
             "Selected package" => {

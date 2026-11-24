@@ -143,6 +143,22 @@ fn workbench_has_semantic_styles_and_selected_identity_at_all_supported_sizes() 
     }
 }
 #[test]
+fn file_details_show_selected_blocker_before_file_types_and_old_result() {
+    let mut app = files_app();
+    app.result = Some("Earlier operation finished".into());
+    let (w, h) = (80, 40);
+    app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), w, h);
+    let b = buffer(&app, w, h);
+    assert_style(&b, "Status:", Color::Reset, Modifier::BOLD);
+    assert_style(&b, "Reason:", Color::Reset, Modifier::BOLD);
+    assert_style(&b, "synthetic blocker", Color::Red, Modifier::BOLD);
+    assert_style(&b, "File types", Color::Cyan, Modifier::BOLD);
+    assert!(locate(&b, "Status:").1 < locate(&b, "synthetic blocker").1);
+    assert!(locate(&b, "synthetic blocker").1 < locate(&b, "File types").1);
+    assert!(locate(&b, "File types").1 < locate(&b, "Earlier operation finished").1);
+    assert!(app.preview.is_none());
+}
+#[test]
 fn input_has_a_real_visible_caret_and_field_button_hierarchy() {
     let mut app = App::new(false);
     app.shell.overlay = Some(Overlay::Form(Form::Adopt));
@@ -220,13 +236,27 @@ fn typed_overview_cards_keep_unknown_distinct_from_zero_and_metadata_inspectable
             "Linked: 2",
             "Needs apply: 1",
             "Blocked mappings: 3",
-            "Plan blocks: true",
+            "Apply plan: Blocked",
             "Blocked writes: 0",
             "Effective profiles:",
         ] {
             assert!(details.contains(value), "inspectable {value} at {w}x{h}");
         }
     }
+    let b = buffer(&app, 100, 40);
+    assert_style(
+        &b,
+        "Writing requires registration.",
+        Color::Red,
+        Modifier::BOLD,
+    );
+    assert_style(
+        &b,
+        "Attach this repository.",
+        Color::Reset,
+        Modifier::empty(),
+    );
+    assert!(locate(&b, "Attach this repository.").1 < locate(&b, "Selected by:").1);
     let data = app.data.as_mut().unwrap();
     data.overview.as_mut().unwrap().files = None;
     data.overview.as_mut().unwrap().registered = None;
@@ -372,6 +402,22 @@ fn checked_dashboard_preserves_result_scope_union_and_limits_through_diagnostics
         }
         assert!(!details.contains("unrelated-current-session"));
     }
+    let b = buffer(&app, 80, 36);
+    assert_style(&b, "Outcome:", Color::Reset, Modifier::BOLD);
+    assert_style(
+        &b,
+        "Declarations are valid",
+        Color::Green,
+        Modifier::empty(),
+    );
+    assert_style(
+        &b,
+        "tool inventory and installation",
+        Color::Yellow,
+        Modifier::BOLD,
+    );
+    assert!(locate(&b, "Scope:").1 < locate(&b, "Manifest and profiles").1);
+    assert!(locate(&b, "Unavailable:").1 < locate(&b, "Format:").1);
     app.complete(Ok(Output::Diagnostics(super::actions::Diagnostics {
         host: synthetic_host(),
         registry: Err("unavailable".into()),
@@ -469,7 +515,7 @@ fn recovery_details_distinguish_sections_fields_and_status() {
             Phase::Running,
             None,
             "[Blocks writes]",
-            Color::Yellow,
+            Color::Red,
             Modifier::BOLD,
         ),
         (
@@ -490,7 +536,12 @@ fn recovery_details_distinguish_sections_fields_and_status() {
         let b = buffer(&app, 80, 40);
         locate(&b, "Operation details");
         assert_style(&b, status, color, emphasis);
-        for section in ["Recovery options", "What recovery keeps"] {
+        for section in [
+            "File adoption",
+            "Recovery options",
+            "What recovery keeps",
+            "Operation record",
+        ] {
             assert_style(&b, section, Color::Cyan, Modifier::BOLD);
         }
         locate(&b, &format!("Repository ID: {}", "a".repeat(64)));
@@ -503,11 +554,47 @@ fn recovery_details_distinguish_sections_fields_and_status() {
             Modifier::BOLD,
         );
         if phase == Phase::Completed {
-            locate(&b, "Rollback: Available for review");
+            let task_y = locate(&b, "Rollback: Available for review").1;
+            assert!(task_y < locate(&b, "Repository ID:").1);
+            assert!(task_y < locate(&b, "Saved steps:").1);
             assert_style(&b, "Rollback:", Color::Reset, Modifier::BOLD);
             assert_style(&b, "Available for review", Color::Reset, Modifier::empty());
         }
     }
+}
+#[test]
+fn compact_recovery_shows_option_before_identifiers_and_keeps_it_during_scroll() {
+    use dort_core::journal::Phase;
+    let mut app = App::new(false);
+    app.tab = Tab::Recovery;
+    app.complete(Ok(Output::History {
+        rows: vec![history_row(Some(3), Some(Phase::Preparing), None, 'a')],
+        error: None,
+    }));
+    let (w, h) = (48, 14);
+    assert!(
+        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), w, h)
+            .is_none()
+    );
+    let first = render(&app, w, h);
+    assert!(first.contains("Repository setup") && first.contains("[Blocks writes]"));
+    assert!(first.contains("Abandon: Available for review"));
+    assert!(!first.contains("Repository ID:"));
+    for _ in 0..20 {
+        assert!(
+            app.key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), w, h)
+                .is_none()
+        );
+        if render(&app, w, h).contains("Saved steps: 7") {
+            break;
+        }
+    }
+    assert!(render(&app, w, h).contains("Saved steps: 7"));
+    assert!(
+        app.key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE), w, h)
+            .is_none()
+    );
+    assert_eq!(render(&app, w, h), first);
 }
 #[test]
 fn shared_reports_distinguish_sections_fields_and_values() {
@@ -549,6 +636,85 @@ fn shared_reports_distinguish_sections_fields_and_values() {
         assert_style(b, value, Color::Reset, Modifier::empty());
     }
     assert_style(b, "BLOCKED: Writer busy", Color::Red, Modifier::BOLD);
+}
+#[test]
+fn shared_collection_keeps_row_targets_on_visible_lines() {
+    use super::input::{Hits, Target, Wheel};
+    use ratatui::{layout::Constraint, widgets::Row};
+    use ui::collection::{Collection, Header, RowTargets, Selection};
+
+    let mut terminal = Terminal::new(TestBackend::new(32, 5)).unwrap();
+    let hits = Hits::default();
+    terminal
+        .draw(|frame| {
+            let area = frame.area();
+            hits.begin(area);
+            Collection::new([Constraint::Min(10)], Header::Heading(["ITEM"]))
+                .titled("Records", true)
+                .draw(
+                    frame,
+                    area,
+                    [
+                        (17, Row::new(["Alpha"]).height(2).bottom_margin(1)),
+                        (32, Row::new(["Beta"]).top_margin(1)),
+                    ],
+                    Selection::at(Some(1)),
+                    RowTargets {
+                        hits: &hits,
+                        wheel: Some(Wheel::Rows),
+                        target: Target::Row,
+                    },
+                );
+        })
+        .unwrap();
+    let b = terminal.backend().buffer();
+    for (label, id, expected_y) in [("Alpha", 17, 2), ("Beta", 32, 3)] {
+        let (x, y) = locate(b, label);
+        assert_eq!(y, expected_y);
+        assert!(matches!(hits.target(x, y), Some(Target::Row(found)) if found == id));
+        assert!(matches!(hits.scroll(x, y), Some(Wheel::Rows)));
+    }
+    assert!(hits.target(3, 4).is_none());
+}
+#[test]
+fn pane_titles_keep_spinner_glyphs_and_escape_controls() {
+    let mut terminal = Terminal::new(TestBackend::new(24, 3)).unwrap();
+    terminal
+        .draw(|frame| {
+            frame.render_widget(
+                ui::pane(&format!("{} Reading", ui::glyphs::SPINNER[0]), false),
+                frame.area(),
+            );
+        })
+        .unwrap();
+    let b = terminal.backend().buffer();
+    let title: String = (0..b.area.width).map(|x| b[(x, 0)].symbol()).collect();
+    assert!(
+        title.contains(&format!("{} Reading", ui::glyphs::SPINNER[0])),
+        "{title}"
+    );
+    terminal
+        .draw(|frame| {
+            frame.render_widget(ui::pane("a\u{1b}b", false), frame.area());
+        })
+        .unwrap();
+    let escaped: String = (0..24)
+        .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+        .collect();
+    assert!(escaped.contains("a\\u{1b}b"), "{escaped}");
+}
+#[test]
+fn report_wraps_trusted_glyphs_at_terminal_cell_boundaries() {
+    let mut terminal = Terminal::new(TestBackend::new(4, 4)).unwrap();
+    terminal
+        .draw(|frame| {
+            ui::text_view(frame, frame.area(), "abc界e\u{301}".into(), 0);
+        })
+        .unwrap();
+    let b = terminal.backend().buffer();
+    assert_eq!(b[(3, 0)].symbol(), " ");
+    assert_eq!(b[(0, 1)].symbol(), "界");
+    assert_eq!(b[(2, 1)].symbol(), "e\u{301}");
 }
 #[test]
 fn recovery_details_keep_full_ids_and_guards_inspectable_without_mutating_diagnosis() {
@@ -595,7 +761,6 @@ fn recovery_details_keep_full_ids_and_guards_inspectable_without_mutating_diagno
                 "Operation ID: ",
                 "Saved steps: 7",
                 "Integrity:",
-                "Blocks writes:",
                 "Recovery checks current paths",
                 "Rollback restores files",
                 "Private backups stay.",
@@ -753,7 +918,7 @@ fn git_metadata_full_paths_branch_and_limits_are_reachable_using_real_scroll_key
             "independent session choice".into(),
             "branch.oid (initial)".into(),
             "branch.head main".into(),
-            "Details".into(),
+            "Git scope | read-only".into(),
             "Untracked contents".into(),
         ] {
             assert!(
@@ -766,6 +931,30 @@ fn git_metadata_full_paths_branch_and_limits_are_reachable_using_real_scroll_key
         assert_eq!(first, render(&app, w, h));
     }
     assert!(app.preview.is_none() && app.confirmation.is_none());
+}
+#[test]
+fn git_details_show_selected_path_and_status_before_scope_and_index_code() {
+    use dort_core::git::{Status, StatusEntry};
+    let mut app = git_app(super::git::Metadata::Status(Status {
+        schema: 1,
+        read_only: true,
+        branch: vec!["branch.head main".into()],
+        entries: vec![StatusEntry {
+            kind: "unmerged".into(),
+            xy: Some("UU".into()),
+            path: "conflicting-file".into(),
+            original_path: None,
+        }],
+    }));
+    key(&mut app, KeyCode::Enter);
+    let b = buffer(&app, 80, 24);
+    assert_style(&b, "Path:", Color::Reset, Modifier::BOLD);
+    assert_style(&b, "unmerged", Color::Red, Modifier::BOLD);
+    assert_style(&b, "Git scope | read-only", Color::Cyan, Modifier::BOLD);
+    assert!(locate(&b, "Path:").1 < locate(&b, "Status:").1);
+    assert!(locate(&b, "Status:").1 < locate(&b, "Git-only root:").1);
+    assert!(locate(&b, "Status:").1 < locate(&b, "XY:").1);
+    assert!(app.preview.is_none());
 }
 #[test]
 fn git_metadata_unknown_empty_and_filter_caret_remain_distinct_at_the_floor() {

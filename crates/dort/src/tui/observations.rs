@@ -5,10 +5,12 @@ use ratatui::{
     Frame,
     layout::Rect,
     style::Style,
-    text::{Line, Span, Text},
+    text::{Line, Text},
 };
 
 use ui::dashboard::Metric;
+use ui::design::Tone;
+use ui::reader::{field, section};
 fn metric(label: &'static str, value: impl ToString, style: Style) -> Metric {
     let value = value.to_string();
     let compact = match label {
@@ -23,20 +25,17 @@ fn metric(label: &'static str, value: impl ToString, style: Style) -> Metric {
         style,
     }
 }
-fn section(lines: &mut Vec<Line<'static>>, title: &'static str) {
+fn start_section(lines: &mut Vec<Line<'static>>, title: &str) {
     if !lines.is_empty() {
         lines.push(Line::default());
     }
-    lines.push(Line::from(Span::styled(title, ui::heading())));
+    lines.push(section(title));
 }
-fn field(label: &str, value: impl ToString) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(format!("{label}: "), ui::muted()),
-        Span::raw(ui::inline(&value.to_string())),
-    ])
+fn fact(label: &str, value: impl ToString) -> Line<'static> {
+    field(label, &value.to_string(), Tone::Neutral)
 }
-fn note(text: &str, style: Style) -> Line<'static> {
-    Line::from(Span::styled(ui::inline(text), style))
+fn note(text: &str, tone: Tone) -> Line<'static> {
+    Line::styled(ui::inline(text), tone.style())
 }
 fn dashboard(
     frame: &mut Frame,
@@ -88,7 +87,7 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
     }
     let Some(data) = &app.data else {
         app.presented("Choose repository", "p", Target::Action(Action::Choose));
-        ui::report(
+        ui::reader::Reader::new(&app.hits).report(
             frame,
             area,
             "Repository details",
@@ -140,15 +139,7 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
             },
         ),
     ];
-    let mut lines = vec![];
-    if let Some(result) = &app.result {
-        section(&mut lines, "Last result");
-        lines.extend(
-            result
-                .lines()
-                .map(|line| note(line, ui::design::Tone::Information.style())),
-        );
-    }
+    let mut lines = Vec::new();
     if root.is_none() {
         app.presented("Choose repository", "p", Target::Action(Action::Choose));
         app.presented("Discover files", "f", Target::Action(Action::Discover));
@@ -157,153 +148,152 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
             "v",
             Target::Action(Action::CheckStandalone),
         );
-        section(&mut lines, "Welcome");
-        lines.push(note(
+        lines.push(section("Welcome"));
+        lines.push(Line::raw(
             "Choose a repository or create a local one to manage files.",
-            ui::muted(),
         ));
-        lines.push(note(
-            "Discovery and standalone checks need no repository.",
-            ui::muted(),
+        lines.push(Line::raw(
+            "Discovery, standalone checks and Recovery need no repository.",
         ));
-        lines.push(note(
-            "Recovery and Diagnostics work without a repository.",
-            Style::default(),
-        ));
-    }
-    section(&mut lines, "Repository and profiles");
-    lines.push(field(
-        "Repository",
-        root.map(|p| format!("{p:?}"))
-            .unwrap_or_else(|| "Not selected".into()),
-    ));
-    lines.push(field("Selected by", app.origin));
-    lines.push(field("Registration", registration));
-    if observation.and_then(|o| o.registered) == Some(false) {
-        lines.push(note(
-            "Attach this repository before writing.",
-            ui::warning(),
-        ));
-    }
-    lines.push(field(
-        "Registered repositories",
-        count(observation.and_then(|o| o.registry_count)),
-    ));
-    if let Some(error) = observation.and_then(|o| o.configuration_error.as_ref()) {
-        lines.push(field("Config unavailable", error));
-        lines.push(note(
-            "Repository list unavailable. Counts and the active repository are unknown.",
-            ui::warning(),
-        ));
-    }
-    if files.is_some() {
-        lines.push(field("Effective profiles", format!("{:?}", data.profiles)));
-    } else {
-        lines.push(field("Effective profiles", "Unknown (files unavailable)"));
-    }
-    section(&mut lines, "Active files");
-    if let Some(files) = files {
-        lines.push(field("Linked", files.linked));
-        lines.push(field("Needs apply", files.changes));
-        lines.push(field("Blocked mappings", files.blocked));
-        lines.push(field("Plan blocks", files.plan_blocked));
-        lines.push(note(
-            "Files shows source and target. Apply covers every active file.",
-            Style::default(),
-        ));
-    } else {
-        lines.push(note("File counts unavailable.", ui::warning()));
-    }
-    if let Some(error) = &data.files_error {
-        lines.extend(error.lines().map(|line| note(line, ui::warning())));
-    }
-    section(&mut lines, "History");
-    lines.push(field(
-        "Operations",
-        count(data.history_error.is_none().then_some(data.history.len())),
-    ));
-    lines.push(field("Blocked writes", count(blockers)));
-    if let Some(error) = &data.history_error {
-        lines.push(field("History unavailable", error));
-        lines.push(note(
-            "Write status unknown. Recovery can still refresh.",
-            ui::warning(),
-        ));
-    }
-    section(&mut lines, "Host and limits");
-    if let Some(observation) = observation {
+    } else if let Some(root) = root {
+        let path = root.to_str().unwrap_or("Unavailable non-UTF-8 root");
+        let path = if app.overview_details {
+            path.to_owned()
+        } else {
+            ui::clip(path, area.width.saturating_sub(14))
+        };
+        lines.push(field("Repository", &path, Tone::Neutral));
         lines.push(field(
-            "Host",
-            format!(
-                "{:?} / {:?}",
-                observation.host.platform, observation.host.architecture
-            ),
+            "Registration",
+            registration,
+            if registration == "Registered" {
+                Tone::Neutral
+            } else {
+                Tone::Attention
+            },
         ));
-    }
-    lines.push(note(
-        "Templates, secrets, sync and Git writes need other tools.",
-        ui::muted(),
-    ));
-    lines.push(note(
-        "Writes need a fresh review. A failed write may leave partial effects.",
-        ui::warning(),
-    ));
-    if !app.overview_details {
-        let mut summary = Vec::new();
-        if let Some(root) = root {
-            summary.push(Line::styled(
-                ui::short_field(
-                    "Repository",
-                    root.to_str().unwrap_or("Unavailable non-UTF-8 root"),
-                    area.width,
-                ),
-                ui::heading(),
+        if observation.and_then(|o| o.registered) == Some(false) {
+            lines.push(field(
+                "Blocked",
+                "Writing requires registration.",
+                Tone::Error,
             ));
-            summary.push(field("Profiles", data.profiles.join(", ")));
-            if let Some(files) = files {
-                summary.push(field(
-                    "Files",
+            lines.push(field("Next", "Attach this repository.", Tone::Neutral));
+        }
+    }
+    if blockers.is_none_or(|n| n > 0) {
+        lines.push(field(
+            "Blocked writes",
+            &count(blockers),
+            if blockers.is_some() {
+                Tone::Error
+            } else {
+                Tone::Attention
+            },
+        ));
+        lines.push(field("Next", "Open Recovery.", Tone::Neutral));
+    }
+    if let Some(result) = &app.result {
+        start_section(&mut lines, "Last result");
+        let limit = if app.overview_details { usize::MAX } else { 2 };
+        lines.extend(
+            result
+                .lines()
+                .take(limit)
+                .map(|line| note(line, Tone::Neutral)),
+        );
+    }
+    if app.overview_details {
+        start_section(&mut lines, "Active files");
+        if let Some(files) = files {
+            lines.push(fact("Linked", files.linked));
+            lines.push(field(
+                "Needs apply",
+                &files.changes.to_string(),
+                if files.changes > 0 {
+                    Tone::Attention
+                } else {
+                    Tone::Neutral
+                },
+            ));
+            lines.push(field(
+                "Blocked mappings",
+                &files.blocked.to_string(),
+                if files.blocked > 0 {
+                    Tone::Error
+                } else {
+                    Tone::Neutral
+                },
+            ));
+            if files.plan_blocked {
+                lines.push(field("Apply plan", "Blocked", Tone::Error));
+            }
+            lines.push(Line::raw(
+                "Files shows source and target. Apply covers every active file.",
+            ));
+        } else {
+            lines.push(note("File counts unavailable.", Tone::Attention));
+        }
+        lines.push(note(
+            "Writes need a fresh review. A failed write may leave partial effects.",
+            Tone::Attention,
+        ));
+        start_section(&mut lines, "Repository and history");
+        lines.push(fact(
+            "Effective profiles",
+            if files.is_some() {
+                data.profiles.join(", ")
+            } else {
+                "Unknown (files unavailable)".into()
+            },
+        ));
+        lines.push(fact("Selected by", app.origin));
+        lines.push(fact(
+            "Registered repositories",
+            count(observation.and_then(|o| o.registry_count)),
+        ));
+        lines.push(fact(
+            "Operations",
+            count(data.history_error.is_none().then_some(data.history.len())),
+        ));
+        if blockers == Some(0) {
+            lines.push(fact("Blocked writes", 0));
+        }
+        lines.push(Line::raw(
+            "Templates, secrets, sync and Git writes need other tools.",
+        ));
+        if let Some(observation) = observation {
+            lines.push(fact(
+                "Host",
+                format!(
+                    "{:?} / {:?}",
+                    observation.host.platform, observation.host.architecture
+                ),
+            ));
+            if let Some(error) = &observation.configuration_error {
+                lines.push(field("Config unavailable", error, Tone::Attention));
+            }
+        }
+        if let Some(error) = &data.history_error {
+            lines.push(field("History unavailable", error, Tone::Attention));
+        }
+        if let Some(error) = &data.files_error {
+            lines.extend(error.lines().map(|line| note(line, Tone::Attention)));
+        }
+    } else if root.is_some() {
+        lines.push(fact("Profiles", data.profiles.join(", ")));
+        lines.push(fact(
+            "Files",
+            files.map_or_else(
+                || "Unknown".into(),
+                |files| {
                     format!(
                         "{} linked / {} changes / {} blocked",
                         files.linked, files.changes, files.blocked
-                    ),
-                ));
-            } else {
-                summary.push(field("Files", "Unknown"));
-            }
-            if observation.and_then(|o| o.registered) == Some(false) {
-                summary.push(note(
-                    "Registration is required before writing.",
-                    ui::warning(),
-                ));
-            }
-        } else {
-            summary.push(Line::styled("Welcome", ui::heading()));
-            summary.push(note(
-                "Choose a repository or create a local one to manage files.",
-                ui::muted(),
-            ));
-            summary.push(note(
-                "Discovery, standalone checks and Recovery are independently available.",
-                ui::muted(),
-            ));
-        }
-        if let Some(error) = observation.and_then(|o| o.configuration_error.as_ref()) {
-            summary.push(field("Registry unavailable", error));
-        }
-        if let Some(error) = &data.history_error {
-            summary.push(field("History unavailable", error));
-        }
-        if let Some(result) = &app.result {
-            summary.push(Line::styled("Last result", ui::heading()));
-            summary.extend(
-                result
-                    .lines()
-                    .take(2)
-                    .map(|line| note(line, ui::design::Tone::Information.style())),
-            );
-        }
-        lines = summary;
+                    )
+                },
+            ),
+        ));
     }
     dashboard(frame, area, app, "Repository details", metrics, lines);
 }
@@ -332,12 +322,9 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
             metric("Files", report.selected_files, ui::heading()),
             metric("Tools", report.selected_tools, ui::heading()),
         ];
-        section(&mut lines, "Manifest check");
-        lines.push(note(
-            "Declarations are valid. Files shows live state; check tools separately.",
-            ui::warning(),
-        ));
-        lines.push(field(
+        lines.push(section("Manifest check"));
+        lines.push(field("Outcome", "Declarations are valid", Tone::Success));
+        lines.push(fact(
             "Scope",
             if *standalone {
                 "standalone manifest"
@@ -345,51 +332,58 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
                 "current repository"
             },
         ));
-        lines.push(field("Valid manifest", format!("{:?}", report.manifest)));
-        lines.push(field("Format", report.schema));
-        section(&mut lines, "Active profiles");
-        lines.push(field(
-            "Effective profiles",
-            format!("{:?}", report.active_profiles),
+        lines.push(fact("Selected files", report.selected_files));
+        lines.push(fact("Selected tools", report.selected_tools));
+        lines.push(Line::raw(
+            "Files shows live state. Check tools and prerequisites separately.",
         ));
-        lines.push(field("Base", "always active"));
-        lines.push(field("Defaults", format!("{:?}", report.choices.defaults)));
-        lines.push(field("Platform", format!("{:?}", report.choices.platform)));
-        lines.push(field("Local", format!("{:?}", report.choices.local)));
-        // These are result-bound additions, not the current mutable session draft.
+        start_section(&mut lines, "Limits");
+        if report.unsupported_capabilities.is_empty() {
+            lines.push(note(
+                "These declarations are supported. Files shows live state.",
+                Tone::Neutral,
+            ));
+        } else {
+            for capability in &report.unsupported_capabilities {
+                lines.push(field("Unavailable", capability, Tone::Attention));
+            }
+        }
+        lines.push(note(
+            "Check tools and prerequisites separately.",
+            Tone::Neutral,
+        ));
+        start_section(&mut lines, "Manifest and profiles");
+        lines.push(fact("Manifest", format!("{:?}", report.manifest)));
+        lines.push(fact(
+            "Effective profiles",
+            report
+                .active_profiles
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", "),
+        ));
+        lines.push(fact("Base", "always active"));
+        lines.push(fact("Defaults", format!("{:?}", report.choices.defaults)));
+        lines.push(fact("Platform", format!("{:?}", report.choices.platform)));
+        lines.push(fact("Local", format!("{:?}", report.choices.local)));
         let additions: Vec<_> = report
             .active_profiles
             .difference(&report.choices.mandatory)
             .collect();
-        lines.push(field("Extra profiles", format!("{additions:?}")));
-        section(&mut lines, "Selected");
-        lines.push(field("Selected files", report.selected_files));
-        lines.push(field("Selected tools", report.selected_tools));
-        lines.push(field(
+        lines.push(fact("Extra profiles", format!("{additions:?}")));
+        lines.push(fact(
             "Tool dependency order",
             format!("{:?}", report.tool_dependency_order),
         ));
-        section(&mut lines, "Limits");
-        if report.unsupported_capabilities.is_empty() {
-            lines.push(note(
-                "These declarations are supported. Files shows live state.",
-                Style::default(),
-            ));
-        }
-        for capability in &report.unsupported_capabilities {
-            lines.push(field("Unavailable", capability));
-        }
-        lines.push(note(
-            "Check tools and prerequisites separately.",
-            ui::muted(),
-        ));
+        lines.push(fact("Format", report.schema));
     } else {
         metrics = vec![
             metric("Manifest", "Not checked", ui::warning()),
             metric("Files", "Unknown", ui::muted()),
             metric("Tools", "Unknown", ui::muted()),
         ];
-        section(&mut lines, "Check a manifest");
+        lines.push(section("Check a manifest"));
         app.presented(
             "Check repository",
             "c",
@@ -402,11 +396,11 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
         );
         lines.push(note(
             "A standalone manifest needs no repository or Git.",
-            Style::default(),
+            Tone::Neutral,
         ));
         lines.push(note(
             "Checks validate declarations. Files shows live state; check tools separately.",
-            ui::warning(),
+            Tone::Neutral,
         ));
     }
     app.presented(
@@ -430,7 +424,7 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
 
 fn diagnostics(frame: &mut Frame, area: Rect, app: &App) {
     let Some(report) = &app.diagnostics else {
-        ui::report(
+        ui::reader::Reader::new(&app.hits).report(
             frame,
             area,
             "Diagnostics",
@@ -471,46 +465,43 @@ fn diagnostics(frame: &mut Frame, area: Rect, app: &App) {
             },
         ),
     ];
-    let mut lines = vec![note(
-        &format!(
-            "Diagnostics | Dort {} | read-only",
-            env!("CARGO_PKG_VERSION")
-        ),
-        ui::heading(),
-    )];
-    lines.push(field(
+    let mut lines = vec![section(&format!(
+        "Diagnostics | Dort {} | read-only",
+        env!("CARGO_PKG_VERSION")
+    ))];
+    lines.push(fact(
         "Registered repositories",
         count(registry.map(|r| r.registered_repositories)),
     ));
-    lines.push(field("Operations", count(history.map(|h| h.0))));
-    lines.push(field("Blocked writes", count(history.map(|h| h.1))));
+    lines.push(fact("Operations", count(history.map(|h| h.0))));
+    lines.push(fact("Blocked writes", count(history.map(|h| h.1))));
     if let Some(registry) = registry {
-        lines.push(field(
+        lines.push(fact(
             "Registered active ID",
             format!("{:?}", registry.active_repository),
         ));
     }
     if let Err(error) = &report.registry {
-        lines.push(field("Config unavailable", error));
+        lines.push(fact("Config unavailable", error));
         lines.push(note(
             "Repository list unavailable. Counts and the active repository are unknown.",
-            ui::warning(),
+            Tone::Attention,
         ));
     }
     if let Err(error) = &report.history {
-        lines.push(field("History unavailable", error));
-        lines.push(note("Write status unknown.", ui::warning()));
+        lines.push(fact("History unavailable", error));
+        lines.push(note("Write status unknown.", Tone::Attention));
     }
-    section(&mut lines, "Host & paths");
+    start_section(&mut lines, "Host & paths");
     let host = &report.host;
-    lines.push(field(
+    lines.push(fact(
         "Platform",
         format!("{:?} / {:?}", host.platform, host.architecture),
     ));
-    lines.push(field("HOME", format!("{:?}", host.home)));
-    lines.push(field("Config", format!("{:?}", host.config_dir)));
-    lines.push(field("State", format!("{:?}", host.state_dir)));
-    lines.push(field(
+    lines.push(fact("HOME", format!("{:?}", host.home)));
+    lines.push(fact("Config", format!("{:?}", host.config_dir)));
+    lines.push(fact("State", format!("{:?}", host.state_dir)));
+    lines.push(fact(
         "Session file root",
         format!(
             "{:?}",
@@ -520,37 +511,34 @@ fn diagnostics(frame: &mut Frame, area: Rect, app: &App) {
                 .or(app.repository.as_ref())
         ),
     ));
-    lines.push(field("Selected by", app.origin));
-    lines.push(field("Git executable", format!("{:?}", app.git)));
-    lines.push(field(
-        "Git session root",
-        format!("{:?}", app.git_view.root),
-    ));
-    lines.push(field("Uses file repository", app.git_view.follows_files));
-    section(&mut lines, "Limits");
+    lines.push(fact("Selected by", app.origin));
+    lines.push(fact("Git executable", format!("{:?}", app.git)));
+    lines.push(fact("Git session root", format!("{:?}", app.git_view.root)));
+    lines.push(fact("Uses file repository", app.git_view.follows_files));
+    start_section(&mut lines, "Limits");
     lines.push(note(
         "Files shows live state; check tools separately.",
-        ui::warning(),
+        Tone::Attention,
     ));
     lines.push(note(
         "Diagnostics shows host and path details.",
-        Style::default(),
+        Tone::Neutral,
     ));
     lines.push(note(
         "Supported: local files, recovery, manifest checks and read-only Git.",
-        Style::default(),
+        Tone::Neutral,
     ));
     lines.push(note(
         "Not supported: templates, secrets, cloning/sync, Git writes and other package managers.",
-        ui::muted(),
+        Tone::Neutral,
     ));
     lines.push(note(
         "Git needs a trusted Git executable. Other workflows still work.",
-        Style::default(),
+        Tone::Neutral,
     ));
     lines.push(note(
         "Fix configuration errors, then refresh. Recovery still works.",
-        Style::default(),
+        Tone::Neutral,
     ));
     app.presented(
         "Refresh Diagnostics",

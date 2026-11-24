@@ -81,6 +81,6 @@ fn provider_choices_retain_independent_even_empty_drafts_without_execution() {
     assert!(app.tools_view.declaration.controls().contains(&3));
     assert!(key(&mut app, KeyCode::F(4)).is_none());
     assert!(!app.tools_view.declaration.controls().contains(&3));
-    assert!(app.preview.is_none() && app.confirmation.is_none() && app.receipt.is_none());
+    assert!(app.preview.is_none() && app.receipt.is_none());
     assert_eq!(fs::read(f.repo.join("dort.toml")).unwrap(), original);
 }

@@ -17,7 +17,7 @@ fn review(f: &Fixture, app: &mut super::app::App) {
 }
 fn inspect(f: &Fixture, app: &mut super::app::App) {
     review(f, app);
-    let task = key(app, KeyCode::Enter).unwrap();
+    let task = super::tests::approve_ready(app, 80, 24).unwrap();
     assert!(matches!(task, Task::ToolsInstalledInspect(_)));
     run(f, app, task);
 }
@@ -67,7 +67,7 @@ fi"#,
             && !text.contains("declaring one Node")
             && !text.contains("PRIVATE_INVALID")
     );
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     let output = actions::perform_scoped(task, &f.host, None, &[], |_| Ok(())).unwrap();
     app.complete(Ok(output));
     assert_eq!(f.calls(), "PL");
@@ -98,7 +98,7 @@ fi"#,
     )
     .unwrap();
     app.complete(Ok(output));
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     assert!(
         app.tools_view.installed.current.is_none(),
         "Accepting refresh discards old results before querying"
@@ -129,7 +129,7 @@ fn current_inspection_details_and_prefilled_add_have_separate_approvals_and_no_r
         );
         assert!(text.lines().last().unwrap().contains("F1 Help"), "{text}");
     }
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     run(&f, &mut app, task);
     assert_eq!(f.calls(), "Q");
     assert_eq!(app.tools_view.installed.rows().len(), 1);
@@ -154,8 +154,8 @@ fn current_inspection_details_and_prefilled_add_have_separate_approvals_and_no_r
     assert!(app.preview.as_ref().unwrap().text.contains("unrelated"));
     assert_eq!(std::fs::read(f.repo.join("dort.toml")).unwrap(), original);
     assert_eq!(f.calls(), "Q");
-    let task = key(&mut app, KeyCode::Enter).unwrap();
-    assert!(matches!(task, Task::Execute(_)) && app.confirmation.is_none());
+    let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
+    assert!(matches!(task, Task::Execute(_)));
     run(&f, &mut app, task);
     assert!(app.tools_view.installed_open && !app.tools_view.declaration_open);
     assert!(!app.tools_view.installed.details && !app.show_result);
@@ -185,7 +185,7 @@ fn only_current_results_survive_refresh_and_failed_queries_never_fall_back() {
     input.search_dirs = vec![f.bin.clone()];
     run(&f, &mut app, Task::ToolsInstalledPrepare(input));
     assert_eq!(f.calls(), "Q");
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     run(&f, &mut app, task);
     assert!(app.tools_view.installed.rows().is_empty());
     assert!(
@@ -207,12 +207,12 @@ fn dry_run_shrink_navigation_and_late_preparation_never_execute_inspection() {
         let mut app = app(&f, dry);
         review(&f, &mut app);
         if dry {
-            assert!(key(&mut app, KeyCode::Enter).is_none());
+            assert!(key(&mut app, KeyCode::Char('y')).is_none());
         }
         app.resize(47, 13);
         app.resize(80, 24);
         assert!(app.tools_view.installed.preview.is_none());
-        assert!(key(&mut app, KeyCode::Enter).is_none());
+        assert!(key(&mut app, KeyCode::Char('y')).is_none());
         assert!(f.calls().is_empty());
     }
     let f = Fixture::new();

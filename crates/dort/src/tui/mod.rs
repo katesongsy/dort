@@ -122,6 +122,7 @@ mod workbench;
 #[cfg(test)]
 #[path = "tests/workflow.rs"]
 mod workflow_tests;
+mod workspace;
 
 use actions::Task;
 use app::App;

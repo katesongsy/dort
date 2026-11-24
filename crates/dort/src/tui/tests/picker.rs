@@ -87,7 +87,7 @@ fn paged_cells(app: &mut App, modal: bool) -> String {
         } else if app.error.is_some() {
             "Read failed"
         } else {
-            "Selected item"
+            "Details"
         };
         let y = (0..14)
             .find(|y| {
@@ -406,4 +406,59 @@ fn ordinary_compact_details_have_overlapping_keyboard_pages_including_busy_help_
     key(&mut app, KeyCode::Esc);
     app.complete(Err(format!("metadata error {path}")));
     assert!(paged_cells(&mut app, false).contains(&super::components::inline(&path)));
+}
+
+#[test]
+fn picker_splits_keep_one_active_owner_and_compact_back_keeps_the_row() {
+    let mut repositories = App::new(false);
+    repositories.shell.overlay = Some(Overlay::Repositories { selected: 1 });
+    let mut ignored = App::new(false);
+    ignored.tab = Tab::Files;
+    ignored.shell.overlay = Some(Overlay::Ignored {
+        paths: vec!["/synthetic/first".into(), "/synthetic/second".into()],
+        selected: 0,
+    });
+    for (mut app, queue, reader) in [
+        (profiles(false), "Repository profiles", "Selection details"),
+        (repositories, "Repository choices", "Selection details"),
+        (ignored, "Ignored paths", "Ignored path details"),
+    ] {
+        let wide = (120, 26);
+        let press = |app: &mut App, code| {
+            assert!(
+                app.key(KeyEvent::new(code, KeyModifiers::NONE), wide.0, wide.1)
+                    .is_none()
+            );
+        };
+        let before = render(&app, wide.0, wide.1);
+        assert!(
+            before.contains(&format!("{queue} [Active]")) && before.contains(reader),
+            "{before}"
+        );
+        let row = |screen: &str| {
+            screen
+                .lines()
+                .find_map(|line| line.split_once("› "))
+                .map(|(_, value)| value.split_whitespace().next().unwrap().to_owned())
+        };
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Char('y'));
+        let focused = render(&app, wide.0, wide.1);
+        assert_eq!(focused.matches("[Active]").count(), 1, "{focused}");
+        assert!(focused.contains(&format!("{reader} [Active]")), "{focused}");
+        assert_eq!(row(&before), row(&focused));
+        let compact = render(&app, 48, 14);
+        assert!(
+            compact.contains(&format!("{reader} [Active]")) && row(&compact).is_none(),
+            "{compact}"
+        );
+        assert!(key(&mut app, KeyCode::Esc).is_none());
+        let queue_screen = render(&app, 48, 14);
+        assert!(
+            queue_screen.contains(&format!("{queue} [Active]")) && !queue_screen.contains(reader),
+            "{queue_screen}"
+        );
+        assert_eq!(row(&before), row(&queue_screen));
+    }
 }

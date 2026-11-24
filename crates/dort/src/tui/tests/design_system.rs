@@ -3,7 +3,8 @@ use super::{
     appearance::Appearance,
     components::{
         self as ui,
-        design::{self, PairRow, PairTable, StripAction, Tone},
+        design::{self, PairRow, PairTable, PaneFocus, StripAction, Tone},
+        reader::{field, section},
     },
     input::{Hits, Target},
     shell::Action,
@@ -214,7 +215,12 @@ fn workflow_components_render_at_every_supported_gallery_size() {
                                 && cells.iter().all(|cell| cell.modifier == emphasis)
                         })
                     };
-                    assert!(has_style("Tools", Modifier::BOLD));
+                    let title = if mono {
+                        Modifier::BOLD | Modifier::UNDERLINED
+                    } else {
+                        Modifier::BOLD
+                    };
+                    assert!(has_style("Tools", title));
                     assert!(has_style("Keys in this context", Modifier::BOLD));
                     assert!(has_style("Inspect metadata", Modifier::empty()));
                     assert!(has_style("Enter", Modifier::BOLD));
@@ -475,6 +481,158 @@ fn component_roles_survive_compact_ascii_and_monochrome_without_private_data() {
         }
     }
 }
+#[test]
+fn structured_reader_keeps_roles_in_color_and_monochrome() {
+    let mut terminal = Terminal::new(TestBackend::new(86, 10)).unwrap();
+    terminal
+        .draw(|frame| {
+            ui::report(
+                frame,
+                frame.area(),
+                "Operation details",
+                vec![
+                    section("Provenance\nnotes"),
+                    field("Snapshot", "Finished", Tone::Neutral),
+                    field("Status", "Finished", Tone::Success),
+                    field("Stop if", "Backup exists", Tone::Attention),
+                    field("Blocker", "Writer busy", Tone::Error),
+                    field("Path\u{1b}", "backup\u{202e}\nnext", Tone::Neutral),
+                ]
+                .into(),
+                0,
+                PaneFocus::Active,
+            );
+        })
+        .unwrap();
+    let color = terminal.backend().buffer();
+    let mut mono = color.clone();
+    Appearance::classify(None, None, None, Some("C.UTF-8"), Some("1")).apply(&mut mono);
+    assert_eq!(text(color), text(&mono));
+    for (y, fragment, ink, color_mod, mono_mod) in [
+        (
+            0,
+            "Operation details",
+            Color::Cyan,
+            Modifier::BOLD | Modifier::UNDERLINED,
+            Modifier::BOLD | Modifier::UNDERLINED,
+        ),
+        (
+            0,
+            "[Active]",
+            Color::Cyan,
+            Modifier::BOLD | Modifier::UNDERLINED,
+            Modifier::BOLD | Modifier::UNDERLINED,
+        ),
+        (
+            1,
+            "Provenance\\nnotes",
+            Color::Cyan,
+            Modifier::BOLD,
+            Modifier::BOLD | Modifier::UNDERLINED,
+        ),
+        (2, "Snapshot:", Color::Reset, Modifier::BOLD, Modifier::BOLD),
+        (
+            2,
+            "Finished",
+            Color::Reset,
+            Modifier::empty(),
+            Modifier::empty(),
+        ),
+        (
+            3,
+            "Finished",
+            Color::Green,
+            Modifier::empty(),
+            Modifier::BOLD,
+        ),
+        (
+            4,
+            "Backup exists",
+            Color::Yellow,
+            Modifier::BOLD,
+            Modifier::BOLD,
+        ),
+        (5, "Writer busy", Color::Red, Modifier::BOLD, Modifier::BOLD),
+        (
+            6,
+            "Path\\u{1b}:",
+            Color::Reset,
+            Modifier::BOLD,
+            Modifier::BOLD,
+        ),
+        (
+            6,
+            "backup\\u{202e}\\nnext",
+            Color::Reset,
+            Modifier::empty(),
+            Modifier::empty(),
+        ),
+    ] {
+        let row: String = (0..color.area.width)
+            .map(|x| color[(x, y)].symbol())
+            .collect();
+        let byte = row
+            .find(fragment)
+            .unwrap_or_else(|| panic!("missing {fragment}: {row}"));
+        let start = row[..byte].chars().count() as u16;
+        for x in start..start + fragment.len() as u16 {
+            assert_eq!(
+                (color[(x, y)].fg, color[(x, y)].modifier),
+                (ink, color_mod),
+                "{fragment}"
+            );
+            assert_eq!(
+                (mono[(x, y)].fg, mono[(x, y)].modifier),
+                (Color::Reset, mono_mod),
+                "{fragment}"
+            );
+        }
+    }
+}
+
+#[test]
+fn active_reader_is_named_independently_of_row_selection() {
+    let mut terminal = Terminal::new(TestBackend::new(60, 8)).unwrap();
+    terminal
+        .draw(|frame| {
+            let list = Rect::new(0, 0, 26, 8);
+            let block = ui::pane("Records", PaneFocus::Inactive);
+            let rows = block.inner(list);
+            frame.render_widget(block, list);
+            design::pairs(
+                frame,
+                rows,
+                PairTable {
+                    headers: ["Name", "Version"],
+                    rows: &[PairRow {
+                        identity: 1,
+                        values: ["Chosen", "1.0"],
+                    }],
+                    selected: 1,
+                },
+                &Hits::default(),
+                Target::ToolsRow,
+            );
+            ui::report(
+                frame,
+                Rect::new(28, 0, 32, 8),
+                "Details",
+                "Inspection".into(),
+                0,
+                PaneFocus::Active,
+            );
+        })
+        .unwrap();
+    let mut buffer = terminal.backend().buffer().clone();
+    Appearance::classify(None, None, None, Some("C.UTF-8"), Some("1")).apply(&mut buffer);
+    let rendered = text(&buffer);
+    assert!(rendered.contains("Details [Active]"));
+    assert!(!rendered.contains("Records [Active]"));
+    assert_eq!(rendered.matches("[Active]").count(), 1);
+    assert!(buffer[(0, 2)].modifier.contains(Modifier::REVERSED));
+    assert!(!buffer[(29, 0)].modifier.contains(Modifier::REVERSED));
+}
+
 #[test]
 fn shared_filter_escapes_metadata_and_positions_its_focused_caret() {
     let mut terminal = Terminal::new(TestBackend::new(80, 4)).unwrap();

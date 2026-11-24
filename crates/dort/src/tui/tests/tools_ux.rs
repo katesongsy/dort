@@ -7,7 +7,7 @@ use super::{
     tools_tests::{app, check, key, run, settings},
 };
 use crate::services::declared_tools_tests::Fixture;
-use ratatui::crossterm::event::KeyCode;
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]
 fn footer_preserves_context_relevance_then_more_back_help_at_every_size() {
@@ -93,9 +93,15 @@ fn more_can_prepare_check_review_but_never_consumes_approval() {
     run(&f, &mut app, Task::ToolsCheckPrepare(inputs));
     assert_eq!(f.calls(), "Q");
     assert!(app.tools_view.declared.check_preview.is_some());
+    let review = render(&app, 48, 14);
+    assert!(review.lines().last().unwrap().contains("End Read"));
+    assert!(
+        app.key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE), 48, 14)
+            .is_none()
+    );
     render(&app, 48, 14);
     let (shown, hidden) = super::workbench::strip_actions(&app, 48);
-    assert!(shown.iter().any(|a| a.key == "Enter"));
+    assert!(shown.iter().any(|a| a.key == "y"));
     assert!(
         !hidden
             .iter()

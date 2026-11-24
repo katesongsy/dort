@@ -1,20 +1,7 @@
 //! Session shell and saved path drafts.
-use super::app::Tab;
+use super::{app::Tab, components::reader::ScrollKeys};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-pub fn scroll_details(scroll: &mut u16, code: KeyCode) -> bool {
-    match code {
-        KeyCode::Down | KeyCode::PageDown => {
-            *scroll = scroll.saturating_add(if code == KeyCode::Down { 1 } else { 2 })
-        }
-        KeyCode::Up | KeyCode::PageUp => {
-            *scroll = scroll.saturating_sub(if code == KeyCode::Up { 1 } else { 2 })
-        }
-        KeyCode::Home => *scroll = 0,
-        _ => return false,
-    }
-    true
-}
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Form {
     Choose,
@@ -348,7 +335,7 @@ impl Shell {
                 if key.code == KeyCode::Esc {
                     self.picker_details = false;
                 } else {
-                    scroll_details(&mut self.scroll, key.code);
+                    ScrollKeys::DETAILS.apply(&mut self.scroll, key.code);
                 }
                 return None;
             }
@@ -361,7 +348,7 @@ impl Shell {
                 if key.code == KeyCode::Esc {
                     self.form_details = false;
                 } else {
-                    scroll_details(&mut self.scroll, key.code);
+                    ScrollKeys::DETAILS.apply(&mut self.scroll, key.code);
                 }
                 return None;
             }
@@ -419,12 +406,10 @@ impl Shell {
                             None
                         }
                     }
-                    KeyCode::Down | KeyCode::Tab => {
+                    KeyCode::Down => {
                         picker.selected = (picker.selected + 1).min(count.saturating_sub(1))
                     }
-                    KeyCode::Up | KeyCode::BackTab => {
-                        picker.selected = picker.selected.saturating_sub(1)
-                    }
+                    KeyCode::Up => picker.selected = picker.selected.saturating_sub(1),
                     KeyCode::PageDown => {
                         picker.selected = (picker.selected + usize::from(self.page_rows.get()))
                             .min(count.saturating_sub(1))
@@ -514,10 +499,8 @@ impl Shell {
             }
             Overlay::Repositories { selected } => match key.code {
                 KeyCode::Esc => self.back(),
-                KeyCode::Down | KeyCode::Tab => {
-                    *selected = selected.saturating_add(1).min(known_count + 1)
-                }
-                KeyCode::Up | KeyCode::BackTab => *selected = selected.saturating_sub(1),
+                KeyCode::Down => *selected = selected.saturating_add(1).min(known_count + 1),
+                KeyCode::Up => *selected = selected.saturating_sub(1),
                 KeyCode::PageDown => {
                     *selected = (*selected + usize::from(self.page_rows.get())).min(known_count + 1)
                 }

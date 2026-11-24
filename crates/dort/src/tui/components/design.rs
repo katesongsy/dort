@@ -1,6 +1,7 @@
 //! Shared Calm Workbench components. Approval logic stays in App.
 use super::{self as ui, glyphs};
 use crate::tui::{
+    appearance::TextRole,
     input::{Hits, Target},
     views,
 };
@@ -23,14 +24,13 @@ pub enum Tone {
 impl Tone {
     pub fn style(self) -> Style {
         match self {
-            Self::Neutral => Style::default(),
-            Self::Information => Style::default().fg(Color::Blue),
-            Self::Success => Style::default().fg(Color::Green),
-            Self::Attention => Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-            Self::Error => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Self::Neutral => TextRole::Value,
+            Self::Information => TextRole::Information,
+            Self::Success => TextRole::Success,
+            Self::Attention => TextRole::Warning,
+            Self::Error => TextRole::Blocker,
         }
+        .style()
     }
     fn symbol(self) -> &'static str {
         match self {
@@ -81,12 +81,40 @@ fn inverse_pair(ink: Color, fill: Color) -> Style {
         .bg(ink)
         .add_modifier(Modifier::REVERSED)
 }
+#[derive(Clone, Copy)]
+pub enum PaneFocus {
+    Active,
+    Inactive,
+}
+
+impl From<bool> for PaneFocus {
+    fn from(focused: bool) -> Self {
+        if focused {
+            Self::Active
+        } else {
+            Self::Inactive
+        }
+    }
+}
+
+pub fn pane(title: &str, focus: impl Into<PaneFocus>) -> Block<'static> {
+    let heading = TextRole::Heading.style();
+    match focus.into() {
+        PaneFocus::Active => titled_block(
+            &format!("{title} [Active]"),
+            Borders::TOP,
+            heading.add_modifier(Modifier::UNDERLINED),
+        ),
+        PaneFocus::Inactive => titled_block(title, Borders::TOP, heading),
+    }
+}
+
 pub(super) fn titled_block(title: &str, borders: Borders, style: Style) -> Block<'static> {
     Block::default()
         .borders(borders)
         .border_style(Style::default().add_modifier(Modifier::DIM))
         .title(Span::styled(
-            format!(" {title} "),
+            format!(" {} ", ui::chrome_text(title)),
             style.remove_modifier(Modifier::DIM),
         ))
 }
@@ -169,7 +197,7 @@ pub fn choice_dialog(frame: &mut Frame, title: &'static str, hits: &Hits) -> Dia
         hits.click(edge, Target::DismissDialog);
     }
     frame.render_widget(Clear, modal);
-    let block = titled_block(title, Borders::ALL, ui::heading());
+    let block = titled_block(title, Borders::ALL, TextRole::Heading.style());
     let inner = block.inner(modal);
     frame.render_widget(block, modal);
     let body = Rect::new(
@@ -192,7 +220,7 @@ pub fn filter(
 ) -> Rect {
     let label_width = (label.len() as u16 + 1).min(area.width);
     frame.render_widget(
-        Paragraph::new(label),
+        Paragraph::new(label).style(TextRole::Label.style()),
         Rect::new(area.x, area.y, label_width, area.height.min(1)),
     );
     let input = Rect::new(
@@ -319,7 +347,7 @@ pub fn pairs_with_disclosure(
                 Tone::Neutral.style()
             })
         });
-    let header = Row::new(["", table.headers[0], table.headers[1]]).style(ui::heading());
+    let header = Row::new(["", table.headers[0], table.headers[1]]).style(TextRole::Label.style());
     frame.render_widget(
         Table::new(
             rows,

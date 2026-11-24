@@ -82,8 +82,8 @@ fn declaration_real_preview_confirm_noop_and_all_repository_recovery_without_pro
         fs::read_to_string(f.repo.join("dort.toml")).unwrap(),
         "# retained\nschema=1\n"
     );
-    let task = key(&mut app, KeyCode::Enter).unwrap();
-    assert!(app.confirmation.is_none() && app.preview.is_none());
+    let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
+    assert!(app.preview.is_none());
     app.start(true);
     let refresh = app
         .complete(f.output(task).map_err(|e| actions::diagnostic(&e)))
@@ -115,7 +115,7 @@ fn declaration_real_preview_confirm_noop_and_all_repository_recovery_without_pro
     assert!(app.page_actions().contains(&Action::Rollback));
     let task = app.activate(Action::Rollback).unwrap();
     app.complete(f.output(task).map_err(|e| actions::diagnostic(&e)));
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     f.output(task).unwrap();
     assert_eq!(
         fs::read_to_string(f.repo.join("dort.toml")).unwrap(),
@@ -178,13 +178,11 @@ fn dry_run_shrink_cancel_and_late_preparation_cannot_approve_declaration() {
     let mut app = f.app(true);
     f.review(&mut app);
     assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(app.confirmation.is_none());
     key(&mut app, KeyCode::Esc);
     assert!(app.tools_view.declaration_open);
     let mut app = f.app(false);
     f.review(&mut app);
     app.resize(47, 13);
-    assert!(app.confirmation.is_none());
     app.resize(80, 24);
     assert!(app.preview.is_some());
     key(&mut app, KeyCode::Esc);
@@ -208,15 +206,15 @@ fn stale_declaration_write_discards_approval_and_retry_only_prepares_new_preview
     let f = Fixture::new();
     let mut app = f.app(false);
     f.review(&mut app);
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     fs::write(f.repo.join("dort.toml"), "# later\nschema=1\n").unwrap();
     app.start(true);
     app.complete(f.output(task).map_err(|e| actions::diagnostic(&e)));
-    assert!(app.failed_write && app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.failed_write && app.preview.is_none());
     let retry = key(&mut app, KeyCode::Char('R')).unwrap();
     assert!(matches!(retry, Task::ToolDeclaration(_)));
     app.complete(f.output(retry).map_err(|e| actions::diagnostic(&e)));
-    assert!(app.preview.is_some() && app.confirmation.is_none());
+    assert!(app.preview.is_some());
     assert!(render(&app, 80, 24).contains("Add tool declaration"));
     assert_eq!(
         fs::read_to_string(f.repo.join("dort.toml")).unwrap(),

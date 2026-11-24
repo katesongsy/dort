@@ -136,7 +136,6 @@ fn direct_keys_select_rows_scroll_details_and_ignore_tab_without_region_focus() 
         assert!(app.tab == tab);
         press(&mut app, KeyCode::Left, size);
         assert!(app.tab == tab);
-        assert!(app.confirmation.is_none());
     }
 }
 #[test]
@@ -226,6 +225,35 @@ fn clicks_and_wheels_use_hovered_rows_and_details_with_filtered_raw_identity() {
     }
 }
 #[test]
+fn collection_headers_do_not_select_rows_at_the_floor_or_wide() {
+    for size in [(48, 14), (140, 24)] {
+        for (tab, header, selected) in [
+            (Tab::Files, "STATE", "› [ ] first"),
+            (Tab::Git, "KIND", "› first"),
+            (Tab::Recovery, "OP ID", "› aaaaaaaa"),
+        ] {
+            let mut app = fixture(tab);
+            let (x, y) = at(&app, header, size);
+            assert!(
+                mouse(
+                    &mut app,
+                    MouseEventKind::Down(MouseButton::Left),
+                    x,
+                    y,
+                    size
+                )
+                .is_none()
+            );
+            let screen = render(&app, size.0, size.1);
+            assert!(
+                screen.contains(selected),
+                "header changed selection:\n{screen}"
+            );
+            assert!(app.page_title().is_none());
+        }
+    }
+}
+#[test]
 fn hit_rows_follow_rendered_table_offset_and_stale_geometry_is_inert() {
     let mut app = fixture(Tab::Files);
     let data = app.data.as_mut().unwrap();
@@ -292,7 +320,6 @@ fn mouse_form_controls_and_palette_actions_never_bypass_typed_approval() {
     assert!(
         matches!(task,Some(super::actions::Task::Files(dort_core::planner::Request::Unmanage{ref id,..})) if id=="first")
     );
-    assert!(app.confirmation.is_none());
 }
 #[test]
 fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_tabs() {
@@ -357,24 +384,35 @@ fn wide_full_paths_and_ids_are_reachable_in_cells_using_only_detail_page_keys() 
                 long_path("original")
             )
         };
-        let size = (110, 24);
+        let size = if tab == Tab::Git { (80, 30) } else { (110, 40) };
         press(&mut app, KeyCode::Enter, size);
         let mut cells: Vec<String> = Vec::new();
         for _ in 0..80 {
             let text = render(&app, size.0, size.1);
             let rows: Vec<_> = text.lines().collect();
-            let top = rows
-                .iter()
-                .position(|line| {
-                    line.contains("Selected item")
-                        || line.contains("Operation details")
-                        || line.contains("Git details")
+            let top = if tab == Tab::Files {
+                rows.iter().enumerate().rev().find(|(y, line)| {
+                    *y > 0 && line.contains("Details") && !line.contains("Selected content")
                 })
-                .unwrap();
-            let title = ["Selected item", "Operation details", "Git details"]
-                .into_iter()
-                .find(|title| rows[top].contains(title))
-                .unwrap();
+            } else {
+                rows.iter().enumerate().find(|(y, line)| {
+                    *y > 0
+                        && (line.contains("Operation details")
+                            || line.contains("Git details")
+                            || line.contains("Selected item"))
+                })
+            }
+            .map(|(index, _)| index)
+            .expect("reader pane title");
+            let title = [
+                "Selected content",
+                "Details",
+                "Operation details",
+                "Git details",
+            ]
+            .into_iter()
+            .find(|title| rows[top].contains(title))
+            .unwrap();
             let index = rows[top].find(title).unwrap();
             let left = rows[top][..index].chars().count() - 1; // Pane title's trusted leading space.
             let viewport: Vec<String> = rows[top + 1..usize::from(size.1 - 1)]
@@ -398,5 +436,55 @@ fn wide_full_paths_and_ids_are_reachable_in_cells_using_only_detail_page_keys() 
         );
         press(&mut app, KeyCode::Home, size);
         assert_eq!(app.details_scroll, 0);
+    }
+}
+
+#[test]
+fn files_and_git_split_tab_moves_the_keyboard_owner_not_the_row() {
+    for (tab, reader, focused_reader) in [
+        (Tab::Files, "Selected item", "Selected content"),
+        (Tab::Git, "Git details", "Git details"),
+    ] {
+        let mut app = fixture(tab);
+        let wide = (100, 24);
+        let narrow = (80, 24);
+        let before = render(&app, wide.0, wide.1);
+        assert!(before.contains(reader), "{before}");
+        assert!(
+            before.contains("› ") && before.matches("[Active]").count() == 1,
+            "{before}"
+        );
+        press(&mut app, KeyCode::Tab, wide);
+        press(&mut app, KeyCode::Down, wide);
+        let focused = render(&app, wide.0, wide.1);
+        assert!(
+            focused.contains(&format!("{focused_reader} [Active]")),
+            "{focused}"
+        );
+        assert_eq!(focused.matches("[Active]").count(), 1, "{focused}");
+        let row = |screen: &str| {
+            screen
+                .lines()
+                .find_map(|line| line.split_once("› "))
+                .map(|(_, text)| {
+                    text.split_whitespace()
+                        .take(2)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+        };
+        assert_eq!(row(&before), row(&focused));
+        let compact = render(&app, narrow.0, narrow.1);
+        assert!(
+            compact.contains(&format!("{focused_reader} [Active]")) && !compact.contains("› "),
+            "{compact}"
+        );
+        press(&mut app, KeyCode::Esc, narrow);
+        let returned = render(&app, wide.0, wide.1);
+        assert!(
+            !returned.contains(&format!("{focused_reader} [Active]")),
+            "{returned}"
+        );
+        assert_eq!(row(&before), row(&returned));
     }
 }

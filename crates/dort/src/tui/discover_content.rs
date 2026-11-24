@@ -6,10 +6,14 @@ use super::{
 use dort_core::{discovery::SelectedContent, observation::Entry};
 use std::path::PathBuf;
 
+#[derive(Clone, PartialEq, Eq)]
+enum Selection {
+    Candidate(Entry, Option<PathBuf>),
+    Path(PathBuf),
+}
 pub struct Read {
     token: u64,
-    entry: Entry,
-    repository: Option<PathBuf>,
+    selection: Selection,
 }
 pub struct Report {
     token: u64,
@@ -17,24 +21,46 @@ pub struct Report {
 }
 impl Read {
     pub fn perform(self, host: &dort_core::context::HostContext) -> Report {
+        let content = match self.selection {
+            Selection::Candidate(entry, repository) => {
+                dort_core::discovery::selected_content(host, repository.as_deref(), &entry)
+            }
+            Selection::Path(path) => dort_core::discovery::selected_content_path(host, None, &path),
+        };
         Report {
             token: self.token,
-            content: dort_core::discovery::selected_content(
-                host,
-                self.repository.as_deref(),
-                &self.entry,
-            ),
+            content,
         }
     }
 }
-pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &State) {
+pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &State, focused: bool) {
     use ratatui::{
         text::{Line, Span, Text},
         widgets::Paragraph,
     };
-    let block = super::components::pane("Selected content", state.focused);
+    let block = super::components::pane("Selected content", focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    let inner = match state.followed() {
+        Some(target) => {
+            let path = target.to_str().unwrap_or("unavailable");
+            let line = Line::from(vec![
+                Span::styled("Following link -> ", super::components::accent()),
+                Span::styled(path.to_owned(), super::components::muted()),
+            ]);
+            frame.render_widget(
+                Paragraph::new(line),
+                ratatui::layout::Rect::new(inner.x, inner.y, inner.width, 1.min(inner.height)),
+            );
+            ratatui::layout::Rect::new(
+                inner.x,
+                inner.y.saturating_add(1),
+                inner.width,
+                inner.height.saturating_sub(1),
+            )
+        }
+        None => inner,
+    };
     let gutter = usize::from(inner.width.min(7));
     let width = usize::from(inner.width).saturating_sub(gutter);
     state.page.set(inner.height.max(1));
@@ -92,7 +118,7 @@ pub fn draw(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &Sta
 #[derive(Default)]
 pub struct State {
     token: u64,
-    selected: Option<(Entry, Option<PathBuf>)>,
+    selected: Option<Selection>,
     requested: bool,
     report: Option<Report>,
     pub scroll: u16,
@@ -117,22 +143,41 @@ impl State {
             self.report = Some(report);
         }
     }
+    pub fn followed(&self) -> Option<&std::path::Path> {
+        match self.report.as_ref().map(|r| &r.content) {
+            Some(Ok(content)) => content.followed(),
+            _ => None,
+        }
+    }
     pub fn text(&self) -> &str {
         match self.report.as_ref().map(|r| &r.content) {
             Some(Ok(content)) => content.text(),
             Some(Err(reason)) => reason,
             None if self.selected.is_some() => "Reading selected file...",
-            None => {
-                "Select a regular file. Sensitive, binary and oversized content is withheld. Preview checks are not proof of secrecy."
-            }
+            None => "Select a file or link to preview its content.",
         }
     }
 }
 /// Invalidate on selection/scope/view changes before accepting a late worker result.
 pub fn sync(app: &mut App, width: u16, height: u16) {
-    let selected = if app.tab == Tab::Files
-        && app.discovering
+    let quiet = app.tab == Tab::Files
         && !app.dry_run
+        && width >= 48
+        && height >= 14
+        && !app.quit
+        && !app.exit_requested
+        && !app.busy
+        && app.error.is_none()
+        && !app.show_result
+        && app.preview.is_none()
+        && app.help.is_none()
+        && app.more.is_none()
+        && app.choice.is_none()
+        && app.shell.overlay.is_none()
+        && !app.batch_editor.as_ref().is_some_and(|e| e.open);
+    let selected = if quiet
+        && app.discovering
+        && app.inventory.group.is_none()
         && width >= 48
         && height >= 14
         && !app.quit
@@ -153,11 +198,20 @@ pub fn sync(app: &mut App, width: u16, height: u16) {
                 .candidates
                 .get(app.candidate_selected)
                 .filter(|c| {
-                    c.supported_for_adoption
-                        && super::discovery_tree::contains(app, app.candidate_selected)
+                    matches!(
+                        c.entry.kind,
+                        dort_core::observation::Kind::Regular
+                            | dort_core::observation::Kind::Symlink
+                    ) && super::discovery_tree::contains(app, app.candidate_selected)
                 })
-                .map(|c| (c.entry.clone(), d.repository.clone()))
+                .map(|c| Selection::Candidate(c.entry.clone(), d.repository.clone()))
         })
+    } else if quiet && !app.discovering && (app.inventory.details || (width >= 110 && height >= 14))
+    {
+        app.data
+            .as_ref()
+            .and_then(|d| d.managed.get(app.selected))
+            .map(|row| Selection::Path(row.target.clone()))
     } else {
         None
     };
@@ -171,6 +225,7 @@ pub fn sync(app: &mut App, width: u16, height: u16) {
         app.content.end.set(0);
     }
     if app.content.available()
+        && app.discovering
         && app.inventory.details
         && !app.inventory.search(app.discovering).editing
     {
@@ -184,11 +239,10 @@ pub fn next(app: &mut App) -> Option<Task> {
     if app.content.requested {
         return None;
     }
-    let (entry, repository) = app.content.selected.clone()?;
+    let selection = app.content.selected.clone()?;
     app.content.requested = true;
     Some(Task::DiscoverContent(Read {
         token: app.content.token,
-        entry,
-        repository,
+        selection,
     }))
 }

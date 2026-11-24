@@ -86,7 +86,7 @@ fn selected_keep_uses_u_while_jk_and_ctrl_u_keep_their_navigation_meaning() {
                     .is_none()
             );
             assert_eq!(app.selected, want);
-            assert!(app.preview.is_none() && app.confirmation.is_none());
+            assert!(app.preview.is_none());
         }
         let page = app.inventory.viewport(false).page();
         assert!(
@@ -103,7 +103,7 @@ fn selected_keep_uses_u_while_jk_and_ctrl_u_keep_their_navigation_meaning() {
         assert!(
             matches!(task, Some(super::actions::Task::Files(dort_core::planner::Request::Unmanage { id, mode: dort_core::planner::UnmanageMode::Keep })) if id == selected)
         );
-        assert!(app.preview.is_none() && app.confirmation.is_none());
+        assert!(app.preview.is_none());
     }
 }
 fn row_point(app: &App, raw: usize) -> (u16, u16) {
@@ -138,7 +138,7 @@ fn double_click_marks_once_without_a_draw_and_keyboard_timeout_resize_invalidate
     assert!(app.inventory.managed_marks.is_empty());
     click(&mut app, point, now + Duration::from_millis(100));
     assert_eq!(app.inventory.managed_marks.len(), 1);
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none());
     render(&app, 140, 40);
     let point = row_point(&app, 2);
     click(&mut app, point, now);
@@ -193,7 +193,39 @@ pub(super) fn assert_review_list_navigation(
     assert_eq!(position(app, 79), last_y);
     assert!(right_contains(&up, previous_details), "{up}");
     assert!(!right_contains(&up, last_details), "{up}");
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    let active_title = |screen: &str| {
+        screen
+            .lines()
+            .find(|line| line.contains("[Active]"))
+            .unwrap()
+            .split("[Active]")
+            .next()
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    let queue_title = active_title(&up);
+    key(app, KeyCode::Tab);
+    let reading = render(app, 140, 40);
+    assert!(right_contains(&reading, "[Active]"), "{reading}");
+    assert_eq!(reading.matches("[Active]").count(), 1, "{reading}");
+    key(app, KeyCode::Up);
+    key(app, KeyCode::Char('y'));
+    let moved = render(app, 140, 40);
+    assert_eq!(position(app, 78), previous_y);
+    assert_eq!(position(app, 79), last_y);
+    assert!(right_contains(&moved, previous_details), "{moved}");
+    let compact = render(app, 80, 24);
+    assert_eq!(compact.matches("[Active]").count(), 1, "{compact}");
+    assert_ne!(active_title(&compact), queue_title);
+    assert!(
+        app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 80, 24)
+            .is_none()
+    );
+    let returned = render(app, 140, 40);
+    assert_eq!(active_title(&returned), queue_title);
+    assert!(right_contains(&returned, previous_details), "{returned}");
+    assert!(app.preview.is_none());
 }
 
 #[test]
@@ -347,5 +379,5 @@ fn files_show_the_contextual_actions_that_their_keys_dispatch() {
     assert!(
         matches!(request, Some(Task::Files(dort_core::planner::Request::Unmanage { id, mode: dort_core::planner::UnmanageMode::Remove })) if id == "/synthetic/.row-000")
     );
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none());
 }

@@ -412,10 +412,7 @@ impl Activity {
 }
 fn scope(lines: &mut Vec<Line<'static>>, activity: Option<&Activity>) {
     if let Some(activity) = activity {
-        lines.push(Line::from(vec![
-            ratatui::text::Span::styled(format!("{:<13} ", "Operation"), ui::muted()),
-            ratatui::text::Span::raw(activity.operation),
-        ]));
+        lines.push(ui::metadata("Operation", activity.operation));
         for (label, value) in &activity.scope {
             lines.push(ui::metadata(label, value));
         }

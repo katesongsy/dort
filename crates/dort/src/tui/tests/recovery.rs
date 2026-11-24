@@ -201,17 +201,19 @@ fn preparing_table_enter_inspects_then_the_visible_action_uses_raw_identity() {
     }));
     for code in [KeyCode::PageDown, KeyCode::PageUp, KeyCode::Home] {
         assert!(key(&mut app, code).is_none());
-        assert!(!app.history_details && app.preview.is_none() && app.confirmation.is_none());
+        assert!(
+            app.history_region == crate::tui::workspace::Region::Queue && app.preview.is_none()
+        );
     }
     assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(app.history_details && app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.history_region == crate::tui::workspace::Region::Details && app.preview.is_none());
     assert!(app.page_actions() == vec![Action::Abandon]);
     key(&mut app, KeyCode::Tab); // no region focus cycle
     assert!(super::tests::has_action(&app, "Abandon"));
     assert!(
         matches!(key(&mut app, KeyCode::Char('x')), Some(Task::Bootstrap(r,t,dort_core::bootstrap::RecoveryAction::Abandon)) if r == "b".repeat(64) && t == "b".repeat(64))
     );
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none());
     // Unavailable recovery operations still explain their reason.
     assert!(app.activate(Action::Resume).is_none());
     assert!(app.status.contains("Resume is unavailable"));
@@ -225,7 +227,7 @@ fn error_retry_never_retains_approval_and_failed_writes_offer_read_only_recovery
         key(&mut app, KeyCode::Char('R')),
         Some(Task::Files(_))
     ));
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none());
     app.retry = Task::Files(dort_core::planner::Request::Apply).retry_intent();
     app.start(true);
     app.complete(Err("held writer lock".into()));
@@ -240,7 +242,7 @@ fn error_retry_never_retains_approval_and_failed_writes_offer_read_only_recovery
         key(&mut app, KeyCode::Char('h')),
         Some(Task::History)
     ));
-    assert!(app.tab == Tab::Recovery && app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.tab == Tab::Recovery && app.preview.is_none());
     app.retry = Task::Files(dort_core::planner::Request::Apply).retry_intent();
     app.complete(Err("another preview read failure".into()));
     key(&mut app, KeyCode::Esc);
@@ -279,4 +281,69 @@ fn about_reports_build_version_and_returns_to_prior_focus_and_details() {
     key(&mut app, KeyCode::Esc);
     assert!(app.tab == Tab::Recovery);
     assert_eq!(app.details_scroll, 8);
+}
+
+#[test]
+fn recovery_split_focus_survives_resize_and_compact_return() {
+    let mut app = App::new(false);
+    app.tab = Tab::Recovery;
+    app.complete(Ok(Output::History {
+        rows: ('a'..='z')
+            .map(|id| row(Some(3), Some(Phase::Preparing), None, id))
+            .collect(),
+        error: None,
+    }));
+    let press = |app: &mut App, code, size: (u16, u16)| {
+        assert!(
+            app.key(KeyEvent::new(code, KeyModifiers::NONE), size.0, size.1)
+                .is_none()
+        );
+    };
+    for width in [89, 90, 99, 100, 106, 107, 110] {
+        let screen = render(&app, width, 18);
+        assert_eq!(
+            screen.contains("Operation details"),
+            width >= 90,
+            "{screen}"
+        );
+        assert_eq!(screen.matches("[Active]").count(), 1, "{screen}");
+        assert!(screen.contains("Operations [Active]"), "{screen}");
+    }
+    let wide = (100, 18);
+    let narrow = (78, 18);
+    render(&app, wide.0, wide.1);
+    press(&mut app, KeyCode::Char('/'), wide);
+    for c in "preparing".chars() {
+        press(&mut app, KeyCode::Char(c), wide);
+    }
+    press(&mut app, KeyCode::Enter, wide);
+    press(&mut app, KeyCode::PageDown, wide);
+    let before = render(&app, wide.0, wide.1);
+    let selected = before
+        .lines()
+        .find_map(|line| line.split_once("› "))
+        .unwrap()
+        .1[..8]
+        .to_string();
+    press(&mut app, KeyCode::Tab, wide);
+    press(&mut app, KeyCode::Down, wide);
+    press(&mut app, KeyCode::Char('y'), wide);
+    let details = render(&app, wide.0, wide.1);
+    assert_eq!(details.matches("[Active]").count(), 1, "{details}");
+    assert!(details.contains("Operation details [Active]"));
+    assert!(details.contains(&format!("› {selected}")));
+    let compact = render(&app, narrow.0, narrow.1);
+    assert!(
+        compact.contains("Operation details [Active]") && !compact.contains("Operations [Active]")
+    );
+    press(&mut app, KeyCode::Esc, narrow);
+    let queue = render(&app, narrow.0, narrow.1);
+    assert!(queue.contains("Operations [Active]") && queue.contains(&format!("› {selected}")));
+    assert!(queue.contains("preparing") && !queue.contains("Operation details"));
+    press(&mut app, KeyCode::Enter, narrow);
+    assert!(render(&app, narrow.0, narrow.1).contains("Operation details [Active]"));
+    let grown = render(&app, 110, 18);
+    assert!(
+        grown.contains("Operation details [Active]") && grown.contains(&format!("› {selected}"))
+    );
 }

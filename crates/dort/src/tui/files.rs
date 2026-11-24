@@ -1,24 +1,30 @@
 //! Files workspace built from typed rows.
+use super::input::{Target, Wheel};
+use super::workspace::{Region, Scope, Workspace};
 use super::{app::App, components as ui, views::safe};
 use dort_core::observation::Kind;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     text::{Line, Span, Text},
-    widgets::{Cell, Paragraph, Row, Table, TableState},
+    widgets::{Cell, Paragraph, Row},
 };
+use ui::collection::{Collection, Header, RowTargets};
+use ui::design::Tone;
+use ui::reader::{field, section};
 
 #[cfg(test)]
 thread_local! { pub(super) static FORMATTED_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 
-fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
-    if app.discovering {
-        let parts = Layout::vertical([Constraint::Min(3), Constraint::Length(5)]).split(area);
-        super::discover_content::draw(frame, parts[0], &app.content);
+fn draw_selected(frame: &mut Frame, area: Rect, app: &App, focused: bool) {
+    if app.content.available() {
+        let parts =
+            Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)]).split(area);
+        super::discover_content::draw(frame, parts[0], &app.content, focused);
         app.hits.wheel(parts[0], super::input::Wheel::Content);
         app.hits
             .click(parts[0], super::input::Target::DiscoverFocus(true));
-        ui::report(
+        ui::reader::Reader::new(&app.hits).report(
             frame,
             parts[1],
             "Details",
@@ -27,17 +33,34 @@ fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
             false,
         );
     } else {
-        ui::report(
+        ui::reader::Reader::new(&app.hits).report(
             frame,
             area,
             "Selected item",
             details(app),
             app.details_scroll,
-            true,
+            focused,
         );
     }
 }
 
+fn kind_short(kind: &Kind) -> &'static str {
+    match kind {
+        Kind::Regular => "File",
+        Kind::Directory => "Dir",
+        Kind::Symlink => "Link",
+        Kind::Missing => "Gone",
+        Kind::Special => "Spec",
+    }
+}
+fn kind_style(kind: &Kind) -> ratatui::style::Style {
+    match kind {
+        Kind::Directory => ui::note(),
+        Kind::Symlink => ui::accent(),
+        Kind::Missing | Kind::Special => ui::warning(),
+        Kind::Regular => ratatui::style::Style::default(),
+    }
+}
 fn kind(kind: &Kind) -> &'static str {
     match kind {
         Kind::Regular => "File",
@@ -49,17 +72,13 @@ fn kind(kind: &Kind) -> &'static str {
 }
 fn details(app: &App) -> Text<'static> {
     let mut lines = Vec::new();
-    if let Some(result) = &app.result {
-        lines.push(Line::styled("Result", ui::heading()));
-        lines.extend(Text::from(safe(result)).lines);
-        lines.push(Line::raw(""));
-    }
     if app.inventory.group.is_some() {
         if let Some(node) = super::tree::selected(app) {
             lines.push(Line::styled("Folder · header only", ui::heading()));
-            lines.push(ui::metadata(
+            lines.push(field(
                 "Full path",
                 node.path.to_str().unwrap_or("unavailable"),
+                Tone::Neutral,
             ));
             lines.push(Line::raw(
                 "Marking a folder marks its eligible files. Marks stay through filters and folds.",
@@ -73,39 +92,45 @@ fn details(app: &App) -> Text<'static> {
             .filter(|_| super::discovery_tree::contains(app, app.candidate_selected))
         {
             let eligible = candidate.supported_for_adoption;
-            let state = if eligible {
-                "Eligible hint"
-            } else {
-                "Not eligible"
-            };
-            lines.push(Line::styled(
-                format!("[{state}] {}", kind(&candidate.entry.kind)),
-                ui::state(state),
-            ));
-            lines.push(ui::metadata(
+            let managed = app.data.as_ref().and_then(|d| {
+                d.managed
+                    .iter()
+                    .find(|row| row.target == candidate.entry.path)
+            });
+            lines.push(section(kind(&candidate.entry.kind)));
+            lines.push(field(
                 "Path",
                 candidate.entry.path.to_str().unwrap_or("unavailable"),
+                Tone::Neutral,
             ));
-            lines.push(Line::raw(""));
-            lines.push(Line::raw(if eligible {
-                "Review this candidate before adoption."
+            let (status, tone) = if managed.is_some() {
+                ("Managed", Tone::Success)
+            } else if eligible {
+                ("Eligible", Tone::Success)
             } else {
-                "Adoption requires an eligible regular file."
+                ("Ineligible", Tone::Attention)
+            };
+            lines.push(field("Status", status, tone));
+            if let Some(row) = managed {
+                lines.push(field("Managed", &row.id, Tone::Neutral));
+                lines.push(Line::raw(
+                    "Already managed. Change the existing entry in Managed.",
+                ));
+            }
+            lines.push(Line::raw(if eligible {
+                "Choose Adopt to edit target, ID and source."
+            } else {
+                "Adoption needs an owned, single-link regular file without special permission bits."
             }));
-            lines.push(Line::raw(if eligible { "Choose Adopt to edit target, ID and source." } else { "Only owned, single-link regular files without special permission bits are candidates." }));
-            lines.push(Line::raw(
-                "The preview checks paths, sensitivity and remaining limits.",
-            ));
             if let Some(d) = &app.discovery {
-                lines.push(Line::raw(""));
-                lines.push(ui::metadata(
+                for warning in &d.report.warnings {
+                    lines.push(Line::styled(safe(warning), Tone::Attention.style()));
+                }
+                lines.push(field(
                     "Protected root",
                     &format!("{:?}", d.repository),
+                    Tone::Neutral,
                 ));
-                lines.push(Line::raw(safe(d.report.sensitivity_notice)));
-                for warning in &d.report.warnings {
-                    lines.push(Line::styled(safe(warning), ui::warning()));
-                }
             }
         } else {
             lines.push(Line::raw("Select a file, or clear the filter."));
@@ -118,10 +143,20 @@ fn details(app: &App) -> Text<'static> {
             .get(app.selected)
             .filter(|_| app.visible_file_rows().contains(&app.selected))
         {
-            lines.push(Line::styled(
-                format!("{}  [{}]", safe(&row.id), row.state),
-                ui::state(row.state),
+            lines.push(section(&row.id));
+            lines.push(field(
+                "Status",
+                row.state,
+                match row.state {
+                    "Linked" => Tone::Success,
+                    "Needs apply" => Tone::Attention,
+                    "Blocked" => Tone::Error,
+                    _ => Tone::Neutral,
+                },
             ));
+            for reason in &row.blockers {
+                lines.push(field("Reason", reason, Tone::Error));
+            }
             lines.push(ui::metadata(
                 "Source",
                 row.source.to_str().unwrap_or("unavailable"),
@@ -130,15 +165,13 @@ fn details(app: &App) -> Text<'static> {
                 "Destination",
                 row.target.to_str().unwrap_or("unavailable"),
             ));
-            lines.push(ui::metadata("Source kind", row.source_kind));
-            lines.push(ui::metadata("Dest. kind", row.target_kind));
-            for reason in &row.blockers {
-                lines.push(Line::styled(safe(reason), ui::danger()));
-            }
-            lines.push(Line::raw(""));
             lines.push(Line::raw(
                 "Keep writes a regular file. Both actions keep the source.",
             ));
+            lines.push(Line::default());
+            lines.push(section("File types"));
+            lines.push(field("Source kind", row.source_kind, Tone::Neutral));
+            lines.push(field("Dest. kind", row.target_kind, Tone::Neutral));
         } else if let Some((_, detail)) = data
             .files
             .get(app.selected)
@@ -149,10 +182,11 @@ fn details(app: &App) -> Text<'static> {
             lines.push(Line::raw("Select a file, or clear the filter."));
         }
     }
-    lines.push(Line::styled(
-        "Search changes the display only. Apply covers every active file.",
-        ui::muted(),
-    ));
+    if let Some(result) = &app.result {
+        lines.push(Line::default());
+        lines.push(section("Result"));
+        lines.extend(Text::from(safe(result)).lines);
+    }
     Text::from(lines)
 }
 
@@ -235,28 +269,28 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     }
     app.hits.click(sections[1], super::input::Target::Filter);
     let content = sections[2];
-    let wide = super::workbench::wide_details(area, 2);
-    let (list_area, details) = super::workbench::detail_panes(content, wide);
-    let focused = !app.discovering || !app.content.focused;
-    if app.inventory.details
-        || app.content.focused
-        || (!wide && app.result.is_some() && app.receipt.is_none())
-    {
-        draw_selected(frame, content, app);
+    let active = if !search.editing && (app.inventory.details || app.content.focused) {
+        Region::Details
+    } else {
+        Region::Queue
+    };
+    let scope = Scope::Files {
+        discovering: app.discovering,
+    };
+    let workspace = Workspace::new(scope, content, active, !nodes.is_empty());
+    if !workspace.is_split() && app.result.is_some() && app.receipt.is_none() && !search.editing {
+        draw_selected(frame, content, app, true);
         return;
     }
-    let selected = super::tree::position(app, app.file_selection());
-    if app.discovering {
-        app.hits
-            .click(list_area, super::input::Target::DiscoverFocus(false));
+    workspace.bind(&app.hits);
+    if let Some(area) = workspace.details {
+        draw_selected(frame, area, app, active == Region::Details);
     }
-    let capacity = list_area.height.saturating_sub(2) as usize;
-    let first = app
-        .inventory
-        .viewport(app.discovering)
-        .start(nodes.len(), capacity, selected);
-    let window: Vec<_> = nodes.window(first, capacity).collect();
-    let visible: Vec<_> = window.iter().map(|n| n.key).collect();
+    let Some(list_area) = workspace.queue else {
+        return;
+    };
+    let focused = active == Region::Queue;
+    let selected = super::tree::position(app, app.file_selection());
     let total = if app.discovering {
         app.discovery
             .as_ref()
@@ -273,13 +307,54 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         },
         total
     );
+    let (adoption_width, kind_width) = if list_area.width < 60 {
+        (12, 4)
+    } else {
+        (16, 9)
+    };
+    let name_width = if app.discovering {
+        list_area
+            .width
+            .saturating_sub(adoption_width + kind_width + 4)
+    } else {
+        list_area.width.saturating_mul(32) / 100
+    };
+    let indent_limit = usize::from(name_width.saturating_sub(15) / 2).min(12);
+    let collection = if app.discovering {
+        Collection::new(
+            [
+                Constraint::Min(18),
+                Constraint::Length(adoption_width),
+                Constraint::Length(kind_width),
+            ],
+            Header::Heading(["NAME", "ADOPTION", "TYPE"]),
+        )
+    } else {
+        Collection::new(
+            [
+                Constraint::Percentage(32),
+                Constraint::Length(13),
+                Constraint::Min(4),
+            ],
+            Header::Heading(["FILE", "STATE", "DESTINATION"]),
+        )
+    }
+    .titled(&title, focused);
+    let window = collection.window(
+        list_area,
+        app.inventory.viewport(app.discovering),
+        nodes.len(),
+        selected,
+    );
     let mut rows = Vec::new();
-    for &node in &window {
+    let mut visible = Vec::new();
+    for node in nodes.window(window.range.start, window.range.len()) {
+        let previous = rows.len();
         #[cfg(test)]
         FORMATTED_ROWS.with(|count| count.set(count.get() + 1));
         let prefix = format!(
             "{}{} {}",
-            "  ".repeat(node.depth.min(12)),
+            "  ".repeat(node.depth.min(indent_limit)),
             if node.branch {
                 let folded = if app.discovering {
                     &app.inventory.candidate_folded
@@ -304,8 +379,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         if node.branch {
             rows.push(Row::new(vec![
                 Cell::from(ui::inline(&prefix)).style(ui::heading()),
-                Cell::from("Group").style(ui::muted()),
-                Cell::from("Directory"),
+                Cell::from(""),
+                Cell::from("Dir").style(kind_style(&Kind::Directory)),
             ]));
         } else if let Some(i) = node.raw {
             if app.discovering {
@@ -314,15 +389,21 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                     .as_ref()
                     .and_then(|d| d.report.candidates.get(i))
                 {
-                    let state = if c.supported_for_adoption {
-                        "Eligible hint"
+                    let managed = app
+                        .data
+                        .as_ref()
+                        .and_then(|d| d.managed.iter().find(|row| row.target == c.entry.path));
+                    let state = if managed.is_some() {
+                        "Managed"
+                    } else if c.supported_for_adoption {
+                        "Eligible"
                     } else {
-                        "Not eligible"
+                        "Ineligible"
                     };
                     rows.push(Row::new(vec![
                         Cell::from(ui::inline(&prefix)),
                         Cell::from(state).style(ui::state(state)),
-                        Cell::from(kind(&c.entry.kind)),
+                        Cell::from(kind_short(&c.entry.kind)).style(kind_style(&c.entry.kind)),
                     ]));
                 }
             } else if let Some(data) = &app.data {
@@ -330,7 +411,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                     rows.push(Row::new(vec![
                         Cell::from(format!(
                             "{}{} {}",
-                            "  ".repeat(node.depth.min(12)),
+                            "  ".repeat(node.depth.min(indent_limit)),
                             if super::tree::marked(app, node) {
                                 "[x]"
                             } else {
@@ -363,8 +444,10 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                 }
             }
         }
+        if rows.len() > previous {
+            visible.push(node);
+        }
     }
-    let block = ui::pane(&title, focused);
     if nodes.is_empty() {
         let message = if !app.discovering {
             app.data
@@ -384,55 +467,37 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             "No matches. Delete clears the display filter."
         };
-        frame.render_widget(Paragraph::new(safe(message)).block(block), list_area);
-    } else {
-        let widths = if app.discovering {
-            vec![
-                Constraint::Percentage(46),
-                Constraint::Length(15),
-                Constraint::Min(6),
-            ]
-        } else {
-            vec![
-                Constraint::Percentage(32),
-                Constraint::Length(13),
-                Constraint::Min(4),
-            ]
-        };
-        let header = Row::new(if app.discovering {
-            vec!["NAME", "ADOPTION", "TYPE"]
-        } else {
-            vec!["FILE", "STATE", "DESTINATION"]
-        })
-        .style(ui::heading());
-        let table = Table::new(rows, widths)
-            .header(header)
-            .block(block)
-            .row_highlight_style(ui::selected())
-            .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
-        let mut state = TableState::default().with_selected(
-            selected
-                .and_then(|i| i.checked_sub(first))
-                .filter(|&i| i < window.len()),
+        frame.render_widget(
+            Paragraph::new(safe(message)).block(ui::pane(&title, focused)),
+            list_area,
         );
-        frame.render_stateful_widget(table, list_area, &mut state);
-        app.hits.rows(list_area, &visible, 0);
-        // Register only actual rendered rows, after the generic row hit regions.
-        for (line, node) in window.iter().enumerate() {
-            let x = list_area.x + 2 + (node.depth.min(12) * 2) as u16;
-            if x + 3 < list_area.right() {
+    } else {
+        let rendered = collection.draw(
+            frame,
+            list_area,
+            visible.iter().map(|node| node.key).zip(rows),
+            window.selection,
+            RowTargets {
+                hits: &app.hits,
+                wheel: Some(Wheel::Rows),
+                target: Target::Row,
+            },
+        );
+        for ((row, _), node) in rendered
+            .rows()
+            .zip(visible.into_iter().skip(rendered.offset))
+        {
+            let x = row.x + 2 + (node.depth.min(indent_limit) * 2) as u16;
+            if x + 3 < row.right() {
                 app.hits.click(
-                    Rect::new(x, list_area.y + 2 + line as u16, 3, 1),
+                    Rect::new(x, row.y, 3, 1),
                     if node.branch {
-                        super::input::Target::TreeFold(node.key)
+                        Target::TreeFold(node.key)
                     } else {
-                        super::input::Target::TreeMark(node.key)
+                        Target::TreeMark(node.key)
                     },
                 );
             }
         }
-    }
-    if let Some(area) = details {
-        draw_selected(frame, area, app);
     }
 }

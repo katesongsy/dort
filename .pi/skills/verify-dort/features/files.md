@@ -15,7 +15,7 @@ Adopt a real file from HOME into the repository, and manage the resulting link. 
 
 ## How to get to it (user POV)
 
-Press `f` to open Managed. Press `2` for Discover or `3` for Ignored paths. In Discover, `Enter` opens details, `i` ignores the selected path, and Space marks or unmarks it. Press `a` to adopt the selected file or `A` to adopt marked files. Press `g` to open Git.
+Press `f` to open Managed. Press `2` for Discover or `3` for Ignored paths. In Discover, `Enter` opens details. On a wide terminal, `Tab` moves focus between the list and details without changing the selected file. `i` ignores the selected path, and Space marks or unmarks it. Press `a` to adopt the selected file or `A` to adopt marked files. A review shows `y` only after its effects reach the bottom of the pane. Press `g` to open Git.
 
 CLI:
 
@@ -71,5 +71,10 @@ An adoption worked when all four hold:
 - **`--dry-run` writes nothing.** It plans the source copy, manifest edit and link replacement, and creates no backup or journal. Confirm no destination file appeared and no transaction directory was added.
 - **Adoption is destructive.** The destination is replaced by a link. Backups live under the repository, not in HOME.
 - **`--confirm-remove ID`** is an extra guard beyond `--yes` for `files remove --mode remove`.
+- **Approval needs the whole review.** The review opens on its full effects. The TUI offers `y` only after they reach the bottom of the pane; `End` jumps there.
+- **`Left`/`Right` fold and unfold a tree group** when the file list has focus.
+- **Preview follows links.** A selected link shows its target's content and names the followed path. Managed files preview their content too.
+- **Discover names managed targets.** An already-managed target shows `Managed` with its ID and refuses adoption.
 - **Groups cannot be adopted directly.** `.config` shows as Group; open it or mark its children.
 - **Templates and secrets are blocked**, not silently allowed.
+- **Content preview reads the file.** A changed or oversized file withholds its content; the preview lists no bytes in reports.
