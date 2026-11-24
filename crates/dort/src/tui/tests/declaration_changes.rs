@@ -59,7 +59,7 @@ fn selected_declaration_edit_remove_use_one_exact_approval_and_refresh_list() {
         );
         assert!(f.calls().is_empty());
         let task = super::tests::approve_ready(&mut app, width, height).unwrap();
-        assert!(app.confirmation.is_none() && app.preview.is_none());
+        assert!(app.preview.is_none());
         perform(&f, &mut app, task);
         key(&mut app, KeyCode::Enter, width, height);
         assert!(app.tools_view.landing());

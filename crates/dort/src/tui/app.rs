@@ -80,9 +80,6 @@ impl Preview {
         );
     }
 }
-pub struct Confirmation {
-    pub prompt_scroll: u16,
-}
 struct RowClick {
     at: std::time::Instant,
     key: usize,
@@ -138,7 +135,8 @@ pub struct App {
     pub details_scroll: u16,
     viewport: (u16, u16),
     pub preview: Option<Preview>,
-    pub confirmation: Option<Confirmation>,
+    #[cfg(test)]
+    pub confirmation: Option<()>,
     pub busy: bool,
     pub writing: bool,
     pub exit_requested: bool,
@@ -231,6 +229,7 @@ impl App {
             details_scroll: 0,
             viewport: (48, 14),
             preview: None,
+            #[cfg(test)]
             confirmation: None,
             busy: false,
             writing: false,
@@ -334,7 +333,6 @@ impl App {
                     format!("Read failed: {error}\nEsc returns to retained input and scope.").into()
                 };
                 self.preview = None;
-                self.confirmation = None;
                 if writing {
                     self.retry = None;
                 }
@@ -502,14 +500,6 @@ impl App {
             self.interaction_notice = Some(reason);
             self.status = reason.into();
             return None;
-        }
-        if self.confirmation.is_some() {
-            let code = match self.hits.target(event.column, event.row) {
-                Some(Target::ConfirmAction) => return self.key(Approval::event(), width, height),
-                Some(Target::CancelConfirmation | Target::DismissDialog) => KeyCode::Esc,
-                _ => return None,
-            };
-            return self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height);
         }
         let target = self.hits.target(event.column, event.row)?;
         if let Some(workspace) = self.hits.workspace((width, height))
@@ -747,7 +737,6 @@ impl App {
                 }
                 None
             }
-            Target::ConfirmAction | Target::CancelConfirmation => None,
             Target::ToolDeclarationField(index) => {
                 if self.tab != Tab::Tools || !self.tools_view.declaration_open {
                     return None;
@@ -1013,7 +1002,6 @@ impl App {
             || self.error.is_some()
             || self.show_result
             || self.preview.is_some()
-            || self.confirmation.is_some()
             || self.text_entry()
             || self.batch_editor.as_ref().is_some_and(|e| e.open)
         {
@@ -1128,12 +1116,11 @@ impl App {
                 && self.more.is_none()
                 && self.choice.is_none()
                 && (self.help.is_some()
-                    || self.confirmation.is_none()
-                        && (self.error.is_some()
-                            || self.show_result
-                            || self.busy
-                            || self.preview.is_some()
-                            || !self.text_entry())))
+                    || (self.error.is_some()
+                        || self.show_result
+                        || self.busy
+                        || self.preview.is_some()
+                        || !self.text_entry())))
         {
             self.git_view.discard_preview();
             if self.busy {
@@ -1214,7 +1201,6 @@ impl App {
                     self.show_result = false;
                     self.details_scroll = 0;
                 } else if self.preview.is_some() {
-                    self.confirmation = None;
                     self.preview = None;
                 } else if self.shell.overlay.is_some() {
                     self.shell.back();
@@ -1241,11 +1227,7 @@ impl App {
             }
             return None;
         }
-        if key.code == KeyCode::F(3)
-            && self.preview.is_some()
-            && self.confirmation.is_none()
-            && !self.busy
-        {
+        if key.code == KeyCode::F(3) && self.preview.is_some() && !self.busy {
             return self.key(
                 KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
                 width,
@@ -1259,7 +1241,6 @@ impl App {
             && self.error.is_none()
             && !self.show_result
             && self.preview.is_none()
-            && self.confirmation.is_none()
         {
             match key.code {
                 KeyCode::Enter if !self.overview_details => {
@@ -1328,7 +1309,6 @@ impl App {
                 KeyCode::Char('h') => {
                     self.error = None;
                     self.preview = None;
-                    self.confirmation = None;
                     self.retry = None;
                     self.tab = Tab::Recovery;
                     self.shell.overlay = None;
@@ -1339,7 +1319,6 @@ impl App {
                 KeyCode::Char('r') => {
                     self.error = None;
                     self.preview = None;
-                    self.confirmation = None;
                     self.details_scroll = 0;
                     if let Some(intent) = self.retry.take() {
                         return Some(intent.task());
@@ -1392,9 +1371,6 @@ impl App {
             }
             self.show_result = false;
             self.details_scroll = 0;
-        }
-        if self.confirmation.is_some() {
-            return self.confirm_key(key, (width, height));
         }
         if self.preview_approval((width, height)).accepts(key) {
             return self.approve_preview();
@@ -1855,7 +1831,6 @@ impl App {
         if width < 48 || height < 14 {
             self.more = None;
             self.choice = None;
-            self.confirmation = None;
             self.git_view.discard_preview();
             self.tools_view.shrink();
         } else if let Some(preview) = &mut self.preview {
@@ -2303,7 +2278,6 @@ impl App {
             && self.error.is_none()
             && !self.show_result
             && self.preview.is_none()
-            && self.confirmation.is_none()
             && self.text_entry()
     }
     /// Stable identity of the foreground form, independent of its selected field.
@@ -2315,7 +2289,6 @@ impl App {
             || self.error.is_some()
             || self.show_result
             || self.preview.is_some()
-            || self.confirmation.is_some()
         {
             return None;
         }
@@ -2554,7 +2527,6 @@ impl App {
             self.check = None;
         }
         self.preview = None;
-        self.confirmation = None;
     }
     fn check_task(&mut self, standalone: bool, profiles: bool) -> Option<Task> {
         let manifest = if standalone {
@@ -2882,16 +2854,15 @@ impl App {
     pub(super) fn preview_approval(&self, size: (u16, u16)) -> Approval {
         Approval::new(
             self.dry_run,
-            self.preview.as_ref().is_none_or(|p| {
-                p.pending.blocked() || self.confirmation.is_none() && !p.effects_visible(size)
-            }),
+            self.preview
+                .as_ref()
+                .is_none_or(|p| p.pending.blocked() || !p.effects_visible(size)),
         )
     }
     fn approve_preview(&mut self) -> Option<Task> {
         let removal_ids = self.batch_removal_ids();
         let pending = self.preview.take()?.pending;
         let adopting = pending.adoption();
-        self.confirmation = None;
         let approval = match pending {
             Pending::Batch(plan) if plan.inputs.action == dort_core::batch::Action::Remove => {
                 dort_core::batch::Approval::from_removal_plan(
@@ -2922,23 +2893,5 @@ impl App {
                 None
             }
         }
-    }
-    fn confirm_key(&mut self, key: KeyEvent, size: (u16, u16)) -> Option<Task> {
-        if self.preview_approval(size).accepts(key) {
-            return self.approve_preview();
-        }
-        let confirmation = self.confirmation.as_mut()?;
-        match key.code {
-            KeyCode::Esc => {
-                self.confirmation = None;
-                self.preview = None;
-            }
-            code => {
-                super::components::reader::ScrollKeys::new(1, 4)
-                    .with_end()
-                    .apply(&mut confirmation.prompt_scroll, code);
-            }
-        }
-        None
     }
 }

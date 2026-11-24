@@ -79,9 +79,7 @@ pub(super) fn more_target(
     let menu = app.more.as_ref().expect("More is a real foreground");
     assert!(menu.items.iter().all(|item| !matches!(
         item.action.target,
-        super::input::Target::ConfirmAction
-            | super::input::Target::Continue
-            | super::input::Target::ToolInstallControl(_, true)
+        super::input::Target::Continue | super::input::Target::ToolInstallControl(_, true)
     )));
     let index = menu
         .items
@@ -420,7 +418,7 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     let mut app = App::new(false);
     app.tab = Tab::Files;
     app.key(key(KeyCode::Tab), 80, 24);
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none());
     app.details_scroll = 3;
     app.key(key(KeyCode::Char('?')), 80, 24);
     assert!(render(&app, 100, 40).contains("Help") && app.dialog_title() == Some("Help"));
@@ -430,7 +428,7 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     assert_eq!(app.details_scroll, 3);
     assert!(app.tab == Tab::Files);
     app.key(key(KeyCode::BackTab), 80, 24);
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none());
     app.key(key(KeyCode::Char('n')), 80, 24);
     focus_form(&mut app);
     for c in "q?/".chars() {

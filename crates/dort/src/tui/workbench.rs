@@ -142,7 +142,7 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
         return actions;
     }
     let mut result = app.hits.actions();
-    if app.confirmation.is_some() || app.preview.is_some() {
+    if app.preview.is_some() {
         return result;
     }
     if !app.busy
@@ -278,11 +278,8 @@ pub(super) fn strip_actions(
         });
     }
     // Controllers supply relevance order; navigation keeps reserved trailing positions.
-    available.sort_by_key(|a| {
-        usize::from(
-            !matches!(a.target, Target::Continue | Target::ConfirmAction) && a.key != "Enter",
-        )
-    });
+    available
+        .sort_by_key(|a| usize::from(!matches!(a.target, Target::Continue) && a.key != "Enter"));
     let mut anchors: Vec<_> = available
         .iter()
         .copied()
@@ -366,8 +363,7 @@ pub(super) fn strip_actions(
                 a.label
             },
             target: a.target,
-            primary: a.key == "Enter"
-                || matches!(a.target, Target::Continue | Target::ConfirmAction),
+            primary: a.key == "Enter" || matches!(a.target, Target::Continue),
         })
         .collect();
     if !hidden.is_empty() {
@@ -573,39 +569,6 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 Rect::new(body.x, body.bottom(), body.width, 0),
                 app,
             );
-        } else if app.confirmation.is_some() {
-            let ids = app.batch_removal_ids();
-            let removal = app.preview.as_ref().and_then(|p| p.pending.removal_id());
-            let prompt = if !ids.is_empty() {
-                format!(
-                    "Delete managed links for these exact IDs:\n{}\nRepository sources are retained.",
-                    ids.iter()
-                        .map(|id| views::safe(id))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                )
-            } else if let Some(id) = removal {
-                format!(
-                    "Delete managed link for ID: {}\nRepository source is retained.",
-                    views::safe(id)
-                )
-            } else {
-                "Proceed with the reviewed changes?".into()
-            };
-            ui::reader::Reader::new(&app.hits)
-                .with_wheel(Wheel::Confirmation)
-                .wrapped(
-                    frame,
-                    body,
-                    Text::from(prompt),
-                    app.confirmation.as_ref().unwrap().prompt_scroll,
-                );
-            app.preview_approval(app.hits.size()).present(
-                &app.hits,
-                "Confirm",
-                Target::ConfirmAction,
-            );
-            app.presented("Cancel", "Esc", Target::CancelConfirmation);
         } else if app.preview.is_some() {
             preview(frame, body, app);
         } else if let Some(editor) = app.batch_editor.as_ref().filter(|e| e.open) {

@@ -446,13 +446,11 @@ fn selected_apply_keep_delete_use_one_review_bound_to_every_selected_id() {
             assert!(key(&mut app, KeyCode::Enter).is_none());
             assert!(!render(&app, 140, 40).contains("only-a"));
             app.resize(47, 14);
-            assert!(app.confirmation.is_none());
             app.resize(48, 14);
             key(&mut app, KeyCode::Esc);
             assert!(app.preview.is_some());
         }
         let task = key(&mut app, KeyCode::Char('y')).unwrap();
-        assert!(app.confirmation.is_none());
         let refresh = f.run(&mut app, task).unwrap();
         f.run(&mut app, refresh);
         assert!(app.inventory.managed_marks.is_empty());
@@ -513,7 +511,7 @@ fn sequential_keep_removes_completed_marks_and_preserves_other_hidden_marks() {
         key(&mut app, KeyCode::Enter);
         let task = key(&mut app, KeyCode::Char(first)).unwrap();
         f.run(&mut app, task);
-        assert!(app.error.is_none() && app.confirmation.is_none());
+        assert!(app.error.is_none());
         let task = approve(&mut app);
         let refresh = f.run(&mut app, task).unwrap();
         f.run(&mut app, refresh);
@@ -583,7 +581,7 @@ fn mouse_tree_controls_use_rendered_geometry_and_never_open_previews_or_approve(
     select(&mut app, "only-b");
     assert!(click(&mut app, "[ ] only-b", 1).is_none());
     assert_eq!(app.inventory.candidate_marks.len(), 2);
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none());
     assert!(journal::diagnose(&f.host).unwrap().is_empty());
     // Group toggling explicitly marks matching regular descendants, including folded rows.
     key(&mut app, KeyCode::Char('h'));
@@ -611,7 +609,6 @@ fn blocked_item_never_silently_skips_and_dry_run_cannot_approve_batch() {
     }
     assert!(key(&mut app, KeyCode::Enter).is_none());
     assert!(key(&mut app, KeyCode::Char('y')).is_none());
-    assert!(app.confirmation.is_none());
     assert!(journal::diagnose(&f.host).unwrap().is_empty());
     let mut dry = f.app(true);
     select(&mut dry, "only-a");
@@ -625,6 +622,5 @@ fn blocked_item_never_silently_skips_and_dry_run_cannot_approve_batch() {
     key(&mut dry, KeyCode::Enter);
     text(&mut dry, "yes");
     assert!(key(&mut dry, KeyCode::Enter).is_none());
-    assert!(dry.confirmation.is_none());
     assert!(journal::diagnose(&f.host).unwrap().is_empty());
 }

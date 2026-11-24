@@ -136,7 +136,6 @@ fn direct_keys_select_rows_scroll_details_and_ignore_tab_without_region_focus() 
         assert!(app.tab == tab);
         press(&mut app, KeyCode::Left, size);
         assert!(app.tab == tab);
-        assert!(app.confirmation.is_none());
     }
 }
 #[test]
@@ -321,7 +320,6 @@ fn mouse_form_controls_and_palette_actions_never_bypass_typed_approval() {
     assert!(
         matches!(task,Some(super::actions::Task::Files(dort_core::planner::Request::Unmanage{ref id,..})) if id=="first")
     );
-    assert!(app.confirmation.is_none());
 }
 #[test]
 fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_tabs() {

@@ -155,7 +155,7 @@ fn current_inspection_details_and_prefilled_add_have_separate_approvals_and_no_r
     assert_eq!(std::fs::read(f.repo.join("dort.toml")).unwrap(), original);
     assert_eq!(f.calls(), "Q");
     let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
-    assert!(matches!(task, Task::Execute(_)) && app.confirmation.is_none());
+    assert!(matches!(task, Task::Execute(_)));
     run(&f, &mut app, task);
     assert!(app.tools_view.installed_open && !app.tools_view.declaration_open);
     assert!(!app.tools_view.installed.details && !app.show_result);

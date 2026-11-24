@@ -15,9 +15,6 @@ impl App {
         if let Some(menu) = &self.more {
             return Some(menu.title);
         }
-        if self.confirmation.is_some() {
-            return Some("Confirm reviewed changes");
-        }
         if self.error.is_some() || self.busy || self.show_result || self.preview.is_some() {
             return None; // A retained choice is not the currently displayed surface.
         }
@@ -147,7 +144,6 @@ impl App {
         self.more = None;
         self.choice = None;
         self.preview = None;
-        self.confirmation = None;
         self.error = None;
         self.failure = None;
         self.retry = None;

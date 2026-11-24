@@ -180,7 +180,6 @@ fn preview_scroll_is_bounded_by_escaped_metadata_and_resets_on_home() {
     assert_eq!((p.scroll, p.horizontal), (0, 0));
     assert!(super::tests::render(&app, 48, 14).contains("\\u{e9}"));
     assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(app.confirmation.is_none()); // Scroll/reset never changes dry-run approval.
     assert!(!fixture.host.state_dir.exists());
     assert!(!fixture.host.config_dir.exists());
 }
@@ -212,7 +211,6 @@ fn structured_review_selection_never_reduces_scope_and_full_report_remains_avail
     assert!(super::tests::render(&app, 140, 40).contains("permissions:"));
     assert_eq!(snapshot(&app), original);
     key(&mut app, KeyCode::Enter);
-    assert!(app.confirmation.is_none());
     key(&mut app, KeyCode::Esc);
     assert!(!fixture.host.state_dir.exists() && !fixture.host.config_dir.exists());
     assert!(
@@ -236,7 +234,6 @@ fn previews_cancellation_and_dry_run_never_create_state() {
     let mut app = App::new(true);
     app.complete(Ok(fixture.prepare(Request::Apply)));
     key(&mut app, KeyCode::Enter);
-    assert!(app.confirmation.is_none());
     assert!(!fixture.host.state_dir.exists());
 }
 #[test]
@@ -314,12 +311,11 @@ fn confirmation_snapshots_and_resize_guard() {
         )
         .is_none()
     );
-    assert!(app.confirmation.is_none());
     assert!(matches!(
         key(&mut app, KeyCode::Char('y')),
         Some(Task::Execute(_))
     ));
-    assert!(app.confirmation.is_none() && app.preview.is_none());
+    assert!(app.preview.is_none());
     assert!(!fixture.host.state_dir.exists());
 }
 #[test]
@@ -399,22 +395,6 @@ fn review_exposes_one_clickable_approval_action_and_consumes_the_review_once() {
     }
 }
 #[test]
-fn confirmation_dialog_ignores_enter_and_escape_discards_approval() {
-    let fixture = Fixture::new(false);
-    let mut app = App::new(false);
-    app.complete(Ok(fixture.prepare(Request::Apply)));
-    app.confirmation = Some(super::app::Confirmation { prompt_scroll: 0 });
-    let screen = super::tests::render(&app, 80, 24);
-    assert!(screen.contains("y Confirm") && !screen.contains("Enter Confirm"));
-    for code in [KeyCode::Enter, KeyCode::Tab, KeyCode::Enter, KeyCode::Esc] {
-        assert!(key(&mut app, code).is_none());
-    }
-    assert!(key(&mut app, KeyCode::Char('y')).is_none());
-    assert!(app.preview.is_none() && app.confirmation.is_none());
-    assert!(!fixture.host.state_dir.exists());
-}
-
-#[test]
 fn full_review_requires_the_effect_tail_to_be_drawn_before_approval() {
     let fixture = Fixture::new(true);
     let mut app = App::new(false);
@@ -464,7 +444,6 @@ fn ascii_monochrome_real_removal_keeps_consent_and_shrink_guards() {
         let screen = super::tests::render(&app, w, h);
         assert!(screen.is_ascii() && screen.contains("editor") && screen.contains("Confirm"));
         app.resize(47, 13);
-        assert!(app.confirmation.is_none());
         app.resize(w, h);
         assert!(fixture.host.home.join(".editor").is_symlink());
         let task = press(&mut app, KeyCode::Char('y')).unwrap();
@@ -480,7 +459,6 @@ fn blocked_preview_cannot_confirm_and_errors_remain_inspectable() {
     let mut app = App::new(false);
     app.complete(Ok(fixture.prepare(Request::Apply)));
     key(&mut app, KeyCode::Enter);
-    assert!(app.confirmation.is_none());
     app.complete(Err("unsafe parent\nno mutation".into()));
     assert!(app.error.is_some());
     assert!(key(&mut app, KeyCode::Char('a')).is_none());
@@ -754,7 +732,7 @@ fn bootstrap_approval_staleness_and_lock_failure_are_visible_without_retry() {
     let lock = WriterLock::acquire(&fixture.host).unwrap();
     assert!(run_task(&mut app, &fixture, task).is_none());
     assert!(app.error.as_ref().unwrap().contains("partial effects"));
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none());
     assert!(app.repository.is_none());
     drop(lock);
     key(&mut app, KeyCode::Esc);
@@ -787,7 +765,6 @@ fn dry_run_bootstrap_can_never_execute_even_after_mode_toggle() {
     let task = submit_path(&mut app);
     run_task(&mut app, &fixture, task);
     key(&mut app, KeyCode::Enter);
-    assert!(app.confirmation.is_none());
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Esc);
     assert!(!fixture.host.state_dir.exists() && !fixture.host.config_dir.exists());
@@ -809,10 +786,9 @@ fn shrinking_requires_fresh_removal_confirmation() {
         app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 47, 14)
             .is_none()
     );
-    assert!(app.confirmation.is_none());
     app.resize(80, 24);
     let task = key(&mut app, KeyCode::Char('y')).expect("fresh deliberate preview approval");
-    assert!(app.confirmation.is_none() && app.preview.is_none());
+    assert!(app.preview.is_none());
     assert!(fixture.host.home.join(".editor").is_symlink());
     fixture.execute(task);
     assert!(!fixture.host.home.join(".editor").exists());
@@ -982,7 +958,7 @@ fn wide_candidate_inspection_then_direct_action_opens_exact_draft() {
     ));
     assert_eq!(app.shell.adoption.target, path.to_str().unwrap());
     assert_eq!(app.shell.adoption.id, "wide-candidate");
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none());
     assert!(!fixture.host.config_dir.exists() && !fixture.host.state_dir.exists());
     assert_eq!(fs::read_to_string(path).unwrap(), "ordinary settings\n");
 }
@@ -1124,14 +1100,12 @@ fn adoption_blockers_dry_run_and_back_never_write_or_lose_drafts() {
         );
         run_task(&mut app, &fixture, retry);
     }
-    assert!(app.confirmation.is_none());
     key(&mut app, KeyCode::Esc);
     app.shell.adoption.source = "files/ordinary".into();
     let task = key(&mut app, KeyCode::Enter).unwrap();
     run_task(&mut app, &fixture, task);
     assert!(!app.preview.as_ref().unwrap().pending.blocked());
     key(&mut app, KeyCode::Enter);
-    assert!(app.confirmation.is_none());
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Char('m'));
@@ -1759,14 +1733,14 @@ fn recovery_lock_failure_needs_new_preview_and_confirmation_not_replayed_approva
     let lock = WriterLock::acquire(&fixture.host).unwrap();
     run_task(&mut app, &fixture, task);
     assert!(app.error.as_ref().unwrap().contains("partial effects"));
-    assert!(app.preview.is_none() && app.confirmation.is_none() && app.retry.is_none());
+    assert!(app.preview.is_none() && app.retry.is_none());
     assert!(fixture.host.home.join(".editor").is_symlink());
     drop(lock);
     let task = key(&mut app, KeyCode::Char('h')).unwrap();
     run_task(&mut app, &fixture, task);
     let task = key(&mut app, KeyCode::Char('b')).unwrap();
     run_task(&mut app, &fixture, task);
-    assert!(app.preview.is_some() && app.confirmation.is_none());
+    assert!(app.preview.is_some());
     let task = approve(&mut app);
     run_task(&mut app, &fixture, task);
     assert!(!fixture.host.home.join(".editor").exists());
@@ -1792,7 +1766,7 @@ fn preview_read_retry_keeps_intent_but_reads_new_state_before_any_approval() {
     let task = key(&mut app, KeyCode::Char('R')).unwrap();
     assert!(matches!(task, Task::Files(Request::Apply)));
     run_task(&mut app, &fixture, task);
-    assert!(app.preview.is_some() && app.confirmation.is_none());
+    assert!(app.preview.is_some());
     assert!(!fixture.host.home.join(".editor").exists());
     assert!(
         dort_core::journal::diagnose(&fixture.host)
@@ -1952,7 +1926,7 @@ fn malformed_journal_tail_is_a_global_blocker_not_a_recovery_permission() {
     for c in ['b', 's', 'x'] {
         assert!(key(&mut app, KeyCode::Char(c)).is_none());
     }
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none());
     assert!(fixture.host.home.join(".editor").is_symlink());
     assert_eq!(
         fs::read_to_string(transaction.join("999999.json")).unwrap(),

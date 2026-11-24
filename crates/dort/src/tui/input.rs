@@ -26,8 +26,6 @@ pub enum Target {
     Filter,
     FormControl(usize, bool),
     FormAction(super::forms::Command),
-    ConfirmAction,
-    CancelConfirmation,
     ToolInstallControl(usize, bool),
     ToolInstallProvider,
     ToolAttemptRow(usize),
@@ -50,7 +48,6 @@ pub enum Wheel {
     Overlay,
     Preview,
     PreviewRows,
-    Confirmation,
     GitPatch,
     Tools,
 }

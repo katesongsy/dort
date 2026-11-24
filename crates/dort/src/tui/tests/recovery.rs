@@ -202,24 +202,18 @@ fn preparing_table_enter_inspects_then_the_visible_action_uses_raw_identity() {
     for code in [KeyCode::PageDown, KeyCode::PageUp, KeyCode::Home] {
         assert!(key(&mut app, code).is_none());
         assert!(
-            app.history_region == crate::tui::workspace::Region::Queue
-                && app.preview.is_none()
-                && app.confirmation.is_none()
+            app.history_region == crate::tui::workspace::Region::Queue && app.preview.is_none()
         );
     }
     assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(
-        app.history_region == crate::tui::workspace::Region::Details
-            && app.preview.is_none()
-            && app.confirmation.is_none()
-    );
+    assert!(app.history_region == crate::tui::workspace::Region::Details && app.preview.is_none());
     assert!(app.page_actions() == vec![Action::Abandon]);
     key(&mut app, KeyCode::Tab); // no region focus cycle
     assert!(super::tests::has_action(&app, "Abandon"));
     assert!(
         matches!(key(&mut app, KeyCode::Char('x')), Some(Task::Bootstrap(r,t,dort_core::bootstrap::RecoveryAction::Abandon)) if r == "b".repeat(64) && t == "b".repeat(64))
     );
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none());
     // Unavailable recovery operations still explain their reason.
     assert!(app.activate(Action::Resume).is_none());
     assert!(app.status.contains("Resume is unavailable"));
@@ -233,7 +227,7 @@ fn error_retry_never_retains_approval_and_failed_writes_offer_read_only_recovery
         key(&mut app, KeyCode::Char('R')),
         Some(Task::Files(_))
     ));
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none());
     app.retry = Task::Files(dort_core::planner::Request::Apply).retry_intent();
     app.start(true);
     app.complete(Err("held writer lock".into()));
@@ -248,7 +242,7 @@ fn error_retry_never_retains_approval_and_failed_writes_offer_read_only_recovery
         key(&mut app, KeyCode::Char('h')),
         Some(Task::History)
     ));
-    assert!(app.tab == Tab::Recovery && app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.tab == Tab::Recovery && app.preview.is_none());
     app.retry = Task::Files(dort_core::planner::Request::Apply).retry_intent();
     app.complete(Err("another preview read failure".into()));
     key(&mut app, KeyCode::Esc);

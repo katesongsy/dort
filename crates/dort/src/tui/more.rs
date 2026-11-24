@@ -33,7 +33,7 @@ pub(super) fn eligible(app: &App, action: &ui::ActionButton) -> bool {
                 app.tools_view.installation.mode,
                 super::tools_install::Mode::CloseReview
             ))
-        && !matches!(action.target, Target::Continue | Target::ConfirmAction)
+        && !matches!(action.target, Target::Continue)
 }
 /// Session controls without their own key; More is their only entry point.
 fn session_actions(app: &App) -> Vec<ui::ActionButton> {

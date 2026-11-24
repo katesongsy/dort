@@ -76,7 +76,7 @@ fn discover_uses_home_end_and_leaves_g_to_git() {
         key(&mut app, KeyCode::Char('g'));
         assert!(app.tab == Tab::Git);
         assert!(!app.content.focused);
-        assert!(app.preview.is_none() && app.confirmation.is_none());
+        assert!(app.preview.is_none());
     }
 }
 #[test]

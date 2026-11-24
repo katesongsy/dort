@@ -253,7 +253,6 @@ impl App {
         apply: bool,
     ) -> Option<Task> {
         self.preview = None;
-        self.confirmation = None;
         if apply {
             if standalone {
                 self.shell.check_profiles = requested;
@@ -350,7 +349,6 @@ impl App {
         self.selected = 0;
         self.details_scroll = 0;
         self.preview = None;
-        self.confirmation = None;
         self.shell.back();
         self.replace_data(data);
         self.status = "Repository selected for this session only; configuration unchanged.".into();

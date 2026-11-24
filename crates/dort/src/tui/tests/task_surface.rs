@@ -214,7 +214,7 @@ fn failed_write_pins_risk_after_back_and_reads_and_never_retries_execution() {
             .any(|c| c.symbol() == "P" && c.fg == Color::Red)
     );
     assert!(render(&app, 48, 14).contains("Possible partial effects"));
-    assert!(app.retry.is_none() && app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.retry.is_none() && app.preview.is_none());
     for _ in 0..20 {
         key(&mut app, KeyCode::PageDown);
         assert!(render(&app, 48, 14).contains("Possible partial effects"));
@@ -227,7 +227,7 @@ fn failed_write_pins_risk_after_back_and_reads_and_never_retries_execution() {
     app.complete(Err("second failure".into()));
     assert!(matches!(click(&mut app, "[Recovery"), Some(Task::History)));
     assert!(app.tab == Tab::Recovery);
-    assert!(app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none());
 }
 #[test]
 fn earlier_operation_blocker_has_its_own_message_scope_and_recovery_action() {

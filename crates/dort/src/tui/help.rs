@@ -26,7 +26,6 @@ pub enum Topic {
     Batch,
     BatchItem,
     Preview,
-    Confirmation,
     Task,
     Error,
     Result,
@@ -52,7 +51,6 @@ impl Topic {
             Self::Batch => "Marked adoption",
             Self::BatchItem => "Edit batch item",
             Self::Preview => "Review preview",
-            Self::Confirmation => "Confirmation",
             Self::Task => "Active task",
             Self::Error => "Error",
             Self::Result => "Completion",
@@ -99,9 +97,6 @@ impl Topic {
             Self::BatchItem => "Edit target, ID and source. Done returns to the draft.",
             Self::Preview => {
                 "Review effects, warnings and limits. Blocked or preview-only pages cannot approve."
-            }
-            Self::Confirmation => {
-                "The preview determines the approval. No typed phrase is required."
             }
             Self::Task => "Progress uses reported steps. It does not estimate a percentage.",
             Self::Error => {
@@ -218,13 +213,6 @@ impl Topic {
                 ),
                 ("Esc", "Back without execution"),
             ],
-            Self::Confirmation => &[
-                (
-                    super::components::approval::Approval::KEY,
-                    "Confirm the displayed changes",
-                ),
-                ("Esc", "Cancel"),
-            ],
             Self::Task => &[
                 ("q / Ctrl-C", "Request exit; wait joined for owned work"),
                 ("F1", "Help"),
@@ -321,9 +309,6 @@ pub fn topic(app: &App) -> Topic {
     if app.busy {
         return Topic::Task;
     }
-    if app.confirmation.is_some() {
-        return Topic::Confirmation;
-    }
     if app.preview.is_some() {
         return Topic::Preview;
     }
@@ -362,15 +347,8 @@ pub fn text_input(app: &App) -> bool {
     if app.more.is_some() || app.choice.is_some() {
         return false;
     }
-    if app.busy
-        || app.error.is_some()
-        || app.show_result
-        || app.preview.is_some() && app.confirmation.is_none()
-    {
+    if app.busy || app.error.is_some() || app.show_result || app.preview.is_some() {
         return false;
-    }
-    if app.confirmation.is_some() {
-        return true;
     }
     if let Some(e) = app.batch_editor.as_ref().filter(|e| e.open) {
         return if e.item_form {
