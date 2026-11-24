@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Patterns | Dort TUI Design</title>
+  <link rel="stylesheet" href="site.css">
+</head>
+<body id="top">
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="masthead">
+    <div class="masthead-inner">
+      <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true">&gt;_</span> Dort <span class="brand-label">TUI design</span></a>
+      <nav aria-label="Main navigation">
+        <a href="foundations.html">Foundations</a>
+        <a href="components.html">Components</a>
+        <a href="patterns.html" aria-current="page">Patterns</a>
+        <a href="reference/">Reference source</a>
+      </nav>
+    </div>
+  </header>
+  <main id="main" class="chapter" tabindex="-1">
+    <header class="chapter-head">
+      <p class="eyebrow">03 / Flows</p>
+      <h1>Patterns</h1>
+      <p class="lead">Keep browsing reversible. Put the effects in a review the operator can cancel before approval.</p>
+    </header>
+    <nav class="contents" aria-label="On this page">
+      <p class="eyebrow">On this page</p>
+      <a href="#browse">Browse and inspect</a>
+      <a href="#blocked">Blocked action</a>
+      <a href="#review">Review and confirm</a>
+      <a href="#receipt">Receipt</a>
+      <a href="#empty">Empty states</a>
+    </nav>
+    <div class="chapter-body">
+      <section id="browse">
+        <h2>Browse and inspect</h2>
+        <dl class="terms">
+          <div><dt>Wide</dt><dd>Show the selected record next to the queue. <kbd>Tab</kbd> moves focus between panes and leaves the selected row and filter in place. <a href="index.html#workspace">See the wide workspace</a>.</dd></div>
+          <div><dt>Compact</dt><dd>Open the selected record in its own view. <kbd>Esc</kbd> returns to the same queue row and filter, with focus back in the queue.</dd></div>
+        </dl>
+        <p>Use compact mode when the terminal lacks cells for two readable panes. Keep the same task order and action labels in both layouts.</p>
+        <figure class="capture capture-compact">
+          <figcaption><span><span class="eyebrow">Terminal capture</span><strong>One view at a time in the compact workspace</strong></span><a href="captures/workspace-compact.html">Open compact workspace capture</a></figcaption>
+          <div class="frame-window" role="group" aria-label="Terminal capture. Scroll sideways for more columns." tabindex="0">
+            <iframe src="captures/workspace-compact.html" title="Dort terminal in the compact workspace layout" style="--columns: 44; --rows: 14" sandbox></iframe>
+          </div>
+        </figure>
+      </section>
+      <section id="blocked">
+        <h2>Blocked action</h2>
+        <p>Say what prevents the action and what to do next. For example, name the missing checksum and direct the operator to capture a verified snapshot. Do not offer review or approval for a blocked action. Neither <kbd>Enter</kbd> nor <kbd>y</kbd> applies it.</p>
+        <figure class="capture">
+          <figcaption><span><span class="eyebrow">Terminal capture</span><strong>A blocker with a reason and next step</strong></span><a href="captures/blocked.html">Open blocked action capture</a></figcaption>
+          <div class="frame-window" role="group" aria-label="Terminal capture. Scroll sideways for more columns." tabindex="0">
+            <iframe src="captures/blocked.html" title="Blocked Dort record showing a reason and next step" style="--columns: 90; --rows: 18" sandbox></iframe>
+          </div>
+        </figure>
+      </section>
+      <section id="review">
+        <h2>Review and confirm</h2>
+        <ol class="rules">
+          <li>Use <kbd>Enter</kbd> on <strong>Review restore</strong>, or an equivalent named action, to open the review. Opening it changes nothing.</li>
+          <li>Use the full terminal width. Name the action, its target, what changes, and what stays untouched. Include any backup conditions or warnings. Let effects scroll above the action area.</li>
+          <li>Reserve <kbd>y</kbd> for the explicit confirmation shown only in a ready review. <kbd>Enter</kbd> does not approve. Offer <kbd>Esc</kbd> to return without applying the action.</li>
+        </ol>
+        <figure class="capture">
+          <figcaption><span><span class="eyebrow">Terminal capture</span><strong>Full-width review with a separate approval key</strong></span><a href="captures/review.html">Open review capture</a></figcaption>
+          <div class="frame-window" role="group" aria-label="Terminal capture. Scroll sideways for more columns." tabindex="0">
+            <iframe src="captures/review.html" title="Dort review showing the proposed effects and explicit confirmation key" style="--columns: 90; --rows: 19" sandbox></iframe>
+          </div>
+        </figure>
+      </section>
+      <section id="receipt">
+        <h2>Receipt</h2>
+        <p>After approval, replace the review with the outcome. On success, show <strong>Finished</strong>, the action taken, and what changed. If the action fails, name the failure and show a next step. Offer a way back. Repeated <kbd>y</kbd> or <kbd>Enter</kbd> must not apply the effect again.</p>
+        <figure class="capture">
+          <figcaption><span><span class="eyebrow">Terminal capture</span><strong>Finished receipt after one approval</strong></span><a href="captures/receipt.html">Open receipt capture</a></figcaption>
+          <div class="frame-window" role="group" aria-label="Terminal capture. Scroll sideways for more columns." tabindex="0">
+            <iframe src="captures/receipt.html" title="Finished receipt in the standalone Dort reference" style="--columns: 76; --rows: 16" sandbox></iframe>
+          </div>
+        </figure>
+      </section>
+      <section id="empty">
+        <h2>Empty states</h2>
+        <p>Distinguish an empty queue from a filter with no matches. For no matches, keep the query visible and offer to clear it. For an empty queue, explain why nothing is listed and how records appear. In both cases, clear stale details and hide record actions.</p>
+        <figure class="capture">
+          <figcaption><span><span class="eyebrow">Terminal capture</span><strong>No matches for the active filter</strong></span><a href="captures/filter-empty.html">Open empty filter capture</a></figcaption>
+          <div class="frame-window" role="group" aria-label="Terminal capture. Scroll sideways for more columns." tabindex="0">
+            <iframe src="captures/filter-empty.html" title="Dort queue with no matches for the active filter" style="--columns: 100; --rows: 16" sandbox></iframe>
+          </div>
+        </figure>
+      </section>
+    </div>
+  </main>
+  <footer class="footer"><a href="index.html">Dort TUI design reference</a><a href="#top">Back to top</a></footer>
+</body>
+</html>

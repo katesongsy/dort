@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dort TUI Design</title>
+  <link rel="stylesheet" href="site.css">
+</head>
+<body id="top">
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="masthead">
+    <div class="masthead-inner">
+      <a class="brand" href="index.html" aria-current="page"><span class="brand-mark" aria-hidden="true">&gt;_</span> Dort <span class="brand-label">TUI design</span></a>
+      <nav aria-label="Main navigation">
+        <a href="foundations.html">Foundations</a>
+        <a href="components.html">Components</a>
+        <a href="patterns.html">Patterns</a>
+        <a href="reference/">Reference source</a>
+      </nav>
+    </div>
+  </header>
+  <main id="main" class="home" tabindex="-1">
+    <section class="hero" aria-labelledby="title">
+      <div>
+        <p class="eyebrow">Design reference / Dort terminal</p>
+        <h1 id="title">Dort TUI design</h1>
+        <p class="lead">Browse a queue, inspect a record, then review what will change before you approve it.</p>
+        <p class="scope"><strong>Status:</strong> Target design for new TUI features and future migration. The examples come from a standalone Rust reference, not the current Dort TUI.</p>
+      </div>
+      <aside class="hero-standard" aria-label="Interaction standard">
+        <p class="eyebrow">Interaction standard</p>
+        <ol>
+          <li>Keep the selected row visible.</li>
+          <li>Put the task before its provenance.</li>
+          <li>Reserve approval for a ready review.</li>
+        </ol>
+      </aside>
+    </section>
+    <nav class="chapters" aria-label="Design topics">
+      <a href="foundations.html"><span class="eyebrow">01 / Roles</span><strong>Foundations</strong><span>Text roles, color, and terminal cells.</span></a>
+      <a href="components.html"><span class="eyebrow">02 / Parts</span><strong>Components</strong><span>The queue, detail reader, and action area.</span></a>
+      <a href="patterns.html"><span class="eyebrow">03 / Flows</span><strong>Patterns</strong><span>Browse and inspect, review, confirm, and recover.</span></a>
+    </nav>
+    <section class="home-section" id="workspace" aria-labelledby="workspace-heading">
+      <h2 id="workspace-heading">The wide workspace</h2>
+      <p class="intro">The queue and detail reader share the screen. Selection names the record. Focus names the pane that gets the next key.</p>
+      <figure class="capture">
+        <figcaption><span><span class="eyebrow">Terminal capture</span><strong>Queue and detail reader</strong></span><a href="captures/workspace-wide.html">Open wide workspace capture</a></figcaption>
+        <div class="frame-window" role="group" aria-label="Terminal capture. Scroll sideways for more columns." tabindex="0">
+          <iframe src="captures/workspace-wide.html" title="Wide workspace with a queue, selected record, and detail reader" style="--columns: 100; --rows: 19" sandbox></iframe>
+        </div>
+      </figure>
+    </section>
+    <section class="reference-note" id="run" aria-labelledby="run-heading">
+      <div>
+        <h2 id="run-heading">Run the reference</h2>
+        <p>Open <a href="reference/">the reference source</a> for the standalone example. Run it from the repository root:</p>
+      </div>
+      <pre tabindex="0"><code>cargo run --locked --manifest-path design-system/reference/Cargo.toml --</code></pre>
+      <details>
+        <summary>Refresh the examples</summary>
+        <pre tabindex="0"><code>cargo run --locked --manifest-path design-system/reference/Cargo.toml -- gallery design-system/captures
+python3 design-system/check.py</code></pre>
+      </details>
+    </section>
+  </main>
+  <footer class="footer"><span>Dort TUI design reference</span><a href="#top">Back to top</a></footer>
+</body>
+</html>
