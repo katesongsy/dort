@@ -400,6 +400,68 @@ fn links_preview_their_target_content_and_name_the_followed_path() {
     assert_eq!(followed.followed(), Some(target.as_path()));
 }
 #[test]
+fn links_preview_even_though_they_cannot_be_adopted() {
+    let f = Fixture::new();
+    std::os::unix::fs::symlink(f.host.home.join(".a"), f.host.home.join(".link")).unwrap();
+    let mut app = f.app();
+    app.complete(Ok(f.finish(Task::Discover)));
+    let index = app
+        .discovery
+        .as_ref()
+        .unwrap()
+        .report
+        .candidates
+        .iter()
+        .position(|c| c.entry.path == f.host.home.join(".link"))
+        .unwrap();
+    assert!(
+        !app.discovery.as_ref().unwrap().report.candidates[index].supported_for_adoption,
+        "fixture link should not be adoptable"
+    );
+    app.candidate_selected = index;
+    app.resize(140, 40);
+    assert!(app.content.available(), "link selection has no preview");
+    let read = discover_content::next(&mut app).unwrap();
+    app.complete(Ok(f.finish(read)));
+    assert_eq!(
+        app.content.text(),
+        "synthetic-preview-A\n\u{1b}[31mescaped\n"
+    );
+    assert_eq!(
+        app.content.followed(),
+        Some(f.host.home.join(".a").as_path())
+    );
+}
+
+#[test]
+fn managed_files_preview_without_opening_details_in_a_wide_split() {
+    use super::actions::ManagedRow;
+    let f = Fixture::new();
+    let mut app = App::new(false);
+    app.tab = Tab::Files;
+    let mut data = super::actions::Data::default();
+    data.managed.push(ManagedRow {
+        id: "a".into(),
+        source: "/synthetic/source".into(),
+        target: f.host.home.join(".a"),
+        state: "Linked",
+        source_kind: "Regular file",
+        target_kind: "Link",
+        blockers: vec![],
+    });
+    app.data = Some(data);
+    app.resize(140, 40);
+    assert!(!app.inventory.details, "preview must not need details open");
+    assert!(app.content.available(), "wide managed split has no preview");
+    let read = discover_content::next(&mut app).unwrap();
+    app.complete(Ok(f.finish(read)));
+    assert_eq!(
+        app.content.text(),
+        "synthetic-preview-A\n\u{1b}[31mescaped\n"
+    );
+}
+
+#[test]
 fn already_managed_candidates_are_marked_and_cannot_be_adopted_again() {
     use super::actions::ManagedRow;
     use super::components as ui;

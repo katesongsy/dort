@@ -198,12 +198,16 @@ pub fn sync(app: &mut App, width: u16, height: u16) {
                 .candidates
                 .get(app.candidate_selected)
                 .filter(|c| {
-                    c.supported_for_adoption
-                        && super::discovery_tree::contains(app, app.candidate_selected)
+                    matches!(
+                        c.entry.kind,
+                        dort_core::observation::Kind::Regular
+                            | dort_core::observation::Kind::Symlink
+                    ) && super::discovery_tree::contains(app, app.candidate_selected)
                 })
                 .map(|c| Selection::Candidate(c.entry.clone(), d.repository.clone()))
         })
-    } else if quiet && !app.discovering && app.inventory.details {
+    } else if quiet && !app.discovering && (app.inventory.details || (width >= 110 && height >= 14))
+    {
         app.data
             .as_ref()
             .and_then(|d| d.managed.get(app.selected))

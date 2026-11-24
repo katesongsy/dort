@@ -55,7 +55,7 @@ fn kind_short(kind: &Kind) -> &'static str {
 }
 fn kind_style(kind: &Kind) -> ratatui::style::Style {
     match kind {
-        Kind::Directory => ui::heading(),
+        Kind::Directory => ui::note(),
         Kind::Symlink => ui::accent(),
         Kind::Missing | Kind::Special => ui::warning(),
         Kind::Regular => ratatui::style::Style::default(),
@@ -122,11 +122,7 @@ fn details(app: &App) -> Text<'static> {
             } else {
                 "Adoption needs an owned, single-link regular file without special permission bits."
             }));
-            lines.push(Line::raw(
-                "The preview checks paths, sensitivity and remaining limits.",
-            ));
             if let Some(d) = &app.discovery {
-                lines.push(Line::raw(safe(d.report.sensitivity_notice)));
                 for warning in &d.report.warnings {
                     lines.push(Line::styled(safe(warning), Tone::Attention.style()));
                 }
@@ -191,10 +187,6 @@ fn details(app: &App) -> Text<'static> {
         lines.push(section("Result"));
         lines.extend(Text::from(safe(result)).lines);
     }
-    lines.push(Line::styled(
-        "Search changes the display only. Apply covers every active file.",
-        ui::muted(),
-    ));
     Text::from(lines)
 }
 

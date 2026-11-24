@@ -242,6 +242,15 @@ fn discovery_rows_name_eligibility_and_style_kinds_distinctly() {
     assert_ne!(eligible.fg, denied.fg);
     assert_eq!(Some(cell("Link").fg), ui::accent().fg);
     assert_eq!(Some(cell("Spec").fg), ui::warning().fg);
+    assert_eq!(
+        Some(ui::note().fg.unwrap_or(ratatui::style::Color::Reset)),
+        Some(ratatui::style::Color::DarkGray)
+    );
+    assert!(
+        !ui::note()
+            .add_modifier
+            .contains(ratatui::style::Modifier::BOLD)
+    );
 }
 
 #[test]

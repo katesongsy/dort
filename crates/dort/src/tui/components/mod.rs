@@ -78,6 +78,10 @@ impl std::fmt::Display for StatusText {
 pub fn accent() -> Style {
     TextRole::Heading.style()
 }
+/// Subdued secondary text, such as a directory name in a mixed list.
+pub fn note() -> Style {
+    crate::tui::appearance::TextRole::Note.style()
+}
 pub fn muted() -> Style {
     TextRole::Value.style()
 }
