@@ -6,8 +6,109 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-use super::pane;
-use crate::tui::input::{Hits, Wheel};
+use super::{
+    design::{PaneFocus, Tone, pane},
+    glyphs, inline,
+};
+use crate::tui::{
+    appearance::TextRole,
+    input::{Hits, Wheel},
+};
+
+pub fn section(title: &str) -> Line<'static> {
+    Line::styled(inline(title), TextRole::Heading.style())
+}
+
+pub fn field(label: &str, value: &str, tone: Tone) -> Line<'static> {
+    field_line(format!("{}: ", inline(label)), value, tone)
+}
+
+pub fn metadata(label: &str, value: &str) -> Line<'static> {
+    field_line(format!("{:<13} ", inline(label)), value, Tone::Neutral)
+}
+
+fn field_line(label: String, value: &str, tone: Tone) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(label, TextRole::Label.style()),
+        Span::styled(inline(value), tone.style()),
+    ])
+}
+
+fn metadata_lines(
+    value: &serde_json::Value,
+    label: &str,
+    depth: usize,
+    lines: &mut Vec<Line<'static>>,
+) {
+    match value {
+        serde_json::Value::Object(values) if depth < 24 => {
+            if !label.is_empty() {
+                lines.push(section(&format!("{}{label}", "  ".repeat(depth.min(6)))));
+            }
+            if values.is_empty() {
+                lines.push(metadata(label, "None recorded"));
+            }
+            for (key, value) in values {
+                metadata_lines(value, key, depth + 1, lines);
+            }
+        }
+        serde_json::Value::Array(values) if depth < 24 => {
+            lines.push(section(&format!(
+                "{}{label} ({})",
+                "  ".repeat(depth.min(6)),
+                values.len()
+            )));
+            if values.is_empty() {
+                lines.push(Line::raw("None recorded"));
+            }
+            for (index, value) in values.iter().enumerate() {
+                metadata_lines(value, &(index + 1).to_string(), depth + 1, lines);
+            }
+        }
+        serde_json::Value::String(value) => lines.push(metadata(label, value)),
+        serde_json::Value::Null => lines.push(metadata(label, "Not recorded")),
+        value => lines.push(metadata(label, &value.to_string())),
+    }
+}
+
+/// Display an existing text or JSON report. Use section and field for typed data.
+pub fn review_text(body: &str) -> Text<'static> {
+    if body.trim_start().starts_with(['{', '['])
+        && let Ok(value) = serde_json::from_str::<serde_json::Value>(body)
+    {
+        let mut lines = Vec::new();
+        metadata_lines(&value, "", 0, &mut lines);
+        return Text::from(lines);
+    }
+    let lines = body
+        .split_terminator('\n')
+        .enumerate()
+        .map(|(index, line)| {
+            let trimmed = line.trim_start_matches(' ');
+            if matches!(
+                trimmed.split_once(':').map_or(trimmed, |(label, _)| label),
+                "BLOCKED" | "Blocker"
+            ) {
+                Line::styled(inline(line), TextRole::Blocker.style())
+            } else if index != 0
+                && let Some(effect) = trimmed.strip_prefix("- ")
+            {
+                Line::from(vec![
+                    Span::raw(format!("{} ", glyphs::PENDING)),
+                    Span::raw(inline(effect)),
+                ])
+            } else if let Some((label, value)) = line.split_once(": ") {
+                field(label, value, Tone::Neutral)
+            } else if trimmed.ends_with(':') {
+                section(line)
+            } else if index == 0 {
+                Line::styled(inline(line), TextRole::Label.style())
+            } else {
+                Line::raw(inline(line))
+            }
+        });
+    Text::from(lines.collect::<Vec<_>>())
+}
 
 pub fn wide_details(area: Rect, header_rows: u16) -> bool {
     area.width >= 110 && area.height.saturating_sub(header_rows) >= 14
@@ -48,10 +149,10 @@ impl<'a> Reader<'a> {
         title: &str,
         body: Text<'static>,
         offset: u16,
-        focused: bool,
+        focus: impl Into<PaneFocus>,
     ) {
         self.hits.wheel(area, self.wheel);
-        report(frame, area, title, body, offset, focused);
+        report(frame, area, title, body, offset, focus);
     }
 
     pub fn wrapped(&self, frame: &mut Frame, area: Rect, body: Text<'static>, offset: u16) {
@@ -107,9 +208,9 @@ pub fn report(
     title: &str,
     body: Text<'static>,
     offset: u16,
-    focused: bool,
+    focus: impl Into<PaneFocus>,
 ) {
-    let block = pane(title, focused);
+    let block = pane(title, focus);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     text_view(frame, inner, body, offset);
