@@ -522,7 +522,13 @@ fn result(frame: &mut Frame, area: Rect, app: &App) -> bool {
     action(app, "Done", "Enter", KeyCode::Enter);
     true
 }
-fn draw_tool(frame: &mut Frame, area: Rect, app: &App, tool: &dort_core::model::Tool) {
+fn draw_tool(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    tool: &dort_core::model::Tool,
+    focused: bool,
+) {
     let mut lines = vec![
         ui::metadata("Tool ID", &tool.id),
         ui::metadata("Status", app.tools_view.declared.row_status(&tool.id)),
@@ -644,7 +650,7 @@ fn draw_tool(frame: &mut Frame, area: Rect, app: &App, tool: &dort_core::model::
             "Declared tool",
             lines.into(),
             app.details_scroll,
-            false,
+            focused,
         );
 }
 pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
@@ -692,14 +698,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         .tools_view
         .declared_selected
         .min(tools.len().saturating_sub(1));
-    if app.tools_view.declared_details
-        && let Some(tool) = tools.get(selected)
-    {
-        draw_tool(frame, area, app, tool);
-        commands(app);
-        action(app, "Back", "Esc", KeyCode::Esc);
-        return;
-    }
     let intro = if app.tools_view.declared.stale {
         "Reviewed installation results are shown.\nCheck installed again to refresh other tools."
             .to_owned()
@@ -732,7 +730,20 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         );
         return;
     }
-    let (list, details) = ui::reader::detail_panes(rows, ui::reader::wide_details(rows, 0));
+    use super::workspace::{Region, Scope, Workspace};
+    let active = Region::from_details(app.tools_view.declared_details);
+    let workspace = Workspace::new(Scope::DeclaredTools, rows, active, true);
+    workspace.bind(&app.hits);
+    if let (Some(area), Some(tool)) = (workspace.details, tools.get(selected)) {
+        draw_tool(frame, area, app, tool, active == Region::Details);
+    }
+    if active == Region::Details {
+        commands(app);
+        action(app, "Back", "Esc", KeyCode::Esc);
+    }
+    let Some(list) = workspace.queue_content(frame, "Declared tools") else {
+        return;
+    };
     let capacity = ui::design::pair_capacity(list);
     let first = app
         .tools_view
@@ -760,7 +771,4 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         &app.hits,
         Target::ToolsRow,
     );
-    if let (Some(area), Some(tool)) = (details, tools.get(selected)) {
-        draw_tool(frame, area, app, tool);
-    }
 }

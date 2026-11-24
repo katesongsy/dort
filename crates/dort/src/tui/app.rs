@@ -951,6 +951,32 @@ impl App {
             Scope::Git if self.tab == Tab::Git && !self.git_view.editing_root => {
                 Some(self.git_view.region)
             }
+            Scope::DeclaredTools
+                if self.tab == Tab::Tools
+                    && self.tools_view.landing()
+                    && self.tools_view.declared.check_preview.is_none()
+                    && self.tools_view.declared.install_preview.is_none()
+                    && !self.tools_view.declared.result_open =>
+            {
+                Some(Region::from_details(self.tools_view.declared_details))
+            }
+            Scope::InstalledTools
+                if self.tab == Tab::Tools
+                    && self.tools_view.installed_open
+                    && self.tools_view.installed.preview.is_none()
+                    && self.tools_view.installed.error.is_none() =>
+            {
+                Some(Region::from_details(self.tools_view.installed.details))
+            }
+            Scope::InstallAttempts
+                if self.tab == Tab::Tools
+                    && self.tools_view.install_open
+                    && self.tools_view.installation.mode
+                        == super::tools_install::Mode::Attempts
+                    && self.tools_view.installation.close_preview.is_none() =>
+            {
+                Some(Region::from_details(self.tools_view.installation.details))
+            }
             _ => None,
         }
     }
@@ -964,6 +990,15 @@ impl App {
                         discovering && self.content.available() && self.inventory.details;
                 }
                 Scope::Git => self.git_view.region = region,
+                Scope::DeclaredTools => {
+                    self.tools_view.declared_details = region == Region::Details
+                }
+                Scope::InstalledTools => {
+                    self.tools_view.installed.details = region == Region::Details
+                }
+                Scope::InstallAttempts => {
+                    self.tools_view.installation.details = region == Region::Details
+                }
             }
         }
     }

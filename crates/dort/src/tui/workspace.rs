@@ -15,6 +15,9 @@ pub enum Region {
     Details,
 }
 impl Region {
+    pub fn from_details(details: bool) -> Self {
+        if details { Self::Details } else { Self::Queue }
+    }
     pub fn other(self) -> Self {
         match self {
             Self::Queue => Self::Details,
@@ -28,6 +31,9 @@ pub enum Scope {
     Recovery,
     Files { discovering: bool },
     Git,
+    DeclaredTools,
+    InstalledTools,
+    InstallAttempts,
 }
 
 #[derive(Clone, Copy)]
@@ -52,6 +58,14 @@ impl Workspace {
             queue,
             details,
         }
+    }
+
+    pub fn queue_content(self, frame: &mut ratatui::Frame, title: &str) -> Option<Rect> {
+        let area = self.queue?;
+        let block = super::components::pane(title, self.active == Region::Queue);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        Some(inner)
     }
 
     pub fn is_split(self) -> bool {

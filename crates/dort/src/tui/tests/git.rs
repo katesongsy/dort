@@ -364,7 +364,10 @@ fn wide_git_preview_follows_keyboard_mouse_filter_and_comparison_without_confirm
     );
     let scrolled = render(&app, 140, 32);
     assert!(scrolled.contains("› beta") && scrolled.contains("BETA-UNSTAGED-END"));
-
+    assert_eq!(scrolled.matches("[Active]").count(), 1, "{scrolled}");
+    wide_key(&mut app, KeyCode::Up);
+    assert!(render(&app, 140, 32).contains("› beta"));
+    wide_key(&mut app, KeyCode::Tab);
     wide_key(&mut app, KeyCode::Up);
     let preview = app.next_git_preview().unwrap();
     f.run(&mut app, preview);

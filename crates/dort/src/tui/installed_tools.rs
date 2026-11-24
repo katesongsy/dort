@@ -143,6 +143,7 @@ impl State {
         area: Rect,
         row: (usize, usize),
         hits: &super::input::Hits,
+        focused: bool,
     ) {
         let Some((scope, package)) = self.current.as_ref().and_then(|c| c.package(row)) else {
             return;
@@ -174,7 +175,7 @@ impl State {
                 "Installed package",
                 lines.into(),
                 self.scroll,
-                false,
+                focused,
             );
     }
     pub fn draw(&self, frame: &mut Frame, area: Rect, dry_run: bool, hits: &super::input::Hits) {
@@ -281,14 +282,6 @@ impl State {
         }
         let rows = self.rows();
         let selected = rows.get(self.selected).copied();
-        if self.details {
-            if let Some(row) = selected {
-                self.draw_package(frame, area, row, hits);
-                action("Add declaration", "a", KeyCode::Char('a'));
-            }
-            action("Back", "Esc", KeyCode::Esc);
-            return;
-        }
         let status = u16::from(self.current.is_some()).min(area.height);
         if let Some(current) = &self.current {
             let unavailable = current.reports.iter().filter(|r| !r.available()).count();
@@ -362,7 +355,23 @@ impl State {
                     false,
                 );
         } else {
-            let (list, details) = ui::reader::detail_panes(body, ui::reader::wide_details(body, 0));
+            use super::workspace::{Region, Scope, Workspace};
+            let active = Region::from_details(self.details && !self.searching);
+            let workspace = Workspace::new(Scope::InstalledTools, body, active, true);
+            workspace.bind(hits);
+            if let (Some(pane), Some(row)) = (workspace.details, selected) {
+                self.draw_package(frame, pane, row, hits, active == Region::Details);
+            }
+            if active == Region::Details {
+                action("Add declaration", "a", KeyCode::Char('a'));
+                action("Back", "Esc", KeyCode::Esc);
+                if !workspace.is_split() {
+                    return;
+                }
+            }
+            let list = workspace
+                .queue_content(frame, "Installed packages")
+                .expect("visible queue");
             let capacity = ui::design::pair_capacity(list);
             let first = self
                 .viewport
@@ -408,10 +417,9 @@ impl State {
                 hits,
                 Target::ToolsRow,
             );
-            if let (Some(area), Some(row)) = (details, selected) {
-                self.draw_package(frame, area, row, hits);
+            if active == Region::Queue {
+                action("Package details", "Enter", KeyCode::Enter);
             }
-            action("Package details", "Enter", KeyCode::Enter);
             action("Add declaration", "a", KeyCode::Char('a'));
         }
         action("Check installed", "R", KeyCode::Char('R'));

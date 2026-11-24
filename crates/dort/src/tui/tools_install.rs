@@ -258,7 +258,13 @@ impl State {
             .with_end()
             .apply(&mut self.scroll, code);
     }
-    fn draw_attempt(&self, frame: &mut Frame, area: Rect, hits: &super::input::Hits) {
+    fn draw_attempt(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        hits: &super::input::Hits,
+        focused: bool,
+    ) {
         let mut lines = vec![];
         if let Some(attempt) = self.attempts.get(self.selected) {
             let s = attempt.summary();
@@ -304,7 +310,7 @@ impl State {
                 "Installation details",
                 lines.into(),
                 self.scroll,
-                false,
+                focused,
             );
     }
     pub fn draw(&self, frame: &mut Frame, area: Rect, dry_run: bool, hits: &super::input::Hits) {
@@ -395,15 +401,29 @@ impl State {
             return;
         }
         let selected = self.attempts.get(self.selected);
-        if self.details {
-            self.draw_attempt(frame, area, hits);
+        use super::workspace::{Region, Scope, Workspace};
+        let active = Region::from_details(self.details && selected.is_some());
+        let workspace = Workspace::new(Scope::InstallAttempts, area, active, selected.is_some());
+        workspace.bind(hits);
+        if let Some(pane) = workspace.details {
+            self.draw_attempt(frame, pane, hits, active == Region::Details);
+        }
+        if active == Region::Details {
             if selected.is_some_and(|a| a.unresolved) {
                 action("Close record", "x", KeyCode::Char('x'));
             }
             action("Back", "Esc", KeyCode::Esc);
-            return;
+            if !workspace.is_split() {
+                return;
+            }
         }
-        let (list, details) = ui::reader::detail_panes(area, ui::reader::wide_details(area, 0));
+        let list = if selected.is_some() {
+            workspace
+                .queue_content(frame, "Installation history")
+                .expect("visible queue")
+        } else {
+            area
+        };
         let capacity = ui::design::pair_capacity(list);
         let first = self.viewport.start(
             self.attempts.len(),
@@ -461,10 +481,9 @@ impl State {
                 hits,
                 Target::ToolAttemptRow,
             );
-            if let Some(pane) = details {
-                self.draw_attempt(frame, pane, hits);
+            if active == Region::Queue {
+                action("Install record", "Enter", KeyCode::Enter);
             }
-            action("Install record", "Enter", KeyCode::Enter);
             if selected.is_some_and(|a| a.unresolved) {
                 action("Close record", "x", KeyCode::Char('x'));
             }

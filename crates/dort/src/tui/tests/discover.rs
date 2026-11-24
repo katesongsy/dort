@@ -143,12 +143,10 @@ fn content_focus_uses_wrapped_viewport_without_selection_changes_or_rereads() {
     let mut app = f.app();
     let read = discover_content::next(&mut app).unwrap();
     app.complete(Ok(f.finish(read)));
-    render(&app, 140, 40);
-    assert!(!app.content.focused);
+    let queue = render(&app, 140, 40);
+    assert!(!queue.contains("Selected content [Active]"));
     key(&mut app, KeyCode::Tab);
-    assert!(!app.content.focused, "Tab never opens a reader");
-    key(&mut app, KeyCode::Enter);
-    assert!(app.content.focused);
+    assert!(render(&app, 140, 40).contains("Selected content [Active]"));
     let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
     terminal
         .draw(|frame| super::views::draw(frame, &app))
@@ -198,7 +196,7 @@ fn content_focus_uses_wrapped_viewport_without_selection_changes_or_rereads() {
     assert_eq!(app.candidate_selected, selected);
     assert!(app.inventory.candidate_marks.is_empty());
     key(&mut app, KeyCode::BackTab);
-    assert!(app.content.focused, "Tab never leaves a reader");
+    assert!(!app.content.focused, "BackTab returns to the visible queue");
     assert_eq!(app.content.scroll, 0);
     key(&mut app, KeyCode::Esc);
     assert!(!app.content.focused);
