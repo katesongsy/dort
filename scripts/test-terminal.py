@@ -435,8 +435,9 @@ def guarded_effects(binary):
                     session.click_action('Read')
                     session.wait(tail)
                     session.wait(b'y Confirm')
+                    session.wait(b'F1 Help')
                     footer = session.screen.text().splitlines()[-1]
-                    assert all(key in footer for key in (b'y Confirm', b'F3 Summary', b'Esc Back', b'F1 Help'))
+                    assert all(key in footer for key in (b'y Confirm', b'F3 Summary', b'Esc Back', b'F1 Help')), footer
                     row = 13
                     column = footer.index(b'y Confirm')
                     session.send(b'\x1b[Hy')
@@ -1048,6 +1049,8 @@ def run():
             session.wait(b"1 entries")
             session.wait(b"PATH")
             session.send(b"\x1bOR")
+            session.wait(b"Git details")
+            session.send(b"\x1b[6~" * 4)
             session.wait(b"Modes: 100644 -> 100644")
             assert b"PRIVATE-PATCH" not in session.screen.text(), "Scope details showed patch content"
             session.send(b"q")
@@ -1257,6 +1260,8 @@ def run():
             session.send(b"\x1b[3~")  # clear display filter, no ID transcription
             session.wait(b"1/1 shown")
             session.send(b"\r")
+            session.wait(b"Recovery options")
+            session.send(b"\x1b[6~" * 16)
             session.wait(b"Repository ID:")
             session.wait(b"Operation ID:")
             session.send(b"b")
@@ -1296,11 +1301,12 @@ def run():
             session.wait(b"Completed")
             session.send(b"\r")  # selected row inspects; never requests rollback
             session.wait(b"Operation details")
-            session.wait(b"Repository ID:")
-            session.send(b"\x1b[6~" * 4)
+            session.wait(b"Recovery options")
+            assert b"Repository ID:" not in session.screen.text()
+            session.send(b"\x1b[6~" * 16)
             session.wait(b"Saved steps:")
             session.send(b"\x1b[H")
-            session.wait(b"Repository ID:")
+            session.wait(b"Recovery options")
             session.more_action('Rollback')  # Still opens a preview.
             session.wait(b"Roll back operation")
             session.send(b"\r\ry")
@@ -1481,6 +1487,7 @@ def run():
             session.wait(b'Review all')
             session.click_label('Review all')
             session.wait(b'Exact marked set')
+            session.ready_review(b'y Adopt all')
             session.send(b'y')  # Adopt all consumes the real combined preview once.
             session.wait(b'Enter Details')
             assert all((targets / name).is_symlink() for name in ('only-a', 'only-b'))

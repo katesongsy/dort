@@ -281,6 +281,7 @@ fn signal_check_review_keeps_warning_and_foreground_action_distinct() {
     };
     inputs.search_dirs = vec![fixture.bin.clone()];
     super::tools_tests::run(&fixture, &mut app, Task::ToolsCheckPrepare(inputs));
+    key(&mut app, KeyCode::End, w, h);
     let color = draw(&app, w, h);
     let cells = color.backend().buffer();
     let warning = locate(&color, "Checks can run package-manager");
