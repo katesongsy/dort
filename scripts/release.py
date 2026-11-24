@@ -223,13 +223,15 @@ def check_ci(commit):
 def notes(tag):
     return f"""# Dort {tag}
 
-Experimental, TUI-first local dotfile management with a shared Rust core and CLI automation.
+Dort manages local dotfiles and tools from the terminal or command line.
 
-- Guided local repository creation/attachment, profiles and standalone manifest checks.
-- File discovery, reviewed links, Keep/Delete unmanage and recovery.
-- Homebrew/npm tool checks, exact missing-package installs and install history.
-- Read-only Git status/diff with separate patch disclosure; Diagnostics and contextual help.
-- Keyboard-first compact/wide navigation, retained drafts and explicit write confirmations.
+- The terminal app shows file and Git patch previews as you browse. Review privately: previews can show secrets.
+- Write reviews show the effects of a change. Read to the end before approving.
+- Homebrew and npm checks and installs use one tool declaration across macOS, Linux and WSL.
+
+## Upgrade from v0.1.0
+
+Update platform keys and tool declarations before applying changes. APT and mise declarations are no longer supported. See the [migration guide](https://github.com/katesongsy/dort/blob/{tag}/docs/user/manifest.md#upgrade-from-v010).
 
 ## Installation
 Choose the archive matching your CPU and OS. Linux binaries require Ubuntu 24.04+ (glibc 2.39+); macOS binaries require macOS 15+. Verify its SHA-256 against `SHA256SUMS`, extract into an empty directory and run `./dort --version`. Checksums detect corruption, not an independent publisher signature. Each archive includes the MIT license, third-party dependency and Rust standard-library notices, and build provenance.
