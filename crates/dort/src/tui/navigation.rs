@@ -239,6 +239,7 @@ pub fn local_available(app: &App) -> bool {
         || app.preview.is_some()
         || app.show_result
         || app.confirmation.is_some()
+        || app.batch_editor.as_ref().is_some_and(|editor| editor.open)
         || app.shell.overlay.is_some() && !ignored
         || app.tab == Tab::Git && app.git_view.editing_root
         || app.page_title().is_some()
