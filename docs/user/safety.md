@@ -14,15 +14,12 @@ One preview creates one approval. Navigation, resizing below 48×14, or a failed
 
 ## Sensitive content
 
-Dort reports names, paths and package facts. File bodies stay unprinted.
+Previews can show secrets:
 
-Two deliberate exceptions:
+- In a wide Files view, selecting a managed file can show its contents automatically. Discover can show a preview of the selected regular file.
+- The Git page previews changes to the selected file. On the command line, `dort git diff --patch` prints patch content.
 
-- The Git page previews changes to the selected file. Patches can contain secrets. Review privately.
-- On the command line, use `dort git diff --patch` to print patch content.
-- In Discover, the selected regular file can be shown in a bounded preview.
-
-Review both privately. Do not share screenshots or logs with secrets. Discovery exclusions are heuristics, not a guarantee.
+Review privately. Check screenshots and logs for secrets before sharing. Discovery filters can miss sensitive files.
 
 Do not put plaintext secrets in the repository, examples or command lines. Secret deployment is not available.
 

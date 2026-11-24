@@ -4,6 +4,16 @@ An environment repository contains `dort.toml`. It describes files, tools and pr
 
 `schema = 1` is the manifest format version. Unknown fields, duplicate IDs, invalid paths and broken references are errors.
 
+## Upgrade from v0.1.0
+
+Back up `dort.toml` before upgrading. Keep `schema = 1` and make these changes:
+
+- Rename the `ubuntu` key under `[profiles.platform]` and `[files.overrides]` to `linux`. Profile names and file paths can stay the same.
+- Replace the `macos` and `ubuntu` entries under each `[tools.install]` with one rule for all hosts. For example, replace `macos = { provider = "brew", package = "git" }` with `provider = "brew"` and `package = "git"` on separate lines.
+- Replace APT and mise rules with a Homebrew or npm rule where one fits. Otherwise, manage the tool separately, remove its declaration and update references to its ID in `requires` and `runtime_tool`.
+
+Run `dort manifest check --manifest /absolute/path/to/dort.toml` before applying changes.
+
 ## Files
 
 ```toml

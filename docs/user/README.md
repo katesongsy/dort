@@ -11,6 +11,8 @@ Dort is experimental. Start with a disposable HOME. Do not point it at real dotf
 3. [Command reference](commands.md): keys, commands, output and exit codes.
 4. [Safety and troubleshooting](safety.md): approvals, recovery, common blockers and state locations.
 
+Upgrading? See [Upgrade from v0.1.0](manifest.md#upgrade-from-v010).
+
 ## What works
 
 | Task | Use |
