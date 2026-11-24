@@ -237,7 +237,7 @@ fn metadata_lines(
             if !title.is_empty() {
                 lines.push(Line::styled(
                     format!("{}{title}", "  ".repeat(depth.min(6))),
-                    heading(),
+                    accent(),
                 ));
             }
             if values.is_empty() {
@@ -250,7 +250,7 @@ fn metadata_lines(
         serde_json::Value::Array(values) if depth < 24 => {
             lines.push(Line::styled(
                 format!("{}{title} ({})", "  ".repeat(depth.min(6)), values.len()),
-                heading(),
+                accent(),
             ));
             if values.is_empty() {
                 lines.push(Line::raw("None recorded"));
@@ -278,11 +278,13 @@ pub fn review_text(body: &str) -> Text<'static> {
     let escaped = super::views::safe(body);
     let lines = escaped.lines().enumerate().map(|(index, line)| {
         let trimmed = line.trim_start();
-        if index == 0 || trimmed.ends_with(':') {
-            Line::styled(line.to_owned(), heading())
+        if trimmed.ends_with(':') {
+            Line::styled(line.to_owned(), accent())
         } else if trimmed.starts_with("BLOCKED") || trimmed.starts_with("Blocker") {
             Line::styled(line.to_owned(), danger())
-        } else if let Some(effect) = trimmed.strip_prefix("- ") {
+        } else if index != 0
+            && let Some(effect) = trimmed.strip_prefix("- ")
+        {
             Line::from(vec![
                 Span::styled(format!("{} ", glyphs::PENDING), muted()),
                 Span::raw(effect.to_owned()),
@@ -292,6 +294,8 @@ pub fn review_text(body: &str) -> Text<'static> {
                 Span::styled(format!("{label}: "), heading()),
                 Span::raw(value.to_owned()),
             ])
+        } else if index == 0 {
+            Line::styled(line.to_owned(), heading())
         } else {
             Line::raw(line.to_owned())
         }
@@ -351,7 +355,7 @@ pub fn text_view_at(frame: &mut Frame, inner: Rect, body: Text<'static>, offset:
 }
 pub fn metadata(label: &str, value: &str) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{:<13} ", inline(label)), muted()),
+        Span::styled(format!("{:<13} ", inline(label)), heading()),
         Span::raw(inline(value)),
     ])
 }

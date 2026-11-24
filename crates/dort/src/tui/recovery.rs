@@ -65,12 +65,12 @@ fn state(row: &Diagnosis) -> (&'static str, Style) {
     } else if row.blocks_writes() {
         ("Blocks writes", ui::warning())
     } else {
-        ("Finished", ui::muted())
+        ("Finished", ui::success())
     }
 }
 fn field(label: &str, value: impl ToString) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{label}: "), ui::muted()),
+        Span::styled(format!("{label}: "), ui::heading()),
         Span::raw(ui::inline(&value.to_string())),
     ])
 }
@@ -84,7 +84,7 @@ fn details(app: &App) -> Text<'static> {
     let (status, style) = state(row);
     let mut lines = vec![
         Line::styled(format!("[{status}]"), style),
-        Line::styled("Operation", ui::heading()),
+        Line::styled("Operation", ui::accent()),
         field("Repository ID", &row.repository_id),
         field("Operation ID", &row.transaction_id),
         field("Type", kind(row)),
@@ -93,7 +93,7 @@ fn details(app: &App) -> Text<'static> {
         field("Integrity", row.problem.as_deref().unwrap_or("Valid")),
         field("Blocks writes", row.blocks_writes()),
         Line::default(),
-        Line::styled("Recovery options", ui::heading()),
+        Line::styled("Recovery options", ui::accent()),
     ];
     if rollback(row) {
         app.presented(
@@ -144,7 +144,7 @@ fn details(app: &App) -> Text<'static> {
         ));
     }
     lines.push(Line::default());
-    lines.push(Line::styled("What recovery keeps", ui::heading()));
+    lines.push(Line::styled("What recovery keeps", ui::accent()));
     lines.push(note(
         "Recovery checks current paths and files before each action.",
         Style::default(),
