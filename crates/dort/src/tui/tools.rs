@@ -107,16 +107,24 @@ impl State {
             && self.declared.install_preview.is_none()
             && !self.declared.result_open
     }
-    pub fn collection_visible(&self) -> bool {
-        self.at_root()
+    pub fn workspace_visible(&self) -> bool {
+        self.landing()
+            && self.declared.check_preview.is_none()
+            && self.declared.install_preview.is_none()
+            && !self.declared.result_open
             || self.installed_open
                 && !self.installed.waiting
-                && !self.installed.details
                 && self.installed.preview.is_none()
                 && self.installed.error.is_none()
             || self.install_open
                 && self.installation.mode == super::tools_install::Mode::Attempts
-                && !self.installation.details
+                && self.installation.close_preview.is_none()
+    }
+    pub fn collection_visible(&self) -> bool {
+        self.workspace_visible()
+            && !(self.landing() && self.declared_details
+                || self.installed_open && self.installed.details
+                || self.install_open && self.installation.details)
     }
     pub fn text_entry(&self) -> bool {
         self.installed_open && self.installed.searching

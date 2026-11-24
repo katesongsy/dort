@@ -276,12 +276,25 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         },
         total
     );
+    let (adoption_width, kind_width) = if list_area.width < 48 {
+        (11, 4)
+    } else {
+        (15, 10)
+    };
+    let name_width = if app.discovering {
+        list_area
+            .width
+            .saturating_sub(adoption_width + kind_width + 4)
+    } else {
+        list_area.width.saturating_mul(32) / 100
+    };
+    let indent_limit = usize::from(name_width.saturating_sub(15) / 2).min(12);
     let collection = if app.discovering {
         Collection::new(
             [
-                Constraint::Percentage(46),
-                Constraint::Length(15),
-                Constraint::Min(6),
+                Constraint::Min(18),
+                Constraint::Length(adoption_width),
+                Constraint::Length(kind_width),
             ],
             Header::Heading(["NAME", "ADOPTION", "TYPE"]),
         )
@@ -310,7 +323,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         FORMATTED_ROWS.with(|count| count.set(count.get() + 1));
         let prefix = format!(
             "{}{} {}",
-            "  ".repeat(node.depth.min(12)),
+            "  ".repeat(node.depth.min(indent_limit)),
             if node.branch {
                 let folded = if app.discovering {
                     &app.inventory.candidate_folded
@@ -361,7 +374,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                     rows.push(Row::new(vec![
                         Cell::from(format!(
                             "{}{} {}",
-                            "  ".repeat(node.depth.min(12)),
+                            "  ".repeat(node.depth.min(indent_limit)),
                             if super::tree::marked(app, node) {
                                 "[x]"
                             } else {
@@ -437,7 +450,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             .rows()
             .zip(visible.into_iter().skip(rendered.offset))
         {
-            let x = row.x + 2 + (node.depth.min(12) * 2) as u16;
+            let x = row.x + 2 + (node.depth.min(indent_limit) * 2) as u16;
             if x + 3 < row.right() {
                 app.hits.click(
                     Rect::new(x, row.y, 3, 1),

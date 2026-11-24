@@ -126,6 +126,7 @@ impl Topic {
                 ("Esc", "Back, retaining draft"),
             ],
             Self::Tools if app.tools_view.installed_open => &[
+                ("Tab / Shift-Tab", "Switch panes when both are visible"),
                 ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 (
                     "Enter",
@@ -181,6 +182,7 @@ impl Topic {
                 ]
             }
             Self::Tools if app.tools_view.install_open => &[
+                ("Tab / Shift-Tab", "Switch panes when both are visible"),
                 ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 ("Enter", "Open the selected installation record"),
                 ("x", "Close an unresolved record"),
@@ -188,6 +190,7 @@ impl Topic {
                 ("Esc", "Back"),
             ],
             Self::Tools => &[
+                ("Tab / Shift-Tab", "Switch panes when both are visible"),
                 ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 ("Enter", "Open the selected tool"),
                 ("C", "Check installed"),
@@ -199,6 +202,7 @@ impl Topic {
                 ("Esc", "Back"),
             ],
             Self::Picker => &[
+                ("Tab / Shift-Tab", "Switch panes when both are visible"),
                 ("Up/Down", "Traverse choices"),
                 ("Space", "Toggle optional profile membership"),
                 ("Enter", "Validate/apply selection"),
@@ -239,12 +243,14 @@ impl Topic {
                 ("F2", "Recovery or refresh"),
             ],
             Self::Content => &[
+                ("Tab / Shift-Tab", "Switch panes when both are visible"),
                 ("Up/Down", "Scroll selected content"),
                 ("PgUp/PgDown", "Page selected content"),
                 ("Alt-PgUp/PgDown", "Read selected details"),
                 ("Esc", "Return to list"),
             ],
             Self::Discover => &[
+                ("Tab / Shift-Tab", "Switch panes when both are visible"),
                 ("Up/Down, Home/End", "Move selection"),
                 ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 ("a / A", "Adopt selected / marked files"),
@@ -254,6 +260,7 @@ impl Topic {
                 ("Enter", "Read the selected file"),
             ],
             Self::Managed => &[
+                ("Tab / Shift-Tab", "Switch panes when both are visible"),
                 ("Up/Down, Home/End", "Move selection"),
                 ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 (
@@ -266,12 +273,14 @@ impl Topic {
                 ("Enter", "Read file details"),
             ],
             Self::Ignored => &[
+                ("Tab / Shift-Tab", "Switch panes when both are visible"),
                 ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 ("Home/End", "Select first / last path"),
                 ("F3", "Read the full path"),
                 ("Enter", "Review unignore"),
             ],
             Self::Recovery | Self::Git => &[
+                ("Tab / Shift-Tab", "Switch panes when both are visible"),
                 ("Up/Down", "Move selection"),
                 ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 ("Enter", "Read selected details"),

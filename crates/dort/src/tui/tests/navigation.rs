@@ -193,6 +193,38 @@ pub(super) fn assert_review_list_navigation(
     assert_eq!(position(app, 79), last_y);
     assert!(right_contains(&up, previous_details), "{up}");
     assert!(!right_contains(&up, last_details), "{up}");
+    let active_title = |screen: &str| {
+        screen
+            .lines()
+            .find(|line| line.contains("[Active]"))
+            .unwrap()
+            .split("[Active]")
+            .next()
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    let queue_title = active_title(&up);
+    key(app, KeyCode::Tab);
+    let reading = render(app, 140, 40);
+    assert!(right_contains(&reading, "[Active]"), "{reading}");
+    assert_eq!(reading.matches("[Active]").count(), 1, "{reading}");
+    key(app, KeyCode::Up);
+    key(app, KeyCode::Char('y'));
+    let moved = render(app, 140, 40);
+    assert_eq!(position(app, 78), previous_y);
+    assert_eq!(position(app, 79), last_y);
+    assert!(right_contains(&moved, previous_details), "{moved}");
+    let compact = render(app, 80, 24);
+    assert_eq!(compact.matches("[Active]").count(), 1, "{compact}");
+    assert_ne!(active_title(&compact), queue_title);
+    assert!(
+        app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 80, 24)
+            .is_none()
+    );
+    let returned = render(app, 140, 40);
+    assert_eq!(active_title(&returned), queue_title);
+    assert!(right_contains(&returned, previous_details), "{returned}");
     assert!(app.preview.is_none() && app.confirmation.is_none());
 }
 

@@ -54,14 +54,14 @@ pub enum Wheel {
     GitPatch,
     Tools,
 }
-struct Region {
+struct Hit {
     area: Rect,
     click: Option<Target>,
     wheel: Option<Wheel>,
 }
 #[derive(Default)]
 pub struct Hits {
-    regions: RefCell<Vec<Region>>,
+    regions: RefCell<Vec<Hit>>,
     size: Cell<(u16, u16)>,
     input_focus: Cell<bool>,
     workspace: Cell<Option<super::workspace::Workspace>>,
@@ -85,6 +85,12 @@ impl Hits {
     }
     pub fn clear(&self) {
         self.regions.borrow_mut().clear();
+        self.actions.borrow_mut().clear();
+    }
+    pub fn retain_file_rows(&self) {
+        self.regions
+            .borrow_mut()
+            .retain(|hit| matches!(hit.click, Some(Target::Row(_))));
         self.actions.borrow_mut().clear();
     }
     pub fn present(&self, mut action: super::components::ActionButton) {
@@ -113,14 +119,14 @@ impl Hits {
         self.actions.borrow().clone()
     }
     pub fn click(&self, area: Rect, target: Target) {
-        self.regions.borrow_mut().push(Region {
+        self.regions.borrow_mut().push(Hit {
             area,
             click: Some(target),
             wheel: None,
         });
     }
     pub fn wheel(&self, area: Rect, target: Wheel) {
-        self.regions.borrow_mut().push(Region {
+        self.regions.borrow_mut().push(Hit {
             area,
             click: None,
             wheel: Some(target),

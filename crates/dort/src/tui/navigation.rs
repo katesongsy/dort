@@ -244,7 +244,7 @@ pub fn local_available(app: &App) -> bool {
         || app.page_title().is_some()
             && !ignored
             && !matches!(app.tab, Tab::Files | Tab::Git)
-            && !(app.tab == Tab::Tools && app.tools_view.collection_visible())
+            && !(app.tab == Tab::Tools && app.tools_view.workspace_visible())
     {
         return false;
     }

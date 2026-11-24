@@ -220,7 +220,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
         },
     );
     let active = Region::from_details(app.shell.picker_details);
-    let workspace = Workspace::new(scope, content, active, true);
+    let paired =
+        !matches!(overlay, Overlay::Profiles(picker) if picker.report.choices.known.is_empty());
+    let workspace = Workspace::new(scope, content, active, paired);
     workspace.bind(&app.hits);
     if let Some(pane) = workspace.details {
         ui::reader::Reader::new(&app.hits)

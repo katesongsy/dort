@@ -440,10 +440,14 @@ impl App {
             let wheel = self.hits.scroll(event.column, event.row)?;
             if let Some(workspace) = self.hits.workspace((width, height))
                 && workspace.is_split()
-                && !self.text_entry()
-                && let Some(region) = workspace.region_at(event.column, event.row)
             {
-                self.focus_workspace(workspace.scope, region);
+                match workspace.region_at(event.column, event.row) {
+                    Some(region) if !self.text_entry() => {
+                        self.focus_workspace(workspace.scope, region)
+                    }
+                    None if matches!(wheel, Wheel::Details | Wheel::Tools) => return None,
+                    _ => (),
+                }
             }
             if matches!(wheel, Wheel::Choices | Wheel::PreviewRows) {
                 let code = if code == KeyCode::PageDown {
@@ -537,7 +541,9 @@ impl App {
         let row_click = matches!(target, Target::Row(_)) && self.tab == Tab::Files && !self.busy;
         // Row selection does not alter layout: retain render-owned hits for coalesced clicks.
         // Checkbox/chevron hits remain single-click controls, never double-click marks.
-        if !row_click {
+        if row_click {
+            self.hits.retain_file_rows();
+        } else {
             self.hits.clear();
         }
         if row_click && let Target::Row(index) = target {
@@ -959,32 +965,18 @@ impl App {
             Scope::Git if self.tab == Tab::Git && !self.git_view.editing_root => {
                 Some(self.git_view.region)
             }
-            Scope::DeclaredTools
-                if self.tab == Tab::Tools
-                    && self.tools_view.landing()
-                    && self.tools_view.declared.check_preview.is_none()
-                    && self.tools_view.declared.install_preview.is_none()
-                    && !self.tools_view.declared.result_open =>
-            {
-                Some(Region::from_details(self.tools_view.declared_details))
-            }
-            Scope::InstalledTools
-                if self.tab == Tab::Tools
-                    && self.tools_view.installed_open
-                    && self.tools_view.installed.preview.is_none()
-                    && self.tools_view.installed.error.is_none() =>
-            {
-                Some(Region::from_details(self.tools_view.installed.details))
-            }
-            Scope::InstallAttempts
-                if self.tab == Tab::Tools
-                    && self.tools_view.install_open
-                    && self.tools_view.installation.mode
-                        == super::tools_install::Mode::Attempts
-                    && self.tools_view.installation.close_preview.is_none() =>
-            {
-                Some(Region::from_details(self.tools_view.installation.details))
-            }
+            scope if self.tab == Tab::Tools && self.tools_view.workspace_visible() => match scope {
+                Scope::DeclaredTools if self.tools_view.landing() => {
+                    Some(Region::from_details(self.tools_view.declared_details))
+                }
+                Scope::InstalledTools if self.tools_view.installed_open => {
+                    Some(Region::from_details(self.tools_view.installed.details))
+                }
+                Scope::InstallAttempts if self.tools_view.install_open => {
+                    Some(Region::from_details(self.tools_view.installation.details))
+                }
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -1500,6 +1492,9 @@ impl App {
             return editor.key(key);
         }
         if matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
             && !self.text_entry()
             && let Some(workspace) = self.hits.workspace((width, height))
             && workspace.is_split()
@@ -1752,6 +1747,7 @@ impl App {
             key.code,
             KeyCode::PageDown | KeyCode::PageUp | KeyCode::Tab | KeyCode::BackTab
         ) && !opens_overlay
+            && !matches!(self.tab, Tab::Files | Tab::Recovery)
         {
             self.details_scroll = 0;
         }
@@ -2529,8 +2525,11 @@ impl App {
                 .saturating_add(count)
                 .min(visible.len().saturating_sub(1))
         };
-        if let Some(&index) = visible.get(next) {
+        if let Some(&index) = visible.get(next)
+            && self.selected != index
+        {
             self.selected = index;
+            self.details_scroll = 0;
         }
     }
     fn reset_repository_scope(&mut self) {
