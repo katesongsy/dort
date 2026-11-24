@@ -174,8 +174,10 @@ fn compact_review_keeps_tail_above_footer_and_disallows_early_confirmation() {
     let first = terminal.text();
     assert!(first.contains("Record"));
     assert!(!first.contains("Recovery queue"));
+    assert!(first.contains("Status    Ready"));
     assert!(first.contains("チーム/atelier-e\u{0301}"));
-    assert!(first.contains("settings.lua"));
+    terminal.key(Down).key(Down);
+    assert!(terminal.text().contains("settings.lua"));
 
     terminal.key(Enter).key(Char('y'));
     assert!(terminal.text().contains("Read remaining effects"));
@@ -195,7 +197,10 @@ fn compact_review_keeps_tail_above_footer_and_disallows_early_confirmation() {
     assert!(final_effect);
     assert!(terminal.lines()[12].contains("y  Simulate restore"));
     terminal.key(Char('y')).key(Esc);
+    assert!(terminal.text().contains("settings.lua"));
+    terminal.key(Up).key(Up);
     assert!(terminal.text().contains("Editor settings"));
+    assert!(terminal.text().contains("Status    Finished"));
     assert!(!terminal.text().contains("Review restore"));
 }
 

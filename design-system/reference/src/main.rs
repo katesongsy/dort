@@ -1,9 +1,10 @@
 mod appearance;
+mod gallery;
 mod model;
 mod render;
 mod text;
 
-use std::{env, io, process::ExitCode};
+use std::{env, io, path::Path, process::ExitCode};
 
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
@@ -13,7 +14,10 @@ fn main() -> ExitCode {
     let result = match env::args_os().skip(1).collect::<Vec<_>>().as_slice() {
         [] => demo(appearance(false)),
         [arg] if arg == "--mono" => demo(appearance(true)),
-        _ => Err(io::Error::other("Usage: dort-reference [--mono]")),
+        [arg, directory] if arg == "gallery" => gallery::write(Path::new(directory)),
+        _ => Err(io::Error::other(
+            "Usage: dort-reference [--mono | gallery OUTPUT_DIR]",
+        )),
     };
     if let Err(error) = result {
         eprintln!("{error}");

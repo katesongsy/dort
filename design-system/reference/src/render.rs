@@ -258,6 +258,12 @@ fn details(
     let mut reader = Reader::default();
     if let Some(record) = record {
         reader.text(area, Role::Label, record.title);
+        reader.field(
+            area,
+            "Status",
+            Role::status(record.status),
+            record.status.label(),
+        );
         reader.blank();
         reader.field(area, "Target", Role::Value, record.target);
         reader.field(
@@ -265,12 +271,6 @@ fn details(
             "Snapshot",
             Role::Value,
             &format!("{} · {}", record.snapshot, record.date),
-        );
-        reader.field(
-            area,
-            "Status",
-            Role::status(record.status),
-            record.status.label(),
         );
         reader.blank();
         reader.text(area, Role::Heading, "Recovery check");
