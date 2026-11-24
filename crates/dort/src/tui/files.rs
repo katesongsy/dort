@@ -10,6 +10,8 @@ use ratatui::{
     widgets::{Cell, Paragraph, Row},
 };
 use ui::collection::{Collection, Header, RowTargets};
+use ui::design::Tone;
+use ui::reader::{field, section};
 
 #[cfg(test)]
 thread_local! { pub(super) static FORMATTED_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
@@ -52,17 +54,13 @@ fn kind(kind: &Kind) -> &'static str {
 }
 fn details(app: &App) -> Text<'static> {
     let mut lines = Vec::new();
-    if let Some(result) = &app.result {
-        lines.push(Line::styled("Result", ui::heading()));
-        lines.extend(Text::from(safe(result)).lines);
-        lines.push(Line::raw(""));
-    }
     if app.inventory.group.is_some() {
         if let Some(node) = super::tree::selected(app) {
             lines.push(Line::styled("Folder · header only", ui::heading()));
-            lines.push(ui::metadata(
+            lines.push(field(
                 "Full path",
                 node.path.to_str().unwrap_or("unavailable"),
+                Tone::Neutral,
             ));
             lines.push(Line::raw(
                 "Marking a folder marks its eligible files. Marks stay through filters and folds.",
@@ -76,39 +74,43 @@ fn details(app: &App) -> Text<'static> {
             .filter(|_| super::discovery_tree::contains(app, app.candidate_selected))
         {
             let eligible = candidate.supported_for_adoption;
-            let state = if eligible {
-                "Eligible hint"
-            } else {
-                "Not eligible"
-            };
-            lines.push(Line::styled(
-                format!("[{state}] {}", kind(&candidate.entry.kind)),
-                ui::state(state),
-            ));
-            lines.push(ui::metadata(
+            lines.push(section(kind(&candidate.entry.kind)));
+            lines.push(field(
                 "Path",
                 candidate.entry.path.to_str().unwrap_or("unavailable"),
+                Tone::Neutral,
             ));
-            lines.push(Line::raw(""));
+            lines.push(field(
+                "Status",
+                if eligible {
+                    "Eligible hint"
+                } else {
+                    "Not eligible"
+                },
+                if eligible {
+                    Tone::Attention
+                } else {
+                    Tone::Error
+                },
+            ));
             lines.push(Line::raw(if eligible {
-                "Review this candidate before adoption."
+                "Choose Adopt to edit target, ID and source."
             } else {
-                "Adoption requires an eligible regular file."
+                "Adoption needs an owned, single-link regular file without special permission bits."
             }));
-            lines.push(Line::raw(if eligible { "Choose Adopt to edit target, ID and source." } else { "Only owned, single-link regular files without special permission bits are candidates." }));
             lines.push(Line::raw(
                 "The preview checks paths, sensitivity and remaining limits.",
             ));
             if let Some(d) = &app.discovery {
-                lines.push(Line::raw(""));
-                lines.push(ui::metadata(
-                    "Protected root",
-                    &format!("{:?}", d.repository),
-                ));
                 lines.push(Line::raw(safe(d.report.sensitivity_notice)));
                 for warning in &d.report.warnings {
-                    lines.push(Line::styled(safe(warning), ui::warning()));
+                    lines.push(Line::styled(safe(warning), Tone::Attention.style()));
                 }
+                lines.push(field(
+                    "Protected root",
+                    &format!("{:?}", d.repository),
+                    Tone::Neutral,
+                ));
             }
         } else {
             lines.push(Line::raw("Select a file, or clear the filter."));
@@ -121,10 +123,20 @@ fn details(app: &App) -> Text<'static> {
             .get(app.selected)
             .filter(|_| app.visible_file_rows().contains(&app.selected))
         {
-            lines.push(Line::styled(
-                format!("{}  [{}]", safe(&row.id), row.state),
-                ui::state(row.state),
+            lines.push(section(&row.id));
+            lines.push(field(
+                "Status",
+                row.state,
+                match row.state {
+                    "Linked" => Tone::Success,
+                    "Needs apply" => Tone::Attention,
+                    "Blocked" => Tone::Error,
+                    _ => Tone::Neutral,
+                },
             ));
+            for reason in &row.blockers {
+                lines.push(field("Reason", reason, Tone::Error));
+            }
             lines.push(ui::metadata(
                 "Source",
                 row.source.to_str().unwrap_or("unavailable"),
@@ -133,15 +145,13 @@ fn details(app: &App) -> Text<'static> {
                 "Destination",
                 row.target.to_str().unwrap_or("unavailable"),
             ));
-            lines.push(ui::metadata("Source kind", row.source_kind));
-            lines.push(ui::metadata("Dest. kind", row.target_kind));
-            for reason in &row.blockers {
-                lines.push(Line::styled(safe(reason), ui::danger()));
-            }
-            lines.push(Line::raw(""));
             lines.push(Line::raw(
                 "Keep writes a regular file. Both actions keep the source.",
             ));
+            lines.push(Line::default());
+            lines.push(section("File types"));
+            lines.push(field("Source kind", row.source_kind, Tone::Neutral));
+            lines.push(field("Dest. kind", row.target_kind, Tone::Neutral));
         } else if let Some((_, detail)) = data
             .files
             .get(app.selected)
@@ -151,6 +161,11 @@ fn details(app: &App) -> Text<'static> {
         } else {
             lines.push(Line::raw("Select a file, or clear the filter."));
         }
+    }
+    if let Some(result) = &app.result {
+        lines.push(Line::default());
+        lines.push(section("Result"));
+        lines.extend(Text::from(safe(result)).lines);
     }
     lines.push(Line::styled(
         "Search changes the display only. Apply covers every active file.",

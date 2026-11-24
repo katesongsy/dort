@@ -14,47 +14,35 @@ use ratatui::{
 };
 use ui::collection::{Collection, Header, RowTargets, Selection};
 
-fn field(label: &str, value: &str) -> Line<'static> {
-    ui::metadata(&format!("{label}: "), value)
+use ui::design::Tone;
+use ui::reader::{field, section};
+
+fn fact(label: &str, value: &str) -> Line<'static> {
+    field(label, value, Tone::Neutral)
 }
 fn names(
     lines: &mut Vec<Line<'static>>,
     label: &'static str,
     values: impl IntoIterator<Item = impl AsRef<str>>,
 ) {
-    lines.push(Line::styled(label, ui::heading()));
+    lines.push(section(label));
     let mut empty = true;
     for value in values {
         empty = false;
         lines.push(Line::raw(ui::inline(value.as_ref())));
     }
     if empty {
-        lines.push(Line::styled("(none)", ui::muted()));
+        lines.push(Line::raw("None"));
     }
 }
 pub fn profile_details(picker: &ProfilePicker) -> Text<'static> {
     let choices = &picker.report.choices;
     let effective: std::collections::BTreeSet<_> =
         choices.mandatory.iter().chain(&picker.requested).collect();
-    let mut lines = vec![
-        Line::styled("Temporary profiles | Never persisted", ui::heading()),
-        field(
-            "Scope",
-            if picker.standalone {
-                "standalone manifest only"
-            } else {
-                "repository file/check scope"
-            },
-        ),
-        field(
-            "Manifest",
-            picker.report.manifest.to_str().unwrap_or("Unavailable"),
-        ),
-        Line::raw("Base is always active. Extra profiles join the always-active set."),
-    ];
+    let mut lines = vec![section("Temporary profiles | Never persisted")];
     if let Some(name) = choices.known.iter().nth(picker.selected) {
-        lines.push(field("Selected", name));
-        lines.push(field(
+        lines.push(fact("Selected", name));
+        lines.push(fact(
             "Membership",
             if choices.mandatory.contains(name) {
                 "Mandatory"
@@ -63,18 +51,32 @@ pub fn profile_details(picker: &ProfilePicker) -> Text<'static> {
             },
         ));
     } else {
-        lines.push(field("Selected", "Apply additions (validation only)"));
+        lines.push(fact("Selected", "Apply additions (validation only)"));
     }
+    lines.push(Line::raw(
+        "Apply validates before changing this session. Esc keeps current profiles.",
+    ));
+    names(&mut lines, "Requested additions", &picker.requested);
+    names(&mut lines, "Effective union", effective);
+    lines.push(Line::raw("Base is always active."));
+    lines.push(Line::default());
+    lines.push(section("Profile sources"));
+    lines.push(fact(
+        "Scope",
+        if picker.standalone {
+            "standalone manifest only"
+        } else {
+            "repository file/check scope"
+        },
+    ));
+    lines.push(fact(
+        "Manifest",
+        picker.report.manifest.to_str().unwrap_or("Unavailable"),
+    ));
     names(&mut lines, "Defaults", &choices.defaults);
     names(&mut lines, "Platform", &choices.platform);
     names(&mut lines, "Local", &choices.local);
-    names(&mut lines, "Requested additions", &picker.requested);
-    names(&mut lines, "Effective union", effective);
     names(&mut lines, "Known profiles", &choices.known);
-    lines.push(Line::styled(
-        "Apply validates before changing this session. Esc keeps the current profiles.",
-        ui::muted(),
-    ));
     Text::from(lines)
 }
 pub fn repository_details(app: &App, selected: usize) -> Text<'static> {
@@ -83,23 +85,56 @@ pub fn repository_details(app: &App, selected: usize) -> Text<'static> {
         .as_ref()
         .map(|d| d.known_roots.as_slice())
         .unwrap_or_default();
-    let mut lines = vec![
-        Line::styled("Choose repository | Session only", ui::heading()),
-        Line::raw("The exact root becomes this session's selection."),
-        field(
-            "Session root",
-            app.data
-                .as_ref()
-                .and_then(|d| d.repository.as_ref())
-                .or(app.repository.as_ref())
-                .and_then(|p| p.to_str())
-                .unwrap_or("None selected"),
-        ),
-        field("Origin", app.origin),
-    ];
+    let mut lines = vec![section("Choose repository | Session only")];
+    match selected {
+        0 => {
+            lines.push(fact("Selected", "Enter exact repository path"));
+            lines.push(fact("Retained path", &app.shell.choose_draft));
+        }
+        1 => {
+            lines.push(fact("Selected", "Use registered active repository"));
+            lines.push(Line::raw("Missing or invalid config keeps the old selection. Choose an explicit root instead."));
+        }
+        i if i == roots.len() + 2 => {
+            lines.push(fact("Selected", "Create/attach"));
+            lines.push(fact("Retained path", &app.shell.init_draft));
+            lines.push(Line::raw(
+                "Opens the saved draft for review. Registration needs separate approval.",
+            ));
+        }
+        i => {
+            if let Some(root) = roots.get(i.saturating_sub(2)) {
+                lines.push(fact(
+                    "Selected root",
+                    root.to_str().unwrap_or("Unavailable"),
+                ));
+            }
+        }
+    }
+    lines.push(Line::raw(
+        "Enter selects for this session. Esc keeps adoption drafts.",
+    ));
+    lines.push(Line::default());
+    lines.push(section("Session and registry"));
+    lines.push(fact(
+        "Session root",
+        app.data
+            .as_ref()
+            .and_then(|d| d.repository.as_ref())
+            .or(app.repository.as_ref())
+            .and_then(|p| p.to_str())
+            .unwrap_or("None selected"),
+    ));
+    lines.push(fact("Origin", app.origin));
+    if selected == 0 {
+        lines.push(fact(
+            "Launch dir",
+            app.launch_directory.to_str().unwrap_or("Unavailable"),
+        ));
+    }
     let overview = app.data.as_ref().and_then(|d| d.overview.as_ref());
     let configuration_error = overview.and_then(|o| o.configuration_error.as_deref());
-    lines.push(field(
+    lines.push(fact(
         "Registry",
         if overview.is_none() {
             "Not loaded; known roots unknown"
@@ -112,37 +147,10 @@ pub fn repository_details(app: &App, selected: usize) -> Text<'static> {
         },
     ));
     if let Some(error) = configuration_error {
-        lines.push(Line::styled(ui::inline(error), ui::warning()));
-    }
-    match selected {
-        0 => {
-            lines.push(field("Selected", "Enter exact repository path"));
-            lines.push(field("Retained path", &app.shell.choose_draft));
-            lines.push(field(
-                "Launch dir",
-                app.launch_directory.to_str().unwrap_or("Unavailable"),
-            ));
-        }
-        1 => {
-            lines.push(field("Selected", "Use registered active repository"));
-            lines.push(Line::raw("Uses the registered active repository. You can still choose an explicit root. A missing or invalid config is an error; the old selection stays."));
-        }
-        i if i == roots.len() + 2 => {
-            lines.push(field("Selected", "Create/attach"));
-            lines.push(field("Retained path", &app.shell.init_draft));
-            lines.push(Line::raw("Opens a saved path draft, then a read-only preview. Registration needs separate approval."));
-        }
-        i => {
-            if let Some(root) = roots.get(i.saturating_sub(2)) {
-                lines.push(field(
-                    "Selected root",
-                    root.to_str().unwrap_or("Unavailable"),
-                ));
-            }
-        }
+        lines.push(Line::styled(ui::inline(error), Tone::Attention.style()));
     }
     if roots.is_empty() && overview.and_then(|o| o.registry_count).is_none() {
-        lines.push(field("Known roots", "Unknown"));
+        lines.push(fact("Known roots", "Unknown"));
     } else {
         names(
             &mut lines,
@@ -150,10 +158,6 @@ pub fn repository_details(app: &App, selected: usize) -> Text<'static> {
             roots.iter().map(|p| p.to_str().unwrap_or("Unavailable")),
         );
     }
-    lines.push(Line::styled(
-        "Enter selects for this session. Esc returns with adoption drafts intact.",
-        ui::muted(),
-    ));
     Text::from(lines)
 }
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {

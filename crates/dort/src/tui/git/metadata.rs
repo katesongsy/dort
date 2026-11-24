@@ -5,12 +5,13 @@ use crate::tui::{components as ui, inventory::Search};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::Style,
     text::{Line, Span, Text},
     widgets::{Cell, Paragraph, Row},
 };
 use std::path::Path;
 use ui::collection::{Collection, Header, RowTargets};
+use ui::design::Tone;
+use ui::reader::{field, section};
 
 pub(super) struct View<'a> {
     pub hits: &'a crate::tui::input::Hits,
@@ -28,45 +29,43 @@ pub(super) struct View<'a> {
     pub scroll: u16,
     pub busy: bool,
 }
-fn field(label: &str, value: impl ToString) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(format!("{label}: "), ui::muted()),
-        Span::raw(ui::inline(&value.to_string())),
-    ])
-}
-fn note(value: &str, style: Style) -> Line<'static> {
-    Line::styled(ui::inline(value), style)
-}
-fn status_style(kind: &str) -> Style {
+fn status_tone(kind: &str) -> Tone {
     match kind {
-        "unmerged" => ui::danger(),
-        "untracked" | "renamed" => ui::warning(),
-        _ => Style::default(),
+        "unmerged" => Tone::Error,
+        "untracked" | "renamed" => Tone::Attention,
+        _ => Tone::Neutral,
     }
 }
 fn details(view: &View<'_>, fallback: Option<&str>) -> Text<'static> {
     let mut lines = Vec::new();
-    if let Some(reason) = fallback {
-        lines.push(note(reason, ui::muted()));
-    }
+    let mut entry_facts = Vec::new();
     if view.visible.contains(&view.selected) {
         match view.metadata {
             Some(Metadata::Status(status)) => {
                 if let Some(entry) = status.entries.get(view.selected) {
-                    lines.push(note(&entry.kind, status_style(&entry.kind)));
-                    lines.push(field("XY", entry.xy.as_deref().unwrap_or("-")));
-                    lines.push(field("Path", format!("{:?}", entry.path)));
-                    lines.push(field("Original path", format!("{:?}", entry.original_path)));
+                    lines.push(field("Path", &format!("{:?}", entry.path), Tone::Neutral));
+                    lines.push(field("Status", &entry.kind, status_tone(&entry.kind)));
+                    if entry.original_path.is_some() {
+                        lines.push(field(
+                            "Original path",
+                            &format!("{:?}", entry.original_path),
+                            Tone::Neutral,
+                        ));
+                    }
+                    if let Some(xy) = &entry.xy {
+                        entry_facts.push(field("XY", xy, Tone::Neutral));
+                    }
                 }
             }
             Some(Metadata::Diff(diff)) => {
                 if let Some(entry) = diff.entries.get(view.selected) {
-                    lines.push(field("Change", &entry.change));
-                    lines.push(field(
+                    lines.push(field("Path", &format!("{:?}", entry.path), Tone::Neutral));
+                    lines.push(field("Change", &entry.change, Tone::Neutral));
+                    entry_facts.push(field(
                         "Modes",
-                        format!("{} -> {}", entry.old_mode, entry.new_mode),
+                        &format!("{} -> {}", entry.old_mode, entry.new_mode),
+                        Tone::Neutral,
                     ));
-                    lines.push(field("Path", format!("{:?}", entry.path)));
                 }
             }
             None => {}
@@ -78,9 +77,18 @@ fn details(view: &View<'_>, fallback: Option<&str>) -> Text<'static> {
             Some(_) => "No displayed entry selected. Clear the filter or refresh.",
         }));
     }
+    if let Some(reason) = fallback {
+        lines.push(Line::styled(ui::inline(reason), Tone::Attention.style()));
+    }
+    lines.push(Line::raw("No staging, commits, network or live-file writes. Untracked contents are not included in diffs."));
     lines.push(Line::default());
-    lines.push(Line::styled("Git scope | read-only", ui::heading()));
-    lines.push(field("Git-only root", format!("{:?}", view.root)));
+    lines.push(section("Git scope | read-only"));
+    lines.push(field("Comparison", view.comparison.label(), Tone::Neutral));
+    lines.push(field(
+        "Git-only root",
+        &format!("{:?}", view.root),
+        Tone::Neutral,
+    ));
     lines.push(field(
         "Selection",
         if view.follows_files {
@@ -88,32 +96,37 @@ fn details(view: &View<'_>, fallback: Option<&str>) -> Text<'static> {
         } else {
             "independent session choice"
         },
+        Tone::Neutral,
     ));
-    lines.push(field("Comparison", view.comparison.label()));
+    lines.extend(entry_facts);
     if let Some(metadata) = view.metadata {
-        lines.push(field("Entries", metadata.len()));
+        lines.push(field("Entries", &metadata.len().to_string(), Tone::Neutral));
         match metadata {
             Metadata::Status(status) => {
-                lines.push(Line::default());
-                lines.push(Line::styled("Branch headers", ui::heading()));
-                for header in &status.branch {
-                    lines.push(note(header, Style::default()));
-                }
-                if status.branch.is_empty() {
-                    lines.push(Line::raw("No branch headers reported."));
+                if !status.branch.is_empty() {
+                    lines.push(Line::default());
+                    lines.push(section("Branch headers"));
+                    lines.extend(
+                        status
+                            .branch
+                            .iter()
+                            .map(|header| Line::raw(ui::inline(header))),
+                    );
                 }
             }
             Metadata::Diff(diff) => {
-                lines.push(field("Staged", diff.staged));
+                lines.push(field(
+                    "Staged",
+                    if diff.staged { "Yes" } else { "No" },
+                    Tone::Neutral,
+                ));
             }
         }
     } else {
-        lines.push(field("Entries", "Unknown (summary unavailable/not loaded)"));
+        lines.push(field("Entries", "Unknown", Tone::Neutral));
     }
     lines.push(Line::default());
-    lines.push(Line::styled("Details", ui::heading()));
-    lines.push(Line::raw("Git requires a trusted executable and exact non-bare root; no manifest or registration required."));
-    lines.push(Line::raw("No staging, commits, network or live-file writes. Untracked contents are not included in diffs."));
+    lines.push(Line::raw("Git needs a trusted executable and an exact non-bare root. No manifest or registration needed."));
     Text::from(lines)
 }
 fn filter(frame: &mut Frame, area: Rect, view: &View<'_>) {
@@ -261,7 +274,7 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
                 Metadata::Status(status) => status.entries.get(index).map(|entry| {
                     [
                         Cell::from(ui::inline(&entry.path)),
-                        Cell::from(ui::inline(&entry.kind)).style(status_style(&entry.kind)),
+                        Cell::from(ui::inline(&entry.kind)).style(status_tone(&entry.kind).style()),
                         Cell::from(ui::inline(entry.xy.as_deref().unwrap_or("-"))),
                     ]
                 }),

@@ -12,6 +12,8 @@ use ratatui::{
 };
 use std::path::PathBuf;
 use ui::collection::{Collection, Header, RowTargets};
+use ui::design::Tone;
+use ui::reader::field;
 
 pub fn draw(
     frame: &mut Frame,
@@ -34,14 +36,15 @@ pub fn draw(
     }
     let details = |frame: &mut Frame, area, focused| {
         let lines = vec![
-            ui::metadata(
+            field(
                 "Saved ignored path",
                 paths
                     .get(selected)
                     .and_then(|p| p.to_str())
                     .unwrap_or("No selection"),
+                Tone::Neutral,
             ),
-            Line::raw("Parent rules and safety limits still apply."),
+            Line::raw("Unignore opens a review. Parent rules and safety limits still apply."),
         ];
         ui::reader::Reader::new(&app.hits)
             .with_wheel(Wheel::Overlay)
@@ -77,7 +80,14 @@ pub fn draw(
     let Some(list) = workspace.queue else { return };
     if paths.is_empty() {
         let block = ui::pane("Ignored paths", true);
-        frame.render_widget(Paragraph::new("No ignored paths.").block(block), list);
+        let inner = block.inner(list);
+        frame.render_widget(block, list);
+        ui::text_view(
+            frame,
+            inner,
+            "No ignored paths. Ignore a path in Discover.".into(),
+            0,
+        );
         return;
     }
     let collection = Collection::new([Constraint::Percentage(100)], Header::None)
