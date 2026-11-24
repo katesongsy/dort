@@ -101,7 +101,8 @@ fn scroll(app: &mut App, code: KeyCode) {
         .with_end()
         .apply(&mut app.details_scroll, code);
 }
-pub fn key(app: &mut App, code: KeyCode) -> Option<Option<Task>> {
+pub fn key(app: &mut App, key: KeyEvent) -> Option<Option<Task>> {
+    let code = key.code;
     let state = &mut app.tools_view.declared;
     if state.result_open {
         match code {
@@ -145,7 +146,7 @@ pub fn key(app: &mut App, code: KeyCode) -> Option<Option<Task>> {
     if state.check_preview.is_some() || state.install_preview.is_some() {
         match code {
             KeyCode::Esc => state.clear_reviews(),
-            KeyCode::Enter if state.approval(app.dry_run).allowed() => {
+            _ if state.approval(app.dry_run).accepts(key) => {
                 if let Some(preview) = state.check_preview.take() {
                     return Some(Some(Task::ToolsCheck(Box::new(preview.approve()))));
                 }

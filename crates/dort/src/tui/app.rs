@@ -1,5 +1,6 @@
 use super::{
     actions::{Data, Output, Pending, Task},
+    components::approval::Approval,
     input::Target,
     shell::{Action, Form, Intent, Overlay, ProfilePicker, Shell},
 };
@@ -463,7 +464,7 @@ impl App {
         }
         if self.confirmation.is_some() {
             let code = match self.hits.target(event.column, event.row) {
-                Some(Target::ConfirmAction) => KeyCode::Enter,
+                Some(Target::ConfirmAction) => return self.key(Approval::event(), width, height),
                 Some(Target::CancelConfirmation | Target::DismissDialog) => KeyCode::Esc,
                 _ => return None,
             };
@@ -586,17 +587,7 @@ impl App {
                 self.go_place(place)
             }
             Target::Feedback(control) => self.feedback(control, width, height),
-            Target::Continue => {
-                if self.preview.is_some() {
-                    self.key(
-                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-                        width,
-                        height,
-                    )
-                } else {
-                    None
-                }
-            }
+            Target::Continue => self.action_key(Approval::event(), width, height),
             Target::PreviewRow(index) => {
                 if let Some(preview) = &mut self.preview
                     && preview.pending.review_len().is_some_and(|len| index < len)
@@ -1099,6 +1090,7 @@ impl App {
                     self.show_result = false;
                     self.details_scroll = 0;
                 } else if self.preview.is_some() {
+                    self.confirmation = None;
                     self.preview = None;
                 } else if self.shell.overlay.is_some() {
                     self.shell.back();
@@ -1277,28 +1269,10 @@ impl App {
             self.details_scroll = 0;
         }
         if self.confirmation.is_some() {
-            if self
-                .preview
-                .as_ref()
-                .is_some_and(|p| matches!(p.pending, Pending::Batch(_)))
-            {
-                return self.batch_confirm_key(key);
-            }
             return self.confirm_key(key);
         }
-        let approve = key.code == KeyCode::Enter && self.preview_approval().allowed();
-        if approve && self.preview.as_ref().is_some_and(|p| p.pending.adoption()) {
-            let preview = self.preview.take().expect("review retained");
-            return match preview.pending.approve(None) {
-                Ok(approved) => {
-                    self.return_to_discover = true;
-                    Some(Task::Execute(approved))
-                }
-                Err(error) => {
-                    self.status = super::actions::diagnostic(&error).into();
-                    None
-                }
-            };
+        if self.preview_approval().accepts(key) {
+            return self.approve_preview();
         }
         if let Some(preview) = &mut self.preview {
             let file_review = preview.pending.review_len().is_some();
@@ -1356,12 +1330,6 @@ impl App {
                 }
                 KeyCode::Right => preview.horizontal = preview.horizontal.saturating_add(8),
                 KeyCode::Left => preview.horizontal = preview.horizontal.saturating_sub(8),
-                KeyCode::Enter if approve => {
-                    return self.approve_preview();
-                }
-                KeyCode::Enter => {
-                    self.status = "Approval disabled: blocked preview or --dry-run.".into()
-                }
                 _ => (),
             }
             if let Some(preview) = &mut self.preview {
@@ -1428,7 +1396,7 @@ impl App {
         }
         if self.tab == Tab::Tools
             && self.tools_view.landing()
-            && let Some(task) = super::declared_tools::key(self, key.code)
+            && let Some(task) = super::declared_tools::key(self, key)
         {
             return task;
         }
@@ -2768,65 +2736,35 @@ impl App {
             _ => vec![],
         }
     }
-    fn batch_confirm_key(&mut self, key: KeyEvent) -> Option<Task> {
-        if key.code != KeyCode::Enter {
-            return self.confirm_key(key);
-        }
-        let acks = self.batch_removal_ids();
-        let Pending::Batch(plan) = self.preview.take()?.pending else {
-            return None;
-        };
-        self.confirmation = None;
-        let approval = if plan.inputs.action == dort_core::batch::Action::Remove {
-            dort_core::batch::Approval::from_removal_plan(
-                *plan,
-                dort_core::batch::RemovalAcknowledgements::confirm(acks),
-            )
-        } else {
-            dort_core::batch::Approval::from_plan(*plan)
-        };
-        match approval {
-            Ok(a) => Some(Task::Execute(super::actions::Approved::Batch(Box::new(a)))),
-            Err(error) => {
-                self.error = Some(format!(
-                    "Approval refused: {}",
-                    super::actions::diagnostic(&error)
-                ));
-                self.retry = None;
-                self.failure = None;
-                self.failed_write = false;
-                self.status = "Approval refused; a fresh review is required.".into();
-                None
-            }
-        }
-    }
-    pub(super) fn preview_approval(&self) -> super::components::approval::Approval {
-        super::components::approval::Approval::new(
+    pub(super) fn preview_approval(&self) -> Approval {
+        Approval::new(
             self.dry_run,
             self.preview.as_ref().is_none_or(|p| p.pending.blocked()),
         )
     }
     fn approve_preview(&mut self) -> Option<Task> {
-        if !self.preview_approval().allowed() {
-            return None;
-        }
-        if self
-            .preview
-            .as_ref()
-            .is_some_and(|p| matches!(p.pending, Pending::Batch(_)))
-        {
-            return self.batch_confirm_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        }
-        let ack = self
-            .preview
-            .as_ref()?
-            .pending
-            .removal_id()
-            .map(str::to_owned);
+        let removal_ids = self.batch_removal_ids();
         let pending = self.preview.take()?.pending;
+        let adopting = pending.adoption();
         self.confirmation = None;
-        match pending.approve(ack.as_deref()) {
-            Ok(approval) => Some(Task::Execute(approval)),
+        let approval = match pending {
+            Pending::Batch(plan) if plan.inputs.action == dort_core::batch::Action::Remove => {
+                dort_core::batch::Approval::from_removal_plan(
+                    *plan,
+                    dort_core::batch::RemovalAcknowledgements::confirm(removal_ids),
+                )
+                .map(|approval| super::actions::Approved::Batch(Box::new(approval)))
+            }
+            pending => {
+                let id = pending.removal_id().map(str::to_owned);
+                pending.approve(id.as_deref())
+            }
+        };
+        match approval {
+            Ok(approval) => {
+                self.return_to_discover = adopting;
+                Some(Task::Execute(approval))
+            }
             Err(error) => {
                 self.error = Some(format!(
                     "Approval refused: {}",
@@ -2841,9 +2779,15 @@ impl App {
         }
     }
     fn confirm_key(&mut self, key: KeyEvent) -> Option<Task> {
+        if self.preview_approval().accepts(key) {
+            return self.approve_preview();
+        }
         let confirmation = self.confirmation.as_mut()?;
         match key.code {
-            KeyCode::Esc => self.confirmation = None,
+            KeyCode::Esc => {
+                self.confirmation = None;
+                self.preview = None;
+            }
             KeyCode::PageDown => {
                 confirmation.prompt_scroll = confirmation.prompt_scroll.saturating_add(4)
             }
@@ -2851,7 +2795,6 @@ impl App {
                 confirmation.prompt_scroll = confirmation.prompt_scroll.saturating_sub(4)
             }
             KeyCode::Home => confirmation.prompt_scroll = 0,
-            KeyCode::Enter => return self.approve_preview(),
             _ => (),
         }
         None

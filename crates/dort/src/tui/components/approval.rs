@@ -1,6 +1,6 @@
 use super::ActionButton;
 use crate::tui::input::{Hits, Target};
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 #[derive(Clone, Copy)]
 pub struct Approval {
@@ -16,21 +16,30 @@ impl Approval {
         !self.dry_run && !self.blocked
     }
 
+    pub const KEY: &'static str = "y";
+
+    pub fn event() -> KeyEvent {
+        KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)
+    }
+
+    pub fn accepts(self, key: KeyEvent) -> bool {
+        self.allowed()
+            && key.code == Self::event().code
+            && key.modifiers == KeyModifiers::NONE
+            && key.kind == KeyEventKind::Press
+    }
+
     pub fn present(self, hits: &Hits, label: &'static str, target: Target) {
         if self.allowed() {
             hits.present(ActionButton {
                 label,
-                key: "Enter",
+                key: Self::KEY,
                 target,
             });
         }
     }
 
     pub fn present_key(self, hits: &Hits, label: &'static str) {
-        self.present(
-            hits,
-            label,
-            Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-        );
+        self.present(hits, label, Target::Continue);
     }
 }

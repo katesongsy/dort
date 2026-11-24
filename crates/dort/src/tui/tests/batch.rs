@@ -153,7 +153,7 @@ fn click(app: &mut App, label: &str, offset: u16) -> Option<Task> {
     )
 }
 fn approve(app: &mut App) -> Task {
-    key(app, KeyCode::Enter).expect("one explicit combined approval")
+    key(app, KeyCode::Char('y')).expect("one explicit combined approval")
 }
 #[test]
 fn separate_item_form_retains_edits_and_only_returns_to_combined_review() {
@@ -200,7 +200,7 @@ fn separate_item_form_retains_edits_and_only_returns_to_combined_review() {
         app.batch_editor.as_ref().unwrap().drafts[0].id,
         "retained-on-escape"
     );
-    let task = key(&mut app, KeyCode::Enter).expect("default combined review remains quick");
+    let task = key(&mut app, KeyCode::Char('y')).expect("default combined review remains quick");
     let Task::Batch(dort_core::batch::Request::Adopt(mappings)) = task else {
         panic!("combined adoption only")
     };
@@ -607,7 +607,7 @@ fn blocked_item_never_silently_skips_and_dry_run_cannot_approve_batch() {
     assert!(app.preview.as_ref().unwrap().pending.blocked());
     assert_eq!(app.preview.as_ref().unwrap().pending.review_len(), Some(2));
     for size in [(48, 14), (140, 24)] {
-        assert!(!render(&app, size.0, size.1).contains("Enter Confirm"));
+        assert!(!render(&app, size.0, size.1).contains("y Confirm"));
     }
     key(&mut app, KeyCode::Enter);
     assert!(app.confirmation.is_none());
@@ -619,7 +619,7 @@ fn blocked_item_never_silently_skips_and_dry_run_cannot_approve_batch() {
     f.run(&mut dry, task);
     assert!(!dry.preview.as_ref().unwrap().pending.blocked());
     for size in [(48, 14), (140, 24)] {
-        assert!(!render(&dry, size.0, size.1).contains("Enter Confirm"));
+        assert!(!render(&dry, size.0, size.1).contains("y Confirm"));
     }
     key(&mut dry, KeyCode::Enter);
     text(&mut dry, "yes");

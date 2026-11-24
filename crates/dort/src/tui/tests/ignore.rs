@@ -47,7 +47,7 @@ fn action(app: &mut App, query: &str) -> Task {
         .expect("primary action task")
 }
 fn approve(app: &mut App) -> Task {
-    key(app, KeyCode::Enter).expect("one explicit preview approval")
+    key(app, KeyCode::Char('y')).expect("one explicit preview approval")
 }
 #[test]
 fn ignore_folder_confirm_refresh_manage_and_unignore_are_complete_tui_workflows() {

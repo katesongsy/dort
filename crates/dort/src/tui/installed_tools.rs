@@ -79,7 +79,7 @@ impl State {
         if self.preview.is_some() {
             match key.code {
                 KeyCode::Esc => self.clear_review(),
-                KeyCode::Enter if self.approval(dry_run).allowed() => {
+                _ if self.approval(dry_run).accepts(key) => {
                     self.current = None;
                     return self
                         .preview

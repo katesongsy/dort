@@ -278,7 +278,11 @@ pub(super) fn strip_actions(
         });
     }
     // Controllers supply relevance order; navigation keeps reserved trailing positions.
-    available.sort_by_key(|a| usize::from(a.key != "Enter"));
+    available.sort_by_key(|a| {
+        usize::from(
+            !matches!(a.target, Target::Continue | Target::ConfirmAction) && a.key != "Enter",
+        )
+    });
     let mut anchors: Vec<_> = available
         .iter()
         .copied()
@@ -317,7 +321,7 @@ pub(super) fn strip_actions(
         let enabled =
             !matches!(action.target, Target::Action(value) if app.action_reason(value).is_some());
         if !action.key.is_empty()
-            && !(app.text_entry() && (action.key.chars().count() == 1 || action.key == "Space"))
+            && !(app.key_text_entry() && (action.key.chars().count() == 1 || action.key == "Space"))
             && enabled
             && !overflowed
             && shown.len() + anchors.len() < 8
@@ -362,7 +366,8 @@ pub(super) fn strip_actions(
                 a.label
             },
             target: a.target,
-            primary: a.key == "Enter",
+            primary: a.key == "Enter"
+                || matches!(a.target, Target::Continue | Target::ConfirmAction),
         })
         .collect();
     if !hidden.is_empty() {

@@ -208,11 +208,17 @@ impl Topic {
             Self::Preview => &[
                 ("PgUp/PgDown", "Read all review rows"),
                 ("F3", "Full report"),
-                ("Enter", "Review or approve"),
+                (
+                    super::components::approval::Approval::KEY,
+                    "Approve ready review",
+                ),
                 ("Esc", "Back without execution"),
             ],
             Self::Confirmation => &[
-                ("Enter", "Confirm the displayed changes"),
+                (
+                    super::components::approval::Approval::KEY,
+                    "Confirm the displayed changes",
+                ),
                 ("Esc", "Cancel"),
             ],
             Self::Task => &[

@@ -169,6 +169,10 @@ impl State {
         self.mode = Mode::LoadingClose;
         Some(Task::ToolClosePrepare(request.clone()))
     }
+    fn approval(&self, dry_run: bool) -> ui::approval::Approval {
+        ui::approval::Approval::new(dry_run, self.close_preview.is_none())
+    }
+
     pub fn key(&mut self, key: KeyEvent, dry_run: bool) -> Option<Outcome> {
         if self.mode == Mode::CloseInputs {
             let n = self.close_field_count();
@@ -196,7 +200,7 @@ impl State {
         if self.mode == Mode::CloseReview {
             match key.code {
                 KeyCode::Esc => self.clear_approvals(),
-                KeyCode::Enter if ui::approval::Approval::new(dry_run, false).allowed() => {
+                _ if self.approval(dry_run).accepts(key) => {
                     return self
                         .close_preview
                         .take()
@@ -386,7 +390,7 @@ impl State {
                     self.scroll,
                     false,
                 );
-            ui::approval::Approval::new(dry_run, false).present_key(hits, "Confirm close");
+            self.approval(dry_run).present_key(hits, "Confirm close");
             action("Cancel", "Esc", KeyCode::Esc);
             return;
         }
