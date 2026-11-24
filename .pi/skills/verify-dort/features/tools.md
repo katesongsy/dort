@@ -58,7 +58,7 @@ python3 .pi/skills/verify-dort/drive.py tui my-proof --label package-manager --s
 
 The selection changes the draft. The manifest stays the same.
 
-A declaration appears without a package manager. To check list navigation, seed more rows than fit on screen. On a wide terminal, select a row and confirm its details appear on the right. Press End and then Up. The highlight should move up while the last row stays visible. Use Ctrl-B and Ctrl-F to page in both directions.
+A declaration appears without a package manager. To check list navigation, seed more rows than fit on screen. On a wide terminal, the list and details share the screen and `Tab` moves focus between them. A guarded review shows `y` only after its effects reach the bottom of the pane; `Enter` opens a review and never approves. Select a row and confirm its details appear on the right. Press End and then Up. The highlight should move up while the last row stays visible. Use Ctrl-B and Ctrl-F to page in both directions.
 
 ## Observable end state
 
