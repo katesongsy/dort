@@ -2,6 +2,7 @@
 use super::{
     components as ui,
     input::{Target, Wheel},
+    workspace::{Region, Scope, Workspace},
 };
 use ratatui::{
     Frame,
@@ -31,7 +32,7 @@ pub fn draw(
             Target::Key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE)),
         );
     }
-    let details = |frame: &mut Frame, area| {
+    let details = |frame: &mut Frame, area, focused| {
         let lines = vec![
             ui::metadata(
                 "Saved ignored path",
@@ -50,35 +51,37 @@ pub fn draw(
                 "Ignored path details",
                 lines.into(),
                 app.shell.scroll,
-                false,
+                focused,
             );
     };
-    if app.shell.picker_details {
-        details(frame, area);
-        app.presented("Back", "Esc", Target::Back);
-        return;
+    let [heading, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).areas(area);
+    frame.render_widget(
+        Paragraph::new("Local HOME discovery preferences").style(ui::muted()),
+        heading,
+    );
+    let active = Region::from_details(app.shell.picker_details);
+    let workspace = Workspace::new(Scope::Ignored, body, active, paths.get(selected).is_some());
+    workspace.bind(&app.hits);
+    if let Some(pane) = workspace.details {
+        details(frame, pane, active == Region::Details);
     }
-    if paths.get(selected).is_some() {
+    if active == Region::Details {
+        app.presented("Back", "Esc", Target::Back);
+    } else if paths.get(selected).is_some() {
         app.presented(
             "Unignore",
             "Enter",
             Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         );
     }
-    let wide = ui::reader::wide_details(area, 1);
-    let [heading, body, footer] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(3),
-        Constraint::Length(if wide { 0 } else { 2 }),
-    ])
-    .areas(area);
-    let (list, pane) = ui::reader::detail_panes(body, ui::reader::wide_details(body, 0));
-    frame.render_widget(
-        Paragraph::new("Local HOME discovery preferences").style(ui::muted()),
-        heading,
-    );
+    let Some(list) = workspace.queue else { return };
+    if paths.is_empty() {
+        let block = ui::pane("Ignored paths", true);
+        frame.render_widget(Paragraph::new("No ignored paths.").block(block), list);
+        return;
+    }
     let collection = Collection::new([Constraint::Percentage(100)], Header::None)
-        .titled("Ignored exact paths and descendants", true);
+        .titled("Ignored paths", active == Region::Queue);
     let current = paths.get(selected).map(|_| selected);
     let window = collection.window(list, &app.shell.ignored_viewport, paths.len(), current);
     let rows = window.range.map(|index| {
@@ -99,25 +102,5 @@ pub fn draw(
             wheel: Some(Wheel::Choices),
             target: |index| Target::Picker(index, false),
         },
-    );
-    if let Some(pane) = pane {
-        details(frame, pane);
-        return;
-    }
-    let detail = paths
-        .get(selected)
-        .map(|p| {
-            format!(
-                "Selected: {}",
-                ui::inline(p.to_str().expect("validated ignore path"))
-            )
-        })
-        .unwrap_or_else(|| "No ignored paths.".into());
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::raw(detail),
-            Line::raw("Ancestor rules and safety exclusions still apply."),
-        ]),
-        footer,
     );
 }

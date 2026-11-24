@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     crossterm::event::KeyCode,
-    layout::{Constraint, Layout, Rect},
+    layout::Rect,
     text::{Line, Span, Text},
     widgets::Paragraph,
 };
@@ -108,21 +108,6 @@ pub fn review_text(body: &str) -> Text<'static> {
             }
         });
     Text::from(lines.collect::<Vec<_>>())
-}
-
-pub fn wide_details(area: Rect, header_rows: u16) -> bool {
-    area.width >= 110 && area.height.saturating_sub(header_rows) >= 14
-}
-
-pub fn detail_panes(area: Rect, wide: bool) -> (Rect, Option<Rect>) {
-    if !wide {
-        return (area, None);
-    }
-    let [list, details] =
-        Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
-            .spacing(2)
-            .areas(area);
-    (list, Some(details))
 }
 
 pub struct Reader<'a> {

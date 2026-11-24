@@ -888,6 +888,7 @@ impl App {
                     }
                     _ => return None,
                 }
+                self.shell.scroll = 0;
                 if activate {
                     self.key(KeyEvent::new(key, modifiers), width, height)
                 } else {
@@ -934,8 +935,15 @@ impl App {
         }
     }
     fn workspace_region(&self, scope: Scope) -> Option<Region> {
-        if self.shell.overlay.is_some() {
-            return None;
+        if let Some(overlay) = &self.shell.overlay {
+            return match (scope, overlay) {
+                (Scope::Ignored, Overlay::Ignored { .. })
+                | (Scope::Repositories, Overlay::Repositories { .. })
+                | (Scope::Profiles, Overlay::Profiles(_)) => {
+                    Some(Region::from_details(self.shell.picker_details))
+                }
+                _ => None,
+            };
         }
         match scope {
             Scope::Recovery if self.tab == Tab::Recovery => Some(self.history_region),
@@ -984,6 +992,9 @@ impl App {
         if self.workspace_region(scope).is_some() {
             match scope {
                 Scope::Recovery => self.history_region = region,
+                Scope::Ignored | Scope::Repositories | Scope::Profiles => {
+                    self.shell.picker_details = region == Region::Details
+                }
                 Scope::Files { discovering } => {
                     self.inventory.details = region == Region::Details;
                     self.content.focused =

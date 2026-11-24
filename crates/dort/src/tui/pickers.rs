@@ -4,10 +4,11 @@ use super::{
     components as ui,
     input::{Target, Wheel},
     shell::{Overlay, ProfilePicker},
+    workspace::{Region, Scope, Workspace},
 };
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Rect},
     text::{Line, Text},
     widgets::Row,
 };
@@ -156,17 +157,19 @@ pub fn repository_details(app: &App, selected: usize) -> Text<'static> {
     Text::from(lines)
 }
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
-    let (title, details) = match overlay {
+    let (scope, title, details) = match overlay {
         Overlay::Profiles(picker) => (
+            Scope::Profiles,
             if picker.standalone {
-                "Profiles | standalone manifest"
+                "Standalone profiles"
             } else {
-                "Profiles | repository scope"
+                "Repository profiles"
             },
             profile_details(picker),
         ),
         Overlay::Repositories { selected } => (
-            "Choose repository | Session only",
+            Scope::Repositories,
+            "Repository choices",
             repository_details(app, *selected),
         ),
         _ => unreachable!("only typed pickers use this renderer"),
@@ -216,40 +219,25 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
             feedback: None,
         },
     );
-    if app.shell.picker_details {
-        app.shell
-            .page_rows
-            .set(content.height.saturating_sub(2).max(1));
+    let active = Region::from_details(app.shell.picker_details);
+    let workspace = Workspace::new(scope, content, active, true);
+    workspace.bind(&app.hits);
+    if let Some(pane) = workspace.details {
         ui::reader::Reader::new(&app.hits)
             .with_wheel(Wheel::Overlay)
             .report(
                 frame,
-                content,
+                pane,
                 "Selection details",
                 details,
                 app.shell.scroll,
-                false,
+                active == Region::Details,
             );
-        return;
     }
-    let detail_height = if content.height >= 12 { 6 } else { 0 };
-    let parts =
-        Layout::vertical([Constraint::Min(4), Constraint::Length(detail_height)]).split(content);
+    let Some(list) = workspace.queue else { return };
     app.shell
         .page_rows
-        .set(parts[0].height.saturating_sub(2).max(1));
-    if detail_height > 0 {
-        ui::reader::Reader::new(&app.hits)
-            .with_wheel(Wheel::Overlay)
-            .report(
-                frame,
-                parts[1],
-                "Selection details",
-                details,
-                app.shell.scroll,
-                false,
-            );
-    }
+        .set(list.height.saturating_sub(2).max(1));
     match overlay {
         Overlay::Profiles(picker) => {
             let choices = &picker.report.choices;
@@ -262,7 +250,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
                     } else {
                         "[ ]".into()
                     },
-                    ui::clip(name, parts[0].width.saturating_sub(22)),
+                    ui::clip(name, list.width.saturating_sub(22)),
                     if mandatory {
                         "Mandatory".into()
                     } else {
@@ -279,10 +267,10 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
                 ],
                 Header::Quiet(["ON", "PROFILE", "MEMBERSHIP"]),
             )
-            .titled(title, selected.is_some())
+            .titled(title, active == Region::Queue)
             .draw(
                 frame,
-                parts[0],
+                list,
                 rows.enumerate(),
                 Selection::at(selected),
                 RowTargets {
@@ -306,7 +294,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
                 Row::new([
                     ui::clip(
                         p.to_str().unwrap_or("Unavailable"),
-                        parts[0].width.saturating_sub(12),
+                        list.width.saturating_sub(12),
                     ),
                     "Known".into(),
                 ])
@@ -315,10 +303,10 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
                 [Constraint::Min(12), Constraint::Length(6)],
                 Header::Quiet(["REPOSITORY", "CHOICE"]),
             )
-            .titled(title, true)
+            .titled(title, active == Region::Queue)
             .draw(
                 frame,
-                parts[0],
+                list,
                 rows.into_iter().enumerate(),
                 Selection::at(Some((*selected).min(roots.len() + 1))),
                 RowTargets {

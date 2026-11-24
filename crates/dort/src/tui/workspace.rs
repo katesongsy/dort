@@ -34,6 +34,9 @@ pub enum Scope {
     DeclaredTools,
     InstalledTools,
     InstallAttempts,
+    Ignored,
+    Repositories,
+    Profiles,
 }
 
 #[derive(Clone, Copy)]

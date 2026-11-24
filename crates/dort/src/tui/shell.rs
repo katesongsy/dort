@@ -406,12 +406,10 @@ impl Shell {
                             None
                         }
                     }
-                    KeyCode::Down | KeyCode::Tab => {
+                    KeyCode::Down => {
                         picker.selected = (picker.selected + 1).min(count.saturating_sub(1))
                     }
-                    KeyCode::Up | KeyCode::BackTab => {
-                        picker.selected = picker.selected.saturating_sub(1)
-                    }
+                    KeyCode::Up => picker.selected = picker.selected.saturating_sub(1),
                     KeyCode::PageDown => {
                         picker.selected = (picker.selected + usize::from(self.page_rows.get()))
                             .min(count.saturating_sub(1))
@@ -501,10 +499,8 @@ impl Shell {
             }
             Overlay::Repositories { selected } => match key.code {
                 KeyCode::Esc => self.back(),
-                KeyCode::Down | KeyCode::Tab => {
-                    *selected = selected.saturating_add(1).min(known_count + 1)
-                }
-                KeyCode::Up | KeyCode::BackTab => *selected = selected.saturating_sub(1),
+                KeyCode::Down => *selected = selected.saturating_add(1).min(known_count + 1),
+                KeyCode::Up => *selected = selected.saturating_sub(1),
                 KeyCode::PageDown => {
                     *selected = (*selected + usize::from(self.page_rows.get())).min(known_count + 1)
                 }
