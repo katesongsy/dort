@@ -132,7 +132,7 @@ fn list_enter_opens_details_and_only_explicit_review_approves_checks_once() {
         assert!(!s.contains("Snapshot") && !s.contains("\\u{b7}"));
     }
     assert!(f.calls().is_empty());
-    let task = key(&mut app, KeyCode::Enter, 80, 24).unwrap();
+    let task = key(&mut app, KeyCode::Char('y'), 80, 24).unwrap();
     assert!(matches!(task, Task::ToolsCheck(_)));
     app.start(false);
     assert!(key(&mut app, KeyCode::Enter, 80, 24).is_none());

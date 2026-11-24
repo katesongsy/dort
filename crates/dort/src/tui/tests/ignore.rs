@@ -305,7 +305,7 @@ fn ignore_preview_cancel_dry_run_and_small_layout_cannot_write() {
     let mut app = f.app(true);
     let task = action(&mut app, "Ignore selected");
     f.finish(&mut app, task);
-    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(key(&mut app, KeyCode::Char('y')).is_none());
     assert!(app.confirmation.is_none());
     key(&mut app, KeyCode::Esc);
     assert!(!f.host.config_dir.exists() && !f.host.state_dir.exists());
@@ -313,12 +313,16 @@ fn ignore_preview_cancel_dry_run_and_small_layout_cannot_write() {
     let task = action(&mut app, "Ignore selected");
     f.finish(&mut app, task);
     assert!(
-        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 47, 13)
-            .is_none()
+        app.key(
+            KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+            47,
+            13
+        )
+        .is_none()
     );
     assert!(app.confirmation.is_none());
-    key(&mut app, KeyCode::Char('y'));
-    assert!(app.preview.is_some() && app.confirmation.is_none()); // text is not an activation
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(app.preview.is_some() && app.confirmation.is_none());
     assert!(!f.host.config_dir.exists());
     key(&mut app, KeyCode::Esc);
     assert!(!f.host.config_dir.exists() && !f.host.state_dir.exists());

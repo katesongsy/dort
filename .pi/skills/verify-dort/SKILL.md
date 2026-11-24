@@ -74,6 +74,8 @@ python3 .pi/skills/verify-dort/drive.py tui my-proof --label managed \
 
 A failing `wait` still writes the frames it captured plus the error, so a broken attempt leaves a trace. Exit code and full terminal state are asserted after `q`: the alternate screen must be left and the original termios modes restored.
 
+For a guarded action, Enter can open the review but cannot approve it. Wait for its `y` action before sending `y` or clicking that footer action. Use Esc to cancel.
+
 The footer is the navigation truth, not the body prose. `drive.py` reuses `scripts/test-terminal.py`'s `Screen`/`Session`, which render the VT stream properly — raw byte matching misses labels that Ratatui does not re-emit.
 
 **Plain shell.** When a journey needs a side effect the two above do not cover, `eval "$(drive.py env my-proof)"` and use the real `dort` binary and the real filesystem. Still record evidence by hand into `$DORT_EVIDENCE`.

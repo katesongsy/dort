@@ -567,14 +567,14 @@ def run():
             assert not ignore_store.exists(), 'Help approved a preview'
             session.send(b'\x1b')
             session.wait(b'Ignore discovery path')
-            session.send(b'ye\x1bOP')
+            session.send(b'\r\r\x1bOP')
             session.wait(b'Keys in this context')
-            session.send(b's\r')
+            session.send(b'y\r')
             session.settle()
             assert not ignore_store.exists(), 'Help submitted confirmation input'
             session.send(b'\x1b')
             session.wait(b'Ignore discovery path')
-            session.send(b's')  # Printable text alone cannot approve.
+            session.send(b'Y')  # Only lowercase y can approve.
             session.send(b'\x1bOP')
             session.wait(b'Keys in this context')
             session.resize((13,47))
@@ -583,7 +583,7 @@ def run():
             session.wait(b'Keys in this context')
             session.send(b'\x1b')  # Help closes to preview; fresh confirmation required
             session.wait(b'Ignore discovery path')
-            session.send(b'\r')
+            session.send(b'y')
             session.wait(b'Filter files')
             session.send(b'q')
             session.finish()
@@ -601,8 +601,8 @@ def run():
             assert b'Enter' in session.screen.text().splitlines()[-1]
             session.send(b'\r')
             session.wait(b'Unignore discovery path')
-            session.wait(b'Confirm')
-            session.send(b'\r')
+            session.wait(b'y Confirm')
+            session.send(b'y')
             session.wait(b'Filter files')
             session.send(b'q')
             session.finish()
@@ -1027,8 +1027,8 @@ def run():
                     assert not created.exists(), "Preview created repository"
                 session.send(b"\r")  # retained draft -> fresh preview
                 session.settle()
-                session.wait(b"Confirm")
-                session.send(b"\r")
+                session.wait(b"y Confirm")
+                session.send(b"y")
                 session.wait(b"Operation result")
                 session.send(b"q")
                 session.finish()
@@ -1062,8 +1062,8 @@ def run():
             session.wait(b"loaded.")
             session.send(b"a")
             session.wait(b"Review effects before confirming")
-            session.wait(b"Confirm")
-            session.send(b"yes\x1b")
+            session.wait(b"y Confirm")
+            session.send(b"\r\r\x1by")
             session.settle()
             session.send(b"\x1b")
             session.settle()
@@ -1076,9 +1076,9 @@ def run():
             session.wait(b"loaded.")
             session.send(b"a")
             session.wait(b"Review effects before confirming")
-            session.send(b"\r")
+            session.send(b"\r\ry")
             session.settle()
-            assert b"Confirm" not in session.data, "Dry-run opened confirmation"
+            assert b"y Confirm" not in session.screen.text(), "Dry-run opened confirmation"
             session.send(b"q")
             session.finish()
         assert not target.exists() and not target.is_symlink() and not state.exists()
@@ -1088,15 +1088,20 @@ def run():
             session.wait(b"loaded.")
             session.send(b"a")
             session.wait(b"Review effects before confirming")
-            session.wait(b"Confirm")
-            session.send(b"\r")
+            session.wait(b"y Confirm")
+            session.send(b"\r\r")
+            session.settle()
+            session.click_label('PLANNED CHANGE')
+            session.settle()
+            assert not target.exists() and not state.exists(), 'Enter or a body click approved apply'
+            session.click_action('Confirm changes')
             deadline = time.monotonic() + TIMEOUT
             while not target.is_symlink() and time.monotonic() < deadline:
                 session.pump()
             assert target.is_symlink(), "Approved TUI apply did not publish the link"
             session.wait(b"Operation result")
             session.wait(b"File operation completed.")
-            session.send(b"q")
+            session.send(b"yyq")
             session.finish()
         assert target.resolve() == repo / "source"
         assert (repo / "source").read_text() == "ordinary settings\n"
@@ -1108,8 +1113,8 @@ def run():
             session.wait(b"loaded.")
             session.send(b"a")
             session.wait(b"Review effects before confirming")
-            session.wait(b"Confirm")
-            session.send(b"\r")
+            session.wait(b"y Confirm")
+            session.send(b"y")
             session.wait(b"Operation result")
             session.wait(b"Everything is up to date.")
             session.more_action('Refresh data')
@@ -1131,8 +1136,8 @@ def run():
                 session.wait(b"loaded.")
                 session.send(b"a")
                 session.wait(b"Review effects before confirming")
-                session.wait(b"Confirm")
-                session.send(b"\r")
+                session.wait(b"y Confirm")
+                session.send(b"y")
                 session.wait(b"Possible partial effects")
                 session.send(b"\x1b[6~" * 4)
                 session.settle()
@@ -1168,8 +1173,8 @@ def run():
             assert target.is_symlink(), "Preview/back performed rollback"
             session.send(b"b")
             session.wait(b"Roll back operation")
-            session.wait(b"Confirm")
-            session.send(b"\r")
+            session.wait(b"y Confirm")
+            session.send(b"y")
             session.wait(b"Operation result")
             assert not target.exists() and not target.is_symlink()
             # Return from the retained receipt before navigating.
@@ -1178,8 +1183,8 @@ def run():
             session.destination("Overview")
             session.send(b"a")
             session.wait(b"Review effects before confirming")
-            session.wait(b"Confirm")
-            session.send(b"\r")
+            session.wait(b"y Confirm")
+            session.send(b"y")
             session.wait(b"Operation result")
             session.send(b"q")
             session.finish()
@@ -1204,9 +1209,9 @@ def run():
             session.wait(b"Repository ID:")
             session.more_action('Rollback')  # Still opens a preview.
             session.wait(b"Roll back operation")
-            session.send(b"\r")
+            session.send(b"\r\ry")
             session.settle()
-            assert b"Confirm" not in session.data, "Dry-run Recovery opened approval"
+            assert b"y Confirm" not in session.screen.text(), "Dry-run Recovery opened approval"
             session.send(b"\x1b")
             session.wait(b"Operation details")
             session.send(b"q")
@@ -1255,7 +1260,7 @@ def run():
             session.settle()
             session.wait(b"No matches")
             session.send(b"a")
-            session.wait(b"Enter Confirm")
+            session.wait(b"y Confirm")
             session.wait(b"Filters do not narrow it.")
             session.send(b"\x1b")
             session.settle()
@@ -1271,13 +1276,13 @@ def run():
             session.send(b"m")
             session.edit_fields('TARGET')
             session.send(b"~/.q?config\tconfig\tfiles/config\r")  # Fields only; Enter previews.
-            session.wait(b"Enter Adopt all")
+            session.wait(b"y Adopt all")
             session.send(b"\x1b")
             session.settle()
             assert not candidate.is_symlink() and not (repo / "files/config").exists()
             session.send(b"\r")  # retained Review -> fresh preview
             session.settle()
-            session.send(b"\r")  # Adopt all: one explicit approval, no typed yes.
+            session.send(b"y")  # Adopt all: one explicit approval, no typed yes.
             session.wait(b"Enter Details")
             session.send(b"q")
             session.finish()
@@ -1293,10 +1298,10 @@ def run():
             session.more_action('Delete managed link: enter exact mapping ID')
             session.edit_fields('Exact ID')
             session.send(b"config\r")
-            session.wait(b"Enter Confirm")
+            session.wait(b"y Confirm")
             session.wait(b"config")
             assert candidate.is_symlink(), "Preview executed without activation"
-            session.send(b"\r")
+            session.send(b"y")
             session.wait(b"Operation result")
             session.send(b"q")
             session.finish()
@@ -1373,7 +1378,7 @@ def run():
             session.wait(b'Review all')
             session.click_label('Review all')
             session.wait(b'Exact marked set')
-            session.send(b'\r')  # Adopt all consumes the real combined preview once.
+            session.send(b'y')  # Adopt all consumes the real combined preview once.
             session.wait(b'Enter Details')
             assert all((targets / name).is_symlink() for name in ('only-a', 'only-b'))
             for name in ('only-a', 'only-b'):
@@ -1382,8 +1387,8 @@ def run():
             session.destination("Recovery")
             session.send(b'b')
             session.wait(b'Roll back operation')
-            session.wait(b'Confirm')
-            session.send(b'\r')
+            session.wait(b'y Confirm')
+            session.send(b'y')
             session.wait(b'Operation result')
             session.send(b'q')
             session.finish()
@@ -1404,8 +1409,8 @@ def run():
                 session.click_label('[ ] only-b')
                 session.send(b'/only-a\rA')  # Hidden only-b remains explicitly included.
                 session.wait(b'Exact marked set')
-                session.wait(b'Confirm')
-                session.send(b'\r')
+                session.wait(b'y Confirm')
+                session.send(b'y')
                 session.wait(b'Operation result')
                 assert all((targets / name).is_symlink() for name in ('only-a', 'only-b'))
                 assert not (targets / 'only-c').is_symlink()
@@ -1414,7 +1419,7 @@ def run():
                 session.settle()
                 session.send(operation.encode())
                 session.wait(b'Exact marked set')
-                session.wait(b'Confirm')
+                session.wait(b'y Confirm')
                 if operation == 'D':
                     session.wait(b'only-a')
                     session.wait(b'only-b')
@@ -1425,7 +1430,7 @@ def run():
                     session.wait(b'Exact marked set')
                     session.settle()
                     assert all((targets / name).is_symlink() for name in ('only-a', 'only-b')), 'Resize executed changes'
-                session.send(b'\r')
+                session.send(b'y')
                 session.wait(b'Batch file operation completed.')
                 session.send(b'q')
                 session.finish()
@@ -1447,9 +1452,9 @@ def run():
             session.wait(b'loaded.')
             session.destination('Files')
             session.send(b'a')
-            session.wait(b"Enter Confirm")
-            session.wait(b'Confirm')
-            session.send(b'\r')
+            session.wait(b"y Confirm")
+            session.wait(b'y Confirm')
+            session.send(b'y')
             session.wait(b'Operation result')
             session.press(b'\x1b', b'Dort / Files / Managed')
             session.press(b'l', b'bundle')
@@ -1457,9 +1462,9 @@ def run():
             session.press(b'l', b'only-a')
             session.press(b'j', '›     [ ] only-a'.encode())
             session.send(b' u')  # Mark A, then unmanage it.
-            session.wait(b"Enter Confirm")
-            session.wait(b'Confirm')
-            session.send(b'\r')
+            session.wait(b"y Confirm")
+            session.wait(b'y Confirm')
+            session.send(b'y')
             session.wait(b'File operation completed.')
             session.press(b'\x1b', b'0 marked (0 hidden)')
             session.press(b'\x1b[H', '› [v] .config'.encode())
@@ -1468,8 +1473,8 @@ def run():
             session.send(b' U')
             session.wait(b'Exact marked set')
             assert b'only-a' not in session.screen.text(), 'Completed Keep leaked into a later batch'
-            session.wait(b'Confirm')
-            session.send(b'\r')
+            session.wait(b'y Confirm')
+            session.send(b'y')
             session.wait(b'Batch file operation completed.')
             session.press(b'\x1b', b'0 marked (0 hidden)')
             session.send(b'q')

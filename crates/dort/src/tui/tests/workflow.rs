@@ -221,8 +221,8 @@ fn previews_cancellation_and_dry_run_never_create_state() {
     let mut app = App::new(false);
     app.complete(Ok(fixture.prepare(Request::Apply)));
     key(&mut app, KeyCode::Enter);
-    type_text(&mut app, "yes");
     key(&mut app, KeyCode::Esc);
+    assert!(key(&mut app, KeyCode::Char('y')).is_none());
     key(&mut app, KeyCode::Esc);
     assert!(app.preview.is_none());
     assert!(!fixture.host.state_dir.exists());
@@ -302,12 +302,16 @@ fn confirmation_snapshots_and_resize_guard() {
     assert!(screen.contains("Confirm"));
     assert!(screen.contains("Confirm") && !screen.contains("Type literal"));
     assert!(
-        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 40, 10)
-            .is_none()
+        app.key(
+            KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+            40,
+            10
+        )
+        .is_none()
     );
     assert!(app.confirmation.is_none());
     assert!(matches!(
-        key(&mut app, KeyCode::Enter),
+        key(&mut app, KeyCode::Char('y')),
         Some(Task::Execute(_))
     ));
     assert!(app.confirmation.is_none() && app.preview.is_none());
@@ -1383,7 +1387,7 @@ fn exact_id_forms_can_keep_or_delete_a_mapping_outside_the_display_filter() {
         let task = key(&mut app, KeyCode::Enter).unwrap();
         run_task(&mut app, &fixture, task);
         assert!(super::tests::render(&app, 80, 24).contains("Confirm"));
-        let task = key(&mut app, KeyCode::Enter).unwrap();
+        let task = key(&mut app, KeyCode::Char('y')).unwrap();
         let refresh = run_task(&mut app, &fixture, task).unwrap();
         run_task(&mut app, &fixture, refresh);
         assert_eq!(fixture.host.home.join(".editor").exists(), !remove);

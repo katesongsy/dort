@@ -200,7 +200,7 @@ fn separate_item_form_retains_edits_and_only_returns_to_combined_review() {
         app.batch_editor.as_ref().unwrap().drafts[0].id,
         "retained-on-escape"
     );
-    let task = key(&mut app, KeyCode::Char('y')).expect("default combined review remains quick");
+    let task = key(&mut app, KeyCode::Enter).expect("default combined review remains quick");
     let Task::Batch(dort_core::batch::Request::Adopt(mappings)) = task else {
         panic!("combined adoption only")
     };
@@ -451,7 +451,7 @@ fn selected_apply_keep_delete_use_one_review_bound_to_every_selected_id() {
             key(&mut app, KeyCode::Esc);
             assert!(app.preview.is_some());
         }
-        let task = key(&mut app, KeyCode::Enter).unwrap();
+        let task = key(&mut app, KeyCode::Char('y')).unwrap();
         assert!(app.confirmation.is_none());
         let refresh = f.run(&mut app, task).unwrap();
         f.run(&mut app, refresh);
