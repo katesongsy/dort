@@ -522,6 +522,7 @@ pub enum Task {
     History,
     Diagnostics,
     Git(super::git::Read),
+    GitPreview(super::git::PreviewRead),
     ToolsSettingsDetect {
         tool: dort_core::model::Tool,
         inputs: crate::services::inspection_defaults::Inputs,
@@ -569,7 +570,8 @@ pub enum Output {
         error: Option<String>,
     },
     Diagnostics(Diagnostics),
-    Git(super::git::Report),
+    Git(super::git::Metadata),
+    GitPreview(super::git::PreviewReport),
     ToolsSettingsDetected(String, crate::services::tools::Request),
     ToolsSettingsSaved(crate::services::tools::Request),
     Data(Data),
@@ -720,6 +722,7 @@ pub fn perform_scoped_with_install_progress(
                 .map_err(|e| diagnostic(&e)),
         })),
         Task::Git(read) => read.perform().map(Output::Git),
+        Task::GitPreview(read) => Ok(Output::GitPreview(read.perform())),
         Task::Refresh => load_scoped(host, repository.as_deref(), requested).map(Output::Data),
         Task::Check {
             manifest,

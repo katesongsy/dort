@@ -18,9 +18,6 @@ impl App {
         if self.confirmation.is_some() {
             return Some("Confirm reviewed changes");
         }
-        if self.tab == Tab::Git && self.git_view.disclosure_pending() {
-            return Some("View Git patch content");
-        }
         if self.error.is_some() || self.busy || self.show_result || self.preview.is_some() {
             return None; // A retained choice is not the currently displayed surface.
         }
@@ -89,11 +86,7 @@ impl App {
         if self.tab == Tab::Recovery && self.history_details {
             return Some("Recovery / Operation details");
         }
-        if self.tab == Tab::Git
-            && self.git_view.browsing_details()
-            && !self.git_view.sensitive()
-            && !self.git_view.editing_root
-        {
+        if self.tab == Tab::Git && self.git_view.browsing_details() && !self.git_view.editing_root {
             return Some("Git / Details");
         }
         if self.tab == Tab::Overview && self.overview_details {

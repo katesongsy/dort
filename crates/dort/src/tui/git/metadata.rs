@@ -1,5 +1,4 @@
-//! Git details renderer. It receives no patch or disclosure data.
-use super::{Comparison, Metadata};
+use super::{Comparison, Metadata, Reader, preview};
 use crate::tui::{components as ui, inventory::Search};
 use ratatui::{
     Frame,
@@ -20,7 +19,8 @@ pub(super) struct View<'a> {
     pub visible: &'a [usize],
     pub selected: usize,
     pub viewport: &'a crate::tui::navigation::ListViewport,
-    pub details: bool,
+    pub reader: Reader,
+    pub preview: &'a preview::State,
     pub scroll: u16,
     pub busy: bool,
 }
@@ -40,8 +40,11 @@ fn status_style(kind: &str) -> Style {
         _ => Style::default(),
     }
 }
-fn details(view: &View<'_>) -> Text<'static> {
+fn details(view: &View<'_>, fallback: Option<&str>) -> Text<'static> {
     let mut lines = Vec::new();
+    if let Some(reason) = fallback {
+        lines.push(note(reason, ui::muted()));
+    }
     if view.visible.contains(&view.selected) {
         match view.metadata {
             Some(Metadata::Status(status)) => {
@@ -105,7 +108,6 @@ fn details(view: &View<'_>) -> Text<'static> {
     }
     lines.push(Line::default());
     lines.push(Line::styled("Details", ui::heading()));
-    lines.push(Line::raw("No patch content requested. Filtering and row selection never narrow a later patch request."));
     lines.push(Line::raw("Git requires a trusted executable and exact non-bare root; no manifest or registration required."));
     lines.push(Line::raw("No staging, commits, network or live-file writes. Untracked contents are not included in diffs."));
     Text::from(lines)
@@ -156,17 +158,22 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
     );
     filter(frame, sections[1], &view);
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let wide = wide_details(area, view.metadata);
     let action = if view.search.editing {
         Some((
             "Done",
             "Enter",
             crate::tui::input::Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         ))
-    } else if view.details {
+    } else if view.reader != Reader::Entries {
         Some(("Back", "Esc", crate::tui::input::Target::Back))
     } else if view.metadata.is_some_and(|metadata| metadata.len() > 0) && !view.visible.is_empty() {
         Some((
-            "Details",
+            match (view.preview.available(), wide) {
+                (true, true) => "Focus patch",
+                (true, false) => "Open patch",
+                _ => "Details",
+            },
             "Enter",
             crate::tui::input::Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         ))
@@ -183,7 +190,7 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         view.hits.present(ui::ActionButton { label, key, target });
     }
     view.hits.present(ui::ActionButton {
-        label: if view.details {
+        label: if view.reader == Reader::Details {
             "Entries"
         } else {
             "Scope details"
@@ -200,16 +207,12 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         );
     }
     let content = sections[3];
-    let wide = wide_details(area, view.metadata);
-    if view.details {
-        ui::report(
-            frame,
-            content,
-            "Git details",
-            details(&view),
-            view.scroll,
-            true,
-        );
+    if view.reader == Reader::Details {
+        draw_details(frame, content, &view, view.preview.fallback());
+        return;
+    }
+    if view.reader == Reader::Patch && !wide {
+        draw_preview(frame, content, &view);
         return;
     }
     let (list, pane) = crate::tui::workbench::detail_panes(content, wide);
@@ -217,7 +220,7 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         .metadata
         .map(|m| format!("Details | {} entries", m.len()))
         .unwrap_or_else(|| "Details | Unknown".into());
-    let block = ui::pane(&title, true);
+    let block = ui::pane(&title, view.reader == Reader::Entries);
     if view.metadata.is_none()
         || view.metadata.is_some_and(|m| m.len() == 0)
         || view.visible.is_empty()
@@ -283,13 +286,25 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         view.hits.rows(list, window, 0);
     }
     if let Some(pane) = pane {
-        ui::report(
-            frame,
-            pane,
-            "Git details",
-            details(&view),
-            view.scroll,
-            true,
-        );
+        draw_preview(frame, pane, &view);
     }
+}
+fn draw_preview(frame: &mut Frame, area: Rect, view: &View<'_>) {
+    if !view
+        .preview
+        .draw(frame, area, view.hits, view.reader == Reader::Patch)
+    {
+        draw_details(frame, area, view, view.preview.fallback());
+    }
+}
+fn draw_details(frame: &mut Frame, area: Rect, view: &View<'_>, fallback: Option<&str>) {
+    view.hits.wheel(area, crate::tui::input::Wheel::Details);
+    ui::report(
+        frame,
+        area,
+        "Git details",
+        details(view, fallback),
+        view.scroll,
+        true,
+    );
 }

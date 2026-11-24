@@ -16,7 +16,6 @@ pub enum Topic {
     Checks,
     Diagnostics,
     Git,
-    GitContent,
     Tools,
     More,
     Choice,
@@ -44,7 +43,6 @@ impl Topic {
             Self::Diagnostics => "Diagnostics",
             Self::Git => "Git inspection",
             Self::Tools => "Tools",
-            Self::GitContent => "Git content disclosure",
             Self::More => "More actions",
             Self::Choice => "Choose a value",
             Self::Form(_) => "Form",
@@ -74,10 +72,7 @@ impl Topic {
             }
             Self::Diagnostics => "Host, path, repository and history details. No file contents.",
             Self::Git => {
-                "Read-only status and diff details. Patch content needs separate approval."
-            }
-            Self::GitContent => {
-                "Patches may contain secrets. Each new view needs a separate check."
+                "Read-only status and diff details. Git previews only the selected file. Enter opens or focuses the patch. F3 opens metadata."
             }
             Self::Tools => {
                 "Enter opens the selected tool or package. Check and Install are named actions. Installed keeps only the current result. Add declaration fills known package fields for a separate review."
@@ -143,8 +138,11 @@ impl Topic {
             ],
             Self::Tools if app.tools_view.declaration_open => &[
                 ("Tab / Shift-Tab", "Edit declaration fields"),
-                ("Space", "Choose the platform package manager"),
-                ("Enter", "Review the declaration change"),
+                ("Enter/Space", "Open Package manager when focused"),
+                (
+                    "Enter",
+                    "Review from another field, or click Review declaration",
+                ),
                 ("F4", "Show/hide dependencies"),
                 ("Esc", "Stop editing, then Back"),
             ],
@@ -168,6 +166,18 @@ impl Topic {
                     ("Up/Down/PgUp/PgDn", "Read scope, reasons and risks"),
                     ("Enter", "Use the shown review action"),
                     ("Esc", "Cancel"),
+                ]
+            }
+            Self::Tools
+                if app.tools_view.install_open
+                    && app.tools_view.installation.mode
+                        == super::tools_install::Mode::CloseInputs =>
+            {
+                &[
+                    ("Tab / Shift-Tab", "Traverse package manager settings"),
+                    ("F4", "Choose the package manager"),
+                    ("Enter", "Review close"),
+                    ("Esc", "Stop editing, then Back"),
                 ]
             }
             Self::Tools if app.tools_view.install_open => &[
@@ -328,7 +338,6 @@ pub fn topic(app: &App) -> Topic {
         Tab::Recovery => Topic::Recovery,
         Tab::Checks if app.showing_diagnostics => Topic::Diagnostics,
         Tab::Checks => Topic::Checks,
-        Tab::Git if app.git_view.sensitive() => Topic::GitContent,
         Tab::Git => Topic::Git,
         Tab::Tools => Topic::Tools,
     }

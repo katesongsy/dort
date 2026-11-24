@@ -197,21 +197,12 @@ impl App {
         None
     }
 
-    pub(super) fn accept_git(&mut self, report: crate::tui::git::Report) -> Option<Task> {
-        self.git_view.accept(
-            report,
-            self.tab == Tab::Git
-                && !self.quit
-                && self.shell.overlay.is_none()
-                && self.help.is_none()
-                && self.more.is_none()
-                && self.choice.is_none(),
-        );
-        self.status = "Git read done. Patch viewing needs a new confirmation.".into();
-
+    pub(super) fn accept_git(&mut self, report: crate::tui::git::Metadata) -> Option<Task> {
+        self.git_view.accept(report);
+        self.sync_git_preview();
+        self.status = "Git summary read.".into();
         None
     }
-
     pub(super) fn accept_data(&mut self, data: Data) -> Option<Task> {
         if self
             .tools_view

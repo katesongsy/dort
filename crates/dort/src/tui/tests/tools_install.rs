@@ -2,7 +2,7 @@
 use super::{
     actions::Task,
     app::App,
-    tests::render,
+    tests::{click_label, render},
     tools_install::Mode,
     tools_provider_fixture::{checked, fixture},
     tools_tests::{app, check, key, run},
@@ -204,12 +204,21 @@ fn damaged_history_asks_only_necessary_scope_values_retains_drafts_and_respects_
         run(&f, &mut app, task);
         assert!(key(&mut app, KeyCode::Char('x')).is_none());
         assert!(app.tools_view.installation.mode == Mode::CloseInputs);
-        app.tools_view
-            .installation
-            .choose_closure_provider(match provider {
-                Provider::Npm => 0,
-                Provider::Brew => 1,
-            });
+        assert!(key(&mut app, KeyCode::F(4)).is_none());
+        assert!(render(&app, 80, 24).contains("CHOICE"));
+        assert!(key(&mut app, KeyCode::Esc).is_none());
+        assert!(render(&app, 80, 24).contains("F4 Change package manager"));
+        assert!(click_label(&mut app, 80, 24, "Change package manager").is_none());
+        let (choice, field) = match provider {
+            Provider::Npm => ("npm", "Node program"),
+            Provider::Brew => ("Homebrew", "Homebrew prefix"),
+        };
+        assert!(render(&app, 80, 24).contains("CHOICE"));
+        assert!(click_label(&mut app, 80, 24, choice).is_none());
+        assert!(key(&mut app, KeyCode::Enter).is_none());
+        assert!(render(&app, 80, 24).contains(field));
+        assert!(!install::diagnose(&f.host).unwrap()[0].explicitly_closed);
+        assert!(f.calls().is_empty());
         let state = &mut app.tools_view.installation;
         state.fields[0] = f
             .bin

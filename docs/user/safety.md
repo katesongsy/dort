@@ -18,7 +18,8 @@ Dort reports names, paths and package facts. File bodies stay unprinted.
 
 Two deliberate exceptions:
 
-- `dort git diff --patch` prints escaped patch content. It can contain secrets.
+- The Git page previews changes to the selected file. Patches can contain secrets. Review privately.
+- On the command line, use `dort git diff --patch` to print patch content.
 - In Discover, the selected regular file can be shown in a bounded preview.
 
 Review both privately. Do not share screenshots or logs with secrets. Discovery exclusions are heuristics, not a guarantee.

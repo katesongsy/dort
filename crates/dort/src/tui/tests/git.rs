@@ -35,11 +35,24 @@ printf '%s\n' "$*" >> '{}'
 for arg do case "$arg" in
 config) if [ -e refuse ]; then printf 'filter.bad.clean\n'; exit 0; fi; exit 1;;
 rev-parse) if [ -e bad-root ]; then printf '/not-this-root\n'; else pwd -P; fi; exit 0;;
-status) printf '# branch.oid (initial)\000# branch.head main\000? strange\nname\000'; exit 0;;
+status) printf '# branch.oid (initial)\000# branch.head main\000? strange\nname\000'
+if [ -e tracked ]; then
+printf '1 MM N... 100644 100644 100644 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 alpha*\000'; fi; exit 0;;
 diff) if [ -e fail ]; then printf 'PRIVATE-PATCH-FAIL' >&2; exit 1; fi
 case " $* " in
-*" --patch "*) printf 'PRIVATE-PATCH\033[31m\n';;
-*) if [ ! -e empty ]; then printf ':100644 100755 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 M\000strange\nname\000'; fi;;
+*" --patch "*)
+if [ -e no-hunks ]; then exit 0; fi
+case " $* " in
+*" :(top,literal)alpha* "*) name=ALPHA;;
+*" :(top,literal)beta "*) name=BETA;;
+*) exit 92;;
+esac
+case " $* " in *" --cached "*) side=STAGED;; *) side=UNSTAGED;; esac
+printf '%s-%s\033[31m\n' "$name" "$side"
+i=1; while [ "$i" -lt 25 ]; do printf 'context %s\n' "$i"; i=$((i + 1)); done
+printf '%s-%s-END\n' "$name" "$side";;
+*) if [ ! -e empty ]; then
+printf ':100644 100755 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 M\000alpha*\000:100644 100755 0000000000000000000000000000000000000000 0000000000000000000000000000000000000000 M\000beta\000'; fi;;
 esac; exit 0;;
 esac; done
 exit 90
@@ -70,7 +83,9 @@ exit 90
         app
     }
     fn run(&self, app: &mut App, task: Task) {
-        app.start(false);
+        if !matches!(task, Task::GitPreview(_)) {
+            app.start(false);
+        }
         let result =
             actions::perform_scoped(task, &self.host, app.repository.clone(), &[], |_| Ok(()))
                 .map_err(|e| actions::diagnostic(&e));
@@ -103,68 +118,6 @@ fn text(app: &mut App, value: &str) {
         assert!(key(app, KeyCode::Char(c)).is_none());
     }
 }
-fn patch_task(app: &mut App) -> Task {
-    key(app, KeyCode::Char('w'));
-    text(app, "view patch");
-    key(app, KeyCode::Enter).unwrap()
-}
-#[test]
-fn help_retains_disclosure_input_hides_private_patch_and_never_restores_disposed_content() {
-    let f = Fixture::new();
-    let mut app = f.app();
-    f.choose(&mut app);
-    let task = key(&mut app, KeyCode::Char('u')).unwrap();
-    f.run(&mut app, task);
-    key(&mut app, KeyCode::Char('w'));
-    text(&mut app, "view ");
-    key(&mut app, KeyCode::F(1));
-    for code in [KeyCode::Char('p'), KeyCode::Enter] {
-        assert!(key(&mut app, code).is_none());
-    }
-    assert_eq!(f.patch_calls(), 0);
-    key(&mut app, KeyCode::Esc);
-    text(&mut app, "patch");
-    let task = key(&mut app, KeyCode::Enter).expect("exact retained disclosure input");
-    f.run(&mut app, task);
-    assert_eq!(f.patch_calls(), 1);
-    assert!(render(&app, 80, 24).contains("PRIVATE-PATCH"));
-    for code in [
-        KeyCode::End,
-        KeyCode::PageUp,
-        KeyCode::PageDown,
-        KeyCode::Home,
-    ] {
-        assert!(key(&mut app, code).is_none());
-        assert!(app.git_view.sensitive());
-        assert_eq!(f.patch_calls(), 1);
-    }
-    assert!(render(&app, 80, 24).contains("PRIVATE-PATCH"));
-    key(&mut app, KeyCode::F(1));
-    assert!(matches!(
-        app.help.as_ref().unwrap().topic,
-        super::help::Topic::GitContent
-    ));
-    assert!(!render(&app, 140, 40).contains("PRIVATE-PATCH"));
-    key(&mut app, KeyCode::Esc);
-    assert!(render(&app, 80, 24).contains("PRIVATE-PATCH")); // same live one-view payload, no new read
-    assert_eq!(f.patch_calls(), 1);
-    key(&mut app, KeyCode::F(1));
-    app.resize(47, 13);
-    app.resize(80, 24);
-    key(&mut app, KeyCode::Esc);
-    assert!(!app.git_view.sensitive());
-    assert!(!render(&app, 80, 24).contains("PRIVATE-PATCH"));
-    let task = patch_task(&mut app);
-    app.start(false);
-    key(&mut app, KeyCode::F(1));
-    let output = actions::perform(task, &f.host, None, |_| Ok(())).unwrap();
-    app.complete(Ok(output)); // late disclosure is withheld while Help is open
-    key(&mut app, KeyCode::Esc);
-    assert!(!app.git_view.sensitive());
-    assert!(!render(&app, 80, 24).contains("PRIVATE-PATCH"));
-    assert_eq!(f.patch_calls(), 2);
-    f.readonly();
-}
 #[test]
 fn git_context_actions_inspect_and_clear_only_the_git_display_filter() {
     let f = Fixture::new();
@@ -186,7 +139,7 @@ fn git_context_actions_inspect_and_clear_only_the_git_display_filter() {
     f.readonly();
 }
 #[test]
-fn independent_git_summaries_match_backend_and_never_prefetch_content() {
+fn independent_git_summaries_match_backend_without_patch_content() {
     let f = Fixture::new();
     let mut app = f.app();
     f.choose(&mut app);
@@ -222,7 +175,7 @@ fn independent_git_summaries_match_backend_and_never_prefetch_content() {
         key(&mut app, KeyCode::Esc);
         assert!(!app.quit && render(&app, 100, 30).contains("0 displayed"));
         key(&mut app, KeyCode::Delete);
-        key(&mut app, KeyCode::Enter);
+        key(&mut app, KeyCode::F(3));
         assert!(render(&app, 100, 30).contains("100644 -> 100755"));
         let task = key(&mut app, KeyCode::Char('R')).unwrap();
         f.run(&mut app, task);
@@ -232,123 +185,12 @@ fn independent_git_summaries_match_backend_and_never_prefetch_content() {
     f.readonly();
 }
 #[test]
-fn git_comparisons_are_read_only_and_never_bypass_or_restore_disclosure() {
-    let f = Fixture::new();
-    let mut app = f.app();
-    f.choose(&mut app);
-    for (action, comparison) in [
-        (
-            super::shell::Action::GitStatus,
-            super::git::Comparison::Status,
-        ),
-        (
-            super::shell::Action::GitUnstaged,
-            super::git::Comparison::Unstaged,
-        ),
-        (
-            super::shell::Action::GitStaged,
-            super::git::Comparison::Staged,
-        ),
-    ] {
-        let task = app.activate(action).unwrap();
-        f.run(&mut app, task);
-        assert!(app.tab == Tab::Git && app.git_view.comparison == comparison);
-        assert!(app.git_view.metadata.is_some() && !app.git_view.sensitive());
-    }
-    assert_eq!(f.patch_calls(), 0);
-    key(&mut app, KeyCode::Char('w'));
-    text(&mut app, "view ");
-    key(&mut app, KeyCode::F(10));
-    text(&mut app, "patch");
-    let task = key(&mut app, KeyCode::Enter).unwrap();
-    f.run(&mut app, task);
-    assert!(render(&app, 100, 30).contains("PRIVATE-PATCH"));
-    key(&mut app, KeyCode::Esc); // Leaving the disclosure drops the patch.
-    assert!(!app.git_view.sensitive());
-    assert!(!render(&app, 100, 30).contains("PRIVATE-PATCH"));
-    key(&mut app, KeyCode::Char('o'));
-    assert!(app.tab == Tab::Overview);
-    key(&mut app, KeyCode::Char('g'));
-    assert!(app.tab == Tab::Git);
-    assert_eq!(f.patch_calls(), 1);
-    f.readonly();
-}
-#[test]
-fn patch_disclosure_is_once_isolated_and_dropped_on_close_scope_resize_or_exit() {
-    let f = Fixture::new();
-    let mut app = f.app();
-    f.choose(&mut app);
-    let task = key(&mut app, KeyCode::Char('u')).unwrap();
-    f.run(&mut app, task);
-    key(&mut app, KeyCode::Tab);
-    assert!(app.activate(super::shell::Action::GitPatch).is_none());
-    assert!(app.tab == Tab::Git);
-    assert!(render(&app, 48, 14).contains("May expose secrets"));
-    assert_eq!(f.patch_calls(), 0);
-    key(&mut app, KeyCode::Esc);
-    let task = patch_task(&mut app);
-    f.run(&mut app, task);
-    let screen = render(&app, 100, 30);
-    assert!(screen.contains("PRIVATE-PATCH\\x1b[31m"));
-    assert!(!app.status.contains("PRIVATE-PATCH"));
-    key(&mut app, KeyCode::Esc);
-    assert!(!render(&app, 100, 30).contains("PRIVATE-PATCH"));
-    let task = key(&mut app, KeyCode::Char('R')).unwrap();
-    f.run(&mut app, task);
-    assert_eq!(f.patch_calls(), 1);
-    key(&mut app, KeyCode::Char('w'));
-    text(&mut app, "view patch");
-    app.resize(47, 14);
-    app.resize(80, 24);
-    assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert_eq!(f.patch_calls(), 1);
-    let task = patch_task(&mut app);
-    f.run(&mut app, task);
-    app.resize(80, 13);
-    assert!(!render(&app, 100, 30).contains("PRIVATE-PATCH"));
-    let task = patch_task(&mut app);
-    f.run(&mut app, task);
-    let task = key(&mut app, KeyCode::Char('s')).unwrap();
-    f.run(&mut app, task);
-    assert!(!render(&app, 100, 30).contains("PRIVATE-PATCH"));
-    let task = patch_task(&mut app);
-    f.run(&mut app, task);
-    key(&mut app, KeyCode::Char('P'));
-    assert!(!render(&app, 100, 30).contains("PRIVATE-PATCH"));
-    key(&mut app, KeyCode::Esc);
-    let task = patch_task(&mut app);
-    app.start(false);
-    key(&mut app, KeyCode::Right);
-    assert!(app.tab == Tab::Git && app.interaction_notice.is_some()); // Refused navigation is not cancellation.
-    app.go_tab(Tab::Overview); // Inject an actual scope change to test late-result rejection independently.
-    let output = actions::perform(task, &f.host, None, |_| Ok(())).unwrap();
-    app.complete(Ok(output));
-    app.tab = Tab::Git;
-    assert!(!render(&app, 100, 30).contains("PRIVATE-PATCH"));
-    let task = patch_task(&mut app);
-    f.run(&mut app, task);
-    key(&mut app, KeyCode::Char('q'));
-    assert!(app.quit && !app.git_view.sensitive());
-    f.readonly();
-}
-#[test]
-fn refusals_empty_missing_git_and_patch_errors_keep_content_out_of_diagnostics() {
+fn summary_refusals_empty_and_missing_git_are_handled() {
     let f = Fixture::new();
     let mut app = f.app();
     app.git = Err("Git unavailable".into());
     key(&mut app, KeyCode::Char('g'));
-    println!(
-        "tab_git={} editing_root={} form={:?}",
-        app.tab == Tab::Git,
-        app.git_view.editing_root,
-        app.form_page()
-    );
     text(&mut app, "git-only");
-    println!(
-        "draft={:?} tab_git={}",
-        app.git_view.draft,
-        app.tab == Tab::Git
-    );
     assert!(key(&mut app, KeyCode::Enter).is_none());
     assert!(app.error.as_ref().unwrap().contains("restart"));
     assert_eq!(app.git_view.draft, "git-only");
@@ -368,12 +210,6 @@ fn refusals_empty_missing_git_and_patch_errors_keep_content_out_of_diagnostics()
     let task = key(&mut app, KeyCode::Char('R')).unwrap();
     f.run(&mut app, task);
     assert!(render(&app, 100, 30).contains("No changes"));
-    fs::write(f.root.join("fail"), "").unwrap();
-    let task = patch_task(&mut app);
-    f.run(&mut app, task);
-    assert!(app.error.is_some());
-    assert!(!render(&app, 100, 30).contains("PRIVATE-PATCH"));
-    assert!(!app.git_view.sensitive());
     f.readonly();
 }
 #[test]
@@ -411,8 +247,8 @@ fn git_root_default_and_independent_selection_do_not_require_healthy_file_observ
 }
 #[test]
 fn git_selection_uses_raw_identity_across_refresh_and_compact_search_is_visible() {
-    fn summary(names: &[&str]) -> super::git::Report {
-        super::git::Report::Summary(super::git::Metadata::Status(dort_core::git::Status {
+    fn summary(names: &[&str]) -> super::git::Metadata {
+        super::git::Metadata::Status(dort_core::git::Status {
             schema: 1,
             read_only: true,
             branch: vec!["branch.head detached".into()],
@@ -425,19 +261,16 @@ fn git_selection_uses_raw_identity_across_refresh_and_compact_search_is_visible(
                     original_path: Some("old\nname".into()),
                 })
                 .collect(),
-        }))
+        })
     }
     let mut app = App::new(false);
     app.tab = Tab::Git;
-    app.git_view
-        .accept(summary(&["first", "second\u{202e}"]), true);
+    app.git_view.accept(summary(&["first", "second\u{202e}"]));
     key(&mut app, KeyCode::Down);
-    app.git_view
-        .accept(summary(&["second\u{202e}", "first"]), true);
+    app.git_view.accept(summary(&["second\u{202e}", "first"]));
     for code in [KeyCode::PageDown, KeyCode::PageUp, KeyCode::Home] {
         assert!(key(&mut app, code).is_none());
         assert!(!app.git_view.browsing_details());
-        assert!(!app.git_view.sensitive());
     }
     key(&mut app, KeyCode::Enter);
     let screen = render(&app, 100, 30);
@@ -452,31 +285,200 @@ fn git_selection_uses_raw_identity_across_refresh_and_compact_search_is_visible(
     assert!(render(&app, 48, 14).contains("[q?/"));
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Delete);
-    app.git_view.accept(summary(&[]), true);
+    app.git_view.accept(summary(&[]));
     assert!(render(&app, 100, 30).contains("0 entries"));
 }
 #[test]
-fn compact_git_drafts_and_confirmation_remain_visible_and_small_cannot_disclose() {
+fn compact_git_root_draft_is_visible_at_the_terminal_floor() {
     let mut app = App::new(true);
     app.tab = Tab::Git;
     app.git_view.editing_root = true;
     app.git_view.draft = "q?".repeat(2000);
     assert!(render(&app, 48, 14).contains("Exact Git root"));
-    key(&mut app, KeyCode::Esc);
-    app.git_view.choose(super::git::Comparison::Unstaged);
-    app.git_view.metadata = Some(super::git::Metadata::Diff(dort_core::git::Diff {
-        schema: 1,
-        read_only: true,
-        staged: false,
-        entries: vec![],
-        patch: None,
-    }));
-    key(&mut app, KeyCode::Char('w'));
-    assert!(render(&app, 48, 14).contains("View patch"));
-    text(&mut app, "view patch");
     assert!(
         app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 47, 13)
             .is_none()
     );
-    assert!(!app.git_view.sensitive());
+    assert!(app.git_view.editing_root);
+}
+
+fn wide_key(app: &mut App, code: KeyCode) -> Option<Task> {
+    app.key(KeyEvent::new(code, KeyModifiers::NONE), 140, 32)
+}
+
+#[test]
+fn wide_git_preview_follows_keyboard_mouse_filter_and_comparison_without_confirmation() {
+    let f = Fixture::new();
+    let mut app = f.app();
+    f.choose(&mut app);
+    assert!(app.next_git_preview().is_none(), "untracked selection");
+    assert!(render(&app, 140, 32).contains("untracked"));
+
+    let summary = wide_key(&mut app, KeyCode::Char('u')).unwrap();
+    f.run(&mut app, summary);
+    let preview = app.next_git_preview().unwrap();
+    assert!(render(&app, 140, 32).contains("Reading selected patch"));
+    assert!(!app.busy && app.confirmation.is_none());
+    f.run(&mut app, preview);
+    let screen = render(&app, 140, 32);
+    assert!(screen.contains("Selected patch") && screen.contains("Focus patch"));
+    assert!(screen.contains("ALPHA-UNSTAGED\\x1b[31m") && !screen.contains("BETA-UNSTAGED"));
+    assert!(!screen.contains('\x1b') && !screen.contains("View patch"));
+
+    let (column, row) = (0..32)
+        .flat_map(|y| (0..140).map(move |x| (x, y)))
+        .find(|&(x, y)| matches!(app.hits.target(x, y), Some(super::input::Target::Row(1))))
+        .unwrap();
+    assert!(
+        app.mouse(
+            ratatui::crossterm::event::MouseEvent {
+                kind: ratatui::crossterm::event::MouseEventKind::Down(
+                    ratatui::crossterm::event::MouseButton::Left
+                ),
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+            140,
+            32,
+        )
+        .is_none()
+    );
+    assert!(!render(&app, 140, 32).contains("ALPHA-UNSTAGED"));
+    let preview = app.next_git_preview().unwrap();
+    f.run(&mut app, preview);
+    let screen = render(&app, 140, 32);
+    assert!(screen.contains("› beta") && screen.contains("BETA-UNSTAGED"));
+    assert!(
+        app.mouse(
+            ratatui::crossterm::event::MouseEvent {
+                kind: ratatui::crossterm::event::MouseEventKind::ScrollDown,
+                column: 90,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+            140,
+            32,
+        )
+        .is_none()
+    );
+    let scrolled = render(&app, 140, 32);
+    assert!(scrolled.contains("› beta") && scrolled.contains("BETA-UNSTAGED-END"));
+
+    wide_key(&mut app, KeyCode::Up);
+    let preview = app.next_git_preview().unwrap();
+    f.run(&mut app, preview);
+    assert!(render(&app, 140, 32).contains("ALPHA-UNSTAGED"));
+    wide_key(&mut app, KeyCode::Char('/'));
+    text(&mut app, "beta");
+    key(&mut app, KeyCode::Enter);
+    let preview = app.next_git_preview().unwrap();
+    f.run(&mut app, preview);
+    assert!(render(&app, 140, 32).contains("BETA-UNSTAGED"));
+    let task = wide_key(&mut app, KeyCode::Char('s')).unwrap();
+    f.run(&mut app, task);
+    let preview = app.next_git_preview().unwrap();
+    f.run(&mut app, preview);
+    let screen = render(&app, 140, 32);
+    assert!(screen.contains("BETA-STAGED") && !screen.contains("BETA-UNSTAGED"));
+    f.readonly();
+}
+
+#[test]
+fn compact_status_opens_both_tracked_changes_and_f3_opens_metadata() {
+    let f = Fixture::new();
+    fs::write(f.root.join("tracked"), "").unwrap();
+    let mut app = f.app();
+    f.choose(&mut app);
+    assert!(app.next_git_preview().is_none());
+    key(&mut app, KeyCode::Down);
+    let preview = app.next_git_preview().unwrap();
+    f.run(&mut app, preview);
+    let list = render(&app, 80, 24);
+    assert!(list.contains("Open patch") && !list.contains("ALPHA-STAGED"));
+    key(&mut app, KeyCode::Enter);
+    let start = render(&app, 80, 24);
+    assert!(start.contains("Selected patch") && start.contains("ALPHA-STAGED"));
+    key(&mut app, KeyCode::End);
+    let end = render(&app, 80, 24);
+    assert!(end.contains("ALPHA-UNSTAGED-END"));
+    key(&mut app, KeyCode::F(1));
+    let help = render(&app, 80, 24);
+    assert!(help.contains("Help") && !help.contains("ALPHA-UNSTAGED"));
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::F(3));
+    let details = render(&app, 80, 24);
+    assert!(details.contains("Git details") && details.contains("XY: MM"));
+    assert!(!details.contains("ALPHA-STAGED"));
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Up);
+    key(&mut app, KeyCode::Enter);
+    let untracked = render(&app, 80, 24);
+    assert!(untracked.contains("Git details") && untracked.contains("untracked"));
+    assert_eq!(f.patch_calls(), 2);
+}
+
+#[test]
+fn stale_patch_reads_cannot_return_after_selection_refresh_page_or_size_changes() {
+    let f = Fixture::new();
+    let mut app = f.app();
+    f.choose(&mut app);
+    let task = key(&mut app, KeyCode::Char('u')).unwrap();
+    f.run(&mut app, task);
+    let first = app.next_git_preview().unwrap();
+    wide_key(&mut app, KeyCode::Down);
+    wide_key(&mut app, KeyCode::Up);
+    let latest = app.next_git_preview().unwrap();
+    f.run(&mut app, first);
+    assert!(!render(&app, 140, 32).contains("ALPHA-UNSTAGED"));
+    f.run(&mut app, latest);
+    assert!(render(&app, 140, 32).contains("ALPHA-UNSTAGED"));
+
+    let summary = wide_key(&mut app, KeyCode::Char('R')).unwrap();
+    assert!(!render(&app, 140, 32).contains("ALPHA-UNSTAGED"));
+    f.run(&mut app, summary);
+    let before_refresh = app.next_git_preview().unwrap();
+    let summary = wide_key(&mut app, KeyCode::Char('R')).unwrap();
+    f.run(&mut app, summary);
+    let after_refresh = app.next_git_preview().unwrap();
+    f.run(&mut app, before_refresh);
+    assert!(!render(&app, 140, 32).contains("ALPHA-UNSTAGED"));
+    app.resize(47, 13);
+    f.run(&mut app, after_refresh);
+    assert!(app.next_git_preview().is_none());
+    app.resize(140, 32);
+    app.sync_git_preview();
+    let before_page = app.next_git_preview().unwrap();
+    wide_key(&mut app, KeyCode::Char('o'));
+    assert!(app.tab == Tab::Overview);
+    f.run(&mut app, before_page);
+    assert!(!render(&app, 140, 32).contains("ALPHA-UNSTAGED"));
+    assert!(!app.busy && app.error.is_none());
+}
+
+#[test]
+fn patch_errors_and_empty_output_fall_back_without_diagnostics_or_retries_until_refresh() {
+    let f = Fixture::new();
+    let mut app = f.app();
+    f.choose(&mut app);
+    for (marker, message) in [
+        ("fail", "Could not read the selected patch"),
+        ("no-hunks", "No patch for the selected change"),
+    ] {
+        let summary = wide_key(&mut app, KeyCode::Char('u')).unwrap();
+        f.run(&mut app, summary);
+        let preview = app.next_git_preview().unwrap();
+        fs::write(f.root.join(marker), "").unwrap();
+        f.run(&mut app, preview);
+        let screen = render(&app, 140, 32);
+        assert!(screen.contains("Git details") && screen.contains(message));
+        assert!(!screen.contains("PRIVATE-PATCH-FAIL") && !screen.contains("Selected patch"));
+        assert!(app.next_git_preview().is_none() && app.error.is_none());
+        fs::remove_file(f.root.join(marker)).unwrap();
+    }
+    let summary = wide_key(&mut app, KeyCode::Char('R')).unwrap();
+    f.run(&mut app, summary);
+    let preview = app.next_git_preview().unwrap();
+    f.run(&mut app, preview);
+    assert!(render(&app, 140, 32).contains("ALPHA-UNSTAGED"));
 }

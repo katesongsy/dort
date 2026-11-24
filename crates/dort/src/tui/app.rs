@@ -239,6 +239,11 @@ impl App {
             self.content.accept(report);
             return None;
         }
+        if let Ok(Output::GitPreview(report)) = result {
+            self.sync_git_preview();
+            self.git_view.accept_preview(report);
+            return None;
+        }
         self.last_click = None;
         if let Ok(Output::DiscoveryTree(report)) = result {
             if super::discovery_tree::accept(self, report) {
@@ -306,7 +311,10 @@ impl App {
                 None
             }
             Ok(
-                Output::DiscoverContent(_) | Output::DiscoveryTree(_) | Output::RecoveryRequired(_),
+                Output::DiscoverContent(_)
+                | Output::DiscoveryTree(_)
+                | Output::GitPreview(_)
+                | Output::RecoveryRequired(_),
             ) => unreachable!(),
             Ok(Output::History { rows, error }) => self.accept_history(rows, error),
             Ok(Output::Diagnostics(report)) => self.accept_diagnostics(report),
@@ -349,7 +357,9 @@ impl App {
         width: u16,
         height: u16,
     ) -> Option<Task> {
-        self.mouse_at(event, width, height, std::time::Instant::now())
+        let task = self.mouse_at(event, width, height, std::time::Instant::now());
+        self.sync_git_preview();
+        task
     }
     pub(super) fn mouse_at(
         &mut self,
@@ -407,6 +417,10 @@ impl App {
             }
             if matches!(wheel, Wheel::Content) {
                 self.content.scroll_by(code == KeyCode::PageUp, 2);
+                return None;
+            }
+            if matches!(wheel, Wheel::GitPatch) {
+                self.git_view.scroll_patch(code);
                 return None;
             }
             if matches!(wheel, Wheel::Details) {
@@ -522,7 +536,7 @@ impl App {
         if matches!(
             target,
             Target::FormControl(_, false)
-                | Target::ToolDeclarationControl(_, false)
+                | Target::ToolDeclarationField(_)
                 | Target::ToolsControl(_, false)
                 | Target::BatchControl(_, false)
                 | Target::ToolInstallControl(_, false)
@@ -679,33 +693,26 @@ impl App {
                     self.history_search.editing = true;
                 }
                 if self.tab == Tab::Git {
-                    self.git_view.search.editing = true;
+                    self.git_view.edit_filter();
                 }
                 None
             }
-            Target::PatchConfirm => self.key(
-                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-                width,
-                height,
-            ),
             Target::ConfirmAction | Target::CancelConfirmation => None,
-            Target::ToolDeclarationControl(index, activate) => {
+            Target::ToolDeclarationField(index) => {
                 if self.tab != Tab::Tools || !self.tools_view.declaration_open {
                     return None;
                 }
-                if !activate {
-                    self.tools_view.declaration.focus = index.min(11);
-                }
-                if activate {
-                    return self
-                        .tools_view
-                        .key(
-                            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-                            self.dry_run,
-                        )
-                        .flatten();
+                self.tools_view.declaration.focus = index;
+                if index == super::tool_declaration::PROVIDER_FIELD {
+                    self.open_control_choice(KeyCode::Enter);
                 }
                 None
+            }
+            Target::ToolDeclarationReview => {
+                if self.tab != Tab::Tools || !self.tools_view.declaration_open {
+                    return None;
+                }
+                self.tools_view.declaration.prepare()
             }
             Target::ToolAttemptRow(index) => {
                 if self.tab == Tab::Tools && self.tools_view.install_open {
@@ -874,7 +881,7 @@ impl App {
                 Some(Task::Refresh)
             }
             Control::Recovery => {
-                self.git_view.discard_patch();
+                self.git_view.discard_preview();
                 self.tab = Tab::Recovery;
                 self.shell.overlay = None;
                 Some(Task::History)
@@ -902,11 +909,7 @@ impl App {
         match self.tab {
             Tab::Files => !self.inventory.details && !self.content.focused,
             Tab::Recovery => !self.history_details,
-            Tab::Git => {
-                !self.git_view.browsing_details()
-                    && !self.git_view.navigation_input()
-                    && !self.git_view.sensitive()
-            }
+            Tab::Git => self.git_view.browsing_entries(),
             Tab::Tools => self.tools_view.collection_visible(),
             _ => false,
         }
@@ -976,6 +979,7 @@ impl App {
         let form_before = self.form_page();
         let transient_before = self.help.is_some() || self.more.is_some() || self.choice.is_some();
         let task = self.key_inner(key, width, height, more_actions, section_shortcuts);
+        self.sync_git_preview();
         let transient_after = self.help.is_some() || self.more.is_some() || self.choice.is_some();
         if !transient_before && !transient_after && form_before != self.form_page() {
             self.form_focus = None;
@@ -1015,7 +1019,7 @@ impl App {
                             || self.preview.is_some()
                             || !self.text_entry())))
         {
-            self.git_view.discard_patch();
+            self.git_view.discard_preview();
             if self.busy {
                 self.exit_requested = true;
                 self.status = "Exit requested; waiting for the active worker. Approved writes run to completion.".into();
@@ -1555,9 +1559,7 @@ impl App {
                 return None;
             }
             if self.tab == Tab::Git
-                && !self.git_view.browsing_details()
-                && !self.git_view.navigation_input()
-                && !self.git_view.sensitive()
+                && self.git_view.browsing_entries()
                 && let Some((backwards, count)) = movement(self.git_view.viewport.page())
             {
                 self.git_view.page_metadata(backwards, count);
@@ -1585,17 +1587,12 @@ impl App {
                 KeyCode::Char('z') => Some(Action::GitStatus),
                 KeyCode::Char('u') => Some(Action::GitUnstaged),
                 KeyCode::Char('s') => Some(Action::GitStaged),
-                KeyCode::Char('w') => Some(Action::GitPatch),
                 KeyCode::Char('r') => Some(Action::GitRefresh),
                 _ => None,
             };
             if let Some(action) = action {
                 return self.activate(action);
             }
-        }
-        // Any outer-shell navigation/action drops a disclosed patch reference.
-        if self.git_view.sensitive() {
-            self.git_view.discard_patch();
         }
         if self.tab == Tab::Recovery && self.history_search.editing {
             self.history_search.key(key);
@@ -1754,7 +1751,7 @@ impl App {
             self.more = None;
             self.choice = None;
             self.confirmation = None;
-            self.git_view.resize();
+            self.git_view.discard_preview();
             self.tools_view.shrink();
         } else if let Some(preview) = &mut self.preview {
             preview.clamp_scroll(width, height);
@@ -1928,9 +1925,6 @@ impl App {
             self.shell.return_to_adopt = true;
         }
         self.shell.overlay = None;
-        if self.git_view.sensitive() {
-            self.git_view.discard_patch();
-        }
         match action {
             Action::ToggleMark => super::tree::toggle(self),
             Action::ClearMarks => {
@@ -1994,14 +1988,6 @@ impl App {
                 return self.git_task();
             }
             Action::GitRefresh => return self.git_task(),
-            Action::GitPatch => {
-                self.tab = Tab::Git;
-
-                self.git_view.confirm_patch();
-                self.status =
-                    "Choose Unstaged or Staged, then activate View patch in its content warning."
-                        .into();
-            }
             Action::Destination(tab) => {
                 self.go_tab(tab);
                 if tab == Tab::Files {
@@ -2440,7 +2426,7 @@ impl App {
     }
     fn reset_repository_scope(&mut self) {
         self.tools_view.declared.invalidate();
-        self.git_view.discard_patch();
+        self.git_view.discard_preview();
         if self.git_view.follows_files {
             self.git_view.scope_changed();
             self.git_view.root = None;
@@ -2495,6 +2481,27 @@ impl App {
                 requested,
             }
         })
+    }
+    pub(super) fn sync_git_preview(&mut self) {
+        self.git_view.sync_preview(
+            self.tab == Tab::Git
+                && self.git.is_ok()
+                && !self.busy
+                && !self.quit
+                && !self.exit_requested
+                && self.error.is_none()
+                && self.shell.overlay.is_none()
+                && !self.show_result
+                && self.preview.is_none()
+                && self.viewport.0 >= 48
+                && self.viewport.1 >= 14,
+        );
+    }
+    pub(super) fn next_git_preview(&mut self) -> Option<Task> {
+        if self.help.is_some() || self.choice.is_some() || self.more.is_some() {
+            return None;
+        }
+        self.git_view.next_preview(self.git.as_ref().ok()?.clone())
     }
     fn git_task(&mut self) -> Option<Task> {
         self.go_tab(Tab::Git);
@@ -2692,11 +2699,6 @@ impl App {
             }
             Action::PreviewOnly if self.preview_only_locked => {
                 Some("--dry-run keeps this session preview-only. Approval is off.")
-            }
-            Action::GitPatch
-                if !matches!(self.git_view.metadata, Some(super::git::Metadata::Diff(_))) =>
-            {
-                Some("Open an Unstaged or Staged diff before viewing a patch.")
             }
             Action::AdoptSelected if self.tab != Tab::Files || !self.discovering => {
                 Some("Select an eligible regular file first.")

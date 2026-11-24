@@ -18,7 +18,7 @@ Dort is experimental. Start with a disposable HOME. Do not point it at real dotf
 | Validate a manifest | `manifest check`, Checks in the TUI |
 | Discover and manage dotfiles | `files discover`, `list`, `plan`, `add`, `apply`, `remove` |
 | Create or attach a local repository | `init PATH`, Create/attach |
-| Inspect Git status and diff | `git status`, `git diff`; patches need explicit disclosure |
+| Inspect Git status and diff | Git page shows patch previews; CLI uses `git status` and `git diff --patch` |
 | Check installed tools | Tools **Check installed** (`C`), `tools check` |
 | Install missing Homebrew or npm tools | Tools **Install missing** (`i`), `tools install-missing` |
 | Browse installed packages | Tools **Installed** (`2`), `tools inspect` |

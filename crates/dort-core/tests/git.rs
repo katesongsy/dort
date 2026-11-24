@@ -379,6 +379,58 @@ fn missing_git_invalid_protocol_and_stderr_are_safe() {
     }
 }
 
+#[test]
+fn selected_patch_uses_literal_paths_and_the_requested_comparison() {
+    let Some(f) = Fixture::new() else {
+        return;
+    };
+    let selected = ":(glob)name*\n.txt";
+    fs::write(f.root.join(selected), "base\n").unwrap();
+    fs::write(f.root.join("other"), "other base\n").unwrap();
+    f.commit();
+    fs::write(f.root.join(selected), "staged\n").unwrap();
+    fs::write(f.root.join("other"), "unrelated staged\n").unwrap();
+    f.command(&["add", "--all"]);
+    fs::write(f.root.join(selected), "worktree\x1b\n").unwrap();
+    fs::write(f.root.join("other"), "unrelated worktree\n").unwrap();
+    let before = snapshot(&f.root);
+
+    let staged = f.git.selected_patch(&f.root, true, selected, None).unwrap();
+    assert!(staged.contains("-base\n+staged\n"));
+    assert!(!staged.contains("worktree") && !staged.contains("unrelated"));
+    let unstaged = f
+        .git
+        .selected_patch(&f.root, false, selected, None)
+        .unwrap();
+    assert!(unstaged.contains("-staged\n+worktree\\x1b\n"));
+    assert!(!unstaged.contains("unrelated"));
+    assert_eq!(snapshot(&f.root), before);
+}
+
+#[test]
+fn selected_patch_excludes_descendants_of_a_deleted_file() {
+    let Some(f) = Fixture::new() else {
+        return;
+    };
+    fs::write(f.root.join("old"), "old file\n").unwrap();
+    f.commit();
+    fs::remove_file(f.root.join("old")).unwrap();
+    fs::create_dir(f.root.join("old")).unwrap();
+    fs::write(f.root.join("old/new"), "new file\n").unwrap();
+    fs::write(f.root.join("old/unrelated"), "unrelated descendant\n").unwrap();
+    f.command(&["add", "--all"]);
+
+    let deleted = f.git.selected_patch(&f.root, true, "old", None).unwrap();
+    assert!(deleted.contains("-old file"));
+    assert!(!deleted.contains("+new file") && !deleted.contains("unrelated"));
+    let renamed = f
+        .git
+        .selected_patch(&f.root, true, "old/new", Some("old"))
+        .unwrap();
+    assert!(renamed.contains("-old file") && renamed.contains("+new file"));
+    assert!(!renamed.contains("unrelated"));
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn non_utf8_paths_fail_without_lossy_identity() {

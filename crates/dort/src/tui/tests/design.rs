@@ -526,8 +526,7 @@ fn git_app(metadata: super::git::Metadata) -> App {
             super::git::Comparison::Unstaged
         });
     }
-    app.git_view
-        .accept(super::git::Report::Summary(metadata), true);
+    app.git_view.accept(metadata);
     app
 }
 #[test]
@@ -651,7 +650,7 @@ fn git_metadata_full_paths_branch_and_limits_are_reachable_using_real_scroll_key
             "branch.oid (initial)".into(),
             "branch.head main".into(),
             "Details".into(),
-            "No patch content requested.".into(),
+            "Untracked contents".into(),
         ] {
             assert!(
                 all.contains(&value),
@@ -662,7 +661,7 @@ fn git_metadata_full_paths_branch_and_limits_are_reachable_using_real_scroll_key
         app.key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE), w, h);
         assert_eq!(first, render(&app, w, h));
     }
-    assert!(!app.git_view.sensitive() && app.preview.is_none() && app.confirmation.is_none());
+    assert!(app.preview.is_none() && app.confirmation.is_none());
 }
 #[test]
 fn git_metadata_unknown_empty_and_filter_caret_remain_distinct_at_the_floor() {

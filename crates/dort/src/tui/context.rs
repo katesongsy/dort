@@ -25,7 +25,6 @@ pub enum Effect {
     Read,
     Draft,
     Preview,
-    Disclosure,
 }
 impl Effect {
     pub fn label(self) -> &'static str {
@@ -34,7 +33,6 @@ impl Effect {
             Self::Read => "Read-only",
             Self::Draft => "Editable draft",
             Self::Preview => "Mutation preview",
-            Self::Disclosure => "Content warning",
         }
     }
 }
@@ -59,7 +57,6 @@ pub(super) fn entry(action: Action, primary: Option<usize>) -> Entry {
         Adopt | AdoptSelected | BatchAdopt | KeepId | RemoveId | Init | CheckStandalone
         | Profiles | StandaloneProfiles | ToolDeclaration | ToolsConfigure | ToolsCheck
         | ToolsInstallMissing | ToolsInstalled => Effect::Draft,
-        GitPatch => Effect::Disclosure,
         Discover | Refresh | CheckCurrent | Diagnostics | GitStatus | GitUnstaged | GitStaged
         | GitRefresh | ToolAttempts => Effect::Read,
         _ => Effect::View,
@@ -117,7 +114,7 @@ pub fn entries(app: &App) -> Vec<Entry> {
             vec![CheckCurrent, CheckStandalone, Profiles],
             vec![StandaloneProfiles, Refresh],
         ),
-        Tab::Git => (vec![GitPatch, GitRefresh], vec![ClearFilter]),
+        Tab::Git => (vec![GitRefresh], vec![ClearFilter]),
         Tab::Tools => (
             vec![ToolsCheck, ToolsInstallMissing],
             vec![ToolDeclaration, ToolsInstalled, ToolAttempts],

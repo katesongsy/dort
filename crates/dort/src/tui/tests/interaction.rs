@@ -301,8 +301,10 @@ fn dialogs_dim_the_background_and_dismiss_outside_without_forwarding_clicks() {
                 5 => {
                     app.tab = Tab::Tools;
                     app.tools_view.declare();
+                    super::tests::focus_form(&mut app);
                     app.tools_view.declaration.focus = 4;
-                    assert!(app.open_control_choice(KeyCode::Left));
+                    assert!(key(&mut app, KeyCode::Left, size.0, size.1).is_none());
+                    assert!(app.choice.is_some());
                     key(&mut app, KeyCode::F(3), size.0, size.1);
                 }
                 _ => unreachable!(),

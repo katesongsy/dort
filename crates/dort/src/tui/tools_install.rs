@@ -335,7 +335,7 @@ impl State {
                 .take(self.close_field_count())
                 .map(|(a, b)| (*a, b.as_str()))
                 .collect::<Vec<_>>();
-            ui::field_page(frame,area,&fields,self.focus,hits,|i|Target::ToolInstallControl(i,false),ui::FormActions {choices:&[],buttons:&[ui::ActionButton {label:"Review close",key:"Enter",target:Target::ToolInstallControl(4,true)},ui::ActionButton {label:"Package manager",key:"F4",target:Target::ToolInstallProvider},ui::ActionButton {label:"Back",key:"Esc",target:Target::Back}],feedback:Some(ui::Feedback {text:self.error.as_deref().unwrap_or("The original record is damaged. Choose the package manager and its paths for a fresh check. Nothing is retried."),tone:ui::design::Tone::Attention})});
+            ui::field_page(frame,area,&fields,self.focus,hits,|i|Target::ToolInstallControl(i,false),ui::FormActions {choices:&[],buttons:&[ui::ActionButton {label:"Review close",key:"Enter",target:Target::ToolInstallControl(4,true)},ui::ActionButton {label:"Change package manager",key:"F4",target:Target::ToolInstallProvider},ui::ActionButton {label:"Back",key:"Esc",target:Target::Back}],feedback:Some(ui::Feedback {text:self.error.as_deref().unwrap_or("The original record is damaged. Choose the package manager and its paths for a fresh check. Nothing is retried."),tone:ui::design::Tone::Attention})});
             return;
         }
         if let Some(preview) = &self.close_preview {

@@ -46,6 +46,18 @@ python3 .pi/skills/verify-dort/drive.py tui my-proof --label declared \
   "wait:loaded." "send:'t'" "wait:Declared tools" "snap:declared"
 ```
 
+To test the package manager dropdown, open Add tool declaration and select npm:
+
+```sh
+python3 .pi/skills/verify-dort/drive.py tui my-proof --label package-manager --size 24 100 \
+  "wait:loaded." "send:'t'" "wait:Declared tools" "send:'a'" \
+  "wait:Enter/Space" "click:Choose package manager" "wait:Homebrew" \
+  "click:npm" "send:'\r'" "wait:[npm" "snap:changed-draft" \
+  "send:' '" "wait:Homebrew" "snap:keyboard-open" "send:'\x1b'" "send:'\x1b'"
+```
+
+The selection changes the draft. The manifest stays the same.
+
 A declaration appears without a package manager. To check list navigation, seed more rows than fit on screen. On a wide terminal, select a row and confirm its details appear on the right. Press End and then Up. The highlight should move up while the last row stays visible. Use Ctrl-B and Ctrl-F to page in both directions.
 
 ## Observable end state

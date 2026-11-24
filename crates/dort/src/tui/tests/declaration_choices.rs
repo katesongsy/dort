@@ -1,4 +1,37 @@
-use super::{Fixture, KeyCode, fs, key};
+use super::{Fixture, KeyCode, Task, fs, key, render};
+use crate::tui::tests::click_label;
+
+#[test]
+fn provider_dropdown_opens_by_click_or_key_and_review_button_stays_separate() {
+    let f = Fixture::new();
+    let original = fs::read(f.repo.join("dort.toml")).unwrap();
+    let mut app = f.app(false);
+
+    assert!(render(&app, 80, 24).contains("[Homebrew ▾] Enter/Space"));
+    assert!(click_label(&mut app, 80, 24, "[Homebrew ▾]").is_none());
+    let choices = render(&app, 80, 24);
+    assert!(choices.contains("CHOICE") && choices.contains("npm"));
+    assert!(click_label(&mut app, 80, 24, "npm").is_none());
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(render(&app, 80, 24).contains("[npm ▾] Enter/Space"));
+    assert!(app.preview.is_none() && app.receipt.is_none());
+    assert_eq!(fs::read(f.repo.join("dort.toml")).unwrap(), original);
+
+    for open in [KeyCode::Enter, KeyCode::Char(' ')] {
+        assert!(key(&mut app, open).is_none());
+        assert!(render(&app, 80, 24).contains("CHOICE"));
+        assert!(key(&mut app, KeyCode::Esc).is_none());
+        assert!(render(&app, 80, 24).contains("[npm ▾] Enter/Space"));
+    }
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(key(&mut app, KeyCode::Home).is_none());
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(render(&app, 80, 24).contains("[Homebrew ▾] Enter/Space"));
+    assert!(matches!(
+        click_label(&mut app, 80, 24, "Review declaration"),
+        Some(Task::ToolDeclaration(_))
+    ));
+}
 
 fn provider(app: &mut super::App, field: usize, row: usize) {
     app.tools_view.declaration.focus = field;
