@@ -7,6 +7,11 @@
 - Write `docs/user` for end users, not developers: user-friendly language, no internal implementation details.
 - Put design and implementation contracts in ignored `specs/` only. They are obsolete once implemented; do not maintain them as documentation.
 
+## TUI design
+
+- Use `design-system/index.html` and `design-system/reference/` for new designs. They define the target standard; migrate existing screens separately.
+- Regenerate captures when the reference changes. Run `python3 design-system/check.py` before review.
+
 ## Code principles
 
 * Architecture: Separate business logic from UI, persistence and external systems. Prefer high cohesion, low coupling and consistent dependency direction.

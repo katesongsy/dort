@@ -1,6 +1,8 @@
 # TUI design guide
 
-Dort uses one workbench. Shared visual choices live in `crates/dort/src/tui/components/`; workflow controllers stay outside.
+Open the [target TUI design system](../design-system/index.html) for new designs and runnable examples. Use the guide below when maintaining the current workbench.
+
+Shared visual choices live in `crates/dort/src/tui/components/`; workflow controllers stay outside.
 
 ## Principles
 
