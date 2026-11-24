@@ -337,9 +337,21 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::raw(
             "Files shows live state. Check tools and prerequisites separately.",
         ));
-        for capability in &report.unsupported_capabilities {
-            lines.push(field("Unavailable", capability, Tone::Attention));
+        start_section(&mut lines, "Limits");
+        if report.unsupported_capabilities.is_empty() {
+            lines.push(note(
+                "These declarations are supported. Files shows live state.",
+                Tone::Neutral,
+            ));
+        } else {
+            for capability in &report.unsupported_capabilities {
+                lines.push(field("Unavailable", capability, Tone::Attention));
+            }
         }
+        lines.push(note(
+            "Check tools and prerequisites separately.",
+            Tone::Neutral,
+        ));
         start_section(&mut lines, "Manifest and profiles");
         lines.push(fact("Manifest", format!("{:?}", report.manifest)));
         lines.push(fact(

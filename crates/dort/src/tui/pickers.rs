@@ -90,6 +90,9 @@ pub fn repository_details(app: &App, selected: usize) -> Text<'static> {
         0 => {
             lines.push(fact("Selected", "Enter exact repository path"));
             lines.push(fact("Retained path", &app.shell.choose_draft));
+            lines.push(Line::raw(
+                "The exact root becomes this session's selection.",
+            ));
         }
         1 => {
             lines.push(fact("Selected", "Use registered active repository"));
