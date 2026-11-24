@@ -237,6 +237,7 @@ impl Topic {
             Self::Discover => &[
                 ("Tab / Shift-Tab", "Switch panes when both are visible"),
                 ("Up/Down, Home/End", "Move selection"),
+                ("Left/Right", "Fold or unfold a group"),
                 ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 ("a / A", "Adopt selected / marked files"),
                 ("Space", "Mark/unmark"),
@@ -247,6 +248,7 @@ impl Topic {
             Self::Managed => &[
                 ("Tab / Shift-Tab", "Switch panes when both are visible"),
                 ("Up/Down, Home/End", "Move selection"),
+                ("Left/Right", "Fold or unfold a group"),
                 ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 (
                     "u / U",

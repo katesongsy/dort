@@ -25,10 +25,82 @@ pub struct Discovery {
 }
 
 /// Ephemeral selected-file disclosure. Deliberately not Debug, Clone or Serialize.
-pub struct SelectedContent(String);
+pub struct SelectedContent {
+    text: String,
+    followed: Option<PathBuf>,
+}
 impl SelectedContent {
     pub fn text(&self) -> &str {
-        &self.0
+        &self.text
+    }
+    /// Link target whose content these bytes came from, when preview followed one.
+    pub fn followed(&self) -> Option<&Path> {
+        self.followed.as_deref()
+    }
+}
+
+fn preview(
+    path: &Path,
+    entry: &observation::Entry,
+) -> std::result::Result<SelectedContent, &'static str> {
+    let fp = entry.fingerprint.as_ref().ok_or("File unavailable")?;
+    if fp.mode & 0o7000 != 0 {
+        return Err("Special permission bits; content withheld");
+    }
+    if fp.size < 0 || fp.size > 65536 {
+        return Err("Content withheld: exceeds 64 KiB preview limit");
+    }
+    let handle = observation::parent_handle(path).map_err(|_| "Unsafe parent; content withheld")?;
+    if !same_parents(&handle.parents, &entry.parents) {
+        return Err("Parent changed; content withheld");
+    }
+    let bytes = observation::read_checked_bounded(&handle, path, fp, 65536)
+        .map_err(|_| "File changed or unavailable; content withheld")?;
+    if observation::inspect(path, false).ok().is_none_or(|after| {
+        after.kind != Kind::Regular
+            || after.fingerprint.as_ref() != Some(fp)
+            || !same_parents(&after.parents, &entry.parents)
+    }) {
+        return Err("File or parent changed; content withheld");
+    }
+    let text = std::str::from_utf8(&bytes).map_err(|_| "Binary/non-UTF-8 content withheld")?;
+    if text
+        .chars()
+        .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t' | '\u{1b}'))
+    {
+        return Err("Binary content withheld");
+    }
+    Ok(SelectedContent {
+        text: text.to_owned(),
+        followed: None,
+    })
+}
+
+/// Preview any selected path, following one link so its target content is shown.
+pub fn selected_content_path(
+    host: &HostContext,
+    repository: Option<&Path>,
+    path: &Path,
+) -> std::result::Result<SelectedContent, &'static str> {
+    let _ = (host, repository);
+    let entry =
+        observation::inspect(path, false).map_err(|_| "File unavailable; content withheld")?;
+    match entry.kind {
+        Kind::Regular => preview(path, &entry),
+        Kind::Symlink => {
+            let target =
+                observation::link_path(&entry).ok_or("Unreadable link; content withheld")?;
+            let followed =
+                observation::inspect(&target, false).map_err(|_| "Link target unavailable")?;
+            if followed.kind != Kind::Regular {
+                return Err("Link target is not a regular file");
+            }
+            let mut content = preview(&target, &followed)?;
+            content.followed = Some(target);
+            Ok(content)
+        }
+        Kind::Missing => Err("File missing; content withheld"),
+        _ => Err("Only regular files or links to them can be previewed"),
     }
 }
 
@@ -62,43 +134,33 @@ pub fn selected_content(
     if current.path != expected.path
         || current.kind != expected.kind
         || current.fingerprint != expected.fingerprint
+        || current.link_target != expected.link_target
         || !same_parents(&current.parents, &expected.parents)
-        || current.kind != Kind::Regular
-        || current.sensitive
     {
         return Err("Changed or ineligible file; content withheld");
     }
-    let fp = current.fingerprint.as_ref().ok_or("File unavailable")?;
-    if fp.links != 1 || fp.uid != rustix::process::geteuid().as_raw() || fp.mode & 0o7000 != 0 {
-        return Err("Only owned, single-link ordinary files can be previewed");
+    match current.kind {
+        Kind::Regular => {
+            let fp = current.fingerprint.as_ref().ok_or("File unavailable")?;
+            if fp.links != 1 || fp.uid != rustix::process::geteuid().as_raw() {
+                return Err("Only owned, single-link ordinary files can be previewed");
+            }
+            preview(path, &current)
+        }
+        Kind::Symlink => {
+            let target =
+                observation::link_path(&current).ok_or("Unreadable link; content withheld")?;
+            let followed =
+                observation::inspect(&target, false).map_err(|_| "Link target unavailable")?;
+            if followed.kind != Kind::Regular {
+                return Err("Link target is not a regular file");
+            }
+            let mut content = preview(&target, &followed)?;
+            content.followed = Some(target);
+            Ok(content)
+        }
+        _ => Err("Changed or ineligible file; content withheld"),
     }
-    if fp.size < 0 || fp.size > 65536 {
-        return Err("Content withheld: exceeds 64 KiB preview limit");
-    }
-    let handle = observation::parent_handle(path).map_err(|_| "Unsafe parent; content withheld")?;
-    if !same_parents(&handle.parents, &current.parents) {
-        return Err("Parent changed; content withheld");
-    }
-    let bytes = observation::read_checked_bounded(&handle, path, fp, 65536)
-        .map_err(|_| "File changed or unavailable; content withheld")?;
-    if observation::inspect(path, false).ok().is_none_or(|after| {
-        after.kind != current.kind
-            || after.fingerprint != current.fingerprint
-            || !same_parents(&after.parents, &current.parents)
-    }) {
-        return Err("File or parent changed; content withheld");
-    }
-    if observation::sensitive_content(&bytes) {
-        return Err("Sensitive-content heuristic matched; content withheld");
-    }
-    let text = std::str::from_utf8(&bytes).map_err(|_| "Binary/non-UTF-8 content withheld")?;
-    if text
-        .chars()
-        .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t' | '\u{1b}'))
-    {
-        return Err("Binary content withheld");
-    }
-    Ok(SelectedContent(text.to_owned()))
 }
 
 fn same_parents(a: &[observation::Parent], b: &[observation::Parent]) -> bool {

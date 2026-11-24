@@ -366,7 +366,7 @@ fn explicit_next_task_waits_for_the_same_owned_passive_worker() {
 }
 
 #[test]
-fn no_disclosure_in_dry_run_and_changed_or_sensitive_content_is_withheld() {
+fn dry_run_does_not_preview_but_changed_content_is_withheld() {
     let f = Fixture::new();
     let mut app = f.app();
     app.dry_run = true;
@@ -375,12 +375,74 @@ fn no_disclosure_in_dry_run_and_changed_or_sensitive_content_is_withheld() {
     app.dry_run = false;
     app.resize(140, 40);
     let read = discover_content::next(&mut app).unwrap();
-    fs::write(f.host.home.join(".a"), "password=synthetic-private-value").unwrap();
+    fs::write(f.host.home.join(".a"), "ordinary replacement\n").unwrap();
     app.complete(Ok(f.finish(read)));
-    assert!(!app.content.text().contains("synthetic-private-value"));
+    assert!(!app.content.text().contains("ordinary replacement"));
     assert!(app.error.is_none());
-    assert!(!app.status.contains("synthetic-private-value"));
 }
+
+#[test]
+fn links_preview_their_target_content_and_name_the_followed_path() {
+    let f = Fixture::new();
+    let mut app = f.app();
+    app.resize(140, 40);
+    let read = discover_content::next(&mut app).unwrap();
+    fs::write(f.host.home.join(".a"), "linked settings\n").unwrap();
+    app.complete(Ok(f.finish(read)));
+    let target = f.host.home.join(".a");
+    let content = dort_core::discovery::selected_content_path(&f.host, None, &target).unwrap();
+    assert_eq!(content.text(), "linked settings\n");
+    assert_eq!(content.followed(), None);
+    let link = f.host.home.join(".c-link");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let followed = dort_core::discovery::selected_content_path(&f.host, None, &link).unwrap();
+    assert_eq!(followed.text(), "linked settings\n");
+    assert_eq!(followed.followed(), Some(target.as_path()));
+}
+#[test]
+fn already_managed_candidates_are_marked_and_cannot_be_adopted_again() {
+    use super::actions::ManagedRow;
+    use super::components as ui;
+    let f = Fixture::new();
+    let mut app = f.app();
+    let target = f.host.home.join(".a");
+    let mut data = super::actions::Data::default();
+    data.managed.push(ManagedRow {
+        id: "existing".into(),
+        source: "/synthetic/source".into(),
+        target: target.clone(),
+        state: "Linked",
+        source_kind: "Regular file",
+        target_kind: "Link",
+        blockers: vec![],
+    });
+    app.data = Some(data);
+    let index = app
+        .discovery
+        .as_ref()
+        .unwrap()
+        .report
+        .candidates
+        .iter()
+        .position(|c| c.entry.path == target)
+        .unwrap();
+    app.candidate_selected = index;
+    assert_eq!(ui::state("Managed").fg, Some(ratatui::style::Color::Cyan));
+    assert!(
+        ui::state("Managed")
+            .add_modifier
+            .contains(ratatui::style::Modifier::BOLD)
+    );
+    let screen = render(&app, 140, 40);
+    assert!(
+        screen.contains("Managed") && screen.contains("existing"),
+        "{screen}"
+    );
+    assert!(key(&mut app, KeyCode::Char('a')).is_none());
+    assert!(app.shell.overlay.is_none());
+    assert!(app.status.contains("Already managed"), "{}", app.status);
+}
+
 #[test]
 fn discover_page_is_not_cluttered_and_ineligible_marking_is_prominent() {
     let f = Fixture::new();

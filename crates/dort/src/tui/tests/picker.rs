@@ -87,7 +87,7 @@ fn paged_cells(app: &mut App, modal: bool) -> String {
         } else if app.error.is_some() {
             "Read failed"
         } else {
-            "Selected item"
+            "Details"
         };
         let y = (0..14)
             .find(|y| {

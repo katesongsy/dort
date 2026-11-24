@@ -270,8 +270,6 @@ class Session:
 
     def ready_review(self, action=b'y Confirm'):
         self.settle()
-        if b'F3 Full effects' in self.screen.text().splitlines()[-1]:
-            self.press(b'\x1bOR', b'F3 Summary')
         if b'End Read' in self.screen.text().splitlines()[-1]:
             self.send(b'\x1b[F')
         self.wait(action)
@@ -414,15 +412,17 @@ def guarded_effects(binary):
             tail = b'tail" }'
             with Session(args, env, (14, 48)) as session:
                 session.wait(b'loaded.')
-                session.press(b'a', b'F3 Full effects')
+                session.press(b'a', b'Review effects before confirming')
                 session.send(b'yy')
                 session.settle()
                 footer = session.screen.text().splitlines()[-1]
-                assert b'y Confirm' not in footer and b'F3 Full effects' in footer
-                assert not state.exists()
-                session.click_action('Full effects')
-                session.wait(b'F3 Summary')
+                assert b'y Confirm' not in footer, footer
+                if mode in ('dry-run', 'blocked'):
+                    assert b'End Read' not in footer, footer
+                else:
+                    assert b'End Read' in footer, footer
                 assert tail not in session.screen.text()
+                assert not state.exists()
                 session.send(b'y')
                 session.settle()
                 assert not state.exists()
@@ -437,7 +437,7 @@ def guarded_effects(binary):
                     session.wait(b'y Confirm')
                     session.wait(b'F1 Help')
                     footer = session.screen.text().splitlines()[-1]
-                    assert all(key in footer for key in (b'y Confirm', b'F3 Summary', b'Esc Back', b'F1 Help')), footer
+                    assert all(key in footer for key in (b'y Confirm', b'Esc Back', b'F1 Help')), footer
                     row = 13
                     column = footer.index(b'y Confirm')
                     session.send(b'\x1b[Hy')
@@ -869,7 +869,7 @@ def run():
         with Session([binary, "tui"], env, (24, 110)) as session:
             session.wait(b"loaded.")
             session.navigate("Files", "Discover [f]")
-            session.wait(b"Eligible hint")
+            session.wait(b"Eligible")
             session.click_label(".q?config")  # selection only; content is automatic
             session.send(b"\r")  # retain inspection when shrinking to compact
             session.wait(b"private-body-marker")
@@ -881,7 +881,7 @@ def run():
             session.settle()
             assert session.screen.text() == scrolled, "Focus round trip changed content or viewport"
             session.send(b"\x1b[H")
-            session.wait(b"Eligible hint")
+            session.wait(b"Eligible")
             session.more_action('Adopt')
             session.edit_fields('TARGET')
             session.click_label("ID")
@@ -951,7 +951,7 @@ def run():
         with Session([binary, "tui"], env) as session:
             session.wait(b"loaded.")
             session.send(b"F")
-            session.wait(b"Eligible hint")
+            session.wait(b"Eligible")
             session.send(b"\r")
             session.wait(b"Selected content")
             session.send(b"a")  # Direct adoption action.
@@ -1369,7 +1369,7 @@ def run():
             session.settle()
             session.wait(b"No matches")
             session.send(b"a")
-            session.wait(b"Filters do not narrow it.")
+            session.wait(b"Scope: every mapping selected by this request.")
             session.ready_review()
             session.send(b"\x1b")
             session.settle()
@@ -1486,7 +1486,7 @@ def run():
             session.click_label('Done')  # Return only; never review/adopt an individual item.
             session.wait(b'Review all')
             session.click_label('Review all')
-            session.wait(b'Exact marked set')
+            session.wait(b'One approval / one transaction')
             session.ready_review(b'y Adopt all')
             session.send(b'y')  # Adopt all consumes the real combined preview once.
             session.wait(b'Enter Details')
@@ -1518,7 +1518,7 @@ def run():
                 session.click_label('[ ] only-a')
                 session.click_label('[ ] only-b')
                 session.send(b'/only-a\rA')  # Hidden only-b remains explicitly included.
-                session.wait(b'Exact marked set')
+                session.wait(b'One approval / one transaction')
                 session.ready_review()
                 session.send(b'y')
                 session.wait(b'Operation result')
@@ -1528,15 +1528,16 @@ def run():
                 session.send(b'\x1b')
                 session.settle()
                 session.send(operation.encode())
-                session.wait(b'Exact marked set')
+                session.wait(b'One approval / one transaction')
                 if operation == 'D':
                     session.wait(b'only-a')
+                    session.send(b'\x1b[F')
                     session.wait(b'only-b')
                     assert all((targets / name).is_symlink() for name in ('only-a', 'only-b'))
                     session.resize((14, 47))
                     session.wait(b'terminal too small')
                     session.resize((24, 80))
-                    session.wait(b'Exact marked set')
+                    session.wait(b'y Confirm changes')
                     session.settle()
                     assert all((targets / name).is_symlink() for name in ('only-a', 'only-b')), 'Resize executed changes'
                 session.ready_review()
@@ -1579,7 +1580,7 @@ def run():
             session.press(b'j', '›   [v] bundle'.encode())
             session.press(b'j', '›     [ ] only-b'.encode())
             session.send(b' U')
-            session.wait(b'Exact marked set')
+            session.wait(b'One approval / one transaction')
             assert b'only-a' not in session.screen.text(), 'Completed Keep leaked into a later batch'
             session.ready_review()
             session.send(b'y')

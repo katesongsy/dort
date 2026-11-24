@@ -17,8 +17,9 @@ use ui::reader::{field, section};
 thread_local! { pub(super) static FORMATTED_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
 
 fn draw_selected(frame: &mut Frame, area: Rect, app: &App, focused: bool) {
-    if app.discovering && app.content.available() {
-        let parts = Layout::vertical([Constraint::Min(3), Constraint::Length(5)]).split(area);
+    if app.content.available() {
+        let parts =
+            Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)]).split(area);
         super::discover_content::draw(frame, parts[0], &app.content, focused);
         app.hits.wheel(parts[0], super::input::Wheel::Content);
         app.hits
@@ -43,6 +44,23 @@ fn draw_selected(frame: &mut Frame, area: Rect, app: &App, focused: bool) {
     }
 }
 
+fn kind_short(kind: &Kind) -> &'static str {
+    match kind {
+        Kind::Regular => "File",
+        Kind::Directory => "Dir",
+        Kind::Symlink => "Link",
+        Kind::Missing => "Gone",
+        Kind::Special => "Spec",
+    }
+}
+fn kind_style(kind: &Kind) -> ratatui::style::Style {
+    match kind {
+        Kind::Directory => ui::heading(),
+        Kind::Symlink => ui::accent(),
+        Kind::Missing | Kind::Special => ui::warning(),
+        Kind::Regular => ratatui::style::Style::default(),
+    }
+}
 fn kind(kind: &Kind) -> &'static str {
     match kind {
         Kind::Regular => "File",
@@ -74,25 +92,31 @@ fn details(app: &App) -> Text<'static> {
             .filter(|_| super::discovery_tree::contains(app, app.candidate_selected))
         {
             let eligible = candidate.supported_for_adoption;
+            let managed = app.data.as_ref().and_then(|d| {
+                d.managed
+                    .iter()
+                    .find(|row| row.target == candidate.entry.path)
+            });
             lines.push(section(kind(&candidate.entry.kind)));
             lines.push(field(
                 "Path",
                 candidate.entry.path.to_str().unwrap_or("unavailable"),
                 Tone::Neutral,
             ));
-            lines.push(field(
-                "Status",
-                if eligible {
-                    "Eligible hint"
-                } else {
-                    "Not eligible"
-                },
-                if eligible {
-                    Tone::Attention
-                } else {
-                    Tone::Error
-                },
-            ));
+            let (status, tone) = if managed.is_some() {
+                ("Managed", Tone::Success)
+            } else if eligible {
+                ("Eligible", Tone::Success)
+            } else {
+                ("Ineligible", Tone::Attention)
+            };
+            lines.push(field("Status", status, tone));
+            if let Some(row) = managed {
+                lines.push(field("Managed", &row.id, Tone::Neutral));
+                lines.push(Line::raw(
+                    "Already managed. Change the existing entry in Managed.",
+                ));
+            }
             lines.push(Line::raw(if eligible {
                 "Choose Adopt to edit target, ID and source."
             } else {
@@ -291,10 +315,10 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         },
         total
     );
-    let (adoption_width, kind_width) = if list_area.width < 48 {
-        (11, 4)
+    let (adoption_width, kind_width) = if list_area.width < 60 {
+        (12, 4)
     } else {
-        (15, 10)
+        (16, 9)
     };
     let name_width = if app.discovering {
         list_area
@@ -363,8 +387,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         if node.branch {
             rows.push(Row::new(vec![
                 Cell::from(ui::inline(&prefix)).style(ui::heading()),
-                Cell::from("Group").style(ui::muted()),
-                Cell::from("Directory"),
+                Cell::from(""),
+                Cell::from("Dir").style(kind_style(&Kind::Directory)),
             ]));
         } else if let Some(i) = node.raw {
             if app.discovering {
@@ -373,15 +397,21 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                     .as_ref()
                     .and_then(|d| d.report.candidates.get(i))
                 {
-                    let state = if c.supported_for_adoption {
-                        "Eligible hint"
+                    let managed = app
+                        .data
+                        .as_ref()
+                        .and_then(|d| d.managed.iter().find(|row| row.target == c.entry.path));
+                    let state = if managed.is_some() {
+                        "Managed"
+                    } else if c.supported_for_adoption {
+                        "Eligible"
                     } else {
-                        "Not eligible"
+                        "Ineligible"
                     };
                     rows.push(Row::new(vec![
                         Cell::from(ui::inline(&prefix)),
                         Cell::from(state).style(ui::state(state)),
-                        Cell::from(kind(&c.entry.kind)),
+                        Cell::from(kind_short(&c.entry.kind)).style(kind_style(&c.entry.kind)),
                     ]));
                 }
             } else if let Some(data) = &app.data {

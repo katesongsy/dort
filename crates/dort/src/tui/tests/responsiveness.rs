@@ -173,6 +173,108 @@ fn cached_large_navigation_virtualizes_rows_and_preserves_raw_mouse_identity() {
     assert!(Arc::ptr_eq(&snapshot, &discovery_tree::snapshot(&app)));
 }
 #[test]
+fn discovery_rows_name_eligibility_and_style_kinds_distinctly() {
+    use super::{components as ui, views};
+    use ratatui::{Terminal, backend::TestBackend};
+    let f = Fixture::new();
+    let mut app = App::new(false);
+    app.tab = Tab::Files;
+    app.discovering = true;
+    let candidates = [
+        (".link", Kind::Symlink, false),
+        (".file", Kind::Regular, true),
+        (".special", Kind::Special, false),
+    ]
+    .into_iter()
+    .map(|(name, kind, eligible)| Candidate {
+        entry: Entry {
+            path: f.host.home.join(name),
+            kind,
+            fingerprint: None,
+            parents: vec![],
+            link_target: None,
+            sha256: None,
+            sensitive: false,
+        },
+        link_state: None,
+        supported_for_adoption: eligible,
+    })
+    .collect();
+    app.complete(Ok(Output::Discovery(crate::services::Discovery {
+        home: f.host.home.clone(),
+        repository: None,
+        report: Discovery {
+            candidates,
+            warnings: vec![],
+            sensitivity_notice: "synthetic metadata",
+        },
+    })));
+    app.inventory.candidate_folded = Arc::new(super::visibility::Folds::all(false));
+    app.resize(100, 24);
+    let screen = render(&app, 100, 24);
+    assert!(
+        screen.contains("Eligible") && screen.contains("Ineligible"),
+        "{screen}"
+    );
+    assert!(!screen.contains("Eligible hint"), "{screen}");
+    assert!(
+        !screen.lines().any(|line| line.contains("Group")),
+        "{screen}"
+    );
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|frame| views::draw(frame, &app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let cell = |needle: &str| {
+        for y in 0..buffer.area.height {
+            let row: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
+            if let Some(byte) = row.find(needle) {
+                let x = row[..byte].chars().count() as u16;
+                return buffer[(x, y)].clone();
+            }
+        }
+        panic!("missing {needle}")
+    };
+    let eligible = cell("Eligible");
+    let denied = cell("Ineligible");
+    assert_eq!(Some(eligible.fg), ui::success().fg);
+    assert_ne!(eligible.fg, denied.fg);
+    assert_eq!(Some(cell("Link").fg), ui::accent().fg);
+    assert_eq!(Some(cell("Spec").fg), ui::warning().fg);
+}
+
+#[test]
+fn arrow_keys_fold_unfold_and_move_across_levels() {
+    let f = Fixture::new();
+    let mut app = f.app(10_000, true);
+    f.finish(&mut app);
+    app.inventory.candidate_folded = Arc::new(super::visibility::Folds::all(false));
+    tree::select(&mut app, 9999);
+    key(&mut app, KeyCode::Left);
+    let group = app
+        .inventory
+        .group
+        .expect("leaf Left selects its parent group");
+    key(&mut app, KeyCode::Left);
+    assert!(
+        !tree::visible(&app).iter().any(|n| n.raw == Some(9999)),
+        "Left collapses the group"
+    );
+    assert_eq!(app.file_selection(), group);
+    key(&mut app, KeyCode::Right);
+    assert!(
+        tree::visible(&app).iter().any(|n| n.raw == Some(9999)),
+        "Right unfolds the group"
+    );
+    key(&mut app, KeyCode::Right);
+    assert!(
+        tree::selected(&app).is_some_and(|n| !n.branch),
+        "Right on an open group moves into its first child"
+    );
+}
+
+#[test]
 fn local_folds_keep_the_snapshot_and_marks_and_scope_changes_drop_old_preparations() {
     let f = Fixture::new();
     let mut app = f.app(10_000, true);

@@ -384,27 +384,35 @@ fn wide_full_paths_and_ids_are_reachable_in_cells_using_only_detail_page_keys() 
                 long_path("original")
             )
         };
-        let size = (110, 24);
+        let size = if tab == Tab::Git { (80, 30) } else { (110, 40) };
         press(&mut app, KeyCode::Enter, size);
         let mut cells: Vec<String> = Vec::new();
         for _ in 0..80 {
             let text = render(&app, size.0, size.1);
             let rows: Vec<_> = text.lines().collect();
-            let top = rows
-                .iter()
-                .enumerate()
-                .find(|(y, line)| {
-                    *y > 0
-                        && (line.contains("Selected item")
-                            || line.contains("Operation details")
-                            || line.contains("Git details"))
+            let top = if tab == Tab::Files {
+                rows.iter().enumerate().rev().find(|(y, line)| {
+                    *y > 0 && line.contains("Details") && !line.contains("Selected content")
                 })
-                .map(|(index, _)| index)
-                .unwrap();
-            let title = ["Selected item", "Operation details", "Git details"]
-                .into_iter()
-                .find(|title| rows[top].contains(title))
-                .unwrap();
+            } else {
+                rows.iter().enumerate().find(|(y, line)| {
+                    *y > 0
+                        && (line.contains("Operation details")
+                            || line.contains("Git details")
+                            || line.contains("Selected item"))
+                })
+            }
+            .map(|(index, _)| index)
+            .expect("reader pane title");
+            let title = [
+                "Selected content",
+                "Details",
+                "Operation details",
+                "Git details",
+            ]
+            .into_iter()
+            .find(|title| rows[top].contains(title))
+            .unwrap();
             let index = rows[top].find(title).unwrap();
             let left = rows[top][..index].chars().count() - 1; // Pane title's trusted leading space.
             let viewport: Vec<String> = rows[top + 1..usize::from(size.1 - 1)]
@@ -433,7 +441,10 @@ fn wide_full_paths_and_ids_are_reachable_in_cells_using_only_detail_page_keys() 
 
 #[test]
 fn files_and_git_split_tab_moves_the_keyboard_owner_not_the_row() {
-    for (tab, reader) in [(Tab::Files, "Selected item"), (Tab::Git, "Git details")] {
+    for (tab, reader, focused_reader) in [
+        (Tab::Files, "Selected item", "Selected content"),
+        (Tab::Git, "Git details", "Git details"),
+    ] {
         let mut app = fixture(tab);
         let wide = (100, 24);
         let narrow = (80, 24);
@@ -446,7 +457,10 @@ fn files_and_git_split_tab_moves_the_keyboard_owner_not_the_row() {
         press(&mut app, KeyCode::Tab, wide);
         press(&mut app, KeyCode::Down, wide);
         let focused = render(&app, wide.0, wide.1);
-        assert!(focused.contains(&format!("{reader} [Active]")), "{focused}");
+        assert!(
+            focused.contains(&format!("{focused_reader} [Active]")),
+            "{focused}"
+        );
         assert_eq!(focused.matches("[Active]").count(), 1, "{focused}");
         let row = |screen: &str| {
             screen
@@ -462,13 +476,13 @@ fn files_and_git_split_tab_moves_the_keyboard_owner_not_the_row() {
         assert_eq!(row(&before), row(&focused));
         let compact = render(&app, narrow.0, narrow.1);
         assert!(
-            compact.contains(&format!("{reader} [Active]")) && !compact.contains("› "),
+            compact.contains(&format!("{focused_reader} [Active]")) && !compact.contains("› "),
             "{compact}"
         );
         press(&mut app, KeyCode::Esc, narrow);
         let returned = render(&app, wide.0, wide.1);
         assert!(
-            !returned.contains(&format!("{reader} [Active]")),
+            !returned.contains(&format!("{focused_reader} [Active]")),
             "{returned}"
         );
         assert_eq!(row(&before), row(&returned));

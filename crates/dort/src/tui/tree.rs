@@ -184,6 +184,30 @@ pub fn fold(app: &mut App, close: bool) {
         }
     }
 }
+/// Right arrow: unfold a closed group, then move into its first visible child.
+pub fn expand(app: &mut App) {
+    let Some(node) = selected(app) else {
+        return;
+    };
+    if !node.branch {
+        return;
+    }
+    let folded = if app.discovering {
+        app.inventory.candidate_folded.clone()
+    } else {
+        app.inventory.managed_folded.clone()
+    };
+    if folded.contains(&node.path) {
+        fold(app, false);
+        return;
+    }
+    if let Some(child) = visible(app)
+        .iter()
+        .find(|n| n.depth == node.depth + 1 && n.path.starts_with(&node.path))
+    {
+        select(app, child.key);
+    }
+}
 pub fn toggle(app: &mut App) {
     let Some(node) = selected(app) else {
         return;
