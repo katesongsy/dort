@@ -400,8 +400,8 @@ fn direct_field_submission_is_preview_only_and_busy_navigation_explains_joined_w
     ));
     app.shell.overlay = None;
     app.start(true);
-    render(&app, 100, 30);
-    let (column, row) = super::tests::target_position(&app, 100, 30, |target| {
+    render(&app, 110, 30);
+    let (column, row) = super::tests::target_position(&app, 110, 30, |target| {
         matches!(target, Target::NavigationBlocked)
     });
     app.mouse(
@@ -411,7 +411,7 @@ fn direct_field_submission_is_preview_only_and_busy_navigation_explains_joined_w
             row,
             modifiers: KeyModifiers::NONE,
         },
-        100,
+        110,
         30,
     );
     assert!(app.busy && app.interaction_notice.is_some());

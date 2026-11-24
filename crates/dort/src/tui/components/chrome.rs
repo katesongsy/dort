@@ -11,6 +11,9 @@ use ratatui::{
     widgets::Paragraph,
 };
 
+const RAIL_WIDTH: u16 = 16;
+const RAIL_GAP: u16 = 1;
+
 pub struct Areas {
     pub body: Rect,
     pub footer: Rect,
@@ -52,8 +55,8 @@ pub fn shell(
         area.width,
         area.height.saturating_sub(2),
     );
-    if area.width >= 100 {
-        let rail = Rect::new(body.x, body.y, 16, body.height);
+    if area.width >= crate::tui::workspace::SPLIT_MIN_WIDTH + RAIL_WIDTH + RAIL_GAP {
+        let rail = Rect::new(body.x, body.y, RAIL_WIDTH, body.height);
         let choices = crate::tui::navigation::SECTION_ORDER
             .into_iter()
             .filter_map(crate::tui::navigation::section_tab);
@@ -84,8 +87,8 @@ pub fn shell(
                 },
             );
         }
-        body.x += rail.width + 1;
-        body.width = body.width.saturating_sub(rail.width + 1);
+        body.x += rail.width + RAIL_GAP;
+        body.width = body.width.saturating_sub(rail.width + RAIL_GAP);
     }
     Areas { body, footer }
 }

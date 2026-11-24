@@ -83,7 +83,7 @@ impl App {
                 "Files / File details"
             });
         }
-        if self.tab == Tab::Recovery && self.history_details {
+        if self.tab == Tab::Recovery && self.history_region == super::workspace::Region::Details {
             return Some("Recovery / Operation details");
         }
         if self.tab == Tab::Git && self.git_view.browsing_details() && !self.git_view.editing_root {

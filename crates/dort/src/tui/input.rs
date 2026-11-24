@@ -5,6 +5,7 @@ use std::cell::{Cell, RefCell};
 
 #[derive(Clone, Copy)]
 pub enum Target {
+    Workspace(super::workspace::Scope, super::workspace::Region),
     Feedback(super::task_surfaces::Control),
     TreeFold(usize),
     TreeMark(usize),
@@ -63,11 +64,13 @@ pub struct Hits {
     regions: RefCell<Vec<Region>>,
     size: Cell<(u16, u16)>,
     input_focus: Cell<bool>,
+    workspace: Cell<Option<super::workspace::Workspace>>,
     actions: RefCell<Vec<super::components::ActionButton>>,
 }
 impl Hits {
     pub fn begin(&self, area: Rect) {
         self.clear();
+        self.workspace.set(None);
         self.size.set((area.width, area.height));
         self.input_focus.set(true);
     }
@@ -94,6 +97,17 @@ impl Hits {
         {
             self.actions.borrow_mut().push(action);
         }
+    }
+    pub fn invalidate_workspace(&self) {
+        self.workspace.set(None);
+    }
+    pub fn bind_workspace(&self, workspace: super::workspace::Workspace) {
+        self.workspace.set(Some(workspace));
+    }
+    pub fn workspace(&self, size: (u16, u16)) -> Option<super::workspace::Workspace> {
+        (self.size() == size)
+            .then(|| self.workspace.get())
+            .flatten()
     }
     pub fn actions(&self) -> Vec<super::components::ActionButton> {
         self.actions.borrow().clone()

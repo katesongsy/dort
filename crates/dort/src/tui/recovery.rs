@@ -1,5 +1,6 @@
 //! Content-free history presentation. Recovery previews make the final decision.
 use super::input::{Target, Wheel};
+use super::workspace::{Region, Scope, Workspace};
 use super::{app::App, components as ui};
 use dort_core::journal::{Diagnosis, Phase};
 use ratatui::{
@@ -223,7 +224,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                 ratatui::crossterm::event::KeyModifiers::NONE,
             )),
         );
-    } else if app.history_details {
+    } else if app.history_region == Region::Details {
         app.presented("Back", "Esc", super::input::Target::Back);
     } else if available.is_some() && !app.visible_history_rows().is_empty() {
         app.presented(
@@ -234,7 +235,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     }
     app.hits.click(rows[1], super::input::Target::Filter);
     let content = rows[2];
-    let focused = true;
     let Some(data) = &app.data else {
         ui::reader::Reader::new(&app.hits).report(
             frame,
@@ -242,7 +242,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             "Recovery | Not loaded",
             Text::raw("Recovery has not loaded yet."),
             0,
-            focused,
+            true,
         );
         return;
     };
@@ -256,31 +256,33 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                 Line::raw("Writes stay blocked until recovery loads."),
             ]),
             app.details_scroll,
-            focused,
+            true,
         );
         return;
     }
-    let wide = ui::reader::wide_details(area, 2);
-    if app.history_details {
+    let visible = app.visible_history_rows();
+    let active = if app.history_search.editing {
+        Region::Queue
+    } else {
+        app.history_region
+    };
+    let workspace = Workspace::new(Scope::Recovery, content, active, !visible.is_empty());
+    workspace.bind(&app.hits);
+    if let Some(pane) = workspace.details {
         ui::reader::Reader::new(&app.hits).report(
             frame,
-            content,
+            pane,
             "Operation details",
             details(app),
             app.details_scroll,
-            focused,
+            active == Region::Details,
         );
-        return;
     }
-    let (list, pane) = ui::reader::detail_panes(content, wide);
-    let visible = app.visible_history_rows();
-    let title = format!(
-        "Operations | {} / {} shown",
-        visible.len(),
-        data.history.len()
-    );
+    let Some(list) = workspace.queue else { return };
+    let title = "Operations";
+    let focused = active == Region::Queue;
     if data.history.is_empty() || visible.is_empty() {
-        let block = ui::pane(&title, focused);
+        let block = ui::pane(title, focused);
         let inner = block.inner(list);
         frame.render_widget(block, list);
         ui::text_view(
@@ -297,13 +299,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         let collection = Collection::new(
             [
                 Constraint::Min(8),
-                Constraint::Length(16),
-                Constraint::Length(12),
-                Constraint::Length(13),
+                Constraint::Length(if list.width < 44 { 4 } else { 12 }),
+                Constraint::Length(9),
+                Constraint::Length(if list.width < 44 { 7 } else { 12 }),
             ],
             Header::Heading(["OP ID", "TYPE", "STATE", "STATUS"]),
         )
-        .titled(&title, focused);
+        .titled(title, focused);
         let selected = visible.iter().position(|&i| i == app.selected);
         let window = collection.window(list, &app.history_viewport, visible.len(), selected);
         let rows = visible[window.range].iter().map(|&i| {
@@ -329,16 +331,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                 wheel: Some(Wheel::Rows),
                 target: Target::Row,
             },
-        );
-    }
-    if let Some(pane) = pane {
-        ui::reader::Reader::new(&app.hits).report(
-            frame,
-            pane,
-            "Operation details",
-            details(app),
-            app.details_scroll,
-            true,
         );
     }
 }

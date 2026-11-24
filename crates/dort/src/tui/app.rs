@@ -1,3 +1,4 @@
+use super::workspace::{Region, Scope};
 use super::{
     actions::{Data, Output, Pending, Task},
     components::approval::Approval,
@@ -128,7 +129,7 @@ pub struct App {
     pub diagnostics: Option<super::actions::Diagnostics>,
     pub showing_diagnostics: bool,
     pub history_search: super::inventory::Search,
-    pub history_details: bool,
+    pub history_region: Region,
     pub history_viewport: super::navigation::ListViewport,
     pub retry: Option<super::actions::Retry>,
     pub selected: usize,
@@ -221,7 +222,7 @@ impl App {
             diagnostics: None,
             showing_diagnostics: false,
             history_search: Default::default(),
-            history_details: false,
+            history_region: Region::Queue,
             history_viewport: Default::default(),
             retry: None,
             selected: 0,
@@ -437,6 +438,13 @@ impl App {
         if let Some(code) = code {
             self.last_click = None;
             let wheel = self.hits.scroll(event.column, event.row)?;
+            if let Some(workspace) = self.hits.workspace((width, height))
+                && workspace.is_split()
+                && !self.text_entry()
+                && let Some(region) = workspace.region_at(event.column, event.row)
+            {
+                self.focus_workspace(workspace.scope, region);
+            }
             if matches!(wheel, Wheel::Choices | Wheel::PreviewRows) {
                 let code = if code == KeyCode::PageDown {
                     KeyCode::Down
@@ -500,6 +508,13 @@ impl App {
             return self.key(KeyEvent::new(code, KeyModifiers::NONE), width, height);
         }
         let target = self.hits.target(event.column, event.row)?;
+        if let Some(workspace) = self.hits.workspace((width, height))
+            && workspace.is_split()
+            && !self.text_entry()
+            && let Some(region) = workspace.region_at(event.column, event.row)
+        {
+            self.focus_workspace(workspace.scope, region);
+        }
         if matches!(target, Target::More) {
             let (_, hidden) = super::workbench::strip_actions(self, width);
             let mut actions = super::workbench::actions(self);
@@ -674,6 +689,12 @@ impl App {
                 self.details_scroll = 0;
                 None
             }
+            Target::Workspace(scope, region) => {
+                if !self.text_entry() {
+                    self.focus_workspace(scope, region);
+                }
+                None
+            }
             Target::Action(action) => self.activate(action),
             Target::DismissDialog => {
                 self.interaction_notice = None;
@@ -699,7 +720,7 @@ impl App {
                 } else if self.tab == Tab::Recovery && self.visible_history_rows().contains(&index)
                 {
                     self.selected = index;
-                    self.history_details = false;
+                    self.history_region = Region::Queue;
                 } else if self.tab == Tab::Git {
                     self.git_view.select_metadata(index);
                 }
@@ -711,6 +732,7 @@ impl App {
                     self.inventory.search_mut(self.discovering).editing = true;
                 }
                 if self.tab == Tab::Recovery {
+                    self.history_region = Region::Queue;
                     self.history_search.editing = true;
                 }
                 if self.tab == Tab::Git {
@@ -910,6 +932,21 @@ impl App {
             Control::Back => None,
         }
     }
+    fn workspace_region(&self, scope: Scope) -> Option<Region> {
+        match scope {
+            Scope::Recovery if self.tab == Tab::Recovery && self.shell.overlay.is_none() => {
+                Some(self.history_region)
+            }
+            _ => None,
+        }
+    }
+    fn focus_workspace(&mut self, scope: Scope, region: Region) {
+        if self.workspace_region(scope).is_some() {
+            match scope {
+                Scope::Recovery => self.history_region = region,
+            }
+        }
+    }
     fn paging_list(&self) -> bool {
         if self.help.is_some()
             || self.more.is_some()
@@ -929,7 +966,7 @@ impl App {
         }
         match self.tab {
             Tab::Files => !self.inventory.details && !self.content.focused,
-            Tab::Recovery => !self.history_details,
+            Tab::Recovery => self.history_region == Region::Queue,
             Tab::Git => self.git_view.browsing_entries(),
             Tab::Tools => self.tools_view.collection_visible(),
             _ => false,
@@ -1127,7 +1164,7 @@ impl App {
                     self.inventory.search_mut(self.discovering).editing = false;
                     self.inventory.details = false;
                     self.history_search.editing = false;
-                    self.history_details = false;
+                    self.history_region = Region::Queue;
                 }
             }
             self.status = "Resize to at least 48x14 to review and approve.".into();
@@ -1396,6 +1433,15 @@ impl App {
         if let Some(editor) = self.batch_editor.as_mut().filter(|e| e.open) {
             return editor.key(key);
         }
+        if matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+            && !self.text_entry()
+            && let Some(workspace) = self.hits.workspace((width, height))
+            && workspace.is_split()
+            && let Some(active) = self.workspace_region(workspace.scope)
+        {
+            self.focus_workspace(workspace.scope, active.other());
+            return None;
+        }
         if self.shell.overlay.is_some() {
             let report_scroll = !self.shell.form_details
                 && !self.shell.picker_details
@@ -1471,22 +1517,18 @@ impl App {
         self.workspace_key(key)
     }
     fn workspace_key(&mut self, key: KeyEvent) -> Option<Task> {
-        if self.tab == Tab::Recovery && self.history_details && !self.history_search.editing {
+        if self.tab == Tab::Recovery
+            && self.history_region == Region::Details
+            && !self.history_search.editing
+        {
+            if super::components::reader::ScrollKeys::DETAILS
+                .apply(&mut self.details_scroll, key.code)
+            {
+                return None;
+            }
             match key.code {
-                KeyCode::Down | KeyCode::PageDown | KeyCode::Char('j') => {
-                    self.details_scroll = self.details_scroll.saturating_add(2);
-                    return None;
-                }
-                KeyCode::Up | KeyCode::PageUp | KeyCode::Char('k') => {
-                    self.details_scroll = self.details_scroll.saturating_sub(2);
-                    return None;
-                }
-                KeyCode::Home => {
-                    self.details_scroll = 0;
-                    return None;
-                }
                 KeyCode::Esc => {
-                    self.history_details = false;
+                    self.history_region = Region::Queue;
                     self.details_scroll = 0;
                     return None;
                 }
@@ -1539,7 +1581,7 @@ impl App {
                 return None;
             }
             if self.tab == Tab::Recovery
-                && !self.history_details
+                && self.history_region == Region::Queue
                 && self
                     .data
                     .as_ref()
@@ -1660,20 +1702,25 @@ impl App {
             KeyCode::Char('l') if self.tab == Tab::Files => super::tree::fold(self, false),
             KeyCode::Esc => {
                 self.inventory.details = false;
-                self.history_details = false;
+                self.history_region = Region::Queue;
 
                 self.result = None;
             }
             KeyCode::Char('/') if self.tab == Tab::Files => {
                 self.inventory.search_mut(self.discovering).editing = true
             }
-            KeyCode::Char('/') if self.tab == Tab::Recovery => self.history_search.editing = true,
+            KeyCode::Char('/') if self.tab == Tab::Recovery => {
+                self.history_region = Region::Queue;
+                self.history_search.editing = true;
+            }
             KeyCode::Delete if self.tab == Tab::Recovery => {
                 self.history_search.query.clear();
                 self.clamp_history_selection();
             }
             KeyCode::Enter if self.tab == Tab::Recovery => {
-                self.history_details = true;
+                if self.history_selection().is_some() {
+                    self.history_region = Region::Details;
+                }
                 self.details_scroll = 0;
             }
             KeyCode::Down if self.tab == Tab::Recovery => self.move_history_selection(false),
@@ -1736,6 +1783,7 @@ impl App {
         if self.viewport != (width, height) {
             self.last_click = None;
             self.hits.clear();
+            self.hits.invalidate_workspace();
         }
         self.viewport = (width, height);
         if let Some(preview) = &self.preview
@@ -2088,7 +2136,7 @@ impl App {
             }
             Action::Inspect if self.tab == Tab::Git => self.git_view.inspect_metadata(),
             Action::Inspect if self.tab == Tab::Recovery => {
-                self.history_details = true;
+                self.history_region = Region::Details;
                 self.details_scroll = 0;
             }
             Action::Inspect if self.tab == Tab::Files => {
@@ -2164,7 +2212,7 @@ impl App {
                         _ => super::recovery::abandon(row),
                     };
                     if !eligible {
-                        self.history_details = true;
+                        self.history_region = Region::Details;
                         self.status = "Action unavailable for this diagnosis. Inspect details and request an eligible recovery preview. Refresh if history changed.".into();
                         return None;
                     }

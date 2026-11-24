@@ -394,11 +394,14 @@ fn wide_full_paths_and_ids_are_reachable_in_cells_using_only_detail_page_keys() 
             let rows: Vec<_> = text.lines().collect();
             let top = rows
                 .iter()
-                .position(|line| {
-                    line.contains("Selected item")
-                        || line.contains("Operation details")
-                        || line.contains("Git details")
+                .enumerate()
+                .find(|(y, line)| {
+                    *y > 0
+                        && (line.contains("Selected item")
+                            || line.contains("Operation details")
+                            || line.contains("Git details"))
                 })
+                .map(|(index, _)| index)
                 .unwrap();
             let title = ["Selected item", "Operation details", "Git details"]
                 .into_iter()
