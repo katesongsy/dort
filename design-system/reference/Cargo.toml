@@ -1,0 +1,11 @@
+[package]
+name = "dort-reference"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
+unicode-segmentation = "1"
