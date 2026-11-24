@@ -551,6 +551,58 @@ fn shared_reports_distinguish_sections_fields_and_values() {
     assert_style(b, "BLOCKED: Writer busy", Color::Red, Modifier::BOLD);
 }
 #[test]
+fn shared_collection_keeps_row_targets_on_visible_lines() {
+    use super::input::{Hits, Target, Wheel};
+    use ratatui::{layout::Constraint, widgets::Row};
+    use ui::collection::{Collection, Header, RowTargets, Selection};
+
+    let mut terminal = Terminal::new(TestBackend::new(32, 5)).unwrap();
+    let hits = Hits::default();
+    terminal
+        .draw(|frame| {
+            let area = frame.area();
+            hits.begin(area);
+            Collection::new([Constraint::Min(10)], Header::Heading(["ITEM"]))
+                .titled("Records", true)
+                .draw(
+                    frame,
+                    area,
+                    [
+                        (17, Row::new(["Alpha"]).height(2).bottom_margin(1)),
+                        (32, Row::new(["Beta"]).top_margin(1)),
+                    ],
+                    Selection::at(Some(1)),
+                    RowTargets {
+                        hits: &hits,
+                        wheel: Some(Wheel::Rows),
+                        target: Target::Row,
+                    },
+                );
+        })
+        .unwrap();
+    let b = terminal.backend().buffer();
+    for (label, id, expected_y) in [("Alpha", 17, 2), ("Beta", 32, 3)] {
+        let (x, y) = locate(b, label);
+        assert_eq!(y, expected_y);
+        assert!(matches!(hits.target(x, y), Some(Target::Row(found)) if found == id));
+        assert!(matches!(hits.scroll(x, y), Some(Wheel::Rows)));
+    }
+    assert!(hits.target(3, 4).is_none());
+}
+#[test]
+fn report_wraps_trusted_glyphs_at_terminal_cell_boundaries() {
+    let mut terminal = Terminal::new(TestBackend::new(4, 4)).unwrap();
+    terminal
+        .draw(|frame| {
+            ui::text_view(frame, frame.area(), "abc界e\u{301}".into(), 0);
+        })
+        .unwrap();
+    let b = terminal.backend().buffer();
+    assert_eq!(b[(3, 0)].symbol(), " ");
+    assert_eq!(b[(0, 1)].symbol(), "界");
+    assert_eq!(b[(2, 1)].symbol(), "e\u{301}");
+}
+#[test]
 fn recovery_details_keep_full_ids_and_guards_inspectable_without_mutating_diagnosis() {
     use dort_core::journal::Phase;
     for (schema, phase, problem) in [

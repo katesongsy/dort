@@ -126,7 +126,10 @@ impl<'a, const N: usize> Collection<'a, N> {
         selection: Selection,
         targets: RowTargets<'_, impl Fn(usize) -> Target>,
     ) -> Rendered {
-        let (ids, rows): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
+        let (ids, rows): (Vec<_>, Vec<_>) = rows
+            .into_iter()
+            .map(|(id, row)| (id, row.height(1).top_margin(0).bottom_margin(0)))
+            .unzip();
         let body = self.row_area(area);
         let mut table = Table::new(rows, self.widths).row_highlight_style(selected());
         match self.header {

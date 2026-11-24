@@ -1,4 +1,3 @@
-//! Project one approval control into the existing keyboard and pointer dispatch.
 use super::ActionButton;
 use crate::tui::input::{Hits, Target};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};

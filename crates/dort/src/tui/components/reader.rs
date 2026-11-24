@@ -1,4 +1,3 @@
-//! Report readers share wrapping, browse layout and input defaults.
 use ratatui::{
     Frame,
     crossterm::event::KeyCode,
@@ -101,8 +100,7 @@ impl ScrollKeys {
     }
 }
 
-/// Scroll an ASCII-safe report by rendered cells, not unbounded paragraph offsets.
-/// Splitting long lines at cells preserves all metadata and avoids silently clipped paths.
+/// Scroll a report by wrapped terminal rows.
 pub fn report(
     frame: &mut Frame,
     area: Rect,
@@ -122,21 +120,18 @@ pub fn text_view(frame: &mut Frame, inner: Rect, body: Text<'static>, offset: u1
 pub fn text_view_at(frame: &mut Frame, inner: Rect, body: Text<'static>, offset: usize) {
     let width = usize::from(inner.width).max(1);
     let mut lines = Vec::new();
-    for line in body.lines {
+    for line in &body.lines {
         let mut row = Vec::new();
         let mut used = 0;
-        let line_style = body.style.patch(line.style);
-        for span in line.spans {
-            let style = line_style.patch(span.style);
-            // Callers supply escaped ASCII text, trusted labels or decoration only.
-            for c in span.content.chars() {
-                if used == width {
-                    lines.push(Line::from(std::mem::take(&mut row)));
-                    used = 0;
-                }
-                row.push(Span::styled(c.to_string(), style));
-                used += 1;
+        for grapheme in line.styled_graphemes(body.style) {
+            let span = Span::styled(grapheme.symbol, grapheme.style);
+            let cells = span.width();
+            if used > 0 && used + cells > width {
+                lines.push(Line::from(std::mem::take(&mut row)));
+                used = 0;
             }
+            used += cells;
+            row.push(span);
         }
         lines.push(Line::from(row));
     }
