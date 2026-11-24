@@ -265,7 +265,7 @@ fn discovery_exclusions_are_relative_to_home_not_temporary_ancestors() {
 }
 
 #[test]
-fn selected_content_is_bounded_private_and_refuses_unsafe_or_sensitive_files() {
+fn selected_content_is_bounded_and_local_previews_show_sensitive_looking_text() {
     let home = TestHome::new();
     let path = home.host.home.join(".settings");
     fs::write(&path, "ordinary text\n").unwrap();
@@ -280,13 +280,17 @@ fn selected_content_is_bounded_private_and_refuses_unsafe_or_sensitive_files() {
     assert!(!metadata.contains("ordinary text"));
     fs::write(&path, "changed").unwrap();
     assert!(discovery::selected_content(&home.host, None, &entry).is_err());
-    for bytes in [
-        b"password=fixture".as_slice(),
-        b"{\"token\":\"fixture\"}",
-        b"\0binary",
-        b"\xff",
-        &[b'a'; 65537],
-    ] {
+    for bytes in [b"password=fixture".as_slice(), b"{\"token\":\"fixture\"}"] {
+        fs::write(&path, bytes).unwrap();
+        let entry = observation::inspect(&path, false).unwrap();
+        assert_eq!(
+            discovery::selected_content(&home.host, None, &entry)
+                .unwrap_or_else(|e| panic!("{e}"))
+                .text(),
+            std::str::from_utf8(bytes).unwrap()
+        );
+    }
+    for bytes in [b"\0binary".as_slice(), b"\xff", &[b'a'; 65537]] {
         fs::write(&path, bytes).unwrap();
         let entry = observation::inspect(&path, false).unwrap();
         assert!(discovery::selected_content(&home.host, None, &entry).is_err());
