@@ -126,7 +126,7 @@ fn filter(frame: &mut Frame, area: Rect, view: &View<'_>) {
 
 pub(super) fn wide_details(area: Rect, metadata: Option<&Metadata>) -> bool {
     let branch = matches!(metadata, Some(Metadata::Status(_))) && area.height >= 12;
-    crate::tui::workbench::wide_details(area, 2 + u16::from(branch))
+    ui::reader::wide_details(area, 2 + u16::from(branch))
 }
 pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
     let branch = match view.metadata {
@@ -217,7 +217,7 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         draw_preview(frame, content, &view);
         return;
     }
-    let (list, pane) = crate::tui::workbench::detail_panes(content, wide);
+    let (list, pane) = ui::reader::detail_panes(content, wide);
     let title = view
         .metadata
         .map(|m| format!("Details | {} entries", m.len()))
@@ -305,8 +305,7 @@ fn draw_preview(frame: &mut Frame, area: Rect, view: &View<'_>) {
     }
 }
 fn draw_details(frame: &mut Frame, area: Rect, view: &View<'_>, fallback: Option<&str>) {
-    view.hits.wheel(area, crate::tui::input::Wheel::Details);
-    ui::report(
+    ui::reader::Reader::new(view.hits).report(
         frame,
         area,
         "Git details",

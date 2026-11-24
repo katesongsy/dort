@@ -7,12 +7,7 @@ use super::{
     views,
 };
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{
-    Frame,
-    layout::{Constraint, Layout, Rect},
-    text::Text,
-    widgets::Paragraph,
-};
+use ratatui::{Frame, layout::Rect, text::Text, widgets::Paragraph};
 
 pub fn shortcut(action: Action) -> &'static str {
     match action {
@@ -77,20 +72,6 @@ fn short(action: Action) -> &'static str {
         Action::GitUnstaged => "Unstaged",
         Action::GitStaged => "Staged",
         _ => action.label(),
-    }
-}
-pub fn wide_details(area: Rect, header_rows: u16) -> bool {
-    area.width >= 110 && area.height.saturating_sub(header_rows) >= 14
-}
-pub fn detail_panes(area: Rect, wide: bool) -> (Rect, Option<Rect>) {
-    if wide {
-        let [list, details] =
-            Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
-                .spacing(2)
-                .areas(area);
-        (list, Some(details))
-    } else {
-        (area, None)
     }
 }
 /// Foreground-only metadata; no contents, serialized plans or approvals enter this model.
@@ -440,23 +421,24 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
     {
         super::review::draw_batch(frame, area, plan, preview, &app.hits);
     } else {
-        frame.render_widget(
-            Paragraph::new(ui::review_text(&preview.text))
-                .scroll((preview.scroll, preview.horizontal)),
-            area,
-        );
+        ui::reader::Reader::new(&app.hits)
+            .with_wheel(Wheel::Preview)
+            .pannable(
+                frame,
+                area,
+                ui::review_text(&preview.text),
+                (preview.scroll, preview.horizontal),
+            );
     }
-    if !preview.pending.blocked() && !app.dry_run {
-        app.presented(
-            if preview.pending.adoption() {
-                "Adopt all"
-            } else {
-                "Confirm changes"
-            },
-            "Enter",
-            Target::Continue,
-        );
-    }
+    app.preview_approval().present(
+        &app.hits,
+        if preview.pending.adoption() {
+            "Adopt all"
+        } else {
+            "Confirm changes"
+        },
+        Target::Continue,
+    );
     app.presented("Back", "Esc", Target::Back);
     app.presented(
         "Full report",
@@ -473,14 +455,16 @@ fn overlay(frame: &mut Frame, inner: Rect, app: &App, overlay: &Overlay) {
         Overlay::Profiles(_) | Overlay::Repositories { .. } => {
             super::pickers::draw(frame, inner, app, overlay)
         }
-        Overlay::Form(_) if app.shell.form_details => ui::report(
-            frame,
-            inner,
-            "Draft details",
-            document(views::overlay_text(app, overlay, inner.height, inner.width)),
-            app.shell.scroll,
-            true,
-        ),
+        Overlay::Form(_) if app.shell.form_details => ui::reader::Reader::new(&app.hits)
+            .with_wheel(Wheel::Overlay)
+            .report(
+                frame,
+                inner,
+                "Draft details",
+                document(views::overlay_text(app, overlay, inner.height, inner.width)),
+                app.shell.scroll,
+                true,
+            ),
         Overlay::Form(form) => super::forms::draw(frame, inner, app, *form),
         _ => ui::text_view(
             frame,
@@ -579,7 +563,6 @@ pub fn draw(frame: &mut Frame, app: &App) {
                 app,
             );
         } else if app.confirmation.is_some() {
-            app.hits.wheel(body, Wheel::Confirmation);
             let ids = app.batch_removal_ids();
             let removal = app.preview.as_ref().and_then(|p| p.pending.removal_id());
             let prompt = if !ids.is_empty() {
@@ -598,20 +581,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
             } else {
                 "Proceed with the reviewed changes?".into()
             };
-            ui::text_view(
-                frame,
-                body,
-                Text::from(prompt),
-                app.confirmation.as_ref().unwrap().prompt_scroll,
-            );
-            if !app.dry_run
-                && app
-                    .preview
-                    .as_ref()
-                    .is_some_and(|preview| !preview.pending.blocked())
-            {
-                app.presented("Confirm", "Enter", Target::ConfirmAction);
-            }
+            ui::reader::Reader::new(&app.hits)
+                .with_wheel(Wheel::Confirmation)
+                .wrapped(
+                    frame,
+                    body,
+                    Text::from(prompt),
+                    app.confirmation.as_ref().unwrap().prompt_scroll,
+                );
+            app.preview_approval()
+                .present(&app.hits, "Confirm", Target::ConfirmAction);
             app.presented("Cancel", "Esc", Target::CancelConfirmation);
         } else if app.preview.is_some() {
             preview(frame, body, app);

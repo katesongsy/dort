@@ -314,7 +314,11 @@ impl State {
                 KeyCode::Left | KeyCode::Right if self.reader == Reader::Patch => {
                     return Some(None);
                 }
-                code if super::shell::scroll_details(&mut self.scroll, code) => return Some(None),
+                code if super::components::reader::ScrollKeys::DETAILS
+                    .apply(&mut self.scroll, code) =>
+                {
+                    return Some(None);
+                }
                 _ => (),
             }
         }
@@ -404,7 +408,7 @@ impl State {
         }
     }
     pub fn scroll_metadata_details(&mut self, code: KeyCode) -> bool {
-        super::shell::scroll_details(&mut self.scroll, code)
+        super::components::reader::ScrollKeys::DETAILS.apply(&mut self.scroll, code)
     }
     pub fn scroll_patch(&mut self, code: KeyCode) {
         self.preview.scroll(code);
@@ -422,7 +426,7 @@ impl State {
                 target: Target::Key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE)),
             });
             if self.root_details {
-                ui::report(frame, area, "Git root draft", vec![ui::metadata("Full root draft", &self.draft), ratatui::text::Line::raw("Relative paths resolve from the launch directory. This draft is not saved and shows no patch content.")].into(), self.scroll, false);
+                ui::reader::Reader::new(hits).report(frame, area, "Git root draft", vec![ui::metadata("Full root draft", &self.draft), ratatui::text::Line::raw("Relative paths resolve from the launch directory. This draft is not saved and shows no patch content.")].into(), self.scroll, false);
                 hits.present(ui::ActionButton {
                     label: "Back",
                     key: "Esc",

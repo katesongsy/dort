@@ -196,7 +196,7 @@ impl State {
         if self.mode == Mode::CloseReview {
             match key.code {
                 KeyCode::Esc => self.clear_approvals(),
-                KeyCode::Enter if !dry_run => {
+                KeyCode::Enter if ui::approval::Approval::new(dry_run, false).allowed() => {
                     return self
                         .close_preview
                         .take()
@@ -250,15 +250,11 @@ impl State {
         None
     }
     fn scroll(&mut self, code: KeyCode) {
-        match code {
-            KeyCode::Down | KeyCode::PageDown => self.scroll = self.scroll.saturating_add(2),
-            KeyCode::Up | KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(2),
-            KeyCode::Home => self.scroll = 0,
-            KeyCode::End => self.scroll = u16::MAX,
-            _ => (),
-        }
+        ui::reader::ScrollKeys::new(2, 2)
+            .with_end()
+            .apply(&mut self.scroll, code);
     }
-    fn draw_attempt(&self, frame: &mut Frame, area: Rect) {
+    fn draw_attempt(&self, frame: &mut Frame, area: Rect, hits: &super::input::Hits) {
         let mut lines = vec![];
         if let Some(attempt) = self.attempts.get(self.selected) {
             let s = attempt.summary();
@@ -296,14 +292,16 @@ impl State {
         if let Some(e) = &self.error {
             lines.push(ui::metadata("Problem", e));
         }
-        ui::report(
-            frame,
-            area,
-            "Installation details",
-            lines.into(),
-            self.scroll,
-            false,
-        );
+        ui::reader::Reader::new(hits)
+            .with_wheel(super::input::Wheel::Tools)
+            .report(
+                frame,
+                area,
+                "Installation details",
+                lines.into(),
+                self.scroll,
+                false,
+            );
     }
     pub fn draw(&self, frame: &mut Frame, area: Rect, dry_run: bool, hits: &super::input::Hits) {
         let action = |label, key, code| {
@@ -378,31 +376,30 @@ impl State {
             for args in &r.fresh_probes {
                 lines.push(ui::metadata("Fresh probe arguments", &args.join(" ")));
             }
-            ui::report(
-                frame,
-                area,
-                "Close installation record",
-                lines.into(),
-                self.scroll,
-                false,
-            );
-            if !dry_run {
-                action("Confirm close", "Enter", KeyCode::Enter);
-            }
+            ui::reader::Reader::new(hits)
+                .with_wheel(super::input::Wheel::Tools)
+                .report(
+                    frame,
+                    area,
+                    "Close installation record",
+                    lines.into(),
+                    self.scroll,
+                    false,
+                );
+            ui::approval::Approval::new(dry_run, false).present_key(hits, "Confirm close");
             action("Cancel", "Esc", KeyCode::Esc);
             return;
         }
         let selected = self.attempts.get(self.selected);
         if self.details {
-            self.draw_attempt(frame, area);
+            self.draw_attempt(frame, area, hits);
             if selected.is_some_and(|a| a.unresolved) {
                 action("Close record", "x", KeyCode::Char('x'));
             }
             action("Back", "Esc", KeyCode::Esc);
             return;
         }
-        let (list, details) =
-            super::workbench::detail_panes(area, super::workbench::wide_details(area, 0));
+        let (list, details) = ui::reader::detail_panes(area, ui::reader::wide_details(area, 0));
         let capacity = ui::design::pair_capacity(list);
         let first = self.viewport.start(
             self.attempts.len(),
@@ -461,7 +458,7 @@ impl State {
                 Target::ToolAttemptRow,
             );
             if let Some(pane) = details {
-                self.draw_attempt(frame, pane);
+                self.draw_attempt(frame, pane, hits);
             }
             action("Install record", "Enter", KeyCode::Enter);
             if selected.is_some_and(|a| a.unresolved) {

@@ -236,7 +236,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     let content = rows[2];
     let focused = true;
     let Some(data) = &app.data else {
-        ui::report(
+        ui::reader::Reader::new(&app.hits).report(
             frame,
             content,
             "Recovery | Not loaded",
@@ -247,7 +247,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         return;
     };
     if let Some(error) = &data.history_error {
-        ui::report(
+        ui::reader::Reader::new(&app.hits).report(
             frame,
             content,
             "Recovery unavailable",
@@ -260,9 +260,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         );
         return;
     }
-    let wide = super::workbench::wide_details(area, 2);
+    let wide = ui::reader::wide_details(area, 2);
     if app.history_details {
-        ui::report(
+        ui::reader::Reader::new(&app.hits).report(
             frame,
             content,
             "Operation details",
@@ -272,7 +272,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         );
         return;
     }
-    let (list, pane) = super::workbench::detail_panes(content, wide);
+    let (list, pane) = ui::reader::detail_panes(content, wide);
     let visible = app.visible_history_rows();
     let title = format!(
         "Operations | {} / {} shown",
@@ -332,7 +332,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         );
     }
     if let Some(pane) = pane {
-        ui::report(
+        ui::reader::Reader::new(&app.hits).report(
             frame,
             pane,
             "Operation details",

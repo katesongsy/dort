@@ -1,20 +1,7 @@
 //! Session shell and saved path drafts.
-use super::app::Tab;
+use super::{app::Tab, components::reader::ScrollKeys};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-pub fn scroll_details(scroll: &mut u16, code: KeyCode) -> bool {
-    match code {
-        KeyCode::Down | KeyCode::PageDown => {
-            *scroll = scroll.saturating_add(if code == KeyCode::Down { 1 } else { 2 })
-        }
-        KeyCode::Up | KeyCode::PageUp => {
-            *scroll = scroll.saturating_sub(if code == KeyCode::Up { 1 } else { 2 })
-        }
-        KeyCode::Home => *scroll = 0,
-        _ => return false,
-    }
-    true
-}
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Form {
     Choose,
@@ -348,7 +335,7 @@ impl Shell {
                 if key.code == KeyCode::Esc {
                     self.picker_details = false;
                 } else {
-                    scroll_details(&mut self.scroll, key.code);
+                    ScrollKeys::DETAILS.apply(&mut self.scroll, key.code);
                 }
                 return None;
             }
@@ -361,7 +348,7 @@ impl Shell {
                 if key.code == KeyCode::Esc {
                     self.form_details = false;
                 } else {
-                    scroll_details(&mut self.scroll, key.code);
+                    ScrollKeys::DETAILS.apply(&mut self.scroll, key.code);
                 }
                 return None;
             }

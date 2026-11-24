@@ -200,7 +200,9 @@ impl State {
             if let Some(failure) = &self.failure {
                 lines.push(ui::metadata("Problem", failure));
             }
-            ui::report(frame, area, "Remove declaration", lines.into(), 0, false);
+            ui::reader::Reader::new(hits)
+                .with_wheel(super::input::Wheel::Tools)
+                .report(frame, area, "Remove declaration", lines.into(), 0, false);
             hits.present(ui::ActionButton {
                 label: "Review removal",
                 key: "Enter",

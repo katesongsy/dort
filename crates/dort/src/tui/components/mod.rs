@@ -1,4 +1,5 @@
 //! Shared visual components. Metadata is escaped before styling.
+pub mod approval;
 pub mod choice;
 pub mod chrome;
 pub mod collection;
@@ -9,6 +10,8 @@ pub mod help;
 pub mod menu;
 pub mod motion;
 pub mod navigation;
+pub mod reader;
+pub use reader::{report, text_view};
 
 pub fn short_field(label: &str, value: &str, width: u16) -> String {
     let escaped = inline(&format!("{value:?}"));
@@ -302,57 +305,6 @@ pub fn review_text(body: &str) -> Text<'static> {
         }
     });
     Text::from(lines.collect::<Vec<_>>())
-}
-/// Scroll an ASCII-safe report by rendered cells, not unbounded paragraph offsets.
-/// Splitting long lines at cells preserves all metadata and avoids silently clipped paths.
-pub fn report(
-    frame: &mut Frame,
-    area: Rect,
-    title: &str,
-    body: Text<'static>,
-    offset: u16,
-    focused: bool,
-) {
-    let block = pane(title, focused);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    text_view(frame, inner, body, offset);
-}
-pub fn text_view(frame: &mut Frame, inner: Rect, body: Text<'static>, offset: u16) {
-    text_view_at(frame, inner, body, usize::from(offset));
-}
-pub fn text_view_at(frame: &mut Frame, inner: Rect, body: Text<'static>, offset: usize) {
-    let width = usize::from(inner.width).max(1);
-    let mut lines = Vec::new();
-    for line in body.lines {
-        let mut row = Vec::new();
-        let mut used = 0;
-        let line_style = body.style.patch(line.style);
-        for span in line.spans {
-            let style = line_style.patch(span.style);
-            // Callers supply escaped ASCII text, trusted labels or decoration only.
-            for c in span.content.chars() {
-                if used == width {
-                    lines.push(Line::from(std::mem::take(&mut row)));
-                    used = 0;
-                }
-                row.push(Span::styled(c.to_string(), style));
-                used += 1;
-            }
-        }
-        lines.push(Line::from(row));
-    }
-    let start = offset.min(lines.len().saturating_sub(usize::from(inner.height)));
-    frame.render_widget(
-        Paragraph::new(Text::from(
-            lines
-                .into_iter()
-                .skip(start)
-                .take(usize::from(inner.height))
-                .collect::<Vec<_>>(),
-        )),
-        inner,
-    );
 }
 pub fn metadata(label: &str, value: &str) -> Line<'static> {
     Line::from(vec![

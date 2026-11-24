@@ -606,6 +606,9 @@ fn blocked_item_never_silently_skips_and_dry_run_cannot_approve_batch() {
     f.run(&mut app, task);
     assert!(app.preview.as_ref().unwrap().pending.blocked());
     assert_eq!(app.preview.as_ref().unwrap().pending.review_len(), Some(2));
+    for size in [(48, 14), (140, 24)] {
+        assert!(!render(&app, size.0, size.1).contains("Enter Confirm"));
+    }
     key(&mut app, KeyCode::Enter);
     assert!(app.confirmation.is_none());
     assert!(journal::diagnose(&f.host).unwrap().is_empty());
@@ -614,6 +617,10 @@ fn blocked_item_never_silently_skips_and_dry_run_cannot_approve_batch() {
     key(&mut dry, KeyCode::Char(' '));
     let task = key(&mut dry, KeyCode::Char('A')).unwrap();
     f.run(&mut dry, task);
+    assert!(!dry.preview.as_ref().unwrap().pending.blocked());
+    for size in [(48, 14), (140, 24)] {
+        assert!(!render(&dry, size.0, size.1).contains("Enter Confirm"));
+    }
     key(&mut dry, KeyCode::Enter);
     text(&mut dry, "yes");
     assert!(key(&mut dry, KeyCode::Enter).is_none());

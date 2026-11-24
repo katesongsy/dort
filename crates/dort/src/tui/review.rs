@@ -231,14 +231,16 @@ fn draw_inner(
         },
     );
     if parts[2].height >= 3 {
-        ui::report(
-            frame,
-            parts[2],
-            "Change details",
-            detail(plan, preview.selected),
-            preview.effect_scroll,
-            true,
-        );
+        ui::reader::Reader::new(hits)
+            .with_wheel(Wheel::Preview)
+            .report(
+                frame,
+                parts[2],
+                "Change details",
+                detail(plan, preview.selected),
+                preview.effect_scroll,
+                true,
+            );
     } else {
         ui::prose(
             frame,

@@ -22,6 +22,13 @@ pub struct State {
     viewport: super::navigation::ListViewport,
 }
 impl State {
+    fn approval(&self, dry_run: bool) -> ui::approval::Approval {
+        ui::approval::Approval::new(
+            dry_run,
+            self.check_preview.is_none()
+                && self.install_preview.as_ref().is_none_or(|p| p.is_empty()),
+        )
+    }
     pub fn clear_reviews(&mut self) {
         self.check_waiting = false;
         self.install_waiting = false;
@@ -90,21 +97,9 @@ impl State {
     }
 }
 fn scroll(app: &mut App, code: KeyCode) {
-    match code {
-        KeyCode::Down | KeyCode::PageDown => {
-            app.details_scroll =
-                app.details_scroll
-                    .saturating_add(if code == KeyCode::Down { 1 } else { 6 })
-        }
-        KeyCode::Up | KeyCode::PageUp => {
-            app.details_scroll =
-                app.details_scroll
-                    .saturating_sub(if code == KeyCode::Up { 1 } else { 6 })
-        }
-        KeyCode::Home => app.details_scroll = 0,
-        KeyCode::End => app.details_scroll = u16::MAX,
-        _ => (),
-    }
+    ui::reader::ScrollKeys::new(1, 6)
+        .with_end()
+        .apply(&mut app.details_scroll, code);
 }
 pub fn key(app: &mut App, code: KeyCode) -> Option<Option<Task>> {
     let state = &mut app.tools_view.declared;
@@ -150,7 +145,7 @@ pub fn key(app: &mut App, code: KeyCode) -> Option<Option<Task>> {
     if state.check_preview.is_some() || state.install_preview.is_some() {
         match code {
             KeyCode::Esc => state.clear_reviews(),
-            KeyCode::Enter if !app.dry_run => {
+            KeyCode::Enter if state.approval(app.dry_run).allowed() => {
                 if let Some(preview) = state.check_preview.take() {
                     return Some(Some(Task::ToolsCheck(Box::new(preview.approve()))));
                 }
@@ -448,22 +443,22 @@ fn review(frame: &mut Frame, area: Rect, app: &App) -> bool {
         warning,
         ui::warning(),
     );
-    ui::report(
-        frame,
-        Rect::new(
-            area.x,
-            area.y + top,
-            area.width,
-            area.height.saturating_sub(top),
-        ),
-        heading,
-        body.into(),
-        app.details_scroll,
-        false,
-    );
-    if !app.dry_run && !empty {
-        action(app, primary, "Enter", KeyCode::Enter);
-    }
+    ui::reader::Reader::new(&app.hits)
+        .with_wheel(super::input::Wheel::Tools)
+        .report(
+            frame,
+            Rect::new(
+                area.x,
+                area.y + top,
+                area.width,
+                area.height.saturating_sub(top),
+            ),
+            heading,
+            body.into(),
+            app.details_scroll,
+            false,
+        );
+    state.approval(app.dry_run).present_key(&app.hits, primary);
     if empty
         && state
             .install_preview
@@ -513,14 +508,16 @@ fn result(frame: &mut Frame, area: Rect, app: &App) -> bool {
         ));
     }
     lines.push(Line::raw("Check installed again before another install."));
-    ui::report(
-        frame,
-        area,
-        "Install results",
-        lines.into(),
-        app.details_scroll,
-        false,
-    );
+    ui::reader::Reader::new(&app.hits)
+        .with_wheel(super::input::Wheel::Tools)
+        .report(
+            frame,
+            area,
+            "Install results",
+            lines.into(),
+            app.details_scroll,
+            false,
+        );
     action(app, "Done", "Enter", KeyCode::Enter);
     true
 }
@@ -638,14 +635,16 @@ fn draw_tool(frame: &mut Frame, area: Rect, app: &App, tool: &dort_core::model::
             lines.push(ui::metadata("npm runtime", runtime));
         }
     }
-    ui::report(
-        frame,
-        area,
-        "Declared tool",
-        lines.into(),
-        app.details_scroll,
-        false,
-    );
+    ui::reader::Reader::new(&app.hits)
+        .with_wheel(super::input::Wheel::Tools)
+        .report(
+            frame,
+            area,
+            "Declared tool",
+            lines.into(),
+            app.details_scroll,
+            false,
+        );
 }
 pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     app.hits.wheel(area, super::input::Wheel::Tools);
@@ -732,8 +731,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         );
         return;
     }
-    let (list, details) =
-        super::workbench::detail_panes(rows, super::workbench::wide_details(rows, 0));
+    let (list, details) = ui::reader::detail_panes(rows, ui::reader::wide_details(rows, 0));
     let capacity = ui::design::pair_capacity(list);
     let first = app
         .tools_view

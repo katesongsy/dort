@@ -20,7 +20,7 @@ fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
         app.hits.wheel(parts[0], super::input::Wheel::Content);
         app.hits
             .click(parts[0], super::input::Target::DiscoverFocus(true));
-        ui::report(
+        ui::reader::Reader::new(&app.hits).report(
             frame,
             parts[1],
             "Details",
@@ -29,7 +29,7 @@ fn draw_selected(frame: &mut Frame, area: Rect, app: &App) {
             false,
         );
     } else {
-        ui::report(
+        ui::reader::Reader::new(&app.hits).report(
             frame,
             area,
             "Selected item",
@@ -237,8 +237,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     }
     app.hits.click(sections[1], super::input::Target::Filter);
     let content = sections[2];
-    let wide = super::workbench::wide_details(area, 2);
-    let (list_area, details) = super::workbench::detail_panes(content, wide);
+    let wide = ui::reader::wide_details(area, 2);
+    let (list_area, details) = ui::reader::detail_panes(content, wide);
     let focused = !app.discovering || !app.content.focused;
     if app.inventory.details
         || app.content.focused

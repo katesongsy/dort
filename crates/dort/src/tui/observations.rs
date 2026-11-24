@@ -88,7 +88,7 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
     }
     let Some(data) = &app.data else {
         app.presented("Choose repository", "p", Target::Action(Action::Choose));
-        ui::report(
+        ui::reader::Reader::new(&app.hits).report(
             frame,
             area,
             "Repository details",
@@ -430,7 +430,7 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
 
 fn diagnostics(frame: &mut Frame, area: Rect, app: &App) {
     let Some(report) = &app.diagnostics else {
-        ui::report(
+        ui::reader::Reader::new(&app.hits).report(
             frame,
             area,
             "Diagnostics",

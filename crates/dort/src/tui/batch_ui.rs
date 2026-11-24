@@ -1,5 +1,11 @@
 //! Batch adoption pages. Editing a draft does not approve a write.
-use super::{actions::Task, app::App, components as ui, input::Target, shell::AdoptionDraft};
+use super::{
+    actions::Task,
+    app::App,
+    components as ui,
+    input::{Target, Wheel},
+    shell::AdoptionDraft,
+};
 use ratatui::{
     Frame,
     crossterm::event::{KeyCode, KeyEvent},
@@ -198,7 +204,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
             },
         );
         editor.page_rows.set(content.height.max(1));
-        ui::text_view(frame, content, editor.metadata(), editor.scroll);
+        ui::reader::Reader::new(&app.hits)
+            .with_wheel(Wheel::Overlay)
+            .wrapped(frame, content, editor.metadata(), editor.scroll);
         return;
     }
     if editor.item_form {

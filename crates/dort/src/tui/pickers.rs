@@ -220,14 +220,16 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
         app.shell
             .page_rows
             .set(content.height.saturating_sub(2).max(1));
-        ui::report(
-            frame,
-            content,
-            "Selection details",
-            details,
-            app.shell.scroll,
-            false,
-        );
+        ui::reader::Reader::new(&app.hits)
+            .with_wheel(Wheel::Overlay)
+            .report(
+                frame,
+                content,
+                "Selection details",
+                details,
+                app.shell.scroll,
+                false,
+            );
         return;
     }
     let detail_height = if content.height >= 12 { 6 } else { 0 };
@@ -237,14 +239,16 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
         .page_rows
         .set(parts[0].height.saturating_sub(2).max(1));
     if detail_height > 0 {
-        ui::report(
-            frame,
-            parts[1],
-            "Selection details",
-            details,
-            app.shell.scroll,
-            false,
-        );
+        ui::reader::Reader::new(&app.hits)
+            .with_wheel(Wheel::Overlay)
+            .report(
+                frame,
+                parts[1],
+                "Selection details",
+                details,
+                app.shell.scroll,
+                false,
+            );
     }
     match overlay {
         Overlay::Profiles(picker) => {

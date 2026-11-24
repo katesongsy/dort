@@ -199,9 +199,10 @@ fn structured_review_selection_never_reduces_scope_and_full_report_remains_avail
     let original = snapshot(&app);
     let screen = super::tests::render(&app, 80, 24);
     assert!(screen.contains("2 changes") && screen.contains("PLANNED CHANGE"));
-    key(&mut app, KeyCode::Down);
+    assert!(super::tests::click_label(&mut app, 80, 24, "second").is_none());
+    assert!(super::tests::render(&app, 80, 24).contains("› second"));
     assert_eq!(app.preview.as_ref().unwrap().selected, 1);
-    key(&mut app, KeyCode::Char('i'));
+    key(&mut app, KeyCode::F(3));
     assert!(app.preview.as_ref().unwrap().full);
     assert!(super::tests::render(&app, 140, 40).contains("permissions:"));
     assert_eq!(snapshot(&app), original);
@@ -343,6 +344,25 @@ fn mouse_confirmation_binds_displayed_exact_id_without_typing() {
     fixture.execute(task);
     assert!(!fixture.host.home.join(".editor").exists());
     assert!(fixture.root.join("source").is_file());
+}
+#[test]
+fn review_exposes_one_clickable_enter_action_and_consumes_the_review_once() {
+    for (width, height) in [(48, 14), (140, 24)] {
+        let fixture = Fixture::new(false);
+        let mut app = App::new(false);
+        app.complete(Ok(fixture.prepare(Request::Apply)));
+        let screen = super::tests::render(&app, width, height);
+        assert_eq!(screen.matches("Enter Confirm").count(), 1, "{screen}");
+        assert!(matches!(
+            super::tests::click_label(&mut app, width, height, "Enter Confirm"),
+            Some(Task::Execute(_))
+        ));
+        assert!(key(&mut app, KeyCode::Enter).is_none());
+        assert!(
+            !fixture.host.state_dir.exists(),
+            "the test has not executed the task"
+        );
+    }
 }
 #[test]
 fn ascii_monochrome_real_removal_keeps_consent_and_shrink_guards() {

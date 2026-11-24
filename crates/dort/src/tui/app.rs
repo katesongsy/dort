@@ -428,7 +428,8 @@ impl App {
                 if self.tab == Tab::Git {
                     self.git_view.scroll_metadata_details(code);
                 } else {
-                    super::shell::scroll_details(&mut self.details_scroll, code);
+                    super::components::reader::ScrollKeys::DETAILS
+                        .apply(&mut self.details_scroll, code);
                 }
                 return None;
             }
@@ -1262,7 +1263,8 @@ impl App {
                 KeyCode::Char('h') => Some(Control::Recovery),
                 KeyCode::Enter | KeyCode::Esc => Some(Control::Back),
                 KeyCode::Home | KeyCode::PageDown | KeyCode::PageUp => {
-                    super::shell::scroll_details(&mut self.details_scroll, key.code);
+                    super::components::reader::ScrollKeys::DETAILS
+                        .apply(&mut self.details_scroll, key.code);
                     return None;
                 }
                 KeyCode::Tab => return None,
@@ -1284,13 +1286,8 @@ impl App {
             }
             return self.confirm_key(key);
         }
-        if key.code == KeyCode::Enter
-            && !self.dry_run
-            && self
-                .preview
-                .as_ref()
-                .is_some_and(|p| p.pending.adoption() && !p.pending.blocked())
-        {
+        let approve = key.code == KeyCode::Enter && self.preview_approval().allowed();
+        if approve && self.preview.as_ref().is_some_and(|p| p.pending.adoption()) {
             let preview = self.preview.take().expect("review retained");
             return match preview.pending.approve(None) {
                 Ok(approved) => {
@@ -1359,7 +1356,7 @@ impl App {
                 }
                 KeyCode::Right => preview.horizontal = preview.horizontal.saturating_add(8),
                 KeyCode::Left => preview.horizontal = preview.horizontal.saturating_sub(8),
-                KeyCode::Enter if !preview.pending.blocked() && !self.dry_run => {
+                KeyCode::Enter if approve => {
                     return self.approve_preview();
                 }
                 KeyCode::Enter => {
@@ -2803,8 +2800,14 @@ impl App {
             }
         }
     }
+    pub(super) fn preview_approval(&self) -> super::components::approval::Approval {
+        super::components::approval::Approval::new(
+            self.dry_run,
+            self.preview.as_ref().is_none_or(|p| p.pending.blocked()),
+        )
+    }
     fn approve_preview(&mut self) -> Option<Task> {
-        if self.preview.as_ref().is_none_or(|p| p.pending.blocked()) || self.dry_run {
+        if !self.preview_approval().allowed() {
             return None;
         }
         if self

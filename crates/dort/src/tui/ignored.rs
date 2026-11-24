@@ -42,14 +42,16 @@ pub fn draw(
             ),
             Line::raw("Parent rules and safety limits still apply."),
         ];
-        ui::report(
-            frame,
-            area,
-            "Ignored path details",
-            lines.into(),
-            app.shell.scroll,
-            false,
-        );
+        ui::reader::Reader::new(&app.hits)
+            .with_wheel(Wheel::Overlay)
+            .report(
+                frame,
+                area,
+                "Ignored path details",
+                lines.into(),
+                app.shell.scroll,
+                false,
+            );
     };
     if app.shell.picker_details {
         details(frame, area);
@@ -63,15 +65,14 @@ pub fn draw(
             Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         );
     }
-    let wide = super::workbench::wide_details(area, 1);
+    let wide = ui::reader::wide_details(area, 1);
     let [heading, body, footer] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(3),
         Constraint::Length(if wide { 0 } else { 2 }),
     ])
     .areas(area);
-    let (list, pane) =
-        super::workbench::detail_panes(body, super::workbench::wide_details(body, 0));
+    let (list, pane) = ui::reader::detail_panes(body, ui::reader::wide_details(body, 0));
     frame.render_widget(
         Paragraph::new("Local HOME discovery preferences").style(ui::muted()),
         heading,
