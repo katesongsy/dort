@@ -284,7 +284,7 @@ fn signal_check_review_keeps_warning_and_foreground_action_distinct() {
     let color = draw(&app, w, h);
     let cells = color.backend().buffer();
     let warning = locate(&color, "Checks can run package-manager");
-    let primary = locate(&color, "Enter Check");
+    let primary = locate(&color, "y Check");
     let rule = locate(&color, "──");
     assert_eq!(
         (cells[warning].fg, cells[warning].bg),
@@ -313,7 +313,7 @@ fn signal_check_review_keeps_warning_and_foreground_action_distinct() {
     assert_eq!(locate(&mono, "Checks can run package-manager"), warning);
     assert!(mono_cells[warning].modifier.contains(Modifier::BOLD));
     assert!(!mono_cells[warning].modifier.contains(Modifier::REVERSED));
-    assert_eq!(locate(&mono, "Enter Check"), primary);
+    assert_eq!(locate(&mono, "y Check"), primary);
     assert!(
         mono_cells[primary]
             .modifier
