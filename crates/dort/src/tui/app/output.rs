@@ -372,6 +372,11 @@ impl App {
     pub(super) fn accept_preview(&mut self, pending: Pending) -> Option<Task> {
         match pending.report() {
             Ok(text) => {
+                let text = if pending.review_len().is_some() {
+                    crate::tui::review::effects_report(&text)
+                } else {
+                    text
+                };
                 self.reviewed_activity =
                     Some(crate::tui::task_surfaces::Activity::for_pending(&pending));
                 self.preview = Some(Preview {

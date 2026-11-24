@@ -268,11 +268,14 @@ class Session:
         # The single foreground strip owns actions; body prose is never a hit.
         self.click_label(label, min_row=len(self.screen.cells) - 1)
 
-    def ready_review(self):
+    def ready_review(self, action=b'y Confirm'):
         self.settle()
+        if b'F3 Full effects' in self.screen.text().splitlines()[-1]:
+            self.press(b'\x1bOR', b'F3 Summary')
         if b'End Read' in self.screen.text().splitlines()[-1]:
             self.send(b'\x1b[F')
-        self.wait(b'y Confirm')
+        self.wait(action)
+        assert action in self.screen.text().splitlines()[-1]
 
     def navigate(self, group, item):
         self.settle()
@@ -381,6 +384,89 @@ def has_color_sgr(data):
                for value in [int(part or b"0") for part in match[1].split(b";")])
 
 
+def guarded_effects(binary):
+    with tempfile.TemporaryDirectory(prefix='dort-effects-') as temporary:
+        base = Path(temporary).resolve()
+        for mode in ('cancel', 'mouse', 'key', 'dry-run', 'blocked'):
+            home, repo = base / mode / 'h', base / mode / 'r'
+            home.mkdir(parents=True, mode=0o700)
+            (repo / '.git').mkdir(parents=True)
+            manifest = 'schema=1\n'
+            sources = [f'source-{index:02}' for index in range(12)] + ['tail']
+            for source in sources:
+                manifest += (f"[[files]]\nid='{source}'\nsource='{source}'\n"
+                             f"target='~/.{source}'\nmode='link'\n")
+                if not (mode == 'blocked' and source == 'tail'):
+                    (repo / source).write_text('disposable settings\n')
+            (repo / 'dort.toml').write_text(manifest)
+            identity = hashlib.sha256(os.fsencode(repo)).hexdigest()
+            config = home / '.config/dort'
+            config.mkdir(parents=True, mode=0o700)
+            local = config / 'local.toml'
+            local.write_text(f'schema=1\nactive_repository="{identity}"\n'
+                             f'[repositories."{identity}"]\nroot={json.dumps(str(repo))}\n')
+            local.chmod(0o600)
+            state = home / '.local/state/dort/repositories'
+            env = {'HOME': str(home), 'XDG_CONFIG_HOME': str(home / '.config'),
+                   'XDG_STATE_HOME': str(home / '.local/state'), 'PATH': '/no-external-programs',
+                   'TERM': 'xterm-256color', 'LANG': 'C.UTF-8'}
+            args = [binary, '--dry-run', 'tui'] if mode == 'dry-run' else [binary, 'tui']
+            tail = b'tail" }'
+            with Session(args, env, (14, 48)) as session:
+                session.wait(b'loaded.')
+                session.press(b'a', b'F3 Full effects')
+                session.send(b'yy')
+                session.settle()
+                footer = session.screen.text().splitlines()[-1]
+                assert b'y Confirm' not in footer and b'F3 Full effects' in footer
+                assert not state.exists()
+                session.click_action('Full effects')
+                session.wait(b'F3 Summary')
+                assert tail not in session.screen.text()
+                session.send(b'y')
+                session.settle()
+                assert not state.exists()
+                if mode in ('dry-run', 'blocked'):
+                    session.send(b'\x1b[Fy')
+                    session.settle()
+                    assert b'y Confirm' not in session.screen.text().splitlines()[-1]
+                else:
+                    session.wait(b'End Read')
+                    session.click_action('Read')
+                    session.wait(tail)
+                    session.wait(b'y Confirm')
+                    footer = session.screen.text().splitlines()[-1]
+                    assert all(key in footer for key in (b'y Confirm', b'F3 Summary', b'Esc Back', b'F1 Help'))
+                    row = 13
+                    column = footer.index(b'y Confirm')
+                    session.send(b'\x1b[Hy')
+                    session.wait(b'End Read')
+                    session.mouse(0, column, row)
+                    session.settle()
+                    assert not state.exists()
+                    session.ready_review()
+                    if mode == 'mouse':
+                        session.click_action('Confirm')
+                    elif mode == 'key':
+                        session.send(b'yy')
+                    else:
+                        session.send(b'\x1b')
+                        session.send(b'y')
+                    if mode in ('mouse', 'key'):
+                        session.wait(b'File operation completed.')
+                        session.send(b'yy')
+                session.send(b'q')
+                session.finish()
+            published = mode in ('mouse', 'key')
+            if published:
+                assert all((home / ('.' + source)).resolve() == repo / source for source in sources)
+            else:
+                assert all(not (home / ('.' + source)).exists() for source in sources)
+            count = len(list(state.glob('*/transactions/*')))
+            assert count == int(published), (mode, count)
+            print('PASS guarded effects', mode, flush=True)
+
+
 def run():
     screen = Screen((2, 20))
     screen.feed(b"Git executes\x1b[")
@@ -389,6 +475,7 @@ def run():
     assert b"label" in screen.text()
     binary = artifact(["build", "-p", "dort"], "binary")
     probe = artifact(["test", "-p", "dort", "--bin", "dort", "--no-run"], "test")
+    guarded_effects(binary)
     with tempfile.TemporaryDirectory(prefix="dort-terminal-") as temporary:
         base = Path(temporary).resolve()
         home = base / "home"
@@ -1098,7 +1185,7 @@ def run():
             session.ready_review()
             session.send(b"\r\r")
             session.settle()
-            session.click_label('PLANNED CHANGE')
+            session.click_label('Read-only plan')
             session.settle()
             assert not target.exists() and not state.exists(), 'Enter or a body click approved apply'
             session.click_action('Confirm changes')
@@ -1276,8 +1363,8 @@ def run():
             session.settle()
             session.wait(b"No matches")
             session.send(b"a")
-            session.ready_review()
             session.wait(b"Filters do not narrow it.")
+            session.ready_review()
             session.send(b"\x1b")
             session.settle()
             session.send(b"q")
@@ -1292,12 +1379,12 @@ def run():
             session.send(b"m")
             session.edit_fields('TARGET')
             session.send(b"~/.q?config\tconfig\tfiles/config\r")  # Fields only; Enter previews.
-            session.wait(b"y Adopt all")
+            session.ready_review(b"y Adopt all")
             session.send(b"\x1b")
             session.settle()
             assert not candidate.is_symlink() and not (repo / "files/config").exists()
             session.send(b"\r")  # retained Review -> fresh preview
-            session.settle()
+            session.ready_review(b"y Adopt all")
             session.send(b"y")  # Adopt all: one explicit approval, no typed yes.
             session.wait(b"Enter Details")
             session.send(b"q")
@@ -1435,7 +1522,6 @@ def run():
                 session.settle()
                 session.send(operation.encode())
                 session.wait(b'Exact marked set')
-                session.ready_review()
                 if operation == 'D':
                     session.wait(b'only-a')
                     session.wait(b'only-b')
@@ -1446,6 +1532,7 @@ def run():
                     session.wait(b'Exact marked set')
                     session.settle()
                     assert all((targets / name).is_symlink() for name in ('only-a', 'only-b')), 'Resize executed changes'
+                session.ready_review()
                 session.send(b'y')
                 session.wait(b'Batch file operation completed.')
                 session.send(b'q')
@@ -1514,4 +1601,7 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    if sys.argv[1:] == ["--guarded-effects"]:
+        guarded_effects(artifact(["build", "-p", "dort"], "binary"))
+    else:
+        run()

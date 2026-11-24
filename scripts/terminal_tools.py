@@ -106,7 +106,7 @@ def check(session, home):
     before = calls(home)
     session.send(b'C')
     session.wait(b'Review installed checks')
-    session.wait(b'y Run checks')
+    session.ready_review(b'y Run checks')
     session.send(b'\r\r')
     session.settle()
     assert calls(home) == before, 'Check preparation executed a package manager'
@@ -150,11 +150,11 @@ def normal_installs(Session, binary, base, env):
             assert calls(home) == before, 'Installation preparation executed a package manager'
             assert b'root hooks' not in session.screen.text()
             session.resize((14, 48))
-            session.wait(b'y Install')
+            session.ready_review(b'y Install')
             session.wait(b'F1 Help')
             assert b'F1 Help' in session.screen.text().splitlines()[-1]
             session.resize((24, 80))
-            session.wait(b'y Install missing')
+            session.ready_review(b'y Install missing')
             session.send(b'\r\r')
             session.settle()
             assert calls(home) == before, 'Enter approved installation'
@@ -210,6 +210,7 @@ def batch_guards(Session, binary, base, env):
                 session.finish()
                 print('PASS declared dry-run and shrink remain process-free')
                 continue
+            session.ready_review(b'y Run checks')
             session.send(b'y')
             session.wait(b'Missing')
             session.settle()
@@ -227,6 +228,7 @@ def batch_guards(Session, binary, base, env):
                 print('PASS missing tools show actionable reasons and Edit without execution warnings')
                 continue
             session.wait(b'Review missing installs')
+            session.ready_review(b'y Install missing')
             session.send(b'y')
             if mode == 'joined':
                 session.wait(b'Installing package')
@@ -252,6 +254,7 @@ def discovery_declarations(Session, binary, base, env):
         session.wait(b'loaded.')
         session.send(b't2')
         session.wait(b'Inspect installed tools')
+        session.ready_review(b'y Check installed')
         assert calls(home) == ''
         session.send(b'y')
         session.wait(b'observed')
@@ -348,6 +351,7 @@ def npm_without_repository(Session, binary, base, env):
         session.send(b't2')
         session.wait(b'Inspect installed tools')
         session.wait(b'prefix --global')
+        session.ready_review(b'y Check installed')
         assert calls(home) == '', 'Preparing PATH inventory executed npm'
         session.send(b'y')
         session.wait(b'demo')
