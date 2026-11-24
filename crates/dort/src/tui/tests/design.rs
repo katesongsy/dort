@@ -2,6 +2,7 @@
 use super::{
     actions::{Data, ManagedRow, Output},
     app::{App, Tab},
+    components as ui,
     shell::{Form, Overlay},
     tests::render,
     views,
@@ -31,6 +32,13 @@ fn locate(buffer: &Buffer, needle: &str) -> (u16, u16) {
         }
     }
     panic!("missing fixture label: {needle}")
+}
+fn assert_style(buffer: &Buffer, text: &str, color: Color, emphasis: Modifier) {
+    let (x, y) = locate(buffer, text);
+    for col in x..x + text.len() as u16 {
+        let cell = &buffer[(col, y)];
+        assert_eq!((cell.fg, cell.modifier), (color, emphasis), "{text}");
+    }
 }
 fn report_title(buffer: &Buffer) -> (u16, u16) {
     for y in 0..buffer.area.height {
@@ -445,6 +453,102 @@ fn recovery_table_has_typed_columns_selection_and_integrity_styles_at_all_sizes(
         assert!(!screen.contains('\u{1b}') && !screen.contains('é'));
         assert!(screen.contains("Blocked writes: 2"));
     }
+}
+#[test]
+fn recovery_details_distinguish_sections_fields_and_status() {
+    use dort_core::journal::Phase;
+    for (phase, problem, status, color, emphasis) in [
+        (
+            Phase::Completed,
+            None,
+            "[Finished]",
+            Color::Green,
+            Modifier::empty(),
+        ),
+        (
+            Phase::Running,
+            None,
+            "[Blocks writes]",
+            Color::Yellow,
+            Modifier::BOLD,
+        ),
+        (
+            Phase::Running,
+            Some("corrupt tail"),
+            "[Damaged]",
+            Color::Red,
+            Modifier::BOLD,
+        ),
+    ] {
+        let mut app = App::new(false);
+        app.tab = Tab::Recovery;
+        app.complete(Ok(Output::History {
+            rows: vec![history_row(Some(1), Some(phase), problem, 'a')],
+            error: None,
+        }));
+        key(&mut app, KeyCode::Enter);
+        let b = buffer(&app, 80, 40);
+        locate(&b, "Operation details");
+        assert_style(&b, status, color, emphasis);
+        for section in ["Recovery options", "What recovery keeps"] {
+            assert_style(&b, section, Color::Cyan, Modifier::BOLD);
+        }
+        locate(&b, &format!("Repository ID: {}", "a".repeat(64)));
+        assert_style(&b, "Repository ID:", Color::Reset, Modifier::BOLD);
+        assert_style(&b, &"a".repeat(64), Color::Reset, Modifier::empty());
+        assert_style(
+            &b,
+            "Rollback restores files only when they still match.",
+            Color::Yellow,
+            Modifier::BOLD,
+        );
+        if phase == Phase::Completed {
+            locate(&b, "Rollback: Available for review");
+            assert_style(&b, "Rollback:", Color::Reset, Modifier::BOLD);
+            assert_style(&b, "Available for review", Color::Reset, Modifier::empty());
+        }
+    }
+}
+#[test]
+fn shared_reports_distinguish_sections_fields_and_values() {
+    let mut terminal = Terminal::new(TestBackend::new(80, 14)).unwrap();
+    terminal
+        .draw(|frame| {
+            let mut text = ui::review_text(
+                "Repository: /fixture/repo\u{1b}\nEffects:\n- No writes.\nBLOCKED: Writer busy",
+            );
+            text.lines
+                .extend(ui::review_text(r#"{"Details":{"Problem":"not recorded"}}"#).lines);
+            text.lines
+                .extend(ui::review_text("Roll back operation").lines);
+            text.lines
+                .push(ui::metadata("Operation ID:", "fixture-id\nend"));
+            ui::report(frame, frame.area(), "Review", text, 0, true);
+        })
+        .unwrap();
+    let b = terminal.backend().buffer();
+    locate(b, "Repository: /fixture/repo\\u{1b}");
+    locate(b, "Operation ID: fixture-id\\nend");
+    for section in ["Effects:", "Details"] {
+        assert_style(b, section, Color::Cyan, Modifier::BOLD);
+    }
+    for label in [
+        "Repository:",
+        "Problem",
+        "Operation ID:",
+        "Roll back operation",
+    ] {
+        assert_style(b, label, Color::Reset, Modifier::BOLD);
+    }
+    for value in [
+        "/fixture/repo\\u{1b}",
+        "not recorded",
+        "fixture-id\\nend",
+        "No writes.",
+    ] {
+        assert_style(b, value, Color::Reset, Modifier::empty());
+    }
+    assert_style(b, "BLOCKED: Writer busy", Color::Red, Modifier::BOLD);
 }
 #[test]
 fn recovery_details_keep_full_ids_and_guards_inspectable_without_mutating_diagnosis() {

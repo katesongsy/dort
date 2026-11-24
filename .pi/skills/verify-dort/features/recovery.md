@@ -31,7 +31,8 @@ Every write creates a record, so a fresh run already has one:
 
 ```sh
 python3 .pi/skills/verify-dort/drive.py tui my-proof --label recovery \
-  "wait:loaded." "send:'r'" "wait:All repositories" "snap:recovery"
+  "wait:loaded." "send:'r'" "wait:All repositories" "snap:recovery" \
+  "send:'\r'" "wait:Operation details" "wait:Recovery options" "snap:operation-details"
 python3 .pi/skills/verify-dort/drive.py cli my-proof --label history -- history
 ```
 
@@ -47,6 +48,7 @@ dort rollback <REPOSITORY_ID> <OPERATION_ID> --dry-run
 
 - `history` lists operations with type, state and status. A completed `Repository setup` and a completed file operation are the expected pair after `new` plus an adoption.
 - The TUI header reads `Recovery / All repositories` with `N/N shown | Blocked writes: 0`.
+- Operation details has cyan section headings, bold field labels and a green `Finished` status in a color terminal.
 - A rollback that succeeds removes the mapping and restores the destination; a rollback over changed state exits nonzero with a diagnosis and touches nothing.
 - `Blocked writes: 0` after a clean teardown is the signal that nothing is left to resolve.
 
