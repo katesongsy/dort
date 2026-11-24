@@ -1,4 +1,5 @@
 //! Declared tools, approved automatic checks and serial missing-package reviews.
+use super::input::Hits;
 use super::{actions::Task, app::App, components as ui, input::Target, shell::Action};
 use crate::services::declared_tools as workflow;
 use ratatui::{
@@ -8,6 +9,7 @@ use ratatui::{
     text::Line,
 };
 use std::sync::Arc;
+use ui::reader::{ReviewScroll, ReviewStage};
 
 #[derive(Default)]
 pub struct State {
@@ -19,11 +21,21 @@ pub struct State {
     pub installed: Option<workflow::Installed>,
     pub result_open: bool,
     pub stale: bool,
+    pub reader: ReviewScroll,
     viewport: super::navigation::ListViewport,
 }
 impl State {
-    fn approval(&self, dry_run: bool) -> ui::approval::Approval {
-        ui::approval::Approval::new(
+    fn stage(&self) -> ReviewStage {
+        if self.check_preview.is_some() {
+            ReviewStage::DeclaredCheck
+        } else {
+            ReviewStage::InstallMissing
+        }
+    }
+    fn approval(&self, dry_run: bool, hits: &Hits) -> ui::approval::Approval {
+        ui::approval::Approval::review(
+            hits,
+            self.stage(),
             dry_run,
             self.check_preview.is_none()
                 && self.install_preview.as_ref().is_none_or(|p| p.is_empty()),
@@ -32,6 +44,7 @@ impl State {
     pub fn clear_reviews(&mut self) {
         self.check_waiting = false;
         self.install_waiting = false;
+        self.reader = ReviewScroll::default();
         self.check_preview = None;
         self.install_preview = None;
     }
@@ -145,8 +158,11 @@ pub fn key(app: &mut App, key: KeyEvent) -> Option<Option<Task>> {
     }
     if state.check_preview.is_some() || state.install_preview.is_some() {
         match code {
-            KeyCode::Esc => state.clear_reviews(),
-            _ if state.approval(app.dry_run).accepts(key) => {
+            KeyCode::Esc => {
+                app.hits.invalidate_review();
+                state.clear_reviews();
+            }
+            _ if state.approval(app.dry_run, &app.hits).accepts(key) => {
                 if let Some(preview) = state.check_preview.take() {
                     return Some(Some(Task::ToolsCheck(Box::new(preview.approve()))));
                 }
@@ -164,7 +180,7 @@ pub fn key(app: &mut App, key: KeyEvent) -> Option<Option<Task>> {
                     );
                 }
             }
-            _ => scroll(app, code),
+            _ => state.reader.key(&app.hits, state.stage(), code),
         }
         return Some(None);
     }
@@ -446,7 +462,7 @@ fn review(frame: &mut Frame, area: Rect, app: &App) -> bool {
     );
     ui::reader::Reader::new(&app.hits)
         .with_wheel(super::input::Wheel::Tools)
-        .report(
+        .review(
             frame,
             Rect::new(
                 area.x,
@@ -454,12 +470,14 @@ fn review(frame: &mut Frame, area: Rect, app: &App) -> bool {
                 area.width,
                 area.height.saturating_sub(top),
             ),
-            heading,
+            Some(heading),
             body.into(),
-            app.details_scroll,
-            false,
+            state.stage(),
+            &state.reader,
         );
-    state.approval(app.dry_run).present_key(&app.hits, primary);
+    state
+        .approval(app.dry_run, &app.hits)
+        .present_key(&app.hits, primary);
     if empty
         && state
             .install_preview

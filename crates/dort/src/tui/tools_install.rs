@@ -1,4 +1,5 @@
 //! Install records and record close. Closing does not replay an install.
+use super::input::Hits;
 use super::{actions::Task, components as ui, input::Target, shell::edit_text};
 use dort_core::tools::{inspection::NpmBinding, install};
 use ratatui::{
@@ -8,6 +9,7 @@ use ratatui::{
     text::Line,
 };
 use std::path::PathBuf;
+use ui::reader::{ReviewScroll, ReviewStage};
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     #[default]
@@ -32,6 +34,7 @@ pub struct State {
     pub focus: usize,
     pub details: bool,
     pub scroll: u16,
+    reader: ReviewScroll,
     pub scope: Option<install::Scope>,
 }
 pub enum Outcome {
@@ -127,6 +130,7 @@ impl State {
         self.focus = 0;
     }
     pub fn close_reviewed(&mut self, preview: install::ClosePreview) {
+        self.reader = ReviewScroll::default();
         self.close_preview = Some(preview);
         self.mode = Mode::CloseReview;
         self.scroll = 0;
@@ -169,11 +173,16 @@ impl State {
         self.mode = Mode::LoadingClose;
         Some(Task::ToolClosePrepare(request.clone()))
     }
-    fn approval(&self, dry_run: bool) -> ui::approval::Approval {
-        ui::approval::Approval::new(dry_run, self.close_preview.is_none())
+    fn approval(&self, dry_run: bool, hits: &Hits) -> ui::approval::Approval {
+        ui::approval::Approval::review(
+            hits,
+            ReviewStage::CloseRecord,
+            dry_run,
+            self.close_preview.is_none(),
+        )
     }
 
-    pub fn key(&mut self, key: KeyEvent, dry_run: bool) -> Option<Outcome> {
+    pub fn key(&mut self, key: KeyEvent, dry_run: bool, hits: &Hits) -> Option<Outcome> {
         if self.mode == Mode::CloseInputs {
             let n = self.close_field_count();
             let task = match key.code {
@@ -199,14 +208,17 @@ impl State {
         }
         if self.mode == Mode::CloseReview {
             match key.code {
-                KeyCode::Esc => self.clear_approvals(),
-                _ if self.approval(dry_run).accepts(key) => {
+                KeyCode::Esc => {
+                    hits.invalidate_review();
+                    self.clear_approvals();
+                }
+                _ if self.approval(dry_run, hits).accepts(key) => {
                     return self
                         .close_preview
                         .take()
                         .map(|p| Outcome::Task(Box::new(Task::ToolClose(Box::new(p.approve())))));
                 }
-                _ => self.scroll(key.code),
+                _ => self.reader.key(hits, ReviewStage::CloseRecord, key.code),
             }
             return None;
         }
@@ -388,15 +400,16 @@ impl State {
             }
             ui::reader::Reader::new(hits)
                 .with_wheel(super::input::Wheel::Tools)
-                .report(
+                .review(
                     frame,
                     area,
-                    "Close installation record",
+                    Some("Close installation record"),
                     lines.into(),
-                    self.scroll,
-                    false,
+                    ReviewStage::CloseRecord,
+                    &self.reader,
                 );
-            self.approval(dry_run).present_key(hits, "Confirm close");
+            self.approval(dry_run, hits)
+                .present_key(hits, "Confirm close");
             action("Cancel", "Esc", KeyCode::Esc);
             return;
         }

@@ -141,6 +141,7 @@ impl App {
     /// Called only after choosing another destination. Retain drafts and
     /// historical metadata, discard one-use approvals.
     pub(super) fn leave_page_for_navigation(&mut self) {
+        self.hits.invalidate_review();
         self.more = None;
         self.choice = None;
         self.preview = None;

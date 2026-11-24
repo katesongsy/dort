@@ -39,7 +39,7 @@ pub(super) fn check(f: &Fixture, app: &mut App) {
     for _ in 0..3 {
         assert!(key(app, KeyCode::Enter).is_none());
     }
-    let task = key(app, KeyCode::Char('y')).unwrap();
+    let task = super::tests::approve_ready(app, 80, 24).unwrap();
     assert!(matches!(task, Task::ToolsCheck(_)));
     run(f, app, task);
 }
@@ -72,7 +72,7 @@ fn list_enter_is_always_details_before_and_after_checks_and_installs() {
             let task = key(&mut app, KeyCode::Char('i')).unwrap();
             run(&f, &mut app, task);
             assert!(app.tools_view.declared.install_preview.is_some());
-            let task = key(&mut app, KeyCode::Char('y')).unwrap();
+            let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
             run(&f, &mut app, task);
             key(&mut app, KeyCode::Enter);
         }

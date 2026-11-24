@@ -422,16 +422,17 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
     {
         super::review::draw_batch(frame, area, plan, preview, &app.hits);
     } else {
-        let text = ui::review_text(&preview.text);
-        let end = text.height().saturating_sub(usize::from(area.height));
-        let offset = preview.observe_report(app.hits.size(), end.min(u16::MAX as usize) as u16);
         ui::reader::Reader::new(&app.hits)
             .with_wheel(Wheel::Preview)
-            .pannable(frame, area, text, (offset, preview.horizontal));
-    }
-    let approval = app.preview_approval(app.hits.size());
-    if approval.allowed() {
-        approval.present_key(
+            .review(
+                frame,
+                area,
+                None,
+                ui::review_text(&preview.text),
+                ui::reader::ReviewStage::Changes,
+                &preview.reader,
+            );
+        app.preview_approval().present_key(
             &app.hits,
             if preview.pending.adoption() {
                 "Adopt all"
@@ -439,19 +440,19 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
                 "Confirm changes"
             },
         );
-    } else if !app.dry_run && !preview.pending.blocked() {
-        app.presented(
-            "Read remaining effects",
-            "End",
-            Target::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)),
-        );
     }
     app.presented("Back", "Esc", Target::Back);
-    app.presented(
-        "Full report",
-        "F3",
-        Target::Key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE)),
-    );
+    if preview.pending.review_len().is_some() {
+        app.presented(
+            if preview.full {
+                "Summary"
+            } else {
+                "Full effects"
+            },
+            "F3",
+            Target::Key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE)),
+        );
+    }
 }
 fn overlay(frame: &mut Frame, inner: Rect, app: &App, overlay: &Overlay) {
     app.hits.wheel(inner, Wheel::Overlay);

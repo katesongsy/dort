@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use ratatui::{
     Frame,
     crossterm::event::KeyCode,
@@ -145,9 +147,69 @@ impl<'a> Reader<'a> {
         text_view(frame, area, body, offset);
     }
 
-    pub fn pannable(&self, frame: &mut Frame, area: Rect, body: Text<'static>, scroll: (u16, u16)) {
+    pub fn review(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        title: Option<&str>,
+        body: Text<'static>,
+        stage: ReviewStage,
+        scroll: &ReviewScroll,
+    ) {
         self.hits.wheel(area, self.wheel);
-        frame.render_widget(Paragraph::new(body).scroll(scroll), area);
+        let inner = if let Some(title) = title {
+            let block = pane(title, false);
+            let inner = block.inner(area);
+            frame.render_widget(block, area);
+            inner
+        } else {
+            area
+        };
+        let rows = text_view_at(frame, inner, body, scroll.offset.get());
+        scroll.offset.set(rows.start);
+        self.hits.observe_review(stage, rows);
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ReviewStage {
+    Changes,
+    DeclaredCheck,
+    InstallMissing,
+    InstalledInspect,
+    CloseRecord,
+}
+
+#[derive(Clone, Copy)]
+pub struct VisibleRows {
+    pub area: Rect,
+    pub start: usize,
+    pub end: usize,
+}
+impl VisibleRows {
+    pub fn shows_tail(self) -> bool {
+        !self.area.is_empty() && self.start == self.end
+    }
+}
+
+#[derive(Default)]
+pub struct ReviewScroll {
+    offset: Cell<usize>,
+}
+impl ReviewScroll {
+    pub fn key(&self, hits: &Hits, stage: ReviewStage, code: KeyCode) {
+        let old = self.offset.get();
+        let mut offset = old;
+        if !ScrollKeys::new(1, 4).with_end().apply_at(&mut offset, code) {
+            return;
+        }
+        if let Some(end) = hits.review_end(stage) {
+            offset = offset.min(end);
+        }
+        if offset != old {
+            self.offset.set(offset);
+            hits.hide_review_tail();
+        }
     }
 }
 
@@ -173,13 +235,19 @@ impl ScrollKeys {
     }
 
     pub fn apply(self, offset: &mut u16, code: KeyCode) -> bool {
+        let mut rows = usize::from(*offset);
+        let handled = self.apply_at(&mut rows, code);
+        *offset = rows.min(usize::from(u16::MAX)) as u16;
+        handled
+    }
+    fn apply_at(self, offset: &mut usize, code: KeyCode) -> bool {
         *offset = match code {
-            KeyCode::Down => offset.saturating_add(self.line),
-            KeyCode::Up => offset.saturating_sub(self.line),
-            KeyCode::PageDown => offset.saturating_add(self.page),
-            KeyCode::PageUp => offset.saturating_sub(self.page),
+            KeyCode::Down => offset.saturating_add(usize::from(self.line)),
+            KeyCode::Up => offset.saturating_sub(usize::from(self.line)),
+            KeyCode::PageDown => offset.saturating_add(usize::from(self.page)),
+            KeyCode::PageUp => offset.saturating_sub(usize::from(self.page)),
             KeyCode::Home => 0,
-            KeyCode::End if self.end => u16::MAX,
+            KeyCode::End if self.end => usize::MAX,
             _ => return false,
         };
         true
@@ -203,7 +271,12 @@ pub fn report(
 pub fn text_view(frame: &mut Frame, inner: Rect, body: Text<'static>, offset: u16) {
     text_view_at(frame, inner, body, usize::from(offset));
 }
-pub fn text_view_at(frame: &mut Frame, inner: Rect, body: Text<'static>, offset: usize) {
+pub fn text_view_at(
+    frame: &mut Frame,
+    inner: Rect,
+    body: Text<'static>,
+    offset: usize,
+) -> VisibleRows {
     let width = usize::from(inner.width).max(1);
     let mut lines = Vec::new();
     for line in &body.lines {
@@ -221,7 +294,8 @@ pub fn text_view_at(frame: &mut Frame, inner: Rect, body: Text<'static>, offset:
         }
         lines.push(Line::from(row));
     }
-    let start = offset.min(lines.len().saturating_sub(usize::from(inner.height)));
+    let end = lines.len().saturating_sub(usize::from(inner.height));
+    let start = offset.min(end);
     frame.render_widget(
         Paragraph::new(Text::from(
             lines
@@ -232,4 +306,9 @@ pub fn text_view_at(frame: &mut Frame, inner: Rect, body: Text<'static>, offset:
         )),
         inner,
     );
+    VisibleRows {
+        area: inner,
+        start,
+        end,
+    }
 }

@@ -1,4 +1,5 @@
 //! One current installed-package inventory and an independently reviewed declaration draft.
+use super::input::Hits;
 use super::{actions::Task, components as ui, input::Target, shell::edit_text};
 use crate::services::installed_tools as discovery;
 use ratatui::{
@@ -7,6 +8,7 @@ use ratatui::{
     layout::Rect,
     text::Line,
 };
+use ui::reader::{ReviewScroll, ReviewStage};
 #[derive(Default)]
 pub struct State {
     pub waiting: bool,
@@ -19,10 +21,16 @@ pub struct State {
     pub filter: String,
     pub error: Option<String>,
     scroll: u16,
+    pub reader: ReviewScroll,
 }
 impl State {
-    fn approval(&self, dry_run: bool) -> ui::approval::Approval {
-        ui::approval::Approval::new(dry_run, self.preview.as_ref().is_none_or(|p| p.is_empty()))
+    fn approval(&self, dry_run: bool, hits: &Hits) -> ui::approval::Approval {
+        ui::approval::Approval::review(
+            hits,
+            ReviewStage::InstalledInspect,
+            dry_run,
+            self.preview.as_ref().is_none_or(|p| p.is_empty()),
+        )
     }
     pub fn clear_review(&mut self) {
         self.waiting = false;
@@ -59,7 +67,7 @@ impl State {
         })?;
         self.current.as_ref().unwrap().seed(row)
     }
-    pub fn key(&mut self, key: KeyEvent, dry_run: bool) -> Option<Task> {
+    pub fn key(&mut self, key: KeyEvent, dry_run: bool, hits: &Hits) -> Option<Task> {
         if self.error.is_some() {
             if key.code == KeyCode::Esc {
                 self.error = None;
@@ -78,15 +86,20 @@ impl State {
         }
         if self.preview.is_some() {
             match key.code {
-                KeyCode::Esc => self.clear_review(),
-                _ if self.approval(dry_run).accepts(key) => {
+                KeyCode::Esc => {
+                    hits.invalidate_review();
+                    self.clear_review();
+                }
+                _ if self.approval(dry_run, hits).accepts(key) => {
                     self.current = None;
                     return self
                         .preview
                         .take()
                         .map(|p| Task::ToolsInstalledInspect(p.approve()));
                 }
-                _ => self.scroll(key.code),
+                _ => self
+                    .reader
+                    .key(hits, ReviewStage::InstalledInspect, key.code),
             }
             return None;
         }
@@ -252,7 +265,7 @@ impl State {
             }
             ui::reader::Reader::new(hits)
                 .with_wheel(super::input::Wheel::Tools)
-                .report(
+                .review(
                     frame,
                     Rect::new(
                         area.x,
@@ -260,12 +273,13 @@ impl State {
                         area.width,
                         area.height.saturating_sub(top),
                     ),
-                    "Inspect installed tools",
+                    Some("Inspect installed tools"),
                     lines.into(),
-                    self.scroll,
-                    false,
+                    ReviewStage::InstalledInspect,
+                    &self.reader,
                 );
-            self.approval(dry_run).present_key(hits, "Check installed");
+            self.approval(dry_run, hits)
+                .present_key(hits, "Check installed");
             action("Back", "Esc", KeyCode::Esc);
             return;
         }

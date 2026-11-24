@@ -48,7 +48,7 @@ fn install(f: &Fixture, app: &mut App) {
             .as_ref()
             .is_some_and(|p| p.len() == 1)
     );
-    let task = key(app, KeyCode::Char('y')).unwrap();
+    let task = super::tests::approve_ready(app, 80, 24).unwrap();
     assert!(matches!(task, Task::ToolsInstallMissing(_)));
     run(f, app, task);
 }
@@ -107,7 +107,7 @@ fn all_providers_use_one_real_review_show_exact_scope_and_revalidate_without_rep
             .review();
         assert_eq!(review.installations.len(), 1);
         assert!(!review.warning.contains("root hooks"));
-        let task = key(&mut app, KeyCode::Char('y')).unwrap();
+        let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
         run(&f, &mut app, task);
         let report = app.tools_view.declared.installed.as_ref().unwrap();
         assert!(report.succeeded(), "{provider:?}");
@@ -177,7 +177,7 @@ fn known_history_scope_closes_only_after_one_fresh_review_and_never_reinstalls()
             "Retained scope needs no repeated configuration or query before approval"
         );
         assert!(render(&app, 140, 40).contains("Close installation record"));
-        let task = key(&mut app, KeyCode::Char('y')).unwrap();
+        let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
         assert!(matches!(task, Task::ToolClose(_)));
         run(&f, &mut app, task);
         let attempts = install::diagnose(&f.host).unwrap();
@@ -266,7 +266,7 @@ fn damaged_history_asks_only_necessary_scope_values_retains_drafts_and_respects_
         app.dry_run = true;
         assert!(key(&mut app, KeyCode::Char('y')).is_none());
         app.dry_run = false;
-        let task = key(&mut app, KeyCode::Char('y')).unwrap();
+        let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
         run(&f, &mut app, task);
         assert!(install::diagnose(&f.host).unwrap()[0].explicitly_closed);
         assert!(!f.host.home.join("installed").exists());

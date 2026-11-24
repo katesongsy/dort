@@ -18,6 +18,7 @@ impl App {
             && !self.quit
         {
             self.tools_view.installed.waiting = false;
+            self.tools_view.installed.reader = ReviewScroll::default();
             self.tools_view.installed.preview = Some(preview);
         }
 
@@ -41,6 +42,7 @@ impl App {
     ) -> Option<Task> {
         if self.tab == Tab::Tools && self.tools_view.declared.check_waiting {
             self.tools_view.declared.check_waiting = false;
+            self.tools_view.declared.reader = ReviewScroll::default();
             self.tools_view.declared.check_preview = Some(preview);
             self.details_scroll = 0;
         }
@@ -69,6 +71,7 @@ impl App {
     ) -> Option<Task> {
         if self.tab == Tab::Tools && self.tools_view.declared.install_waiting {
             self.tools_view.declared.install_waiting = false;
+            self.tools_view.declared.reader = ReviewScroll::default();
             self.tools_view.declared.install_preview = Some(preview);
             self.details_scroll = 0;
         }
@@ -374,12 +377,10 @@ impl App {
                 self.preview = Some(Preview {
                     pending,
                     text,
-                    scroll: 0,
-                    horizontal: 0,
+                    reader: ReviewScroll::default(),
                     full: false,
                     selected: 0,
                     effect_scroll: 0,
-                    report_window: Default::default(),
                 });
                 self.status = if self.preview.as_ref().is_some_and(|p| p.pending.adoption()) {
                     "Review all mappings; Adopt all approves this exact set once."

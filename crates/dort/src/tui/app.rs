@@ -1,7 +1,10 @@
 use super::workspace::{Region, Scope};
 use super::{
     actions::{Data, Output, Pending, Task},
-    components::approval::Approval,
+    components::{
+        approval::Approval,
+        reader::{ReviewScroll, ReviewStage},
+    },
     input::Target,
     shell::{Action, Form, Intent, Overlay, ProfilePicker, Shell},
 };
@@ -10,7 +13,7 @@ use dort_core::{
     planner::{Request, UnmanageMode},
 };
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::{cell::Cell, path::PathBuf};
+use std::path::PathBuf;
 
 mod output;
 
@@ -26,58 +29,14 @@ pub enum Tab {
 pub struct Preview {
     pub pending: Pending,
     pub text: String,
-    pub scroll: u16,
-    pub horizontal: u16,
+    pub reader: ReviewScroll,
     pub full: bool,
     pub selected: usize,
     pub effect_scroll: u16,
-    report_window: Cell<Option<ReportWindow>>,
-}
-#[derive(Clone, Copy)]
-struct ReportWindow {
-    size: (u16, u16),
-    end: u16,
-    tail_drawn: bool,
 }
 impl Preview {
-    pub(super) fn observe_report(&self, size: (u16, u16), end: u16) -> u16 {
-        let offset = self.scroll.min(end);
-        self.report_window.set(Some(ReportWindow {
-            size,
-            end,
-            tail_drawn: offset == end,
-        }));
-        offset
-    }
-
-    fn report_window(&self, size: (u16, u16)) -> Option<ReportWindow> {
-        self.report_window
-            .get()
-            .filter(|window| window.size == size)
-    }
-
-    fn reading_report(&self) -> bool {
+    pub(super) fn reading_report(&self) -> bool {
         self.full || self.pending.review_len().is_none()
-    }
-
-    fn effects_visible(&self, size: (u16, u16)) -> bool {
-        !self.reading_report()
-            || self
-                .report_window(size)
-                .is_some_and(|w| w.tail_drawn && self.scroll >= w.end)
-    }
-
-    fn clamp_scroll(&mut self, size: (u16, u16)) {
-        if let Some(window) = self.report_window(size) {
-            self.scroll = self.scroll.min(window.end);
-        }
-        let escaped = super::views::safe(&self.text);
-        let columns = escaped.lines().map(str::len).max().unwrap_or(0);
-        self.horizontal = self.horizontal.min(
-            columns
-                .saturating_sub(usize::from(size.0.saturating_sub(2)))
-                .min(u16::MAX as usize) as u16,
-        );
     }
 }
 struct RowClick {
@@ -243,6 +202,7 @@ impl App {
         }
     }
     pub fn start(&mut self, writing: bool) {
+        self.hits.invalidate_review();
         self.motion.reset();
         self.last_click = None;
         self.hits.clear();
@@ -281,6 +241,7 @@ impl App {
             }
             return None;
         }
+        self.hits.invalidate_review();
         let writing = self.writing;
         let activity = self.activity.take();
         self.failed_write = (writing || blocked) && result.is_err();
@@ -1085,6 +1046,9 @@ impl App {
         let task = self.key_inner(key, width, height, more_actions, section_shortcuts);
         self.sync_git_preview();
         let transient_after = self.help.is_some() || self.more.is_some() || self.choice.is_some();
+        if transient_before != transient_after {
+            self.hits.invalidate_review();
+        }
         if !transient_before && !transient_after && form_before != self.form_page() {
             self.form_focus = None;
         }
@@ -1372,7 +1336,7 @@ impl App {
             self.show_result = false;
             self.details_scroll = 0;
         }
-        if self.preview_approval((width, height)).accepts(key) {
+        if self.preview_approval().accepts(key) {
             return self.approve_preview();
         }
         if let Some(preview) = &mut self.preview {
@@ -1380,9 +1344,8 @@ impl App {
             match key.code {
                 KeyCode::Char('i') if file_review => {
                     preview.full = !preview.full;
-                    preview.report_window.set(None);
-                    preview.scroll = 0;
-                    preview.horizontal = 0;
+                    self.hits.invalidate_review();
+                    preview.reader = ReviewScroll::default();
                     preview.effect_scroll = 0;
                 }
                 KeyCode::Down | KeyCode::Up if file_review && !preview.full => {
@@ -1402,35 +1365,16 @@ impl App {
                         preview.effect_scroll.saturating_sub(4)
                     };
                 }
-                KeyCode::Home => {
-                    preview.scroll = 0;
-                    preview.horizontal = 0;
-                    preview.effect_scroll = 0;
-                }
+                KeyCode::Home if !preview.reading_report() => preview.effect_scroll = 0,
                 KeyCode::Esc => {
                     self.preview = None;
+                    self.hits.invalidate_review();
                     self.status = "Returned to the draft.".into();
                 }
-                KeyCode::End if preview.reading_report() => preview.scroll = u16::MAX,
-                KeyCode::Down | KeyCode::PageDown => {
-                    preview.scroll = preview.scroll.saturating_add(if key.code == KeyCode::Down {
-                        1
-                    } else {
-                        8
-                    });
+                code if preview.reading_report() => {
+                    preview.reader.key(&self.hits, ReviewStage::Changes, code);
                 }
-                KeyCode::Up | KeyCode::PageUp => {
-                    preview.scroll =
-                        preview
-                            .scroll
-                            .saturating_sub(if key.code == KeyCode::Up { 1 } else { 8 })
-                }
-                KeyCode::Right => preview.horizontal = preview.horizontal.saturating_add(8),
-                KeyCode::Left => preview.horizontal = preview.horizontal.saturating_sub(8),
                 _ => (),
-            }
-            if let Some(preview) = &mut self.preview {
-                preview.clamp_scroll((width, height));
             }
             return None;
         }
@@ -1510,7 +1454,7 @@ impl App {
             return task;
         }
         if self.tab == Tab::Tools
-            && let Some(task) = self.tools_view.key(key, self.dry_run)
+            && let Some(task) = self.tools_view.key(key, self.dry_run, &self.hits)
         {
             return task;
         }
@@ -1819,22 +1763,16 @@ impl App {
             self.last_click = None;
             self.hits.clear();
             if self.hits.size() != (width, height) {
+                self.hits.invalidate_review();
                 self.hits.invalidate_workspace();
             }
         }
         self.viewport = (width, height);
-        if let Some(preview) = &self.preview
-            && preview.report_window((width, height)).is_none()
-        {
-            preview.report_window.set(None);
-        }
         if width < 48 || height < 14 {
             self.more = None;
             self.choice = None;
             self.git_view.discard_preview();
             self.tools_view.shrink();
-        } else if let Some(preview) = &mut self.preview {
-            preview.clamp_scroll((width, height));
         }
         super::discover_content::sync(self, width, height);
     }
@@ -2851,12 +2789,14 @@ impl App {
             _ => vec![],
         }
     }
-    pub(super) fn preview_approval(&self, size: (u16, u16)) -> Approval {
-        Approval::new(
+    pub(super) fn preview_approval(&self) -> Approval {
+        Approval::review(
+            &self.hits,
+            ReviewStage::Changes,
             self.dry_run,
             self.preview
                 .as_ref()
-                .is_none_or(|p| p.pending.blocked() || !p.effects_visible(size)),
+                .is_none_or(|p| p.pending.blocked() || !p.reading_report()),
         )
     }
     fn approve_preview(&mut self) -> Option<Task> {

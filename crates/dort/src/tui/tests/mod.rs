@@ -140,12 +140,17 @@ pub(super) fn approve_ready(
     width: u16,
     height: u16,
 ) -> Option<super::actions::Task> {
-    if render(app, width, height)
-        .lines()
-        .last()
-        .unwrap()
-        .contains("End Read")
-    {
+    let footer = |app: &App| {
+        render(app, width, height)
+            .lines()
+            .last()
+            .unwrap()
+            .to_owned()
+    };
+    if footer(app).contains("F3 Full effects") {
+        assert!(app.key(key(KeyCode::F(3)), width, height).is_none());
+    }
+    if footer(app).contains("End Read") {
         assert!(app.key(key(KeyCode::End), width, height).is_none());
         render(app, width, height);
     }

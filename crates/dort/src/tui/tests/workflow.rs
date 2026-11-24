@@ -149,36 +149,27 @@ fn welcome_next_steps_are_visible_at_the_floor_without_creating_state() {
 }
 
 #[test]
-fn preview_scroll_is_bounded_by_escaped_metadata_and_resets_on_home() {
+fn review_wraps_escaped_metadata_and_returns_to_top_on_home() {
     let fixture = Fixture::new(false);
     let mut app = App::new(true);
     app.complete(Ok(fixture.prepare(Request::Apply)));
-    // Exercise only full-report presentation offsets; retain the real opaque core preview.
     app.preview.as_mut().unwrap().full = true;
     app.preview.as_mut().unwrap().text = format!("{}\n{}\nEND", "é".repeat(20), "row\n".repeat(30));
-    super::tests::render(&app, 48, 14);
-    for _ in 0..100 {
-        app.key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), 48, 14);
-        app.key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), 48, 14);
-    }
-    let p = app.preview.as_ref().unwrap();
-    assert_eq!(p.horizontal, 120 - 46); // Each é becomes six ASCII escape bytes.
-    app.key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), 48, 14);
-    assert_eq!(app.preview.as_ref().unwrap().horizontal, 120 - 46 - 8);
-    for _ in 0..12 {
-        app.key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), 48, 14);
-    }
-    assert!(super::tests::render(&app, 48, 14).contains("END"));
+    let draw = |app: &App| super::tests::render(app, 48, 14);
+    let press = |app: &mut App, code| app.key(KeyEvent::new(code, KeyModifiers::NONE), 48, 14);
+    let start = draw(&app);
+    assert!(
+        start.matches("\\u{e9}").count() > 8 && !start.contains("END"),
+        "{start}"
+    );
+    press(&mut app, KeyCode::End);
+    assert!(draw(&app).contains("END"));
     app.resize(140, 60);
     let wide = super::tests::render(&app, 140, 60);
     assert!(wide.contains("\\u{e9}") && wide.contains("END"));
-    app.resize(48, 14);
-    app.key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), 48, 14);
-    app.key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), 48, 14);
-    app.key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE), 48, 14);
-    let p = app.preview.as_ref().unwrap();
-    assert_eq!((p.scroll, p.horizontal), (0, 0));
-    assert!(super::tests::render(&app, 48, 14).contains("\\u{e9}"));
+    press(&mut app, KeyCode::Home);
+    assert!(draw(&app).contains("\\u{e9}"));
+    assert!(!draw(&app).contains("END"));
     assert!(key(&mut app, KeyCode::Enter).is_none());
     assert!(!fixture.host.state_dir.exists());
     assert!(!fixture.host.config_dir.exists());
@@ -301,8 +292,7 @@ fn confirmation_snapshots_and_resize_guard() {
     let mut app = App::new(false);
     app.complete(Ok(fixture.prepare(Request::Apply)));
     let screen = super::tests::render(&app, 48, 14);
-    assert!(screen.contains("Confirm"));
-    assert!(screen.contains("Confirm") && !screen.contains("Type literal"));
+    assert!(screen.contains("F3 Full effects") && !screen.contains("y Confirm"));
     assert!(
         app.key(
             KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
@@ -312,7 +302,7 @@ fn confirmation_snapshots_and_resize_guard() {
         .is_none()
     );
     assert!(matches!(
-        key(&mut app, KeyCode::Char('y')),
+        super::tests::approve_ready(&mut app, 80, 24),
         Some(Task::Execute(_))
     ));
     assert!(app.preview.is_none());
@@ -331,6 +321,11 @@ fn mouse_confirmation_binds_displayed_exact_id_without_typing() {
     })));
     let screen = super::tests::render(&app, 48, 14);
     assert!(screen.contains("editor") && !screen.contains("Type exact"));
+    let press = |app: &mut App, code| app.key(KeyEvent::new(code, KeyModifiers::NONE), 48, 14);
+    press(&mut app, KeyCode::F(3));
+    super::tests::render(&app, 48, 14);
+    press(&mut app, KeyCode::End);
+    super::tests::render(&app, 48, 14);
     let (x, y) = super::tests::target_position(&app, 48, 14, |target| {
         matches!(target, super::input::Target::Continue)
     });
@@ -356,6 +351,11 @@ fn review_exposes_one_clickable_approval_action_and_consumes_the_review_once() {
         let fixture = Fixture::new(false);
         let mut app = App::new(false);
         app.complete(Ok(fixture.prepare(Request::Apply)));
+        let press =
+            |app: &mut App, code| app.key(KeyEvent::new(code, KeyModifiers::NONE), width, height);
+        press(&mut app, KeyCode::F(3));
+        super::tests::render(&app, width, height);
+        press(&mut app, KeyCode::End);
         let screen = super::tests::render(&app, width, height);
         assert_eq!(screen.matches("y Confirm").count(), 1, "{screen}");
         use ratatui::crossterm::event::{KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
@@ -442,11 +442,14 @@ fn ascii_monochrome_real_removal_keeps_consent_and_shrink_guards() {
         })));
         let press = |app: &mut App, code| app.key(KeyEvent::new(code, KeyModifiers::NONE), w, h);
         let screen = super::tests::render(&app, w, h);
-        assert!(screen.is_ascii() && screen.contains("editor") && screen.contains("Confirm"));
+        assert!(
+            screen.is_ascii() && screen.contains("editor") && screen.contains("F3 Full effects")
+        );
         app.resize(47, 13);
         app.resize(w, h);
         assert!(fixture.host.home.join(".editor").is_symlink());
-        let task = press(&mut app, KeyCode::Char('y')).unwrap();
+        assert!(press(&mut app, KeyCode::Char('y')).is_none());
+        let task = super::tests::approve_ready(&mut app, w, h).unwrap();
         fixture.execute(task);
         assert!(!fixture.host.home.join(".editor").exists());
     }
@@ -787,7 +790,8 @@ fn shrinking_requires_fresh_removal_confirmation() {
             .is_none()
     );
     app.resize(80, 24);
-    let task = key(&mut app, KeyCode::Char('y')).expect("fresh deliberate preview approval");
+    assert!(key(&mut app, KeyCode::Char('y')).is_none());
+    let task = approve(&mut app);
     assert!(app.preview.is_none());
     assert!(fixture.host.home.join(".editor").is_symlink());
     fixture.execute(task);
@@ -1407,8 +1411,7 @@ fn exact_id_forms_can_keep_or_delete_a_mapping_outside_the_display_filter() {
         key(&mut app, KeyCode::Enter);
         let task = key(&mut app, KeyCode::Enter).unwrap();
         run_task(&mut app, &fixture, task);
-        assert!(super::tests::render(&app, 80, 24).contains("Confirm"));
-        let task = key(&mut app, KeyCode::Char('y')).unwrap();
+        let task = approve(&mut app);
         let refresh = run_task(&mut app, &fixture, task).unwrap();
         run_task(&mut app, &fixture, refresh);
         assert_eq!(fixture.host.home.join(".editor").exists(), !remove);

@@ -153,7 +153,7 @@ fn click(app: &mut App, label: &str, offset: u16) -> Option<Task> {
     )
 }
 fn approve(app: &mut App) -> Task {
-    key(app, KeyCode::Char('y')).expect("one explicit combined approval")
+    super::tests::approve_ready(app, SIZE.0, SIZE.1).expect("one explicit combined approval")
 }
 #[test]
 fn separate_item_form_retains_edits_and_only_returns_to_combined_review() {
@@ -450,7 +450,7 @@ fn selected_apply_keep_delete_use_one_review_bound_to_every_selected_id() {
             key(&mut app, KeyCode::Esc);
             assert!(app.preview.is_some());
         }
-        let task = key(&mut app, KeyCode::Char('y')).unwrap();
+        let task = approve(&mut app);
         let refresh = f.run(&mut app, task).unwrap();
         f.run(&mut app, refresh);
         assert!(app.inventory.managed_marks.is_empty());

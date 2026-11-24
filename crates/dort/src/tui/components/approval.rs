@@ -1,45 +1,46 @@
-use super::ActionButton;
+use super::{ActionButton, reader::ReviewStage};
 use crate::tui::input::{Hits, Target};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-#[derive(Clone, Copy)]
-pub struct Approval {
-    dry_run: bool,
-    blocked: bool,
+pub enum Approval {
+    Disabled,
+    Unread,
+    Ready,
 }
 impl Approval {
-    pub fn new(dry_run: bool, blocked: bool) -> Self {
-        Self { dry_run, blocked }
+    pub fn review(hits: &Hits, stage: ReviewStage, dry_run: bool, blocked: bool) -> Self {
+        if dry_run || blocked {
+            Self::Disabled
+        } else if hits.review_tail_drawn(stage) {
+            Self::Ready
+        } else {
+            Self::Unread
+        }
     }
-
-    pub fn allowed(self) -> bool {
-        !self.dry_run && !self.blocked
-    }
-
     pub const KEY: &'static str = "y";
-
     pub fn event() -> KeyEvent {
         KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)
     }
-
     pub fn accepts(self, key: KeyEvent) -> bool {
-        self.allowed()
+        matches!(self, Self::Ready)
             && key.code == Self::event().code
             && key.modifiers == KeyModifiers::NONE
             && key.kind == KeyEventKind::Press
     }
-
-    pub fn present(self, hits: &Hits, label: &'static str, target: Target) {
-        if self.allowed() {
-            hits.present(ActionButton {
+    pub fn present_key(self, hits: &Hits, label: &'static str) {
+        let action = match self {
+            Self::Disabled => return,
+            Self::Unread => ActionButton {
+                label: "Read remaining effects",
+                key: "End",
+                target: Target::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)),
+            },
+            Self::Ready => ActionButton {
                 label,
                 key: Self::KEY,
-                target,
-            });
-        }
-    }
-
-    pub fn present_key(self, hits: &Hits, label: &'static str) {
-        self.present(hits, label, Target::Continue);
+                target: Target::Continue,
+            },
+        };
+        hits.present(action);
     }
 }

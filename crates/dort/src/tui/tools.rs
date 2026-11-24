@@ -313,7 +313,12 @@ impl State {
         self.install_open = true;
         self.installation.open_attempts()
     }
-    pub fn key(&mut self, key: KeyEvent, dry_run: bool) -> Option<Option<Task>> {
+    pub fn key(
+        &mut self,
+        key: KeyEvent,
+        dry_run: bool,
+        hits: &super::input::Hits,
+    ) -> Option<Option<Task>> {
         if self.installed_open {
             if !self.installed.searching
                 && self.installed.preview.is_none()
@@ -329,10 +334,10 @@ impl State {
                     _ => (),
                 }
             }
-            return Some(self.installed.key(key, dry_run));
+            return Some(self.installed.key(key, dry_run, hits));
         }
         if self.install_open {
-            return match self.installation.key(key, dry_run) {
+            return match self.installation.key(key, dry_run, hits) {
                 Some(super::tools_install::Outcome::Back) => Some(self.back()),
                 Some(super::tools_install::Outcome::Task(task)) => Some(Some(*task)),
                 None => Some(None),

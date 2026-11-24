@@ -17,7 +17,7 @@ fn review(f: &Fixture, app: &mut super::app::App) {
 }
 fn inspect(f: &Fixture, app: &mut super::app::App) {
     review(f, app);
-    let task = key(app, KeyCode::Char('y')).unwrap();
+    let task = super::tests::approve_ready(app, 80, 24).unwrap();
     assert!(matches!(task, Task::ToolsInstalledInspect(_)));
     run(f, app, task);
 }
@@ -67,7 +67,7 @@ fi"#,
             && !text.contains("declaring one Node")
             && !text.contains("PRIVATE_INVALID")
     );
-    let task = key(&mut app, KeyCode::Char('y')).unwrap();
+    let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     let output = actions::perform_scoped(task, &f.host, None, &[], |_| Ok(())).unwrap();
     app.complete(Ok(output));
     assert_eq!(f.calls(), "PL");
@@ -98,7 +98,7 @@ fi"#,
     )
     .unwrap();
     app.complete(Ok(output));
-    let task = key(&mut app, KeyCode::Char('y')).unwrap();
+    let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     assert!(
         app.tools_view.installed.current.is_none(),
         "Accepting refresh discards old results before querying"
@@ -129,7 +129,7 @@ fn current_inspection_details_and_prefilled_add_have_separate_approvals_and_no_r
         );
         assert!(text.lines().last().unwrap().contains("F1 Help"), "{text}");
     }
-    let task = key(&mut app, KeyCode::Char('y')).unwrap();
+    let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     run(&f, &mut app, task);
     assert_eq!(f.calls(), "Q");
     assert_eq!(app.tools_view.installed.rows().len(), 1);
@@ -185,7 +185,7 @@ fn only_current_results_survive_refresh_and_failed_queries_never_fall_back() {
     input.search_dirs = vec![f.bin.clone()];
     run(&f, &mut app, Task::ToolsInstalledPrepare(input));
     assert_eq!(f.calls(), "Q");
-    let task = key(&mut app, KeyCode::Char('y')).unwrap();
+    let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     run(&f, &mut app, task);
     assert!(app.tools_view.installed.rows().is_empty());
     assert!(

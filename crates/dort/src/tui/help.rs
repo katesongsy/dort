@@ -96,7 +96,7 @@ impl Topic {
             Self::Batch => "Review the marked files. Editing one item does not adopt it.",
             Self::BatchItem => "Edit target, ID and source. Done returns to the draft.",
             Self::Preview => {
-                "Review effects, warnings and limits. Blocked or preview-only pages cannot approve."
+                "Approval appears when the end of the full effects is visible. Blocked and preview-only reviews cannot approve."
             }
             Self::Task => "Progress uses reported steps. It does not estimate a percentage.",
             Self::Error => {
@@ -206,11 +206,8 @@ impl Topic {
             ],
             Self::Preview => &[
                 ("PgUp/PgDown", "Read all review rows"),
-                ("F3", "Full report"),
-                (
-                    super::components::approval::Approval::KEY,
-                    "Approve ready review",
-                ),
+                ("F3", "Switch between summary and full effects"),
+                ("Home/End", "First/last effects"),
                 ("Esc", "Back without execution"),
             ],
             Self::Task => &[

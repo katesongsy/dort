@@ -1,5 +1,8 @@
 //! Render-owned hit regions.
-use super::shell::Action;
+use super::{
+    components::reader::{ReviewStage, VisibleRows},
+    shell::Action,
+};
 use ratatui::layout::{Position, Rect};
 use std::cell::{Cell, RefCell};
 
@@ -56,6 +59,13 @@ struct Hit {
     click: Option<Target>,
     wheel: Option<Wheel>,
 }
+#[derive(Clone, Copy)]
+struct RenderedReview {
+    stage: ReviewStage,
+    rows: VisibleRows,
+    current: bool,
+}
+
 #[derive(Default)]
 pub struct Hits {
     regions: RefCell<Vec<Hit>>,
@@ -63,13 +73,42 @@ pub struct Hits {
     input_focus: Cell<bool>,
     workspace: Cell<Option<super::workspace::Workspace>>,
     actions: RefCell<Vec<super::components::ActionButton>>,
+    review: Cell<Option<RenderedReview>>,
 }
 impl Hits {
     pub fn begin(&self, area: Rect) {
         self.clear();
+        self.invalidate_review();
         self.workspace.set(None);
         self.size.set((area.width, area.height));
         self.input_focus.set(true);
+    }
+    pub fn observe_review(&self, stage: ReviewStage, rows: VisibleRows) {
+        self.review.set(Some(RenderedReview {
+            stage,
+            rows,
+            current: true,
+        }));
+    }
+    pub fn invalidate_review(&self) {
+        self.review.set(None);
+    }
+    pub fn hide_review_tail(&self) {
+        self.review.set(self.review.get().map(|mut review| {
+            review.current = false;
+            review
+        }));
+    }
+    pub fn review_end(&self, stage: ReviewStage) -> Option<usize> {
+        self.review
+            .get()
+            .filter(|review| review.stage == stage)
+            .map(|review| review.rows.end)
+    }
+    pub fn review_tail_drawn(&self, stage: ReviewStage) -> bool {
+        self.review.get().is_some_and(|review| {
+            review.stage == stage && review.current && review.rows.shows_tail()
+        })
     }
     pub fn input_focus_allowed(&self) -> bool {
         self.input_focus.get()
