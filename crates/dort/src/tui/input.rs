@@ -128,24 +128,4 @@ impl Hits {
                 .flatten()
         })
     }
-    pub fn rows(&self, area: Rect, visible: &[usize], offset: usize) {
-        let rows = Rect::new(
-            area.x,
-            area.y + 2,
-            area.width,
-            area.height.saturating_sub(2),
-        );
-        self.wheel(area, Wheel::Rows);
-        for (y, &index) in visible
-            .iter()
-            .skip(offset)
-            .take(usize::from(rows.height))
-            .enumerate()
-        {
-            self.click(
-                Rect::new(rows.x, rows.y + y as u16, rows.width, 1),
-                Target::Row(index),
-            );
-        }
-    }
 }

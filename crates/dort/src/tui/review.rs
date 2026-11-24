@@ -1,12 +1,14 @@
 //! File reviews built from typed plans.
+use super::input::{Target, Wheel};
 use super::{app::Preview, components as ui, views::safe};
 use dort_core::planner::{Effect, Outcome, Plan};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     text::{Line, Text},
-    widgets::{Cell, Paragraph, Row, Table, TableState},
+    widgets::{Cell, Paragraph, Row},
 };
+use ui::collection::{Collection, Header, RowTargets, Selection};
 fn outcome(outcome: &Outcome) -> &'static str {
     match outcome {
         Outcome::Change => "Change",
@@ -202,41 +204,32 @@ fn draw_inner(
         ]),
         parts[0],
     );
-    let rows: Vec<_> = plan
-        .files
-        .iter()
-        .map(|f| {
-            Row::new(vec![
-                Cell::from(ui::inline(&f.id)),
-                Cell::from(outcome(&f.outcome)).style(ui::state(outcome(&f.outcome))),
-                Cell::from(f.effects.first().map(effect).unwrap_or("None")),
-            ])
-        })
-        .collect();
-    let table = Table::new(
-        rows,
+    let rows = plan.files.iter().map(|f| {
+        Row::new([
+            Cell::from(ui::inline(&f.id)),
+            Cell::from(outcome(&f.outcome)).style(ui::state(outcome(&f.outcome))),
+            Cell::from(f.effects.first().map(effect).unwrap_or("None")),
+        ])
+    });
+    Collection::new(
         [
             Constraint::Percentage(30),
             Constraint::Length(11),
             Constraint::Min(8),
         ],
+        Header::Heading(["FILE", "STATUS", "PLANNED CHANGE"]),
     )
-    .header(Row::new(["FILE", "STATUS", "PLANNED CHANGE"]).style(ui::heading()))
-    .row_highlight_style(ui::selected())
-    .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
-    let mut state =
-        TableState::default().with_selected((!plan.files.is_empty()).then_some(preview.selected));
-    frame.render_stateful_widget(table, parts[1], &mut state);
-    hits.wheel(parts[1], super::input::Wheel::PreviewRows);
-    for (y, index) in (state.offset()..plan.files.len())
-        .take(usize::from(parts[1].height.saturating_sub(1)))
-        .enumerate()
-    {
-        hits.click(
-            Rect::new(parts[1].x, parts[1].y + 1 + y as u16, parts[1].width, 1),
-            super::input::Target::PreviewRow(index),
-        );
-    }
+    .draw(
+        frame,
+        parts[1],
+        rows.enumerate(),
+        Selection::at((!plan.files.is_empty()).then_some(preview.selected)),
+        RowTargets {
+            hits,
+            wheel: Some(Wheel::PreviewRows),
+            target: Target::PreviewRow,
+        },
+    );
     if parts[2].height >= 3 {
         ui::report(
             frame,

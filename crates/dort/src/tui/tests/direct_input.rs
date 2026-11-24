@@ -226,6 +226,35 @@ fn clicks_and_wheels_use_hovered_rows_and_details_with_filtered_raw_identity() {
     }
 }
 #[test]
+fn collection_headers_do_not_select_rows_at_the_floor_or_wide() {
+    for size in [(48, 14), (140, 24)] {
+        for (tab, header, selected) in [
+            (Tab::Files, "STATE", "› [ ] first"),
+            (Tab::Git, "KIND", "› first"),
+            (Tab::Recovery, "OP ID", "› aaaaaaaa"),
+        ] {
+            let mut app = fixture(tab);
+            let (x, y) = at(&app, header, size);
+            assert!(
+                mouse(
+                    &mut app,
+                    MouseEventKind::Down(MouseButton::Left),
+                    x,
+                    y,
+                    size
+                )
+                .is_none()
+            );
+            let screen = render(&app, size.0, size.1);
+            assert!(
+                screen.contains(selected),
+                "header changed selection:\n{screen}"
+            );
+            assert!(app.page_title().is_none());
+        }
+    }
+}
+#[test]
 fn hit_rows_follow_rendered_table_offset_and_stale_geometry_is_inert() {
     let mut app = fixture(Tab::Files);
     let data = app.data.as_mut().unwrap();

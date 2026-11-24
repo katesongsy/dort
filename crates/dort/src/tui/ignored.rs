@@ -1,12 +1,16 @@
 //! Ignore picker. Enter previews; approval is separate.
-use super::components as ui;
+use super::{
+    components as ui,
+    input::{Target, Wheel},
+};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     text::Line,
-    widgets::{Paragraph, Row, Table, TableState},
+    widgets::{Paragraph, Row},
 };
 use std::path::PathBuf;
+use ui::collection::{Collection, Header, RowTargets};
 
 pub fn draw(
     frame: &mut Frame,
@@ -15,7 +19,6 @@ pub fn draw(
     paths: &[PathBuf],
     selected: usize,
 ) {
-    use super::input::Target;
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     if paths.get(selected).is_some() || app.shell.picker_details {
         app.presented(
@@ -73,33 +76,29 @@ pub fn draw(
         Paragraph::new("Local HOME discovery preferences").style(ui::muted()),
         heading,
     );
-    app.hits.wheel(list, super::input::Wheel::Choices);
-    let capacity = usize::from(list.height.saturating_sub(1));
+    let collection = Collection::new([Constraint::Percentage(100)], Header::None)
+        .titled("Ignored exact paths and descendants", true);
     let current = paths.get(selected).map(|_| selected);
-    let first = app
-        .shell
-        .ignored_viewport
-        .start(paths.len(), capacity, current);
-    let rows = paths.iter().skip(first).take(capacity).map(|path| {
-        Row::new(vec![ui::inline(
-            path.to_str().expect("validated ignore path"),
-        )])
+    let window = collection.window(list, &app.shell.ignored_viewport, paths.len(), current);
+    let rows = window.range.map(|index| {
+        (
+            index,
+            Row::new([ui::inline(
+                paths[index].to_str().expect("validated ignore path"),
+            )]),
+        )
     });
-    let mut state = TableState::default().with_selected(current.and_then(|i| i.checked_sub(first)));
-    frame.render_stateful_widget(
-        Table::new(rows, [Constraint::Percentage(100)])
-            .block(ui::pane("Ignored exact paths and descendants", true))
-            .row_highlight_style(ui::selected())
-            .highlight_symbol(format!("{} ", ui::glyphs::SELECTED)),
+    collection.draw(
+        frame,
         list,
-        &mut state,
+        rows,
+        window.selection,
+        RowTargets {
+            hits: &app.hits,
+            wheel: Some(Wheel::Choices),
+            target: |index| Target::Picker(index, false),
+        },
     );
-    for (y, index) in (first..paths.len()).take(capacity).enumerate() {
-        app.hits.click(
-            Rect::new(list.x, list.y + 1 + y as u16, list.width, 1),
-            super::input::Target::Picker(index, false),
-        );
-    }
     if let Some(pane) = pane {
         details(frame, pane);
         return;

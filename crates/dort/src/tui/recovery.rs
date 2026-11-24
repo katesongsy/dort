@@ -1,4 +1,5 @@
 //! Content-free history presentation. Recovery previews make the final decision.
+use super::input::{Target, Wheel};
 use super::{app::App, components as ui};
 use dort_core::journal::{Diagnosis, Phase};
 use ratatui::{
@@ -6,8 +7,9 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span, Text},
-    widgets::{Cell, Paragraph, Row, Table, TableState},
+    widgets::{Cell, Paragraph, Row},
 };
+use ui::collection::{Collection, Header, RowTargets};
 
 pub fn rollback(row: &Diagnosis) -> bool {
     row.problem.is_none()
@@ -277,8 +279,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         visible.len(),
         data.history.len()
     );
-    let block = ui::pane(&title, focused);
     if data.history.is_empty() || visible.is_empty() {
+        let block = ui::pane(&title, focused);
         let inner = block.inner(list);
         frame.render_widget(block, list);
         ui::text_view(
@@ -292,39 +294,42 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             0,
         );
     } else {
-        let selected = visible.iter().position(|&i| i == app.selected);
-        let capacity = usize::from(list.height.saturating_sub(2));
-        let first = app
-            .history_viewport
-            .start(visible.len(), capacity, selected);
-        let window = &visible[first..(first + capacity).min(visible.len())];
-        let table_rows = window.iter().map(|&i| {
-            let row = &data.history[i];
-            let (status, style) = state(row);
-            Row::new(vec![
-                Cell::from(ui::inline(row.transaction_id.get(..8).unwrap_or("invalid"))),
-                Cell::from(kind(row)),
-                Cell::from(phase(row)),
-                Cell::from(status).style(style),
-            ])
-        });
-        let table = Table::new(
-            table_rows,
+        let collection = Collection::new(
             [
                 Constraint::Min(8),
                 Constraint::Length(16),
                 Constraint::Length(12),
                 Constraint::Length(13),
             ],
+            Header::Heading(["OP ID", "TYPE", "STATE", "STATUS"]),
         )
-        .header(Row::new(["OP ID", "TYPE", "STATE", "STATUS"]).style(ui::heading()))
-        .block(block)
-        .row_highlight_style(ui::selected())
-        .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
-        let mut selection =
-            TableState::default().with_selected(window.iter().position(|&i| i == app.selected));
-        frame.render_stateful_widget(table, list, &mut selection);
-        app.hits.rows(list, window, 0);
+        .titled(&title, focused);
+        let selected = visible.iter().position(|&i| i == app.selected);
+        let window = collection.window(list, &app.history_viewport, visible.len(), selected);
+        let rows = visible[window.range].iter().map(|&i| {
+            let row = &data.history[i];
+            let (status, style) = state(row);
+            (
+                i,
+                Row::new([
+                    Cell::from(ui::inline(row.transaction_id.get(..8).unwrap_or("invalid"))),
+                    Cell::from(kind(row)),
+                    Cell::from(phase(row)),
+                    Cell::from(status).style(style),
+                ]),
+            )
+        });
+        collection.draw(
+            frame,
+            list,
+            rows,
+            window.selection,
+            RowTargets {
+                hits: &app.hits,
+                wheel: Some(Wheel::Rows),
+                target: Target::Row,
+            },
+        );
     }
     if let Some(pane) = pane {
         ui::report(

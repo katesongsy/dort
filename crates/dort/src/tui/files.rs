@@ -1,12 +1,14 @@
 //! Files workspace built from typed rows.
+use super::input::{Target, Wheel};
 use super::{app::App, components as ui, views::safe};
 use dort_core::observation::Kind;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     text::{Line, Span, Text},
-    widgets::{Cell, Paragraph, Row, Table, TableState},
+    widgets::{Cell, Paragraph, Row},
 };
+use ui::collection::{Collection, Header, RowTargets};
 
 #[cfg(test)]
 thread_local! { pub(super) static FORMATTED_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
@@ -250,13 +252,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         app.hits
             .click(list_area, super::input::Target::DiscoverFocus(false));
     }
-    let capacity = list_area.height.saturating_sub(2) as usize;
-    let first = app
-        .inventory
-        .viewport(app.discovering)
-        .start(nodes.len(), capacity, selected);
-    let window: Vec<_> = nodes.window(first, capacity).collect();
-    let visible: Vec<_> = window.iter().map(|n| n.key).collect();
     let total = if app.discovering {
         app.discovery
             .as_ref()
@@ -273,8 +268,36 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         },
         total
     );
+    let collection = if app.discovering {
+        Collection::new(
+            [
+                Constraint::Percentage(46),
+                Constraint::Length(15),
+                Constraint::Min(6),
+            ],
+            Header::Heading(["NAME", "ADOPTION", "TYPE"]),
+        )
+    } else {
+        Collection::new(
+            [
+                Constraint::Percentage(32),
+                Constraint::Length(13),
+                Constraint::Min(4),
+            ],
+            Header::Heading(["FILE", "STATE", "DESTINATION"]),
+        )
+    }
+    .titled(&title, focused);
+    let window = collection.window(
+        list_area,
+        app.inventory.viewport(app.discovering),
+        nodes.len(),
+        selected,
+    );
     let mut rows = Vec::new();
-    for &node in &window {
+    let mut visible = Vec::new();
+    for node in nodes.window(window.range.start, window.range.len()) {
+        let previous = rows.len();
         #[cfg(test)]
         FORMATTED_ROWS.with(|count| count.set(count.get() + 1));
         let prefix = format!(
@@ -363,8 +386,10 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                 }
             }
         }
+        if rows.len() > previous {
+            visible.push(node);
+        }
     }
-    let block = ui::pane(&title, focused);
     if nodes.is_empty() {
         let message = if !app.discovering {
             app.data
@@ -384,49 +409,34 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         } else {
             "No matches. Delete clears the display filter."
         };
-        frame.render_widget(Paragraph::new(safe(message)).block(block), list_area);
-    } else {
-        let widths = if app.discovering {
-            vec![
-                Constraint::Percentage(46),
-                Constraint::Length(15),
-                Constraint::Min(6),
-            ]
-        } else {
-            vec![
-                Constraint::Percentage(32),
-                Constraint::Length(13),
-                Constraint::Min(4),
-            ]
-        };
-        let header = Row::new(if app.discovering {
-            vec!["NAME", "ADOPTION", "TYPE"]
-        } else {
-            vec!["FILE", "STATE", "DESTINATION"]
-        })
-        .style(ui::heading());
-        let table = Table::new(rows, widths)
-            .header(header)
-            .block(block)
-            .row_highlight_style(ui::selected())
-            .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
-        let mut state = TableState::default().with_selected(
-            selected
-                .and_then(|i| i.checked_sub(first))
-                .filter(|&i| i < window.len()),
+        frame.render_widget(
+            Paragraph::new(safe(message)).block(ui::pane(&title, focused)),
+            list_area,
         );
-        frame.render_stateful_widget(table, list_area, &mut state);
-        app.hits.rows(list_area, &visible, 0);
-        // Register only actual rendered rows, after the generic row hit regions.
-        for (line, node) in window.iter().enumerate() {
-            let x = list_area.x + 2 + (node.depth.min(12) * 2) as u16;
-            if x + 3 < list_area.right() {
+    } else {
+        let rendered = collection.draw(
+            frame,
+            list_area,
+            visible.iter().map(|node| node.key).zip(rows),
+            window.selection,
+            RowTargets {
+                hits: &app.hits,
+                wheel: Some(Wheel::Rows),
+                target: Target::Row,
+            },
+        );
+        for ((row, _), node) in rendered
+            .rows()
+            .zip(visible.into_iter().skip(rendered.offset))
+        {
+            let x = row.x + 2 + (node.depth.min(12) * 2) as u16;
+            if x + 3 < row.right() {
                 app.hits.click(
-                    Rect::new(x, list_area.y + 2 + line as u16, 3, 1),
+                    Rect::new(x, row.y, 3, 1),
                     if node.branch {
-                        super::input::Target::TreeFold(node.key)
+                        Target::TreeFold(node.key)
                     } else {
-                        super::input::Target::TreeMark(node.key)
+                        Target::TreeMark(node.key)
                     },
                 );
             }

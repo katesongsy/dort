@@ -1,13 +1,15 @@
 use super::{Comparison, Metadata, Reader, preview};
+use crate::tui::input::{Target, Wheel};
 use crate::tui::{components as ui, inventory::Search};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     style::Style,
     text::{Line, Span, Text},
-    widgets::{Cell, Paragraph, Row, Table, TableState},
+    widgets::{Cell, Paragraph, Row},
 };
 use std::path::Path;
+use ui::collection::{Collection, Header, RowTargets};
 
 pub(super) struct View<'a> {
     pub hits: &'a crate::tui::input::Hits,
@@ -220,11 +222,12 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         .metadata
         .map(|m| format!("Details | {} entries", m.len()))
         .unwrap_or_else(|| "Details | Unknown".into());
-    let block = ui::pane(&title, view.reader == Reader::Entries);
+    let focused = view.reader == Reader::Entries;
     if view.metadata.is_none()
         || view.metadata.is_some_and(|m| m.len() == 0)
         || view.visible.is_empty()
     {
+        let block = ui::pane(&title, focused);
         let inner = block.inner(list);
         frame.render_widget(block, list);
         let text = match view.metadata {
@@ -234,29 +237,6 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
         };
         ui::text_view(frame, inner, Text::raw(text), 0);
     } else if let Some(metadata) = view.metadata {
-        let selected = view.visible.iter().position(|&i| i == view.selected);
-        let capacity = usize::from(list.height.saturating_sub(2));
-        let first = view.viewport.start(view.visible.len(), capacity, selected);
-        let window = &view.visible[first..(first + capacity).min(view.visible.len())];
-        let rows = window.iter().filter_map(|&index| match metadata {
-            Metadata::Status(status) => status.entries.get(index).map(|entry| {
-                Row::new(vec![
-                    Cell::from(ui::inline(&entry.path)),
-                    Cell::from(ui::inline(&entry.kind)).style(status_style(&entry.kind)),
-                    Cell::from(ui::inline(entry.xy.as_deref().unwrap_or("-"))),
-                ])
-            }),
-            Metadata::Diff(diff) => diff.entries.get(index).map(|entry| {
-                Row::new(vec![
-                    Cell::from(ui::inline(&entry.path)),
-                    Cell::from(ui::inline(&entry.change)).style(ui::warning()),
-                    Cell::from(ui::inline(&format!(
-                        "{} -> {}",
-                        entry.old_mode, entry.new_mode
-                    ))),
-                ])
-            }),
-        });
         let (widths, labels) = match metadata {
             Metadata::Status(_) => (
                 [
@@ -275,15 +255,42 @@ pub(super) fn draw(frame: &mut Frame, area: Rect, view: View<'_>) {
                 ["PATH", "CHANGE", "MODES"],
             ),
         };
-        let table = Table::new(rows, widths)
-            .header(Row::new(labels).style(ui::heading()))
-            .block(block)
-            .row_highlight_style(ui::selected())
-            .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
-        let mut selection =
-            TableState::default().with_selected(window.iter().position(|&i| i == view.selected));
-        frame.render_stateful_widget(table, list, &mut selection);
-        view.hits.rows(list, window, 0);
+        let collection = Collection::new(widths, Header::Heading(labels)).titled(&title, focused);
+        let selected = view.visible.iter().position(|&i| i == view.selected);
+        let window = collection.window(list, view.viewport, view.visible.len(), selected);
+        let rows = view.visible[window.range].iter().filter_map(|&index| {
+            let cells = match metadata {
+                Metadata::Status(status) => status.entries.get(index).map(|entry| {
+                    [
+                        Cell::from(ui::inline(&entry.path)),
+                        Cell::from(ui::inline(&entry.kind)).style(status_style(&entry.kind)),
+                        Cell::from(ui::inline(entry.xy.as_deref().unwrap_or("-"))),
+                    ]
+                }),
+                Metadata::Diff(diff) => diff.entries.get(index).map(|entry| {
+                    [
+                        Cell::from(ui::inline(&entry.path)),
+                        Cell::from(ui::inline(&entry.change)).style(ui::warning()),
+                        Cell::from(ui::inline(&format!(
+                            "{} -> {}",
+                            entry.old_mode, entry.new_mode
+                        ))),
+                    ]
+                }),
+            }?;
+            Some((index, Row::new(cells)))
+        });
+        collection.draw(
+            frame,
+            list,
+            rows,
+            window.selection,
+            RowTargets {
+                hits: view.hits,
+                wheel: Some(Wheel::Rows),
+                target: Target::Row,
+            },
+        );
     }
     if let Some(pane) = pane {
         draw_preview(frame, pane, &view);

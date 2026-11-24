@@ -2,14 +2,16 @@
 use super::{
     app::App,
     components as ui,
+    input::{Target, Wheel},
     shell::{Overlay, ProfilePicker},
 };
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     text::{Line, Text},
-    widgets::{Row, Table, TableState},
+    widgets::Row,
 };
+use ui::collection::{Collection, Header, RowTargets, Selection};
 
 fn field(label: &str, value: &str) -> Line<'static> {
     ui::metadata(&format!("{label}: "), value)
@@ -153,38 +155,7 @@ pub fn repository_details(app: &App, selected: usize) -> Text<'static> {
     ));
     Text::from(lines)
 }
-fn table(
-    frame: &mut Frame,
-    area: Rect,
-    title: &str,
-    rows: Vec<Row<'static>>,
-    headers: Row<'static>,
-    widths: &[Constraint],
-    selected: Option<usize>,
-) -> usize {
-    let table = Table::new(rows, widths.to_vec())
-        .header(headers.style(ui::muted()))
-        .block(ui::pane(title, selected.is_some()))
-        .row_highlight_style(ui::selected())
-        .highlight_symbol(format!("{} ", ui::glyphs::SELECTED));
-    let mut state = TableState::default().with_selected(selected);
-    frame.render_stateful_widget(table, area, &mut state);
-    state.offset()
-}
-fn choices_hits(app: &App, area: Rect, count: usize, offset: usize, toggle: bool) {
-    app.hits.wheel(area, super::input::Wheel::Choices);
-    for (y, index) in (offset..count)
-        .take(usize::from(area.height.saturating_sub(2)))
-        .enumerate()
-    {
-        app.hits.click(
-            Rect::new(area.x, area.y + 2 + y as u16, area.width, 1),
-            super::input::Target::Picker(index, toggle),
-        );
-    }
-}
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
-    use super::input::Target;
     let (title, details) = match overlay {
         Overlay::Profiles(picker) => (
             if picker.standalone {
@@ -279,40 +250,43 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
         Overlay::Profiles(picker) => {
             let choices = &picker.report.choices;
             let count = choices.known.len();
-            let rows = choices
-                .known
-                .iter()
-                .map(|name| {
-                    let mandatory = choices.mandatory.contains(name);
-                    Row::new(vec![
-                        if mandatory || picker.requested.contains(name) {
-                            "[x]".into()
-                        } else {
-                            "[ ]".into()
-                        },
-                        ui::clip(name, parts[0].width.saturating_sub(22)),
-                        if mandatory {
-                            "Mandatory".into()
-                        } else {
-                            "Optional".into()
-                        },
-                    ])
-                })
-                .collect();
-            let offset = table(
-                frame,
-                parts[0],
-                title,
-                rows,
-                Row::new(["ON", "PROFILE", "MEMBERSHIP"]),
-                &[
+            let rows = choices.known.iter().map(|name| {
+                let mandatory = choices.mandatory.contains(name);
+                Row::new(vec![
+                    if mandatory || picker.requested.contains(name) {
+                        "[x]".into()
+                    } else {
+                        "[ ]".into()
+                    },
+                    ui::clip(name, parts[0].width.saturating_sub(22)),
+                    if mandatory {
+                        "Mandatory".into()
+                    } else {
+                        "Optional".into()
+                    },
+                ])
+            });
+            let selected = (count > 0).then_some(picker.selected.min(count.saturating_sub(1)));
+            Collection::new(
+                [
                     Constraint::Length(3),
                     Constraint::Min(8),
                     Constraint::Length(10),
                 ],
-                (count > 0).then_some(picker.selected.min(count.saturating_sub(1))),
+                Header::Quiet(["ON", "PROFILE", "MEMBERSHIP"]),
+            )
+            .titled(title, selected.is_some())
+            .draw(
+                frame,
+                parts[0],
+                rows.enumerate(),
+                Selection::at(selected),
+                RowTargets {
+                    hits: &app.hits,
+                    wheel: Some(Wheel::Choices),
+                    target: |index| Target::Picker(index, true),
+                },
             );
-            choices_hits(app, parts[0], count, offset, true);
         }
         Overlay::Repositories { selected } => {
             let roots = app
@@ -333,16 +307,22 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
                     "Known".into(),
                 ])
             }));
-            let offset = table(
+            Collection::new(
+                [Constraint::Min(12), Constraint::Length(6)],
+                Header::Quiet(["REPOSITORY", "CHOICE"]),
+            )
+            .titled(title, true)
+            .draw(
                 frame,
                 parts[0],
-                title,
-                rows,
-                Row::new(["REPOSITORY", "CHOICE"]),
-                &[Constraint::Min(12), Constraint::Length(6)],
-                Some((*selected).min(roots.len() + 1)),
+                rows.into_iter().enumerate(),
+                Selection::at(Some((*selected).min(roots.len() + 1))),
+                RowTargets {
+                    hits: &app.hits,
+                    wheel: Some(Wheel::Choices),
+                    target: |index| Target::Picker(index, false),
+                },
             );
-            choices_hits(app, parts[0], roots.len() + 2, offset, false);
         }
         _ => unreachable!(),
     }

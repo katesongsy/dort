@@ -1,6 +1,7 @@
 //! Shared visual components. Metadata is escaped before styling.
 pub mod choice;
 pub mod chrome;
+pub mod collection;
 pub mod dashboard;
 pub mod design;
 pub mod glyphs;
