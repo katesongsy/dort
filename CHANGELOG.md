@@ -7,6 +7,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Documentation
 
+- verify downloads with release checksums ([64812a7](https://github.com/katesongsy/dort/commit/64812a71985ba399f8b4fb66b958a103eb5a1b1a))
+
 - **manifest:** explain v0.1 manifest upgrades and file previews ([98a670f](https://github.com/katesongsy/dort/commit/98a670f4faf8af443350144d84d90fba161cc9c6))
 
 - **verify:** describe focused panes and deliberate approval ([921681c](https://github.com/katesongsy/dort/commit/921681c4d79046ba811d40d804d245ee993b4659))
