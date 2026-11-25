@@ -1855,7 +1855,7 @@ impl App {
                 }))
             }
             Intent::Submit(Form::Configure) => match self.shell.configuration.as_ref()?.change() {
-                Ok(change) => Some(Task::Manifest(Box::new(change))),
+                Ok(change) => Some(Task::Configuration(Box::new(change))),
                 Err(error) => {
                     self.status = error.to_string().into();
                     None
@@ -1959,7 +1959,12 @@ impl App {
                 } else {
                     None
                 };
-                self.shell.configuration = Some(Draft::new(kind, mapping));
+                let root = self
+                    .data
+                    .as_ref()
+                    .and_then(|data| data.repository.as_deref())
+                    .or(self.repository.as_deref());
+                self.shell.configuration = Some(Draft::new(kind, mapping, root));
                 self.shell.overlay = Some(Overlay::Form(Form::Configure));
             }
             Action::EnvironmentPlan | Action::EnvironmentResume => {
@@ -2664,7 +2669,12 @@ impl App {
             {
                 Some("Choose a repository to check its declared tools.")
             }
-            Action::Configure(_)
+            Action::Configure(
+                super::configuration::Kind::Profile
+                | super::configuration::Kind::DeleteProfile
+                | super::configuration::Kind::File
+                | super::configuration::Kind::EditFile,
+            )
             | Action::EnvironmentPlan
             | Action::EnvironmentCheck
             | Action::EnvironmentResume

@@ -79,6 +79,14 @@ fn session_actions(app: &App) -> Vec<ui::ActionButton> {
     use super::configuration::Kind;
     let configurations: &[Kind] = if app.tab == Tab::Files {
         &[Kind::File, Kind::EditFile]
+    } else if app.tab == Tab::Overview {
+        &[
+            Kind::Profile,
+            Kind::DeleteProfile,
+            Kind::Startup,
+            Kind::Forget,
+            Kind::Reconnect,
+        ]
     } else {
         &[Kind::Profile, Kind::DeleteProfile]
     };

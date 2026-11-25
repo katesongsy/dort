@@ -296,7 +296,7 @@ pub fn load_scoped(
 }
 
 pub enum Pending {
-    Manifest(Box<dort_core::manifest_edit::Preview>),
+    Configuration(super::configuration::Preview),
     Environment(Box<dort_core::environment::Preview>),
     Clone(Box<bootstrap::ClonePreview>),
     Profile(Box<dort_core::local::ProfilePreview>),
@@ -314,7 +314,7 @@ impl Pending {
             Self::ToolDeclaration(p) => crate::services::declaration::report(p),
             Self::Ignore(preview) => preview.human(),
             Self::Profile(p) => p.human(),
-            Self::Manifest(p) => p.human(),
+            Self::Configuration(p) => p.human(),
             Self::Environment(p) => p.human(),
             Self::Clone(p) => p.human(),
             Self::Batch(plan) => plan.human(),
@@ -368,7 +368,7 @@ impl Pending {
             Self::Clone(_) => "Clone and register",
             Self::Environment(_) => "Run environment",
             Self::Profile(_) => "Save profile choice",
-            Self::Manifest(_) => "Save manifest change",
+            Self::Configuration(p) => p.label(),
             _ if self.adoption() => "Adopt all",
             _ => "Confirm changes",
         }
@@ -413,7 +413,7 @@ impl Pending {
                 .map(|a| Approved::ToolDeclaration(Box::new(a))),
             Self::Ignore(preview) => Ok(Approved::Ignore(preview.approve())),
             Self::Profile(p) => Ok(Approved::Profile(Box::new(p.approve()))),
-            Self::Manifest(p) => Ok(Approved::Manifest(Box::new(p.approve()))),
+            Self::Configuration(p) => Ok(Approved::Configuration(p.approve())),
             Self::Environment(p) => Ok(Approved::Environment(Box::new(p.approve()?))),
             Self::Clone(p) => {
                 let root = p.destination().to_owned();
@@ -443,7 +443,7 @@ impl Pending {
 }
 
 pub enum Approved {
-    Manifest(Box<dort_core::manifest_edit::Approval>),
+    Configuration(super::configuration::Approval),
     Environment(Box<dort_core::environment::Approval>),
     Clone(Box<bootstrap::CloneApproval>, PathBuf),
     Profile(Box<dort_core::local::ProfileApproval>),
@@ -467,7 +467,10 @@ impl Approved {
         observer: impl FnMut(&Event) -> Result<()>,
     ) -> Result<Output> {
         let (operation, transaction_id, repository) = match self {
-            Self::Manifest(p) => {
+            Self::Configuration(super::configuration::Approval::Registry(p)) => {
+                ("Repository registration", None, p.execute(host)?)
+            }
+            Self::Configuration(super::configuration::Approval::Manifest(p)) => {
                 let backup = p.execute(host)?;
                 let id = backup
                     .as_deref()
@@ -621,7 +624,7 @@ impl Task {
     }
 }
 pub enum Task {
-    Manifest(Box<dort_core::manifest_edit::Change>),
+    Configuration(Box<super::configuration::Request>),
     Environment {
         resume: bool,
     },
@@ -933,10 +936,20 @@ pub fn perform_scoped_with_install_progress(
             let data = load_scoped(host, Some(&root), &[])?;
             Ok(Output::Selected(explicit.map(|_| root), data))
         }
-        Task::Manifest(change) => {
-            let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
-            dort_core::manifest_edit::Preview::prepare(host, &root, &change)
-                .map(|p| Output::Preview(Pending::Manifest(Box::new(p))))
+        Task::Configuration(request) => {
+            use super::configuration::{Preview, Request};
+            let preview = match *request {
+                Request::Manifest(change) => {
+                    let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
+                    Preview::Manifest(Box::new(dort_core::manifest_edit::Preview::prepare(
+                        host, &root, &change,
+                    )?))
+                }
+                Request::Registry(change) => Preview::Registry(Box::new(
+                    dort_core::local::registry_edit::Preview::prepare(host, change)?,
+                )),
+            };
+            Ok(Output::Preview(Pending::Configuration(preview)))
         }
         Task::Profile(root, name, choice) => {
             dort_core::local::ProfilePreview::prepare(host, &root, &name, choice)

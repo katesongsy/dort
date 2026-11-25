@@ -437,13 +437,20 @@ impl App {
         if !adopted {
             self.discovery = None;
         }
+        if completion.operation == "Repository registration" && completion.repository.is_none() {
+            self.repository = None;
+            self.reset_repository_scope();
+            self.origin = "registered active";
+            self.data = None;
+            self.tab = Tab::Overview;
+        }
         if let Some(root) = completion.repository {
             self.repository = Some(root);
             self.reset_repository_scope();
-            self.origin = if completion.operation == "Clone and register" {
-                "approved clone"
-            } else {
-                "approved create/attach"
+            self.origin = match completion.operation {
+                "Clone and register" => "approved clone",
+                "Repository registration" => "approved registration",
+                _ => "approved create/attach",
             };
             self.tab = if self.shell.return_to_adopt {
                 Tab::Files

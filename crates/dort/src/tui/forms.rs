@@ -27,7 +27,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
             let Some(draft) = &s.configuration else {
                 return;
             };
-            (draft.fields(), draft.focus, "Review manifest change")
+            (draft.fields(), draft.focus, "Review changes")
         }
         Form::Check => (
             vec![("Manifest path", &s.manifest_draft)],

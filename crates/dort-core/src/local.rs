@@ -12,6 +12,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub mod registry_edit;
+
 fn schema_one() -> u32 {
     1
 }

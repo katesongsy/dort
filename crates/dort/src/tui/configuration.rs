@@ -1,6 +1,7 @@
 use dort_core::{
     Error, Result,
-    manifest_edit::{Change, FileChange, Profile},
+    local::registry_edit,
+    manifest_edit::{self, Change, FileChange, Profile},
     model::{FileMode, ManagedFile},
     platform::Platform,
 };
@@ -11,6 +12,47 @@ pub enum Kind {
     DeleteProfile,
     File,
     EditFile,
+    Startup,
+    Forget,
+    Reconnect,
+}
+
+pub enum Request {
+    Manifest(Change),
+    Registry(registry_edit::Change),
+}
+
+pub enum Preview {
+    Manifest(Box<manifest_edit::Preview>),
+    Registry(Box<registry_edit::Preview>),
+}
+
+pub enum Approval {
+    Manifest(Box<manifest_edit::Approval>),
+    Registry(Box<registry_edit::Approval>),
+}
+
+impl Preview {
+    pub fn human(&self) -> String {
+        match self {
+            Self::Manifest(p) => p.human(),
+            Self::Registry(p) => p.human(),
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Manifest(_) => "Save manifest change",
+            Self::Registry(_) => "Save repository change",
+        }
+    }
+
+    pub fn approve(self) -> Approval {
+        match self {
+            Self::Manifest(p) => Approval::Manifest(Box::new(p.approve())),
+            Self::Registry(p) => Approval::Registry(Box::new(p.approve())),
+        }
+    }
 }
 
 impl Kind {
@@ -20,6 +62,9 @@ impl Kind {
             Self::DeleteProfile => "Delete profile",
             Self::File => "Add file mapping",
             Self::EditFile => "Edit file mapping",
+            Self::Startup => "Set startup repository",
+            Self::Forget => "Forget repository",
+            Self::Reconnect => "Reconnect moved repository",
         }
     }
 
@@ -33,6 +78,8 @@ impl Kind {
             Self::DeleteProfile => &["Profile name"],
             Self::File => Self::FILE_FIELDS,
             Self::EditFile => &Self::FILE_FIELDS[1..],
+            Self::Startup | Self::Forget => &["Registered repository path"],
+            Self::Reconnect => &["Previous registered path", "New repository path"],
         }
     }
 
@@ -63,7 +110,7 @@ pub(super) fn list(text: &str) -> Vec<String> {
 }
 
 impl Draft {
-    pub fn new(kind: Kind, mapping: Option<ManagedFile>) -> Self {
+    pub fn new(kind: Kind, mapping: Option<ManagedFile>, root: Option<&std::path::Path>) -> Self {
         let mut fields = vec![String::new(); kind.fields().len()];
         if let Some(file) = &mapping {
             fields = vec![
@@ -78,6 +125,11 @@ impl Draft {
                     .get(&Platform::Linux)
                     .map_or_else(String::new, |p| p.display().to_string()),
             ];
+        }
+        if matches!(kind, Kind::Startup | Kind::Forget | Kind::Reconnect)
+            && let Some(root) = root
+        {
+            fields[0] = root.display().to_string();
         }
         Self {
             kind,
@@ -111,7 +163,7 @@ impl Draft {
         }
     }
 
-    pub fn change(&self) -> Result<Change> {
+    pub fn change(&self) -> Result<Request> {
         let value = |i: usize| self.fields[i].trim();
         let required = |index: usize| -> Result<&str> {
             let text = value(index);
@@ -124,7 +176,20 @@ impl Draft {
                 Ok(text)
             }
         };
-        Ok(match self.kind {
+        let registry = match self.kind {
+            Kind::Startup => Some(registry_edit::Change::Startup(required(0)?.into())),
+            Kind::Forget => Some(registry_edit::Change::Forget(required(0)?.into())),
+            Kind::Reconnect => Some(registry_edit::Change::Reconnect {
+                previous: required(0)?.into(),
+                destination: required(1)?.into(),
+            }),
+            _ => None,
+        };
+        if let Some(change) = registry {
+            return Ok(Request::Registry(change));
+        }
+        Ok(Request::Manifest(match self.kind {
+            Kind::Startup | Kind::Forget | Kind::Reconnect => unreachable!(),
             Kind::DeleteProfile => Change::Profile {
                 old: Some(required(0)?.into()),
                 new: None,
@@ -187,6 +252,6 @@ impl Draft {
                     },
                 }))
             }
-        })
+        }))
     }
 }

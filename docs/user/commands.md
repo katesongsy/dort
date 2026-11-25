@@ -202,6 +202,8 @@ dort init /path/to/existing-repository
 
 `init` creates a local repository or attaches an existing Git tree. In the TUI, open **F2 More → Clone repository** or **Create/attach**.
 
+In **Overview → F2 More**, set the startup repository, forget a registration, or reconnect a moved repository. Forgetting leaves the repository, Home files, and history in place. Reconnecting keeps saved choices and history. Check existing Home links after moving a repository.
+
 ## Environment
 
 ```sh
