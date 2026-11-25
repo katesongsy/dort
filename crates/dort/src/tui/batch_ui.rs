@@ -40,7 +40,7 @@ impl Editor {
             })
             .collect();
         Self {
-            focused: drafts.len() * 3,
+            focused: drafts.len() * AdoptionDraft::FIELDS,
             paths: paths.iter().cloned().collect(),
             drafts,
             item: 0,
@@ -74,7 +74,7 @@ impl Editor {
             })
             .collect();
         self.item = self.item.min(self.drafts.len().saturating_sub(1));
-        self.focused = self.drafts.len() * 3;
+        self.focused = self.drafts.len() * AdoptionDraft::FIELDS;
         self.scroll = 0;
         self.open = true;
         self.item_form = false;
@@ -84,7 +84,7 @@ impl Editor {
         if !self.drafts.is_empty() {
             self.item_form = true;
             self.details = false;
-            self.focused = self.item * 3;
+            self.focused = self.item * AdoptionDraft::FIELDS;
             self.scroll = 0;
         }
     }
@@ -108,28 +108,25 @@ impl Editor {
             }
             return None;
         }
-        let review = self.drafts.len() * 3;
+        let review = self.drafts.len() * AdoptionDraft::FIELDS;
         if self.item_form {
-            let field = self.focused.saturating_sub(self.item * 3).min(2);
+            let start = self.item * AdoptionDraft::FIELDS;
+            let field = self
+                .focused
+                .saturating_sub(start)
+                .min(AdoptionDraft::FIELDS - 1);
             match key.code {
                 KeyCode::Esc | KeyCode::Enter => {
                     self.item_form = false;
                     self.focused = review;
                     self.scroll = 0;
                 }
-                KeyCode::Tab => self.focused = self.item * 3 + (field + 1) % 3,
-                KeyCode::BackTab => self.focused = self.item * 3 + (field + 2) % 3,
-                _ => {
-                    let d = &mut self.drafts[self.item];
-                    super::shell::edit_text(
-                        match field {
-                            0 => &mut d.target,
-                            1 => &mut d.id,
-                            _ => &mut d.source,
-                        },
-                        key,
-                    );
+                KeyCode::Tab => self.focused = start + (field + 1) % AdoptionDraft::FIELDS,
+                KeyCode::BackTab => {
+                    self.focused =
+                        start + (field + AdoptionDraft::FIELDS - 1) % AdoptionDraft::FIELDS
                 }
+                _ => super::shell::edit_text(self.drafts[self.item].field(field), key),
             }
             return None;
         }
@@ -153,20 +150,7 @@ impl Editor {
             KeyCode::Home => self.item = 0,
             KeyCode::End => self.item = self.drafts.len().saturating_sub(1),
             KeyCode::Enter if !self.drafts.is_empty() => {
-                let mappings = self
-                    .drafts
-                    .iter()
-                    .map(|d| {
-                        match crate::services::adopt_request(
-                            std::path::Path::new(&d.target),
-                            &d.id,
-                            std::path::Path::new(&d.source),
-                        ) {
-                            dort_core::planner::Request::Adopt { mapping } => mapping,
-                            _ => unreachable!("typed adoption"),
-                        }
-                    })
-                    .collect();
+                let mappings = self.drafts.iter().map(AdoptionDraft::mapping).collect();
                 return Some(Task::Batch(dort_core::batch::Request::Adopt(mappings)));
             }
             _ => (),
@@ -182,6 +166,7 @@ impl Editor {
             ui::metadata("TARGET: ", &d.target),
             ui::metadata("ID: ", &d.id),
             ui::metadata("SOURCE: ", &d.source),
+            ui::metadata("Profiles", &d.profiles),
         ])
     }
 }
@@ -217,21 +202,25 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
             ("Target · home-relative", d.target.as_str()),
             ("Mapping ID", d.id.as_str()),
             ("Repository source", d.source.as_str()),
+            ("Profiles (blank uses base)", d.profiles.as_str()),
         ];
         ui::field_page(
             frame,
             area,
             &values,
-            editor.focused.saturating_sub(editor.item * 3).min(2),
+            editor
+                .focused
+                .saturating_sub(editor.item * AdoptionDraft::FIELDS)
+                .min(AdoptionDraft::FIELDS - 1),
             &app.hits,
-            |i| Target::BatchControl(editor.item * 3 + i, false),
+            |i| Target::BatchControl(editor.item * AdoptionDraft::FIELDS + i, false),
             ui::FormActions {
                 choices: &[],
                 buttons: &[
                     ui::ActionButton {
                         label: "Done editing",
                         key: "Enter",
-                        target: Target::BatchControl(editor.item * 3, true),
+                        target: Target::BatchControl(editor.item * AdoptionDraft::FIELDS, true),
                     },
                     ui::ActionButton {
                         label: "Details",
@@ -254,7 +243,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
                 ui::ActionButton {
                     label: "Review all",
                     key: "Enter",
-                    target: Target::BatchControl(editor.drafts.len() * 3, true),
+                    target: Target::BatchControl(editor.drafts.len() * AdoptionDraft::FIELDS, true),
                 },
                 ui::ActionButton {
                     label: "Edit item",
@@ -306,7 +295,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
         RowTargets {
             hits: &app.hits,
             wheel: None,
-            target: |index| Target::BatchControl(index * 3, false),
+            target: |index| Target::BatchControl(index * AdoptionDraft::FIELDS, false),
         },
     );
     editor.offset.set(rendered.offset);

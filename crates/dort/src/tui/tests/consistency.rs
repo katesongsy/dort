@@ -124,7 +124,10 @@ fn marked_editor_pages_keep_table_review_controls_and_drafts_inline() {
             );
             assert!(key(&mut app, code, w, h).is_none());
             let editor = app.batch_editor.as_ref().unwrap();
-            assert!(!editor.item_form && editor.focused == editor.drafts.len() * 3);
+            assert!(
+                !editor.item_form
+                    && editor.focused == editor.drafts.len() * super::shell::AdoptionDraft::FIELDS
+            );
             assert_eq!(editor.drafts[0].target, original);
             assert!(app.preview.is_none());
         }

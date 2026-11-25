@@ -18,10 +18,17 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                 ("TARGET", &s.adoption.target),
                 ("ID", &s.adoption.id),
                 ("SOURCE", &s.adoption.source),
+                ("Profiles (blank uses base)", &s.adoption.profiles),
             ],
             s.adoption.focused,
             "Review read-only preview",
         ),
+        Form::Configure => {
+            let Some(draft) = &s.configuration else {
+                return;
+            };
+            (draft.fields(), draft.focus, "Review manifest change")
+        }
         Form::Check => (
             vec![("Manifest path", &s.manifest_draft)],
             0,

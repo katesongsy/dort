@@ -16,6 +16,7 @@ mod batch_ui;
 mod calm_controls_tests;
 mod choice;
 mod components;
+mod configuration;
 #[cfg(test)]
 #[path = "tests/consistency.rs"]
 mod consistency_tests;

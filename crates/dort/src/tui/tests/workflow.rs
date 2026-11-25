@@ -1278,7 +1278,7 @@ fn temporary_profiles_are_mandatory_union_and_drive_full_inventory_and_plans() {
         .replace("active_profiles = []", "active_profiles = ['local']");
     fs::write(&config_path, &config).unwrap();
     let mut app = onboarding_app(&fixture, false);
-    assert!(app.data.as_ref().unwrap().files.is_empty());
+    assert_eq!(app.data.as_ref().unwrap().managed[0].state, "Not selected");
     let task = key(&mut app, KeyCode::Char('T')).unwrap();
     run_task(&mut app, &fixture, task);
     let Overlay::Profiles(picker) = app.shell.overlay.as_ref().unwrap() else {
@@ -1985,6 +1985,63 @@ fn malformed_journal_tail_is_a_global_blocker_not_a_recovery_permission() {
     assert_eq!(
         fs::read_to_string(transaction.join("999999.json")).unwrap(),
         "deliberately malformed fixture tail"
+    );
+}
+
+#[test]
+fn define_profile_and_map_existing_repository_file_without_deploying() {
+    use super::{configuration::Kind, input::Target, shell::Action};
+    let fixture = Fixture::new(true);
+    let manifest_path = fixture.root.join("dort.toml");
+    let original = fs::read(&manifest_path).unwrap();
+    let mut app = onboarding_app(&fixture, false);
+    let go = |app: &mut App, kind| {
+        assert!(
+            super::tests::more_target(
+                app,
+                |target| matches!(target, Target::Action(Action::Configure(k)) if k == kind)
+            )
+            .is_none()
+        );
+    };
+    let save = |app: &mut App| {
+        let read = key(app, KeyCode::Enter).unwrap();
+        run_task(app, &fixture, read);
+        let write = super::tests::approve_ready(app, 80, 24).unwrap();
+        if let Some(refresh) = run_task(app, &fixture, write) {
+            run_task(app, &fixture, refresh);
+        }
+        key(app, KeyCode::Esc);
+    };
+    go(&mut app, Kind::Profile);
+    type_text(&mut app, "work");
+    save(&mut app);
+    assert_ne!(fs::read(&manifest_path).unwrap(), original);
+    app.tab = super::app::Tab::Files;
+    go(&mut app, Kind::File);
+    for (i, text) in ["work-file", "source", "~/.work", "work"]
+        .into_iter()
+        .enumerate()
+    {
+        if i > 0 {
+            key(&mut app, KeyCode::Tab);
+        }
+        type_text(&mut app, text);
+    }
+    save(&mut app);
+    let manifest =
+        dort_core::Manifest::parse(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    assert!(manifest.profiles.available.contains(&"work".into()));
+    let file = manifest.files.iter().find(|f| f.id == "work-file").unwrap();
+    assert_eq!(file.profiles, ["work"]);
+    assert!(!fixture.host.home.join(".work").exists());
+    assert!(
+        app.data
+            .as_ref()
+            .unwrap()
+            .managed
+            .iter()
+            .any(|row| row.id == "work-file" && row.state == "Not selected")
     );
 }
 

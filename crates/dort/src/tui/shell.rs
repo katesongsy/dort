@@ -7,6 +7,7 @@ pub enum Form {
     Choose,
     Init,
     Clone,
+    Configure,
     Adopt,
     Check,
     KeepId,
@@ -24,15 +25,42 @@ pub struct AdoptionDraft {
     pub target: String,
     pub id: String,
     pub source: String,
-    // Fields, Review, Choose repository, Create/attach, Discard.
+    pub profiles: String,
     pub focused: usize,
 }
 impl AdoptionDraft {
+    pub const FIELDS: usize = 4;
+
+    pub fn mapping(&self) -> dort_core::model::ManagedFile {
+        let dort_core::planner::Request::Adopt { mut mapping } = crate::services::adopt_request(
+            std::path::Path::new(&self.target),
+            &self.id,
+            std::path::Path::new(&self.source),
+        ) else {
+            unreachable!()
+        };
+        let profiles = super::configuration::list(&self.profiles);
+        if !profiles.is_empty() {
+            mapping.profiles = profiles;
+        }
+        mapping
+    }
+
+    pub fn field(&mut self, index: usize) -> &mut String {
+        match index {
+            0 => &mut self.target,
+            1 => &mut self.id,
+            2 => &mut self.source,
+            _ => &mut self.profiles,
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             target: String::new(),
             id: String::new(),
             source: String::new(),
+            profiles: String::new(),
             focused: 0,
         }
     }
@@ -112,6 +140,7 @@ pub enum Action {
     CollapseAll,
     Profiles,
     SavedProfiles,
+    Configure(super::configuration::Kind),
     EnvironmentPlan,
     EnvironmentCheck,
     EnvironmentResume,
@@ -175,6 +204,7 @@ impl Action {
             Self::EnvironmentCheck => "Environment check",
             Self::EnvironmentResume => "Review environment resume",
             Self::SavedProfiles => "Saved profiles",
+            Self::Configure(kind) => kind.label(),
             Self::Profiles => "Profiles: extra profiles for this session",
             Self::CheckCurrent => "Check current repository manifest",
             Self::CheckStandalone => "Check standalone manifest (no repository needed)",
@@ -203,6 +233,7 @@ pub struct Shell {
     pub page_rows: std::cell::Cell<u16>,
     pub init_draft: String,
     pub clone_fields: [String; 2],
+    pub configuration: Option<super::configuration::Draft>,
     pub path_focused: usize,
     pub form_details: bool,
     pub form_feedback: Option<(Form, &'static str)>,
@@ -236,6 +267,7 @@ impl Shell {
             page_rows: std::cell::Cell::new(1),
             init_draft: String::new(),
             clone_fields: Default::default(),
+            configuration: None,
             path_focused: 0,
             form_details: false,
             form_feedback: None,
@@ -268,7 +300,9 @@ impl Shell {
             self.overlay,
             Some(Overlay::Form(Form::Clone | Form::Choose | Form::Init))
                 if self.path_focused < 2
-        ) || (matches!(self.overlay, Some(Overlay::Form(Form::Adopt))) && self.adoption.focused < 3)
+        ) || matches!(self.overlay, Some(Overlay::Form(Form::Configure)))
+            || (matches!(self.overlay, Some(Overlay::Form(Form::Adopt)))
+                && self.adoption.focused < AdoptionDraft::FIELDS)
             || (matches!(self.overlay, Some(Overlay::Form(Form::Check)))
                 && self.manifest_focused == 0)
             || (matches!(
@@ -290,6 +324,7 @@ impl Shell {
             Form::Choose => &self.choose_draft,
             Form::Init => &self.init_draft,
             Form::Clone => &self.clone_fields[1],
+            Form::Configure => "",
             Form::Adopt => &self.adoption.target,
             Form::Check => &self.manifest_draft,
             Form::KeepId | Form::RemoveId => &self.unmanage_id,
@@ -484,18 +519,24 @@ impl Shell {
                     KeyCode::Tab | KeyCode::BackTab => {
                         let backwards = key.code == KeyCode::BackTab
                             || key.modifiers.contains(KeyModifiers::SHIFT);
-                        draft.focused = (draft.focused + if backwards { 2 } else { 1 }) % 3;
+                        draft.focused = (draft.focused
+                            + if backwards {
+                                AdoptionDraft::FIELDS - 1
+                            } else {
+                                1
+                            })
+                            % AdoptionDraft::FIELDS;
                         self.scroll = 0;
                     }
                     KeyCode::Enter => return Some(Intent::Submit(Form::Adopt)),
-                    _ => match draft.focused {
-                        0 => edit_text(&mut draft.target, key),
-                        1 => edit_text(&mut draft.id, key),
-                        2 => edit_text(&mut draft.source, key),
-                        _ => (),
-                    },
+                    _ => edit_text(draft.field(draft.focused), key),
                 }
             }
+            Overlay::Form(Form::Configure) => match key.code {
+                KeyCode::Esc => self.back(),
+                KeyCode::Enter => return Some(Intent::Submit(Form::Configure)),
+                _ => self.configuration.as_mut()?.key(key),
+            },
             Overlay::Form(Form::Clone) => match key.code {
                 KeyCode::Esc => self.back(),
                 KeyCode::Tab | KeyCode::BackTab => self.path_focused ^= 1,
@@ -507,7 +548,12 @@ impl Shell {
                 let draft = match form {
                     Form::Choose => &mut self.choose_draft,
                     Form::Init => &mut self.init_draft,
-                    Form::Clone | Form::Adopt | Form::Check | Form::KeepId | Form::RemoveId => {
+                    Form::Configure
+                    | Form::Clone
+                    | Form::Adopt
+                    | Form::Check
+                    | Form::KeepId
+                    | Form::RemoveId => {
                         unreachable!()
                     }
                 };

@@ -18,6 +18,7 @@ pub mod lifecycle;
 mod lifecycle_journal;
 pub mod local;
 pub mod manifest;
+pub mod manifest_edit;
 pub mod model;
 pub mod observation;
 pub mod planner;

@@ -58,6 +58,7 @@ pub struct Data {
     pub profile_rows: Vec<dort_core::profiles::Row>,
     pub files: Vec<(String, String)>,
     pub managed: Vec<ManagedRow>,
+    pub file_declarations: Vec<dort_core::model::ManagedFile>,
     pub tools: Option<std::result::Result<Vec<dort_core::model::Tool>, String>>,
     pub tools_source: Option<crate::services::declared_tools::Source>,
     pub files_error: Option<String>,
@@ -117,6 +118,7 @@ pub fn load_scoped(
     let mut known_roots = vec![];
     let mut profiles = vec![];
     let mut profile_rows = vec![];
+    let mut file_declarations = vec![];
     let mut selected = None;
     let mut tools = None;
     let mut tools_source = None;
@@ -150,6 +152,7 @@ pub fn load_scoped(
                                 tools_source =
                                     crate::services::declared_tools::Source::capture(host, &entry)
                                         .ok();
+                                file_declarations = manifest.files;
                                 manifest.tools
                             })
                             .map_err(|error| diagnostic(&error)),
@@ -239,6 +242,38 @@ pub fn load_scoped(
                             }
                         }
                     }
+                    for mapping in &file_declarations {
+                        if files.iter().any(|(id, _)| id == &mapping.id) {
+                            continue;
+                        }
+                        let source = root.join(
+                            mapping
+                                .overrides
+                                .get(&host.platform)
+                                .unwrap_or(&mapping.source),
+                        );
+                        let Ok(target) = host.target_path(&mapping.target, Some(&root)) else {
+                            continue;
+                        };
+                        let state = if files_error.is_some() {
+                            "Blocked"
+                        } else {
+                            "Not selected"
+                        };
+                        files.push((
+                            mapping.id.clone(),
+                            format!("{state}. Profiles: {}", mapping.profiles.join(", ")),
+                        ));
+                        managed.push(ManagedRow {
+                            id: mapping.id.clone(),
+                            source,
+                            target,
+                            state,
+                            source_kind: "Not checked",
+                            target_kind: "Not checked",
+                            blockers: vec![],
+                        });
+                    }
                 }
             }
         }
@@ -249,6 +284,7 @@ pub fn load_scoped(
         known_roots,
         profiles,
         profile_rows,
+        file_declarations,
         files,
         managed,
         tools,
@@ -260,6 +296,7 @@ pub fn load_scoped(
 }
 
 pub enum Pending {
+    Manifest(Box<dort_core::manifest_edit::Preview>),
     Environment(Box<dort_core::environment::Preview>),
     Clone(Box<bootstrap::ClonePreview>),
     Profile(Box<dort_core::local::ProfilePreview>),
@@ -277,6 +314,7 @@ impl Pending {
             Self::ToolDeclaration(p) => crate::services::declaration::report(p),
             Self::Ignore(preview) => preview.human(),
             Self::Profile(p) => p.human(),
+            Self::Manifest(p) => p.human(),
             Self::Environment(p) => p.human(),
             Self::Clone(p) => p.human(),
             Self::Batch(plan) => plan.human(),
@@ -330,6 +368,7 @@ impl Pending {
             Self::Clone(_) => "Clone and register",
             Self::Environment(_) => "Run environment",
             Self::Profile(_) => "Save profile choice",
+            Self::Manifest(_) => "Save manifest change",
             _ if self.adoption() => "Adopt all",
             _ => "Confirm changes",
         }
@@ -374,6 +413,7 @@ impl Pending {
                 .map(|a| Approved::ToolDeclaration(Box::new(a))),
             Self::Ignore(preview) => Ok(Approved::Ignore(preview.approve())),
             Self::Profile(p) => Ok(Approved::Profile(Box::new(p.approve()))),
+            Self::Manifest(p) => Ok(Approved::Manifest(Box::new(p.approve()))),
             Self::Environment(p) => Ok(Approved::Environment(Box::new(p.approve()?))),
             Self::Clone(p) => {
                 let root = p.destination().to_owned();
@@ -403,6 +443,7 @@ impl Pending {
 }
 
 pub enum Approved {
+    Manifest(Box<dort_core::manifest_edit::Approval>),
     Environment(Box<dort_core::environment::Approval>),
     Clone(Box<bootstrap::CloneApproval>, PathBuf),
     Profile(Box<dort_core::local::ProfileApproval>),
@@ -426,6 +467,16 @@ impl Approved {
         observer: impl FnMut(&Event) -> Result<()>,
     ) -> Result<Output> {
         let (operation, transaction_id, repository) = match self {
+            Self::Manifest(p) => {
+                let backup = p.execute(host)?;
+                let id = backup
+                    .as_deref()
+                    .and_then(Path::parent)
+                    .and_then(Path::file_name)
+                    .and_then(|id| id.to_str())
+                    .map(str::to_owned);
+                ("Manifest change", id, None)
+            }
             Self::Environment(p) => return p.execute(host, observer).map(Output::EnvironmentRun),
             Self::ToolDeclaration(a) => {
                 let lock = WriterLock::acquire(host)?;
@@ -570,6 +621,7 @@ impl Task {
     }
 }
 pub enum Task {
+    Manifest(Box<dort_core::manifest_edit::Change>),
     Environment {
         resume: bool,
     },
@@ -880,6 +932,11 @@ pub fn perform_scoped_with_install_progress(
             }
             let data = load_scoped(host, Some(&root), &[])?;
             Ok(Output::Selected(explicit.map(|_| root), data))
+        }
+        Task::Manifest(change) => {
+            let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
+            dort_core::manifest_edit::Preview::prepare(host, &root, &change)
+                .map(|p| Output::Preview(Pending::Manifest(Box::new(p))))
         }
         Task::Profile(root, name, choice) => {
             dort_core::local::ProfilePreview::prepare(host, &root, &name, choice)

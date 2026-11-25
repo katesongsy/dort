@@ -64,6 +64,11 @@ impl App {
                 return Some(match form {
                     Form::Choose => "Session / Exact repository path",
                     Form::Clone => "Session / Clone repository",
+                    Form::Configure => self
+                        .shell
+                        .configuration
+                        .as_ref()
+                        .map_or("Edit manifest", |draft| draft.kind.label()),
                     Form::Init => "Session / Create or attach repository",
                     Form::Adopt => "Files / Adoption details",
                     Form::Check => "Checks / Standalone manifest",

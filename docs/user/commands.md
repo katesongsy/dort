@@ -37,6 +37,7 @@ After a failure, `R` retries a read or asks for a fresh preview. It never replay
 Use `1` for Managed, `2` for Discover and `3` for Ignored paths. `g` opens Git.
 - **Managed:** `u` Unmanage keeps the local file; `U` Unmanage marked does the same for marked files. `m` Manual adopt opens an adoption draft. `a` Apply reviews all active files; `A` Apply marked reviews marked files only.
 - **Discover:** `a` Adopt opens a draft for the selected file; `A` Adopt marked opens a batch draft. `i` Ignore reviews excluding the selected path from discovery.
+- In **Managed**, use **F2 More → Add file mapping** for a file already in the repository. Select a mapping and use **Edit file mapping** to change its declaration. Review and save before applying. Adoption also lets you choose active profiles.
 - In either list, `Space` marks or unmarks, and `Home` / `End` select the first or last row. Hidden marks still count.
 - **Delete link** and **Delete marked** are separate actions. Review the paths and confirm the exact mapping IDs before deleting links.
 ## Tools
@@ -184,7 +185,9 @@ dort profiles list --profile work
 
 `base` is always on. A temporary `--profile` wins over the saved choice, which wins over repository and platform defaults. Saved choices affect only the selected registered repository. Saving a choice leaves files and tools in place. An installed link can appear as **No longer selected** until you remove it separately.
 
-In the TUI, open **F2 More → Saved profiles**. Select a profile, choose **Use defaults**, **On**, or **Off**, then review and save.
+In the TUI, use **F2 More → Define profile** to create a profile or change its name and defaults. Enter the existing name when editing. Leave Defaults blank for an optional profile, or enter a comma-separated list of `repository`, `macos`, and `linux`. **Delete profile** removes an unused profile.
+
+Open **F2 More → Saved profiles** to set the local choice. Select **Use defaults**, **On**, or **Off**, then review and save. Use **Profiles** to try temporary additions without saving them.
 
 ## Clone or init
 

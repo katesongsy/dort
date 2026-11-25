@@ -76,6 +76,17 @@ fn session_actions(app: &App) -> Vec<ui::ActionButton> {
             target: Target::Action(Action::About),
         },
     ];
+    use super::configuration::Kind;
+    let configurations: &[Kind] = if app.tab == Tab::Files {
+        &[Kind::File, Kind::EditFile]
+    } else {
+        &[Kind::Profile, Kind::DeleteProfile]
+    };
+    actions.extend(configurations.iter().map(|&kind| ui::ActionButton {
+        label: kind.label(),
+        key: "",
+        target: Target::Action(Action::Configure(kind)),
+    }));
     if app.tab == Tab::Git && !app.git_view.follows_files {
         actions.push(ui::ActionButton {
             label: "Follow selected repository",

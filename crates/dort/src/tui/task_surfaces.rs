@@ -102,6 +102,7 @@ fn batch_label(action: dort_core::batch::Action) -> &'static str {
 impl Activity {
     pub fn for_task(task: &Task, app: &App) -> Self {
         let operation = match task {
+            Task::Manifest(_) => "Review manifest change",
             Task::ToolsInstalledPrepare(_) => "Prepare installed-package inspection (no execution)",
             Task::ToolsInstalledInspect(_) => "Inspect installed packages",
             Task::Environment { resume: true } => "Review environment resume",
@@ -147,6 +148,7 @@ impl Activity {
                     Approved::ToolDeclaration(_) => "Tool declaration",
                     Approved::Environment(_) => "Run environment",
                     Approved::Profile(_) => "Save profile choice",
+                    Approved::Manifest(_) => "Save manifest change",
                     Approved::Ignore(_) => "Discovery preferences",
                     Approved::Files(_) => "File operation",
                     Approved::Batch(_) => "Batch file operation",
@@ -316,6 +318,7 @@ impl Activity {
     }
     pub fn for_pending(pending: &Pending) -> Self {
         let (operation, scope) = match pending {
+            Pending::Manifest(_) => ("Manifest change", vec![]),
             Pending::ToolDeclaration(p) => (
                 "Tool declaration · manifest only",
                 vec![

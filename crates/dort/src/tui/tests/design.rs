@@ -177,7 +177,7 @@ fn input_has_a_real_visible_caret_and_field_button_hierarchy() {
                 .contains(Modifier::BOLD)
         );
     }
-    for _ in 0..3 {
+    for _ in 0..super::shell::AdoptionDraft::FIELDS {
         key(&mut app, KeyCode::Tab);
     }
     assert_eq!(app.shell.adoption.focused, 0);

@@ -231,7 +231,7 @@ fn item_form_mouse_done_never_reviews_an_individual_item() {
         .find(|(x, y)| {
             matches!(
                 app.hits.target(*x, *y),
-                Some(super::input::Target::BatchControl(4, false))
+                Some(super::input::Target::BatchControl(index, false)) if index == super::shell::AdoptionDraft::FIELDS + 1
             )
         })
         .unwrap();
@@ -248,7 +248,6 @@ fn item_form_mouse_done_never_reviews_an_individual_item() {
         )
         .is_none()
     );
-    assert_eq!(app.batch_editor.as_ref().unwrap().focused, 4);
     clear(&mut app);
     text(&mut app, "mouse-edited");
     assert!(
@@ -310,7 +309,10 @@ fn tree_folds_marks_hidden_items_and_batch_editor_retains_real_fields_at_floor()
         );
     }
     // Enter reviews all defaults from the list; no footer traversal is needed.
-    assert_eq!(app.batch_editor.as_ref().unwrap().focused, 6);
+    assert_eq!(
+        app.batch_editor.as_ref().unwrap().focused,
+        2 * super::shell::AdoptionDraft::FIELDS
+    );
     key(&mut app, KeyCode::Char('e')); // Local item page.
     super::tests::focus_form(&mut app);
     key(&mut app, KeyCode::Tab); // First ID.

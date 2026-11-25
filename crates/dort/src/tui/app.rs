@@ -611,11 +611,12 @@ impl App {
             Target::BatchControl(index, activate) => {
                 let editor = self.batch_editor.as_mut().filter(|e| e.open)?;
                 if !activate {
+                    let fields = super::shell::AdoptionDraft::FIELDS;
                     if editor.item_form {
-                        editor.focused = editor.item * 3 + index % 3;
-                    } else if index < editor.drafts.len() * 3 {
-                        editor.item = index / 3;
-                        editor.focused = editor.drafts.len() * 3;
+                        editor.focused = editor.item * fields + index % fields;
+                    } else if index < editor.drafts.len() * fields {
+                        editor.item = index / fields;
+                        editor.focused = editor.drafts.len() * fields;
                     }
                 }
                 if activate {
@@ -784,12 +785,18 @@ impl App {
                 .and_then(|intent| self.intent(intent)),
             Target::FormControl(index, activate) => {
                 match self.shell.overlay {
-                    Some(Overlay::Form(Form::Adopt)) => self.shell.adoption.focused = index.min(2),
+                    Some(Overlay::Form(Form::Adopt)) => {
+                        self.shell.adoption.focused =
+                            index.min(super::shell::AdoptionDraft::FIELDS - 1)
+                    }
                     Some(Overlay::Form(Form::Check)) => self.shell.manifest_focused = 0,
                     Some(Overlay::Form(Form::KeepId | Form::RemoveId)) => {
                         self.shell.unmanage_focused = 0
                     }
                     Some(Overlay::Form(Form::Clone)) => self.shell.path_focused = index.min(1),
+                    Some(Overlay::Form(Form::Configure)) => {
+                        self.shell.configuration.as_mut()?.focus_at(index)
+                    }
                     Some(Overlay::Form(Form::Choose | Form::Init)) => self.shell.path_focused = 0,
                     _ => return None,
                 }
@@ -1843,12 +1850,17 @@ impl App {
                     return None;
                 }
                 // The core owns all path/kind/sensitivity/mapping policy.
-                Some(Task::Files(crate::services::adopt_request(
-                    std::path::Path::new(&draft.target),
-                    &draft.id,
-                    std::path::Path::new(&draft.source),
-                )))
+                Some(Task::Files(Request::Adopt {
+                    mapping: draft.mapping(),
+                }))
             }
+            Intent::Submit(Form::Configure) => match self.shell.configuration.as_ref()?.change() {
+                Ok(change) => Some(Task::Manifest(Box::new(change))),
+                Err(error) => {
+                    self.status = error.to_string().into();
+                    None
+                }
+            },
             Intent::Submit(form) => {
                 let draft = self.shell.draft(form);
                 if draft.is_empty() {
@@ -1862,7 +1874,9 @@ impl App {
                     &self.launch_directory,
                 );
                 match form {
-                    Form::Adopt | Form::Check | Form::KeepId | Form::RemoveId => unreachable!(),
+                    Form::Configure | Form::Adopt | Form::Check | Form::KeepId | Form::RemoveId => {
+                        unreachable!()
+                    }
                     Form::Choose => Some(Task::Select(Some(root))),
                     Form::Clone => match &self.git {
                         Ok(git) if !self.shell.clone_fields[0].is_empty() => Some(Task::Clone {
@@ -1931,6 +1945,23 @@ impl App {
         self.shell.overlay = None;
         match action {
             Action::SavedProfiles => self.open_saved_profiles(),
+            Action::Configure(kind) => {
+                use super::configuration::{Draft, Kind};
+                let mapping = if kind == Kind::EditFile {
+                    let data = self.data.as_ref()?;
+                    let (id, _) = data.files.get(self.selected)?;
+                    Some(
+                        data.file_declarations
+                            .iter()
+                            .find(|file| &file.id == id)?
+                            .clone(),
+                    )
+                } else {
+                    None
+                };
+                self.shell.configuration = Some(Draft::new(kind, mapping));
+                self.shell.overlay = Some(Overlay::Form(Form::Configure));
+            }
             Action::EnvironmentPlan | Action::EnvironmentResume => {
                 return Some(Task::Environment {
                     resume: action == Action::EnvironmentResume,
@@ -2241,6 +2272,7 @@ impl App {
                 Form::Choose => "choose",
                 Form::Init => "init",
                 Form::Clone => "clone",
+                Form::Configure => "configuration",
                 Form::KeepId => "keep",
                 Form::RemoveId => "remove",
             });
@@ -2291,7 +2323,7 @@ impl App {
             Some("adopt") => self.shell.adoption.focused = 0,
             Some("batch item") => {
                 if let Some(editor) = &mut self.batch_editor {
-                    editor.focused = editor.item * 3;
+                    editor.focused = editor.item * super::shell::AdoptionDraft::FIELDS;
                 }
             }
             Some("declaration") => {
@@ -2632,7 +2664,10 @@ impl App {
             {
                 Some("Choose a repository to check its declared tools.")
             }
-            Action::EnvironmentPlan | Action::EnvironmentCheck | Action::EnvironmentResume
+            Action::Configure(_)
+            | Action::EnvironmentPlan
+            | Action::EnvironmentCheck
+            | Action::EnvironmentResume
                 if self
                     .data
                     .as_ref()
@@ -2641,6 +2676,13 @@ impl App {
                     != Some(true) =>
             {
                 Some("Choose a registered repository.")
+            }
+            Action::Configure(super::configuration::Kind::EditFile)
+                if self.tab != Tab::Files
+                    || self.discovering
+                    || !self.visible_file_rows().contains(&self.selected) =>
+            {
+                Some("Select a displayed file mapping first.")
             }
             Action::SavedProfiles
                 if self
