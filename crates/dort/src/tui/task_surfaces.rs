@@ -128,6 +128,7 @@ impl Activity {
             Task::Profile(..) => "Review profile choice",
             Task::Profiles { .. } => "Read profile selection",
             Task::Select(_) => "Select session repository",
+            Task::EnvironmentAbandon => "Review environment abandonment",
             Task::Clone { .. } => "Preview clone and registration",
             Task::Init { .. } => "Preview create/attach",
             Task::Files(request) => request_label(request),
@@ -158,6 +159,7 @@ impl Activity {
                     Approved::Configuration(_) => "Save configuration change",
                     Approved::Ignore(_) => "Discovery preferences",
                     Approved::Files(_) => "File operation",
+                    Approved::EnvironmentAbandon(_) => "Abandon environment run",
                     Approved::Batch(_) => "Batch file operation",
                     Approved::Clone(..) => "Clone and register",
                     Approved::Init(..) => "Create/attach",
@@ -342,6 +344,10 @@ impl Activity {
             Pending::Profile(_) => ("Save profile choice", vec![]),
             Pending::Ignore(_) => (
                 "Discovery preferences",
+            Pending::EnvironmentAbandon(p) => (
+                "Abandon environment run",
+                vec![("Repository", p.repository().display().to_string())],
+            ),
                 vec![("Scope", "Local HOME discovery only".into())],
             ),
             Pending::Files(plan) => (

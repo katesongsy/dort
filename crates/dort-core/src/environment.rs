@@ -11,7 +11,7 @@ use crate::{
     tools::{VersionMatch, VersionPolicy, binaries, inspection, install, planning},
 };
 mod run;
-pub use run::{Approval, Run};
+pub use run::{AbandonApproval, AbandonPreview, Approval, Run};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -321,12 +321,12 @@ impl Plan {
                     }
                     planning::PackageFinding::Present { versions } => {
                         let matching: Vec<_> = versions.iter().filter(|v| v.policy_match == VersionMatch::Satisfied).map(|v| v.version.as_str()).collect();
-                        if matching.is_empty() { row.blockers.push("Installed version differs or cannot be verified. Repair the tool, then check again.".into()); }
+                        if matching.is_empty() { row.blockers.push("Installed version differs or cannot be verified. Use the package manager outside Dort to select the declared version, or correct the declaration, then run Environment check.".into()); }
                         else if let Some(proven) = scope.and_then(|scope| proof_of_tool(tool, scope, &matching).ok().flatten()) {
                             row.status = "Already correct";
                             if let Detail::Tool { version, .. } = &mut row.detail { *version = Some(matching.join(", ")); }
                             proof = Some(proven);
-                        } else { row.blockers.push("The selected command is not available at the checked package version. Repair it, then check again.".into()); }
+                        } else { row.blockers.push("The command does not resolve to the checked package. Fix the command or tool search paths outside this run, then run Environment check.".into()); }
                     }
                     planning::PackageFinding::Absent => match prepare_install(host, &input, check.as_ref(), &tool_plan.rows, tool, &reports, &catalogs) {
                         Ok(p) => {
@@ -596,13 +596,25 @@ impl Preview {
                 blockers.push("No run to resume. Review a new environment plan.".into())
             }
             (Some(run), true) => blockers.extend(run.review_resume(&plan)),
-            (Some(run), false) if run.would_repeat_uncertain_install(&plan) => {
-                blockers.push(
-                    "The last run has an uncertain step. Check or repair it, then review Resume."
-                        .into(),
-                );
+            (Some(run), false) if !run.complete() && !run.abandoned => {
+                blockers.push("An unfinished run exists. Review Resume or Abandon environment run before starting another run.".into());
             }
             _ => (),
+        }
+        if plan
+            .rows
+            .iter()
+            .any(|row| matches!(row.row.item, Item::Tool(_)))
+            && previous
+                .as_ref()
+                .and_then(|run| run.stale_check.as_ref())
+                .is_some_and(|stale| {
+                    plan.check
+                        .as_ref()
+                        .is_none_or(|check| check.generation == *stale)
+                })
+        {
+            blockers.push("Run a fresh Environment check after abandonment before reviewing tools in a new plan.".into());
         }
         Ok(Self {
             plan,

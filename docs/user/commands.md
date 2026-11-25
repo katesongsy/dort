@@ -214,6 +214,8 @@ dort --dry-run environment apply
 dort environment apply
 dort --dry-run environment resume
 dort environment resume
+dort --dry-run environment abandon
+dort environment abandon
 ```
 
 Use **Environment check** to update unknown tool results. It runs the reviewed package managers and saves results for ten minutes. **Plan** and `--dry-run` never run a manager. Pass the same `--profile NAME` additions to each command in the workflow.
@@ -222,7 +224,9 @@ Review tools and links together before applying. A required tool must be selecte
 
 If a run stops, review **Resume**. Dort rechecks confirmed work without reinstalling it. Run **Environment check** after an uncertain install. Repair the tool if the check cannot confirm its version and command. Changed declarations, choices, files, or approved effects can block the old resume.
 
-In the TUI, open **F2 More** for **Review environment plan**, **Environment check**, and **Review environment resume**.
+An unfinished run cannot be replaced with a new plan. If Resume is blocked and you want to start over, review **Abandon environment run**. Dort keeps the old run record and leaves completed links and packages in place. Before retrying an uncertain install, close any unresolved install record in **Tools History** (or `dort tools close-attempt ID`), run **Environment check**, and review a new plan. Dort does not upgrade, downgrade, or uninstall a mismatched package. Use the package manager outside Dort to select the declared version, or correct the declaration, then check again.
+
+In the TUI, open **F2 More** for **Review environment plan**, **Environment check**, **Review environment resume**, and **Abandon environment run**.
 
 ## Checks
 

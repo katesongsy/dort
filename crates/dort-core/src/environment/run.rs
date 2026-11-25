@@ -41,21 +41,26 @@ pub struct Run {
     input: String,
     steps: Vec<Step>,
     problem: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) abandoned: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) stale_check: Option<String>,
 }
 impl Run {
-    pub(super) fn would_repeat_uncertain_install(&self, plan: &Plan) -> bool {
+    fn uncertain_tool(&self) -> bool {
         self.steps.iter().any(|step| {
-            matches!(
-                step.progress,
-                StepState::InProgress { .. } | StepState::Uncertain { .. }
-            ) && plan
-                .rows
-                .iter()
-                .any(|row| row.row.item == step.item && row.install.is_some())
+            matches!(step.item, Item::Tool(_))
+                && matches!(
+                    step.progress,
+                    StepState::InProgress { .. } | StepState::Uncertain { .. }
+                )
         })
     }
 
     pub(super) fn review_resume(&self, plan: &Plan) -> Vec<String> {
+        if self.abandoned {
+            return vec!["This run was abandoned. Review a new environment plan.".into()];
+        }
         if self.complete() {
             return vec!["The last run is complete. Review a new plan.".into()];
         }
@@ -73,6 +78,10 @@ impl Run {
             .collect()
     }
 
+    pub fn abandoned(&self) -> bool {
+        self.abandoned
+    }
+
     pub fn complete(&self) -> bool {
         self.problem.is_none()
             && self
@@ -81,7 +90,11 @@ impl Run {
                 .all(|step| matches!(step.progress, StepState::Confirmed { .. }))
     }
     pub fn human(&self) -> String {
-        let mut text = format!("Environment run {}\n", self.id);
+        let mut text = format!(
+            "Environment run {}{}\n",
+            self.id,
+            if self.abandoned { " (abandoned)" } else { "" }
+        );
         for step in &self.steps {
             text.push_str(&format!("{}: {}\n", step.item.id(), step.progress.label()));
         }
@@ -89,6 +102,100 @@ impl Run {
             text.push_str(problem);
         }
         text
+    }
+}
+
+#[derive(Serialize)]
+pub struct AbandonPreview {
+    repository: PathBuf,
+    archive: PathBuf,
+    run: Run,
+    new_stale_check: Option<String>,
+    #[serde(skip)]
+    original: String,
+}
+
+impl AbandonPreview {
+    pub fn prepare(host: &HostContext, root: &Path) -> Result<Self> {
+        let local = LocalConfig::load(host)?;
+        let id = local
+            .repositories
+            .iter()
+            .find(|(_, record)| record.root == root)
+            .map(|(id, _)| id)
+            .ok_or_else(|| invalid("Choose a registered repository."))?;
+        let dir =
+            directory(host, id, false)?.ok_or_else(|| invalid("No unfinished environment run."))?;
+        if observation::inspect(&dir.path.join("run.json"), false)?.kind == Kind::Missing {
+            return Err(invalid("No unfinished environment run."));
+        }
+        let original = String::from_utf8(journal::read_bytes(&dir, "run.json")?)
+            .map_err(|_| invalid("Cannot read the saved environment record."))?;
+        let run: Run = serde_json::from_str(&original)
+            .map_err(|_| invalid("Cannot read the saved environment record."))?;
+        if run.complete() || run.abandoned {
+            return Err(invalid("No unfinished environment run."));
+        }
+        let new_stale_check = if run.uncertain_tool() {
+            read::<Check>(&dir, "check.json")?.map(|c| c.generation)
+        } else {
+            run.stale_check.clone()
+        };
+        Ok(Self {
+            repository: root.to_owned(),
+            archive: dir.path.join(format!(
+                "abandoned-{}.json",
+                journal::digest(original.as_bytes())
+            )),
+            run,
+            new_stale_check,
+            original,
+        })
+    }
+
+    pub fn repository(&self) -> &Path {
+        &self.repository
+    }
+
+    pub fn human(&self) -> String {
+        format!(
+            "Repository: {:?}\n\n{}\n\nKeep the old record at {:?} and mark this run abandoned.\nKeep completed effects in place. No file or package is changed.\nBefore retrying an uncertain install, close any unresolved record in Tools History, run Environment check, then review a new plan.",
+            self.repository,
+            self.run.human(),
+            self.archive
+        )
+    }
+
+    pub fn approve(self) -> AbandonApproval {
+        AbandonApproval(self)
+    }
+}
+
+pub struct AbandonApproval(AbandonPreview);
+
+impl AbandonApproval {
+    pub fn execute(self, host: &HostContext) -> Result<Run> {
+        let _lock = WriterLock::acquire(host)?;
+        let p = self.0;
+        let fresh = AbandonPreview::prepare(host, &p.repository)?;
+        if digest(&p)? != digest(&fresh)? {
+            return Err(invalid(
+                "Environment run or check changed. Review abandonment again.",
+            ));
+        }
+        let dir = PrivateDir::open(p.archive.parent().expect("archive has parent"), false)?
+            .ok_or_else(|| invalid("Environment record directory is missing."))?;
+        let name = p
+            .archive
+            .file_name()
+            .and_then(|s| s.to_str())
+            .expect("generated archive name");
+        dir.replace(name, &p.original)?;
+        let mut run = p.run;
+        run.abandoned = true;
+        run.stale_check = p.new_stale_check;
+        save(&dir, "run.json", &run)?;
+        Ok(run)
     }
 }
 
@@ -252,6 +359,8 @@ impl Approval {
                     .map(PreparedRow::step)
                     .collect::<Result<_>>()?,
                 problem: None,
+                abandoned: false,
+                stale_check: fresh.previous.and_then(|run| run.stale_check),
             }
         };
         run.problem = None;

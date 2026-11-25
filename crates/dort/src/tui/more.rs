@@ -56,6 +56,11 @@ fn session_actions(app: &App) -> Vec<ui::ActionButton> {
             target: Target::Action(Action::EnvironmentResume),
         },
         ui::ActionButton {
+            label: "Abandon environment run",
+            key: "",
+            target: Target::Action(Action::EnvironmentAbandon),
+        },
+        ui::ActionButton {
             label: "Clone repository",
             key: "",
             target: Target::Action(Action::Clone),

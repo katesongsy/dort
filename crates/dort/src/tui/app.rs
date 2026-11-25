@@ -332,7 +332,9 @@ impl App {
                 self.result = Some(run.human());
                 self.show_result = true;
                 self.details_scroll = 0;
-                self.status = if run.complete() {
+                self.status = if run.abandoned() {
+                    "Environment run abandoned. Completed effects were kept.".into()
+                } else if run.complete() {
                     "Environment completed.".into()
                 } else {
                     "Environment stopped. Review the run record before resuming.".into()
@@ -2015,6 +2017,7 @@ impl App {
                     ));
                 }
             }
+            Action::EnvironmentAbandon => return Some(Task::EnvironmentAbandon),
             Action::ApplyMarked | Action::KeepMarked | Action::RemoveMarked => {
                 let ids = self.inventory.managed_marks.iter().cloned().collect();
                 return Some(Task::Batch(match action {
@@ -2734,6 +2737,7 @@ impl App {
             Action::IgnoreSelected
                 if self.tab != Tab::Files
                     || !self.discovering
+            | Action::EnvironmentAbandon
                     || super::tree::selected(self).is_none() =>
             {
                 Some(

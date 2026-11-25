@@ -6,7 +6,11 @@ use dort_core::{
     state::WriterLock,
 };
 use serde_json::Value;
-use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
+use std::{
+    fs,
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+};
 
 struct Fixture {
     _temp: tempfile::TempDir,
@@ -384,8 +388,7 @@ fn environment_plan_stops_on_uncertain_result_and_resumes_without_repeating_inst
     );
 }
 
-#[test]
-fn environment_process_interruption_leaves_durable_intent_and_never_replays() {
+fn interrupted_environment() -> Fixture {
     use std::time::{Duration, Instant};
     let f = Fixture::new();
     f.program("brew", include_str!("support/environment-brew.sh"));
@@ -418,6 +421,12 @@ fn environment_process_interruption_leaves_durable_intent_and_never_replays() {
     child.wait().unwrap();
     fs::remove_file(f.host.home.join("hold-b")).unwrap();
     assert!(reached && wait("provider-done"));
+    f
+}
+
+#[test]
+fn environment_process_interruption_leaves_durable_intent_and_never_replays() {
+    let f = interrupted_environment();
     let review = f.json(&["--json", "--dry-run", "environment", "resume"], 4);
     assert_eq!(
         review["last_run"]["steps"][0]["progress"]["state"],
@@ -442,6 +451,76 @@ fn environment_process_interruption_leaves_durable_intent_and_never_replays() {
         f.calls().chars().filter(|c| *c != 'Q').collect::<String>(),
         "AB"
     );
+}
+
+#[test]
+fn environment_abandon_archives_and_requires_fresh_check_and_install_close() {
+    let f = interrupted_environment();
+    let editor = f.host.home.join(".editor");
+    let before = f.calls();
+    // Simulate an interrupted install that left no usable command or package claim.
+    fs::remove_file(f.host.home.join("b")).unwrap();
+    fs::remove_file(f.bin.join("b")).unwrap();
+    let blocked = f.json(&["--json", "environment", "plan"], 4);
+    assert!(blocked["blockers"].to_string().contains("unfinished run"));
+    let review = f.json(&["--json", "--dry-run", "environment", "abandon"], 0);
+    let archive = Path::new(review["archive"].as_str().unwrap());
+    assert!(!archive.exists());
+    assert_eq!(f.calls(), before);
+    let abandoned = f.json(&["--json", "--yes", "environment", "abandon"], 0);
+    assert_eq!(abandoned["abandoned"], true);
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&fs::read(archive).unwrap()).unwrap(),
+        review["run"]
+    );
+    assert_eq!(f.calls(), before);
+    assert!(f.bin.join("a").exists());
+    assert!(!editor.exists());
+    let blocked = f.json(&["--json", "environment", "plan"], 4);
+    assert!(
+        blocked["blockers"]
+            .to_string()
+            .contains("fresh Environment check")
+    );
+    let resume = f.json(&["--json", "--dry-run", "environment", "resume"], 4);
+    assert!(resume["blockers"].to_string().contains("run was abandoned"));
+    f.json(&["--json", "--yes", "environment", "check"], 0);
+    let blocked = f.json(&["--json", "environment", "plan"], 4);
+    assert!(
+        blocked["blockers"]
+            .to_string()
+            .contains("install is unresolved")
+    );
+    let attempts = f.json(&["--json", "tools", "attempts"], 0);
+    let attempt = attempts
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["unresolved"] == true)
+        .unwrap();
+    f.json(
+        &[
+            "--json",
+            "--yes",
+            "tools",
+            "close-attempt",
+            attempt["id"].as_str().unwrap(),
+        ],
+        0,
+    );
+    f.json(&["--json", "environment", "plan"], 0);
+    assert_eq!(
+        f.calls().chars().filter(|c| *c != 'Q').collect::<String>(),
+        "AB"
+    );
+    assert!(!editor.exists());
+    f.json(&["--json", "--yes", "environment", "apply"], 0);
+    assert_eq!(
+        f.calls().chars().filter(|c| *c != 'Q').collect::<String>(),
+        "ABB"
+    );
+    assert_eq!(fs::read_link(&editor).unwrap(), f.repo.join("settings"));
+    assert!(archive.exists());
 }
 
 #[test]

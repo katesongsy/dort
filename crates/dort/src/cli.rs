@@ -115,6 +115,8 @@ enum EnvironmentCommand {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
+    /// Review and abandon the unfinished run without undoing effects.
+    Abandon,
     /// Review the last run and continue only after checking completed work.
     Resume {
         #[arg(long = "profile")]
@@ -918,6 +920,27 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
             let (profiles, preview_only, resume) = match command {
                 EnvironmentCommand::Check(args) => {
                     return declared_tools(cli, &host, args, false, true);
+                }
+                EnvironmentCommand::Abandon => {
+                    let root = local.select_repository(cli.repo.as_deref())?;
+                    let preview = dort_core::environment::AbandonPreview::prepare(&host, &root)?;
+                    if !cli.json {
+                        println!("{}", crate::services::presentation::safe(&preview.human()));
+                    }
+                    if cli.dry_run {
+                        if cli.json {
+                            print_git_json(&preview)?;
+                        }
+                    } else {
+                        approve(cli)?;
+                        let run = preview.approve().execute(&host)?;
+                        if cli.json {
+                            print_git_json(&run)?;
+                        } else {
+                            println!("{}", crate::services::presentation::safe(&run.human()));
+                        }
+                    }
+                    return Ok(ExitCode::SUCCESS);
                 }
                 EnvironmentCommand::Plan { profiles } => (profiles, true, false),
                 EnvironmentCommand::Apply { profiles } => (profiles, false, false),

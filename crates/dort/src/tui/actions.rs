@@ -298,6 +298,7 @@ pub fn load_scoped(
 pub enum Pending {
     Configuration(super::configuration::Preview),
     Environment(Box<dort_core::environment::Preview>),
+    EnvironmentAbandon(Box<dort_core::environment::AbandonPreview>),
     Clone(Box<bootstrap::ClonePreview>),
     Profile(Box<dort_core::local::ProfilePreview>),
     ToolDeclaration(Box<dort_core::tools::declaration::Preview>),
@@ -316,6 +317,7 @@ impl Pending {
             Self::Profile(p) => p.human(),
             Self::Configuration(p) => p.human(),
             Self::Environment(p) => p.human(),
+            Self::EnvironmentAbandon(p) => p.human(),
             Self::Clone(p) => p.human(),
             Self::Batch(plan) => plan.human(),
             Self::Files(plan) => format!(
@@ -367,6 +369,7 @@ impl Pending {
         match self {
             Self::Clone(_) => "Clone and register",
             Self::Environment(_) => "Run environment",
+            Self::EnvironmentAbandon(_) => "Abandon environment run",
             Self::Profile(_) => "Save profile choice",
             Self::Configuration(p) => p.label(),
             _ if self.adoption() => "Adopt all",
@@ -415,6 +418,7 @@ impl Pending {
             Self::Profile(p) => Ok(Approved::Profile(Box::new(p.approve()))),
             Self::Configuration(p) => Ok(Approved::Configuration(p.approve())),
             Self::Environment(p) => Ok(Approved::Environment(Box::new(p.approve()?))),
+            Self::EnvironmentAbandon(p) => Ok(Approved::EnvironmentAbandon(Box::new(p.approve()))),
             Self::Clone(p) => {
                 let root = p.destination().to_owned();
                 Ok(Approved::Clone(Box::new(p.approve()), root))
@@ -445,6 +449,7 @@ impl Pending {
 pub enum Approved {
     Configuration(super::configuration::Approval),
     Environment(Box<dort_core::environment::Approval>),
+    EnvironmentAbandon(Box<dort_core::environment::AbandonApproval>),
     Clone(Box<bootstrap::CloneApproval>, PathBuf),
     Profile(Box<dort_core::local::ProfileApproval>),
     ToolDeclaration(Box<dort_core::tools::declaration::Approval>),
@@ -485,6 +490,7 @@ impl Approved {
                 let lock = WriterLock::acquire(host)?;
                 (
                     "Tool declaration",
+            Self::EnvironmentAbandon(p) => return p.execute(host).map(Output::EnvironmentRun),
                     dort_core::tools::declaration::execute(host, &lock, *a, observer)?,
                     None,
                 )
@@ -634,6 +640,7 @@ pub enum Task {
     ToolsCheckPrepare(crate::services::inspection_defaults::Inputs),
     ToolsStandaloneCheckPrepare(crate::services::declared_tools::Input),
     ToolsCheck(Box<crate::services::declared_tools::CheckApproval>),
+    EnvironmentAbandon,
     ToolsInstallMissingPrepare(std::sync::Arc<crate::services::declared_tools::Checked>),
     ToolsInstallMissing(crate::services::declared_tools::InstallApproval),
 
@@ -771,6 +778,11 @@ pub fn perform_scoped_with_install_progress(
                 .map(|p| Output::Preview(Pending::Environment(Box::new(p))))
         }
         Task::ToolsCheckPrepare(_) | Task::EnvironmentCheck(_) => {
+        Task::EnvironmentAbandon => {
+            let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
+            dort_core::environment::AbandonPreview::prepare(host, &root)
+                .map(|p| Output::Preview(Pending::EnvironmentAbandon(Box::new(p))))
+        }
             let (detection, environment) = match task {
                 Task::ToolsCheckPrepare(detection) => (detection, false),
                 Task::EnvironmentCheck(detection) => (detection, true),
