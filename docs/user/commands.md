@@ -186,7 +186,7 @@ dort profiles list --profile work
 
 `base` is always on. A temporary `--profile` wins over the saved choice, which wins over repository and platform defaults. Saved choices affect only the selected registered repository. Saving a choice leaves files and tools in place. An installed link can appear as **No longer selected** until you remove it separately.
 
-From **Overview**, open **F2 More → Create profile**. Leave Defaults blank for an optional profile, or enter a comma-separated list of `repository`, `macos`, and `linux`. **Edit profile defaults**, **Rename profile**, and **Delete profile** let you pick an existing profile first. Only unused profiles can be deleted. Press **F1 Help** for field details.
+From **Overview**, open **F2 More → Create profile**, enter a name, then press **Space** on each default row to turn it on or off. **All hosts** turns the profile on everywhere; **macOS** and **Linux** turn it on for that platform. Leave all three off for an optional profile. **Edit profile defaults**, **Rename profile**, and **Delete profile** let you pick an existing profile first. Only unused profiles can be deleted. Press **F1 Help** for field details.
 
 Open **F2 More → Saved profiles** to set the local choice. Select **Use defaults**, **On**, or **Off**, then review and save. Use **Profiles** to try temporary additions without saving them.
 

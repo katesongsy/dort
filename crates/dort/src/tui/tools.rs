@@ -448,6 +448,7 @@ impl State {
                 |_| Target::ToolsControl(0, false),
                 ui::FormActions {
                     choices: &[],
+                    toggles: &[],
                     buttons: &[
                         ui::ActionButton {
                             label: "Review checks",
@@ -512,6 +513,7 @@ impl State {
                 |i| Target::ToolsControl(i, false),
                 ui::FormActions {
                     choices: &[],
+                    toggles: &[],
                     buttons: &[
                         ui::ActionButton {
                             label: if dry_run {

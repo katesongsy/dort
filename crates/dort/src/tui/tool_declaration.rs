@@ -271,6 +271,7 @@ impl State {
             |i| Target::ToolDeclarationField(controls[i]),
             ui::FormActions {
                 choices: &choices,
+                toggles: &[],
                 buttons: &[
                     ui::ActionButton {
                         label: "Review declaration",

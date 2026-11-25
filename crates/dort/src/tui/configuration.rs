@@ -89,10 +89,28 @@ impl Kind {
         )
     }
 
+    /// Dropdown-free defaults: each host group is its own on/off row.
+    fn default_rows(self) -> std::ops::Range<usize> {
+        match self {
+            Self::CreateProfile => 1..4,
+            Self::EditProfileDefaults => 0..3,
+            _ => 0..0,
+        }
+    }
+
     fn fields(self) -> &'static [&'static str] {
         match self {
-            Self::CreateProfile => &["Profile name", "Defaults: repository, macos, linux"],
-            Self::EditProfileDefaults => &["Defaults"],
+            Self::CreateProfile => &[
+                "Profile name",
+                "Default for all hosts",
+                "Default on macOS",
+                "Default on Linux",
+            ],
+            Self::EditProfileDefaults => &[
+                "Default for all hosts",
+                "Default on macOS",
+                "Default on Linux",
+            ],
             Self::RenameProfile => &["New profile name"],
             Self::DeleteProfile => &[],
             Self::File => Self::FILE_FIELDS,
@@ -118,6 +136,8 @@ pub struct Draft {
     pub kind: Kind,
     pub focus: usize,
     fields: Vec<String>,
+    /// `repository`, `macos`, `linux` in that order.
+    defaults: [bool; 3],
     profile: Option<String>,
     profile_field_label: Option<String>,
     mapping: Option<ManagedFile>,
@@ -159,6 +179,7 @@ impl Draft {
             kind,
             focus: 0,
             fields,
+            defaults: [false; 3],
             profile: None,
             profile_field_label: None,
             mapping,
@@ -167,40 +188,55 @@ impl Draft {
 
     pub fn for_profile(kind: Kind, profile: Profile) -> Self {
         let mut draft = Self::new(kind, None, None);
-        let label = match kind {
-            Kind::EditProfileDefaults => {
-                draft.fields[0] = [
-                    (profile.default, "repository"),
-                    (profile.macos, "macos"),
-                    (profile.linux, "linux"),
-                ]
-                .into_iter()
-                .filter_map(|(on, label)| on.then_some(label))
-                .collect::<Vec<_>>()
-                .join(", ");
-                format!("Defaults for {}", profile.name)
-            }
-            Kind::RenameProfile => format!("New name for {}", profile.name),
-            _ => unreachable!("only edit and rename open a profile form"),
-        };
+        draft.defaults = [profile.default, profile.macos, profile.linux];
+        if kind == Kind::RenameProfile {
+            draft.profile_field_label = Some(format!("New name for {}", profile.name));
+        }
         draft.profile = Some(profile.name);
-        draft.profile_field_label = Some(label);
         draft
     }
 
     pub fn fields(&self) -> Vec<(&str, &str)> {
+        let rows = self.kind.default_rows();
         self.kind
             .fields()
             .iter()
             .enumerate()
             .map(|(i, &label)| {
-                if i == 0 {
-                    self.profile_field_label.as_deref().unwrap_or(label)
+                if rows.contains(&i) {
+                    (
+                        label,
+                        if self.defaults[i - rows.start] {
+                            "On"
+                        } else {
+                            "Off"
+                        },
+                    )
                 } else {
-                    label
+                    let label = self.profile_field_label.as_deref().unwrap_or(label);
+                    (label, self.fields[i].as_str())
                 }
             })
-            .zip(self.fields.iter().map(String::as_str))
+            .collect()
+    }
+
+    pub fn is_default_row(&self, index: usize) -> bool {
+        self.kind.default_rows().contains(&index)
+    }
+
+    pub fn toggle_default(&mut self) -> bool {
+        if !self.is_default_row(self.focus) {
+            return false;
+        }
+        let slot = self.focus - self.kind.default_rows().start;
+        self.defaults[slot] = !self.defaults[slot];
+        true
+    }
+
+    pub fn toggle_rows(&self) -> Vec<(usize, bool)> {
+        let rows = self.kind.default_rows();
+        rows.clone()
+            .map(|i| (i, self.defaults[i - rows.start]))
             .collect()
     }
 
@@ -220,7 +256,13 @@ impl Draft {
             KeyCode::BackTab => {
                 self.focus = (self.focus + self.fields.len() - 1) % self.fields.len()
             }
-            _ => super::shell::edit_text(&mut self.fields[self.focus], key),
+            KeyCode::Char(' ') if self.is_default_row(self.focus) => {
+                self.toggle_default();
+            }
+            _ if !self.is_default_row(self.focus) => {
+                super::shell::edit_text(&mut self.fields[self.focus], key)
+            }
+            _ => (),
         }
     }
 
@@ -278,21 +320,7 @@ impl Draft {
                 new: required(0)?.into(),
             },
             Kind::CreateProfile | Kind::EditProfileDefaults => {
-                let defaults = if self.kind == Kind::CreateProfile {
-                    value(1)
-                } else {
-                    value(0)
-                };
-                let flags = list(defaults);
-                if flags
-                    .iter()
-                    .any(|flag| !matches!(flag.as_str(), "repository" | "macos" | "linux"))
-                {
-                    return Err(Error::Invalid(
-                        "Use repository, macos or linux for defaults.".into(),
-                    ));
-                }
-                let has = |name: &str| flags.iter().any(|flag| flag == name);
+                let [default, macos, linux] = self.defaults;
                 let name = match self.profile.as_deref() {
                     Some(name) => name,
                     None => required(0)?,
@@ -301,9 +329,9 @@ impl Draft {
                     old: self.profile.clone(),
                     new: Some(Profile {
                         name: name.into(),
-                        default: has("repository"),
-                        macos: has("macos"),
-                        linux: has("linux"),
+                        default,
+                        macos,
+                        linux,
                     }),
                 }
             }

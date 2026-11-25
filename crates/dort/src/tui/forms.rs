@@ -10,6 +10,7 @@ pub enum Command {
     Discard,
     Details,
     InsertLine,
+    Toggle,
 }
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
     let s = &app.shell;
@@ -113,6 +114,18 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
             key: "F4",
             target: Target::FormAction(Command::InsertLine),
         }),
+        Form::Configure
+            if app.form_has_focus()
+                && s.configuration
+                    .as_ref()
+                    .is_some_and(|d| d.is_default_row(d.focus)) =>
+        {
+            actions.push(ui::ActionButton {
+                label: "Toggle",
+                key: "Space",
+                target: Target::FormAction(Command::Toggle),
+            });
+        }
         Form::Choose => actions.push(ui::ActionButton {
             label: "New",
             key: "Ctrl-N",
@@ -130,6 +143,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
         key: "F3",
         target: Target::FormAction(Command::Details),
     });
+    let toggles = s
+        .configuration
+        .as_ref()
+        .filter(|_| form == Form::Configure)
+        .map(|draft| draft.toggle_rows())
+        .unwrap_or_default();
     ui::field_page(
         frame,
         area,
@@ -139,6 +158,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
         |i| Target::FormControl(i, false),
         ui::FormActions {
             choices: &[],
+            toggles: &toggles,
             buttons: &actions,
             feedback: s
                 .form_feedback

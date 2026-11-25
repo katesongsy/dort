@@ -449,6 +449,7 @@ impl State {
                 |_| Target::Key(KeyEvent::new(KeyCode::Null, KeyModifiers::NONE)),
                 ui::FormActions {
                     choices: &[],
+                    toggles: &[],
                     buttons: &[
                         ui::ActionButton {
                             label: "Read Git",

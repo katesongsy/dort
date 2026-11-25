@@ -274,6 +274,27 @@ pub fn choice(frame: &mut Frame, area: Rect, value: &str, focused: bool) {
     );
 }
 
+/// On/off row. Space flips it; Enter still reviews the whole form.
+pub fn toggle(frame: &mut Frame, area: Rect, on: bool, focused: bool) {
+    if area.width < 5 || area.height == 0 {
+        return;
+    }
+    let boundary = if focused { ui::accent() } else { ui::muted() };
+    let hint = if focused && area.width >= 12 {
+        "  Space"
+    } else {
+        ""
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(if on { "[x]" } else { "[ ]" }, boundary),
+            Span::raw(if on { " On" } else { " Off" }),
+            Span::styled(hint, ui::muted()),
+        ])),
+        Rect::new(area.x, area.y, area.width, 1),
+    );
+}
+
 pub struct PairRow<'a> {
     pub identity: usize,
     pub values: [&'a str; 2],

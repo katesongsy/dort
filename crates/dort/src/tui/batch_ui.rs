@@ -180,6 +180,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
             &app.hits,
             ui::FormActions {
                 choices: &[],
+                toggles: &[],
                 buttons: &[ui::ActionButton {
                     label: "Back to draft",
                     key: "F3",
@@ -216,6 +217,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
             |i| Target::BatchControl(editor.item * AdoptionDraft::FIELDS + i, false),
             ui::FormActions {
                 choices: &[],
+                toggles: &[],
                 buttons: &[
                     ui::ActionButton {
                         label: "Done editing",
@@ -239,6 +241,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
         &app.hits,
         ui::FormActions {
             choices: &[],
+            toggles: &[],
             buttons: &[
                 ui::ActionButton {
                     label: "Review all",

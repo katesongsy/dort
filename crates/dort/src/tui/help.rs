@@ -85,14 +85,16 @@ impl Topic {
             Self::Form(Form::Configure) => "Enter the declaration, then review before saving.",
             Self::ProfileForm(Kind::CreateProfile) => concat!(
                 "Profile name: enter a new name, such as work. ",
-                "Defaults: leave blank for an optional profile. Enter repository for all hosts, ",
-                "macos for macOS, or linux for Linux. Separate values with commas. ",
+                "Defaults: focus a row and press Space to turn it on or off. ",
+                "All hosts turns the profile on everywhere, macOS and Linux on that platform. ",
+                "Leave all three off for an optional profile. ",
                 "Assign files and tools to the profile separately."
             ),
             Self::ProfileForm(Kind::EditProfileDefaults) => concat!(
-                "Defaults shows the current settings. Leave it blank for an optional profile. ",
-                "Enter repository for all hosts, macos for macOS, or linux for Linux. ",
-                "Separate values with commas. Use Saved profiles to change your local choice."
+                "The rows show the current defaults. Focus a row and press Space to turn it on or off. ",
+                "All hosts turns the profile on everywhere, macOS and Linux on that platform. ",
+                "Leave all three off for an optional profile. ",
+                "Use Saved profiles to change your local choice."
             ),
             Self::ProfileForm(Kind::RenameProfile) => concat!(
                 "Enter a new name for the selected profile. Dort updates files, tools and defaults ",
@@ -146,7 +148,8 @@ impl Topic {
             ],
             Self::ProfileForm(_) => &[
                 ("Tab / Shift-Tab", "Move between fields"),
-                ("Ctrl-U", "Clear current field"),
+                ("Space", "Turn the focused default on or off"),
+                ("Ctrl-U", "Clear the name field"),
                 ("Enter", "Review manifest change"),
                 ("Esc", "Back"),
             ],

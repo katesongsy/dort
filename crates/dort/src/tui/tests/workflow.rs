@@ -2016,8 +2016,21 @@ fn create_profile_and_map_existing_repository_file_without_deploying() {
     go(&mut app, Kind::CreateProfile);
     type_text(&mut app, "work");
     let form = super::tests::render(&app, 80, 24);
-    assert!(form.contains("Defaults: repository, macos, linux"));
-    assert!(!form.contains("Existing name"));
+    assert!(form.contains("Default for all hosts") && form.contains("Default on macOS"));
+    assert!(form.contains("[ ] Off") && !form.contains("Existing name"));
+    // Space toggles the focused default without typing a value.
+    key(&mut app, KeyCode::Tab);
+    super::tests::render(&app, 80, 24); // The strip reflects the field focused last frame.
+    assert!(
+        super::tests::render(&app, 80, 24)
+            .lines()
+            .last()
+            .unwrap()
+            .contains("Space Toggle")
+    );
+    key(&mut app, KeyCode::Char(' '));
+    assert!(super::tests::render(&app, 80, 24).contains("[x] On"));
+    key(&mut app, KeyCode::Char(' '));
     assert!(key(&mut app, KeyCode::F(1)).is_none());
     let help = super::tests::render(&app, 80, 24);
     assert!(help.contains("Profile name: enter a new name"));
@@ -2091,12 +2104,21 @@ fn profile_edit_rename_and_delete_use_the_selected_name() {
     assert!(pick(&mut app, Kind::EditProfileDefaults, "work").is_none());
     assert_eq!(
         app.shell.configuration.as_ref().unwrap().fields(),
-        [("Defaults for work", "linux")]
+        [
+            ("Default for all hosts", "Off"),
+            ("Default on macOS", "Off"),
+            ("Default on Linux", "On"),
+        ]
     );
-    for _ in 0.."linux".len() {
-        key(&mut app, KeyCode::Backspace);
-    }
-    type_text(&mut app, "macos, linux");
+    // Focus starts on the first row. Space flips it and leaves the others alone.
+    key(&mut app, KeyCode::Char(' '));
+    assert_eq!(
+        app.shell.configuration.as_ref().unwrap().fields()[0],
+        ("Default for all hosts", "On")
+    );
+    key(&mut app, KeyCode::Char(' '));
+    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Char(' '));
     let read = key(&mut app, KeyCode::Enter).unwrap();
     let manifest = save(&mut app, read);
     assert_eq!(manifest.profiles.platform[&Platform::Macos], ["work"]);

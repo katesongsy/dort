@@ -826,7 +826,12 @@ impl App {
                         self.shell.repair.as_mut()?.focus_at(index)
                     }
                     Some(Overlay::Form(Form::Configure)) => {
-                        self.shell.configuration.as_mut()?.focus_at(index)
+                        let draft = self.shell.configuration.as_mut()?;
+                        let toggles = draft.is_default_row(index);
+                        draft.focus_at(index);
+                        if toggles {
+                            draft.toggle_default();
+                        }
                     }
                     Some(Overlay::Form(Form::Choose | Form::Init)) => self.shell.path_focused = 0,
                     _ => return None,

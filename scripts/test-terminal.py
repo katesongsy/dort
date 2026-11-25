@@ -1158,19 +1158,22 @@ def run():
             session.wait(b"loaded.")
             session.more_action("Create profile")
             session.wait(b"Profile name")
-            session.send(b"\twork\tlinux")  # Tab focuses the first field.
+            session.send(b"\twork")  # Tab focuses the name field.
             session.wait(b"work")
+            session.send(b"\t ")  # Tab to the first default, then toggle it.
+            session.wait(b"[x] On")
             session.send(b"\x1bOP")  # VT100 PF1.
             session.wait(b"Profile name: enter a new name")
-            session.wait(b"optional profile")
+            session.wait(b"press Space")
             session.send(b"\x1bOP")
-            session.wait(b"Defaults: repository, macos, linux")
+            session.wait(b"Default on Linux")
             screen = session.screen.text()
-            assert b"work" in screen and b"Existing name" not in screen
+            assert b"work" in screen and b"[x] On" in screen
+            assert b"Existing name" not in screen
             session.send(b"\x1b[11~")  # CSI PF1.
             session.wait(b"Profile name: enter a new name")
             session.send(b"\x1b[11~")
-            session.wait(b"Defaults: repository, macos, linux")
+            session.wait(b"Default on Linux")
             session.send(b"\x1b")
             session.send(b"\x1b")
             session.wait(b"F2 More")

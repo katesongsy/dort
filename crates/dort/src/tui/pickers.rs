@@ -222,6 +222,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
         &app.hits,
         ui::FormActions {
             choices: &[],
+            toggles: &[],
             buttons: &actions,
             feedback: None,
         },

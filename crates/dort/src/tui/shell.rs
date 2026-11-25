@@ -307,11 +307,14 @@ impl Shell {
             self.overlay,
             Some(Overlay::Form(Form::Clone | Form::Choose | Form::Init))
                 if self.path_focused < 2
-        ) || matches!(
-            self.overlay,
-            Some(Overlay::Form(Form::Configure | Form::Repair))
-        ) || (matches!(self.overlay, Some(Overlay::Form(Form::Adopt)))
-            && self.adoption.focused < AdoptionDraft::FIELDS)
+        ) || matches!(self.overlay, Some(Overlay::Form(Form::Repair)))
+            || (matches!(self.overlay, Some(Overlay::Form(Form::Configure)))
+                && self
+                    .configuration
+                    .as_ref()
+                    .is_some_and(|draft| !draft.is_default_row(draft.focus)))
+            || (matches!(self.overlay, Some(Overlay::Form(Form::Adopt)))
+                && self.adoption.focused < AdoptionDraft::FIELDS)
             || (matches!(self.overlay, Some(Overlay::Form(Form::Check)))
                 && self.manifest_focused == 0)
             || (matches!(
@@ -348,6 +351,10 @@ impl Shell {
             Command::Submit => Some(Intent::Submit(form)),
             Command::InsertLine => {
                 self.repair.as_mut()?.insert();
+                None
+            }
+            Command::Toggle => {
+                self.configuration.as_mut()?.toggle_default();
                 None
             }
             Command::Choose => Some(Intent::Action(Action::Choose)),

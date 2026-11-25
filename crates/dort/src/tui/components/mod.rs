@@ -166,6 +166,8 @@ pub struct Feedback<'a> {
 }
 pub struct FormActions<'a> {
     pub choices: &'a [usize],
+    /// Field index and on/off state for rows without a text input.
+    pub toggles: &'a [(usize, bool)],
     pub buttons: &'a [ActionButton],
     pub feedback: Option<Feedback<'a>>,
 }
@@ -180,6 +182,7 @@ pub fn field_page(
     controls: FormActions<'_>,
 ) {
     let choices = controls.choices;
+    let toggles = controls.toggles;
     let fields_area = action_bar(frame, area, hits, controls);
     let count = usize::from(fields_area.height / 2).max(1);
     let focus = focus.min(fields.len().saturating_sub(1));
@@ -195,7 +198,13 @@ pub fn field_page(
             Rect::new(fields_area.x, y, fields_area.width, 1),
         );
         let rect = Rect::new(fields_area.x, y + 1, fields_area.width, 1);
-        if choices.contains(&i) {
+        if let Some(on) = toggles
+            .iter()
+            .find(|(index, _)| *index == i)
+            .map(|(_, on)| *on)
+        {
+            design::toggle(frame, rect, on, active);
+        } else if choices.contains(&i) {
             design::choice(frame, rect, fields[i].1, active);
         } else {
             design::filter(frame, rect, "", fields[i].1, active);
