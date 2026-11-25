@@ -853,9 +853,11 @@ pub fn perform_scoped_with_install_progress(
                     .select_repository(repository.as_deref())?
                     .join("dort.toml"),
             };
-            let report = Box::new(crate::services::check_manifest(
-                host, &local, path, &requested,
-            )?);
+            let report = Box::new(if apply {
+                crate::services::check_manifest(host, &local, path, &requested)?
+            } else {
+                crate::services::profile_picker(host, &local, path, &requested)?
+            });
             Ok(Output::Profiles {
                 report,
                 requested,

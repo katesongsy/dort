@@ -1246,6 +1246,28 @@ fn standalone_check_is_independent_and_preserves_path_profile_drafts_on_errors()
 }
 
 #[test]
+fn temporary_profile_picker_opens_with_an_inactive_dependency() {
+    let fixture = Fixture::new(true);
+    fs::write(fixture.root.join("dort.toml"), "schema=1\n[profiles]\navailable=['work']\n[[tools]]\nid='formatter'\nbinary='formatter'\nprofiles=['work']\n[tools.install]\nprovider='brew'\npackage='formatter'\n[[files]]\nid='editor'\nsource='source'\ntarget='~/.editor'\nmode='link'\nrequires=['formatter']\n").unwrap();
+    let config = fs::read(fixture.host.local_config_path()).unwrap();
+    let mut app = onboarding_app(&fixture, false);
+    let task = key(&mut app, KeyCode::Char('T')).unwrap();
+    run_task(&mut app, &fixture, task);
+    assert!(matches!(
+        app.shell.overlay,
+        Some(super::shell::Overlay::Profiles(_))
+    ));
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Char(' '));
+    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let refresh = run_task(&mut app, &fixture, task).unwrap();
+    run_task(&mut app, &fixture, refresh);
+    assert_eq!(app.requested_profiles, ["work"]);
+    assert_eq!(fs::read(fixture.host.local_config_path()).unwrap(), config);
+    assert!(!fixture.host.home.join(".editor").exists());
+}
+
+#[test]
 fn temporary_profiles_are_mandatory_union_and_drive_full_inventory_and_plans() {
     use super::shell::Overlay;
     let fixture = Fixture::new(true);

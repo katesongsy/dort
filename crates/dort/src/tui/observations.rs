@@ -529,7 +529,7 @@ fn diagnostics(frame: &mut Frame, area: Rect, app: &App) {
         Tone::Neutral,
     ));
     lines.push(note(
-        "Not supported: templates, secrets, cloning/sync, Git writes and other package managers.",
+        "Not supported: templates, secrets, sync, other Git writes and other package managers.",
         Tone::Neutral,
     ));
     lines.push(note(

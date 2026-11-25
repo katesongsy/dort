@@ -136,7 +136,10 @@ fn observe_inner(
             ));
         }
         if !environment && !mapping.requires.is_empty() {
-            blockers.push("tool prerequisites cannot yet be verified".into());
+            blockers.push(format!(
+                "Requires {}. Use Review environment plan (F2 More) or dort environment plan.",
+                mapping.requires.join(", ")
+            ));
         }
         let hash = blockers.is_empty();
         let mut capture = |path: &Path| match observation::inspect(path, hash) {

@@ -86,6 +86,25 @@ pub fn check_manifest(
     path: PathBuf,
     requested: &[String],
 ) -> Result<CheckReport> {
+    manifest_report(host, local, path, requested, true)
+}
+
+pub fn profile_picker(
+    host: &HostContext,
+    local: &LocalConfig,
+    path: PathBuf,
+    requested: &[String],
+) -> Result<CheckReport> {
+    manifest_report(host, local, path, requested, false)
+}
+
+fn manifest_report(
+    host: &HostContext,
+    local: &LocalConfig,
+    path: PathBuf,
+    requested: &[String],
+    validate_selection: bool,
+) -> Result<CheckReport> {
     let text = std::fs::read_to_string(&path).map_err(|source| dort_core::Error::Io {
         operation: "read manifest",
         path: path.clone(),
@@ -104,7 +123,16 @@ pub fn check_manifest(
         })?;
     let registered =
         (path.file_name().is_some_and(|name| name == "dort.toml")).then_some(root.as_path());
-    let active = manifest.validate_local_selection(host, requested, registered)?;
+    let active = if validate_selection {
+        manifest.validate_local_selection(host, requested, registered)?
+    } else {
+        dort_core::profiles::active(&local.profile_rows(
+            &manifest.profiles,
+            host.platform,
+            registered,
+            requested,
+        )?)
+    };
     let tools: Vec<_> = manifest
         .tools
         .iter()
@@ -149,7 +177,11 @@ pub fn check_manifest(
         schema: manifest.schema,
         selected_tools: tools.len(),
         selected_files: files.len(),
-        tool_dependency_order: manifest.dependency_order(host.platform, &active)?,
+        tool_dependency_order: if validate_selection {
+            manifest.dependency_order(host.platform, &active)?
+        } else {
+            vec![]
+        },
         active_profiles: active,
         unsupported_capabilities: unsupported,
         filesystem_and_tools_inspected: false,
