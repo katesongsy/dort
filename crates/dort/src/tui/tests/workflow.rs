@@ -130,11 +130,14 @@ fn welcome_next_steps_are_visible_at_the_floor_without_creating_state() {
     )));
     let screen = super::tests::render(&app, 48, 14);
     assert!(
-        screen.contains("Welcome") && screen.contains("Enter Create or attach"),
+        screen.contains("Welcome")
+            && screen.contains("n Create/attach")
+            && screen.contains("l Clone"),
         "{screen}"
     );
     for label in [
         "Create or attach",
+        "Clone repository",
         "Choose repository",
         "Discover files",
         "Standalone check",
@@ -738,7 +741,12 @@ fn invalid_path_missing_git_and_read_errors_preserve_draft_and_old_scope() {
     key(&mut app, KeyCode::Esc);
     assert_eq!(app.shell.choose_draft, "absent/q?path");
     key(&mut app, KeyCode::Esc);
-    key(&mut app, KeyCode::Char('n'));
+    key(&mut app, KeyCode::Char('p'));
+    app.key(
+        KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
+        80,
+        24,
+    );
     type_text(&mut app, "new");
     key(&mut app, KeyCode::Enter); // advance to review button
     app.git = Err("Git missing".into());
@@ -1990,20 +1998,11 @@ fn malformed_journal_tail_is_a_global_blocker_not_a_recovery_permission() {
 
 #[test]
 fn create_profile_and_map_existing_repository_file_without_deploying() {
-    use super::{configuration::Kind, input::Target, shell::Action};
+    use super::tests::click_label;
     let fixture = Fixture::new(true);
     let manifest_path = fixture.root.join("dort.toml");
     let original = fs::read(&manifest_path).unwrap();
     let mut app = onboarding_app(&fixture, false);
-    let go = |app: &mut App, kind| {
-        assert!(
-            super::tests::more_target(
-                app,
-                |target| matches!(target, Target::Action(Action::Configure(k)) if k == kind)
-            )
-            .is_none()
-        );
-    };
     let save = |app: &mut App| {
         let read = key(app, KeyCode::Enter).unwrap();
         run_task(app, &fixture, read);
@@ -2013,7 +2012,8 @@ fn create_profile_and_map_existing_repository_file_without_deploying() {
         }
         key(app, KeyCode::Esc);
     };
-    go(&mut app, Kind::CreateProfile);
+    assert!(click_label(&mut app, 100, 24, "s Profiles").is_none());
+    assert!(click_label(&mut app, 100, 24, "n New profile").is_none());
     type_text(&mut app, "work");
     let form = super::tests::render(&app, 80, 24);
     assert!(form.contains("Default for all hosts") && form.contains("Default on macOS"));
@@ -2038,8 +2038,8 @@ fn create_profile_and_map_existing_repository_file_without_deploying() {
     assert!(key(&mut app, KeyCode::F(1)).is_none());
     save(&mut app);
     assert_ne!(fs::read(&manifest_path).unwrap(), original);
-    app.tab = super::app::Tab::Files;
-    go(&mut app, Kind::File);
+    key(&mut app, KeyCode::Char('f'));
+    assert!(click_label(&mut app, 100, 24, "n Add file mapping").is_none());
     for (i, text) in ["work-file", "source", "~/.work", "work"]
         .into_iter()
         .enumerate()
@@ -2068,26 +2068,18 @@ fn create_profile_and_map_existing_repository_file_without_deploying() {
 
 #[test]
 fn profile_edit_rename_and_delete_use_the_selected_name() {
-    use super::{configuration::Kind, input::Target, shell::Action};
+    use super::tests::click_label;
     use dort_core::platform::Platform;
     let f = Fixture::new(true);
     let path = f.root.join("dort.toml");
     fs::write(&path, "schema=1\n[profiles]\navailable=['unused', 'work']\n[profiles.platform]\nlinux=['work']\n[[files]]\nid='editor'\nsource='source'\ntarget='~/.editor'\nmode='link'\nprofiles=['work']\n").unwrap();
     let mut app = onboarding_app(&f, false);
-    let pick = |app: &mut App, kind, name| {
-        assert!(
-            super::tests::more_target(app, |target| matches!(
-                target, Target::Action(Action::Configure(k)) if k == kind
-            ))
-            .is_none()
-        );
-        let choices = super::tests::render(app, 80, 24);
-        assert!(!choices.contains("› base"));
-        assert!(choices.contains("› unused"));
-        if name == "work" {
-            key(app, KeyCode::Down);
-        }
-        key(app, KeyCode::Enter)
+    assert!(click_label(&mut app, 140, 24, "s Profiles").is_none());
+    let base = super::tests::render(&app, 140, 24);
+    assert!(base.contains("base: On (always on)") && !base.contains("Delete profile"));
+    let pick = |app: &mut App, name, label| {
+        assert!(click_label(app, 140, 24, name).is_none());
+        click_label(app, 140, 24, label)
     };
     let save = |app: &mut App, read| {
         let before = fs::read(&path).unwrap();
@@ -2101,7 +2093,7 @@ fn profile_edit_rename_and_delete_use_the_selected_name() {
         dort_core::Manifest::parse(&fs::read_to_string(&path).unwrap()).unwrap()
     };
 
-    assert!(pick(&mut app, Kind::EditProfileDefaults, "work").is_none());
+    assert!(pick(&mut app, "work: On", "e Edit profile defaults").is_none());
     assert_eq!(
         app.shell.configuration.as_ref().unwrap().fields(),
         [
@@ -2125,7 +2117,7 @@ fn profile_edit_rename_and_delete_use_the_selected_name() {
     assert_eq!(manifest.profiles.platform[&Platform::Linux], ["work"]);
     assert_eq!(manifest.files[0].profiles, ["work"]);
 
-    assert!(pick(&mut app, Kind::RenameProfile, "work").is_none());
+    assert!(pick(&mut app, "work: On", "R Rename profile").is_none());
     assert_eq!(
         app.shell.configuration.as_ref().unwrap().fields(),
         [("New name for work", "")]
@@ -2142,18 +2134,76 @@ fn profile_edit_rename_and_delete_use_the_selected_name() {
     assert!(manifest.profiles.platform[&Platform::Linux].is_empty());
     assert_eq!(manifest.files[0].profiles, ["dev"]);
 
-    assert!(
-        super::tests::more_target(&mut app, |target| matches!(
-            target,
-            Target::Action(Action::Configure(Kind::DeleteProfile))
-        ))
-        .is_none()
-    );
-    key(&mut app, KeyCode::End);
-    let read = key(&mut app, KeyCode::Enter).unwrap();
+    let read = pick(&mut app, "unused: Off", "d Delete profile").unwrap();
     let manifest = save(&mut app, read);
     assert_eq!(manifest.profiles.available, ["dev"]);
     assert!(!f.host.home.join(".editor").exists());
+}
+
+#[test]
+fn contextual_workflows_remain_reachable_after_resize() {
+    use super::tests::{click_label, render};
+    let f = Fixture::new(true);
+    let mut app = onboarding_app(&f, false);
+    let overview = render(&app, 48, 14);
+    let footer = overview.lines().last().unwrap();
+    assert!(
+        footer.contains("e Env plan") && footer.contains("s Profiles"),
+        "{overview}"
+    );
+    assert!(click_label(&mut app, 48, 14, "s Profiles").is_none());
+    let profiles = render(&app, 48, 14);
+    assert!(
+        profiles.contains("Overview / Profiles") && profiles.contains("n New profile"),
+        "{profiles}"
+    );
+    assert!(click_label(&mut app, 48, 14, "n New profile").is_none());
+    assert!(render(&app, 48, 14).contains("Profile name"));
+
+    key(&mut app, KeyCode::Char('f'));
+    assert!(click_label(&mut app, 48, 14, "n Add").is_none());
+    assert!(render(&app, 48, 14).contains("Add file mapping"));
+    key(&mut app, KeyCode::Esc);
+    assert!(click_label(&mut app, 48, 14, "Enter Details").is_none());
+    assert!(click_label(&mut app, 48, 14, "e Edit mapping").is_none());
+    let form = render(&app, 140, 40);
+    assert!(
+        form.contains("Edit file mapping") && form.contains(".editor"),
+        "{form}"
+    );
+    assert!(!f.host.home.join(".editor").exists());
+
+    key(&mut app, KeyCode::Char('t'));
+    key(&mut app, KeyCode::F(2));
+    let labels: Vec<_> = app
+        .more
+        .as_ref()
+        .unwrap()
+        .items
+        .iter()
+        .map(|i| i.action.label)
+        .collect();
+    for label in [
+        "Clone repository",
+        "Create or attach",
+        "Review environment",
+        "Saved profiles",
+        "Create profile",
+        "Edit profile defaults",
+        "Rename profile",
+        "Delete profile",
+        "Add file mapping",
+        "Edit file mapping",
+        "Environment check",
+        "Review environment resume",
+        "Abandon environment run",
+        "Repair unregistered manifest",
+    ] {
+        assert!(
+            !labels.contains(&label),
+            "{label} leaked into Tools' F2 menu"
+        );
+    }
 }
 
 #[test]
@@ -2163,18 +2213,11 @@ fn saved_profiles_requires_review_then_reopens_from_local_configuration() {
     fs::write(&manifest, "schema=1\n[profiles]\navailable=['work']\ndefault=['work']\n[[files]]\nid='editor'\nsource='source'\ntarget='~/.editor'\nmode='link'\nprofiles=['work']\n").unwrap();
     let mut app = App::new(false);
     app.complete(Ok(Output::Data(actions::load(&f.host, None).unwrap())));
-    let show = |app: &mut App| {
-        super::tests::more_target(app, |target| {
-            matches!(
-                target,
-                super::input::Target::Action(super::shell::Action::SavedProfiles)
-            )
-        })
-    };
+    let show = |app: &mut App| super::tests::click_label(app, 100, 24, "s Profiles");
     assert!(show(&mut app).is_none());
     assert!(super::tests::render(&app, 80, 24).contains("work: On (repository default)"));
     key(&mut app, KeyCode::Down);
-    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(key(&mut app, KeyCode::Char('s')).is_none());
     key(&mut app, KeyCode::End);
     let preview = key(&mut app, KeyCode::Enter).unwrap();
     let original = fs::read(f.host.local_config_path()).unwrap();
@@ -2221,13 +2264,7 @@ fn clone_form_review_registers_without_creating_home_link() {
     let mut app = App::new(false);
     app.git = Ok(git);
     app.complete(Ok(Output::Data(actions::load(&f.host, None).unwrap())));
-    assert!(
-        super::tests::more_target(&mut app, |target| matches!(
-            target,
-            super::input::Target::Action(super::shell::Action::Clone)
-        ))
-        .is_none()
-    );
+    assert!(super::tests::click_label(&mut app, 80, 24, "l Clone repository").is_none());
     type_text(&mut app, f.root.to_str().unwrap());
     key(&mut app, KeyCode::Tab);
     type_text(&mut app, clone.to_str().unwrap());
@@ -2278,21 +2315,17 @@ fn unregistered_manifest_repair_opens_a_draft_and_requires_diff_approval() {
     app.complete(Ok(Output::Data(
         actions::load(&f.host, Some(&f.root)).unwrap(),
     )));
-    assert!(
-        super::tests::more_target(&mut app, |target| matches!(
-            target,
-            super::input::Target::Action(super::shell::Action::Configure(
-                super::configuration::Kind::Repair
-            ))
-        ))
-        .is_none()
-    );
+    app.complete(Ok(Output::CloneNeedsRepair {
+        repository: f.root.clone(),
+        reason: "Invalid manifest".into(),
+    }));
+    assert!(super::tests::render(&app, 80, 24).contains("Repair manifest"));
     let run = |app: &mut App, task| {
         app.complete(Ok(
             actions::perform(task, &f.host, None, |_| Ok(())).unwrap()
         ));
     };
-    let open = key(&mut app, KeyCode::Enter).unwrap();
+    let open = super::tests::click_label(&mut app, 80, 24, "m Repair manifest").unwrap();
     run(&mut app, open);
     assert!(super::tests::render(&app, 80, 24).contains("Manifest repair draft"));
     key(&mut app, KeyCode::End);

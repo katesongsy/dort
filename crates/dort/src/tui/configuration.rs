@@ -82,7 +82,7 @@ impl Kind {
         }
     }
 
-    pub fn picks_profile(self) -> bool {
+    pub fn edits_profile(self) -> bool {
         matches!(
             self,
             Self::EditProfileDefaults | Self::RenameProfile | Self::DeleteProfile

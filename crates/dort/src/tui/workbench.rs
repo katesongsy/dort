@@ -36,6 +36,7 @@ pub fn shortcut(action: Action) -> &'static str {
         Action::Abandon => "x",
         Action::CheckCurrent => "c",
         Action::CheckStandalone => "v",
+        Action::Configure(super::configuration::Kind::Repair) => "e",
         Action::Diagnostics => "r",
         Action::Profiles => "t",
         Action::GitStatus => "z",
@@ -225,6 +226,26 @@ fn compact(label: &'static str) -> &'static str {
         "Remove"
     } else if label == "Tool settings" {
         "Settings"
+    } else if label == "Create or attach" {
+        "Create/attach"
+    } else if label == Action::Clone.label() {
+        "Clone"
+    } else if label == Action::EnvironmentPlan.label() {
+        "Env plan"
+    } else if label == "Add file mapping" {
+        "Add"
+    } else if label == "Edit file mapping" {
+        "Edit mapping"
+    } else if label == Action::SaveProfileChoice.label() {
+        "Local choice"
+    } else if label == "Review resume" {
+        "Resume review"
+    } else if label == "Edit profile defaults" {
+        "Defaults"
+    } else if label == "Rename profile" {
+        "Rename"
+    } else if label == "Delete profile" {
+        "Delete"
     } else if label.starts_with("Review") {
         "Review"
     } else if label.starts_with("Install") {
@@ -425,6 +446,16 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
         );
     app.preview_approval()
         .present_key(&app.hits, preview.pending.confirmation_label());
+    if app.environment_review_needs_check() {
+        app.presented("Check tools", "c", Target::Action(Action::EnvironmentCheck));
+    }
+    if app.file_review_needs_environment() {
+        app.presented(
+            Action::EnvironmentPlan.label(),
+            "w",
+            Target::Action(Action::EnvironmentPlan),
+        );
+    }
     app.presented("Back", "Esc", Target::Back);
 }
 fn overlay(frame: &mut Frame, inner: Rect, app: &App, overlay: &Overlay) {
@@ -557,6 +588,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
                     super::declared_tools::draw(frame, body, app)
                 }
                 Tab::Tools => app.tools_view.draw(frame, body, app.dry_run, &app.hits),
+                Tab::Overview if app.profiles.open => super::profiles::draw(frame, body, app),
                 Tab::Overview => super::observations::overview(frame, body, app),
                 Tab::Checks => super::observations::checks(frame, body, app),
                 Tab::Recovery => super::recovery::draw(frame, body, app),

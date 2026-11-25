@@ -141,7 +141,7 @@ pub fn load_scoped(
                 Err(error) => {
                     let error = diagnostic(&error);
                     files_error = Some(format!(
-                        "{error}\nChoose repository or Create/attach in Actions."
+                        "{error}\nOpen Overview to choose, clone, create or attach a repository."
                     ));
                 }
                 Ok(root) => {
@@ -500,10 +500,12 @@ impl Approved {
                     None,
                 )
             }
-            Self::Clone(p, root) => {
-                p.execute(host)?;
-                ("Clone and register", None, Some(root))
-            }
+            Self::Clone(p, root) => match p.execute_with_result(host)? {
+                bootstrap::CloneResult::Registered(_) => ("Clone and register", None, Some(root)),
+                bootstrap::CloneResult::InvalidManifest { repository, reason } => {
+                    return Ok(Output::CloneNeedsRepair { repository, reason });
+                }
+            },
             Self::Profile(p) => {
                 p.execute(host)?;
                 ("Save profile choice", None, None)
@@ -641,6 +643,7 @@ pub enum Task {
     },
     EnvironmentCheck(crate::services::inspection_defaults::Inputs),
     EnvironmentAbandon,
+    EnvironmentRecord,
     ToolsInstalledPrepare(crate::services::inspection_defaults::Inputs),
     ToolsInstalledInspect(crate::services::installed_tools::Approval),
     ToolsCheckPrepare(crate::services::inspection_defaults::Inputs),
@@ -699,6 +702,7 @@ pub enum Task {
 }
 pub enum Output {
     EnvironmentRun(dort_core::environment::Run),
+    EnvironmentRecord(Option<dort_core::environment::Run>),
     RecoveryRequired(Box<journal::WriteBlocker>),
     ToolsInstalledPreview(crate::services::installed_tools::Preview),
     ToolsInstalled(crate::services::installed_tools::Current),
@@ -740,6 +744,10 @@ pub enum Output {
     Preview(Pending),
     RepairDraft(Box<dort_core::manifest_edit::RepairDraft>),
     ManifestRepaired(PathBuf),
+    CloneNeedsRepair {
+        repository: PathBuf,
+        reason: String,
+    },
     Completed(Completion),
 }
 #[cfg(test)]
@@ -779,6 +787,10 @@ pub fn perform_scoped_with_install_progress(
                 .map(Output::ToolsInstalledPreview)
         }
         Task::ToolsInstalledInspect(approval) => approval.inspect().map(Output::ToolsInstalled),
+        Task::EnvironmentRecord => {
+            let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
+            dort_core::environment::Run::latest(host, &root).map(Output::EnvironmentRecord)
+        }
         Task::EnvironmentAbandon => {
             let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
             dort_core::environment::AbandonPreview::prepare(host, &root)

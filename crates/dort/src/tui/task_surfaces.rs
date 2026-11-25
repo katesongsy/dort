@@ -133,6 +133,7 @@ impl Activity {
                 _ => "Preview configuration change",
             },
             Task::EnvironmentAbandon => "Review environment abandonment",
+            Task::EnvironmentRecord => "Read environment run",
             Task::Clone { .. } => "Preview clone and registration",
             Task::Init { .. } => "Preview create/attach",
             Task::Files(request) => request_label(request),
@@ -632,7 +633,26 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
                 .map(|line| Line::raw(line.to_owned()))
                 .collect(),
         );
-        controls(frame, actions, app, false);
+        for key in ['m', 'a', 's', 'x'] {
+            if let Some(action) = app.result_action(ratatui::crossterm::event::KeyCode::Char(key)) {
+                let label = if action == super::shell::Action::EnvironmentResume {
+                    "Review resume"
+                } else {
+                    action.label()
+                };
+                app.presented(
+                    label,
+                    match key {
+                        'm' => "m",
+                        'a' => "a",
+                        's' => "s",
+                        _ => "x",
+                    },
+                    Target::Action(action),
+                );
+            }
+        }
+        app.presented("Back", "Esc", Target::Back);
     } else if app.busy {
         let mut lines = vec![];
         let progress = app.activity.as_ref().and_then(|a| a.progress.as_ref());

@@ -231,8 +231,22 @@ impl ClonePreview {
 
 pub struct CloneApproval(ClonePreview);
 
+pub enum CloneResult {
+    Registered(String),
+    InvalidManifest { repository: PathBuf, reason: String },
+}
+
 impl CloneApproval {
     pub fn execute(self, host: &HostContext) -> Result<String> {
+        match self.execute_with_result(host)? {
+            CloneResult::Registered(id) => Ok(id),
+            CloneResult::InvalidManifest { repository, reason } => Err(Error::Invalid(format!(
+                "Clone kept at {repository:?}. Fix dort.toml, then attach this folder: {reason}"
+            ))),
+        }
+    }
+
+    pub fn execute_with_result(self, host: &HostContext) -> Result<CloneResult> {
         let _lock = WriterLock::acquire(host)?;
         journal::ensure_writable(host)?;
         let p = self.0;
@@ -290,16 +304,15 @@ impl CloneApproval {
             manifest.validate_file_targets(host, &active, Some(&p.destination), None)?;
             Ok(())
         };
-        check().map_err(|error| {
-            Error::Invalid(format!(
-                "Clone kept at {:?}. Use More > Repair unregistered manifest (or edit dort.toml externally), then review attaching this folder: {}",
-                p.destination,
-                match error {
-                    Error::Parse(_) => "invalid TOML (contents withheld)".into(),
+        if let Err(error) = check() {
+            return Ok(CloneResult::InvalidManifest {
+                repository: p.destination,
+                reason: match error {
+                    Error::Parse(_) => "Invalid TOML. Contents withheld.".into(),
                     other => other.to_string(),
-                }
-            ))
-        })?;
+                },
+            });
+        }
         if !matches(&p.config, &config_entry(host)?.0) {
             return Err(Error::Invalid(format!(
                 "Clone kept at {:?}. Registration changed. Review attaching the clone.",
@@ -307,6 +320,7 @@ impl CloneApproval {
             )));
         }
         local::RepositoryRegistry::register(host, &_lock, &p.destination)
+            .map(CloneResult::Registered)
     }
 }
 

@@ -73,7 +73,7 @@ pub(super) fn entry(action: Action, primary: Option<usize>) -> Entry {
 pub fn entries(app: &App) -> Vec<Entry> {
     use Action::*;
     let (primary, other): (Vec<Action>, Vec<Action>) = match app.tab {
-        Tab::Overview => (vec![Apply], vec![Profiles, Refresh]),
+        Tab::Overview => (vec![Apply], vec![Refresh]),
         Tab::Files if app.discovering => (
             vec![AdoptSelected, IgnoreSelected, ToggleMark, BatchAdopt],
             vec![
@@ -111,7 +111,12 @@ pub fn entries(app: &App) -> Vec<Entry> {
         Tab::Recovery => (vec![Rollback, Resume, Abandon], vec![ClearFilter, Refresh]),
         Tab::Checks if app.showing_diagnostics => (vec![Diagnostics], vec![]),
         Tab::Checks => (
-            vec![CheckCurrent, CheckStandalone, Profiles],
+            vec![
+                CheckCurrent,
+                CheckStandalone,
+                Configure(super::configuration::Kind::Repair),
+                Profiles,
+            ],
             vec![StandaloneProfiles, Refresh],
         ),
         Tab::Git => (vec![GitRefresh], vec![ClearFilter]),
@@ -160,6 +165,23 @@ pub fn page_actions(app: &App) -> Vec<Action> {
         .collect();
     rows.sort_by_key(|e| e.primary);
     rows.into_iter().map(|e| e.action).collect()
+}
+
+pub(super) fn control_action(
+    key: ratatui::crossterm::event::KeyCode,
+    controls: impl IntoIterator<Item = super::components::ActionButton>,
+) -> Option<Action> {
+    let ratatui::crossterm::event::KeyCode::Char(c) = key else {
+        return None;
+    };
+    let mut buf = [0; 4];
+    let key = c.encode_utf8(&mut buf);
+    controls
+        .into_iter()
+        .find_map(|control| match control.target {
+            super::input::Target::Action(action) if control.key == key => Some(action),
+            _ => None,
+        })
 }
 
 pub(super) fn file_action(key: ratatui::crossterm::event::KeyCode, app: &App) -> Option<Action> {

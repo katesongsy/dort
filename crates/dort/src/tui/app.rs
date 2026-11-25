@@ -38,9 +38,16 @@ struct RowClick {
     size: (u16, u16),
     row: u16,
 }
+pub(super) enum ResultNext {
+    Repair(PathBuf),
+    Attach,
+    RecoverRun,
+}
+
 pub struct App {
     pub appearance: super::appearance::Appearance,
     pub overview_details: bool,
+    pub profiles: super::profiles::Page,
     pub more: Option<super::more::More>,
     pub choice: Option<super::choice::Choice>,
     pub motion: super::components::motion::Indicator,
@@ -59,6 +66,8 @@ pub struct App {
     pub result: Option<String>,
     pub receipt: Option<super::task_surfaces::Receipt>,
     pub show_result: bool,
+    pub(super) result_next: Option<ResultNext>,
+    pub(super) return_to_environment: Option<(Tab, bool)>,
     pub activity: Option<super::task_surfaces::Activity>,
     pub reviewed_activity: Option<super::task_surfaces::Activity>,
     pub failure: Option<super::task_surfaces::Failure>,
@@ -100,18 +109,12 @@ pub struct App {
     pub failed_write: bool,
 }
 impl App {
-    pub(super) fn overview_primary(&self) -> Action {
-        if self
-            .data
+    pub(super) fn registered_repository(&self) -> bool {
+        self.data
             .as_ref()
             .and_then(|d| d.overview.as_ref())
             .and_then(|o| o.registered)
             == Some(true)
-        {
-            Action::Apply
-        } else {
-            Action::Init
-        }
     }
     pub(super) fn checks_primary(&self) -> Action {
         if self.showing_diagnostics {
@@ -134,6 +137,7 @@ impl App {
         Self {
             appearance: Default::default(),
             overview_details: false,
+            profiles: Default::default(),
             more: None,
             choice: None,
             motion: Default::default(),
@@ -153,6 +157,8 @@ impl App {
             result: None,
             receipt: None,
             show_result: false,
+            result_next: None,
+            return_to_environment: None,
             activity: None,
             reviewed_activity: None,
             failure: None,
@@ -245,6 +251,9 @@ impl App {
         if result.is_ok() {
             self.retry = None;
         }
+        if !matches!(&result, Ok(Output::Data(_) | Output::History { .. })) {
+            self.result_next = None;
+        }
         let task = match result {
             Ok(Output::ToolsInstalledPreview(preview)) => {
                 self.accept_tools_installed_preview(preview)
@@ -327,8 +336,26 @@ impl App {
                 None
             }
             Ok(Output::Preview(pending)) => self.accept_preview(pending),
+            Ok(Output::EnvironmentRecord(run)) => {
+                self.receipt = None;
+                self.result_next = run
+                    .as_ref()
+                    .filter(|run| !run.abandoned() && !run.complete())
+                    .map(|_| ResultNext::RecoverRun);
+                self.result = Some(run.map_or_else(
+                    || "No environment run for this repository.".into(),
+                    |run| run.human(),
+                ));
+                self.show_result = true;
+                self.details_scroll = 0;
+                self.status = "Latest environment run for the selected repository.".into();
+                None
+            }
             Ok(Output::EnvironmentRun(run)) => {
                 self.receipt = None;
+                if !run.abandoned() && !run.complete() {
+                    self.result_next = Some(ResultNext::RecoverRun);
+                }
                 self.result = Some(run.human());
                 self.show_result = true;
                 self.details_scroll = 0;
@@ -350,6 +377,18 @@ impl App {
                     "Edit the draft, then review the diff. Nothing has been saved.".into();
                 None
             }
+            Ok(Output::CloneNeedsRepair { repository, reason }) => {
+                self.shell.back();
+                self.receipt = None;
+                self.result = Some(format!(
+                    "Clone kept at {repository:?}.\n\n{reason}\n\nRepair dort.toml before attaching the repository."
+                ));
+                self.result_next = Some(ResultNext::Repair(repository));
+                self.show_result = true;
+                self.details_scroll = 0;
+                self.status = "Cloned. The manifest needs repair.".into();
+                None
+            }
             Ok(Output::ManifestRepaired(backup)) => {
                 if let Some(draft) = self.shell.repair.take() {
                     self.shell.init_draft = draft.repository().display().to_string();
@@ -362,6 +401,7 @@ impl App {
                 self.show_result = true;
                 self.details_scroll = 0;
                 self.status = "Manifest repaired. Review attaching the repository next.".into();
+                self.result_next = Some(ResultNext::Attach);
                 None
             }
             Ok(Output::Completed(completion)) => self.accept_completed(completion, activity),
@@ -694,7 +734,9 @@ impl App {
                 height,
             ),
             Target::Row(index) => {
-                if self.tab == Tab::Files && super::tree::position(self, index).is_some() {
+                if self.tab == Tab::Overview && self.profiles.open {
+                    self.profiles.selected = index;
+                } else if self.tab == Tab::Files && super::tree::position(self, index).is_some() {
                     super::tree::select(self, index);
                     self.inventory.details = false;
                 } else if self.tab == Tab::Recovery && self.visible_history_rows().contains(&index)
@@ -1089,7 +1131,11 @@ impl App {
         if transient_before != transient_after {
             self.hits.invalidate_review();
         }
-        if !transient_before && !transient_after && form_before != self.form_page() {
+        if !transient_before
+            && !transient_after
+            && form_before != self.form_page()
+            && self.form_focus != self.form_page()
+        {
             self.form_focus = None;
         }
         super::discover_content::sync(self, width, height);
@@ -1245,10 +1291,21 @@ impl App {
             && !self.show_result
             && self.preview.is_none()
         {
-            match key.code {
-                KeyCode::Enter if !self.overview_details => {
-                    return self.activate(self.overview_primary());
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            {
+                if self.profiles.open {
+                    return self.profiles_key(key.code);
                 }
+                if let Some(action) = super::context::control_action(
+                    key.code,
+                    super::observations::overview_controls(self),
+                ) {
+                    return self.activate(action);
+                }
+            }
+            match key.code {
                 KeyCode::F(3) => {
                     self.overview_details = !self.overview_details;
                     self.details_scroll = 0;
@@ -1352,6 +1409,7 @@ impl App {
                     self.failed_write = false;
                     self.retry = None;
                     self.details_scroll = 0;
+                    return self.return_to_environment_review();
                 }
                 KeyCode::Home => self.details_scroll = 0,
                 KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(2),
@@ -1361,6 +1419,13 @@ impl App {
             return None;
         }
         if self.show_result && self.preview.is_none() {
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                && let Some(action) = self.result_action(key.code)
+            {
+                return self.activate(action);
+            }
             use super::task_surfaces::Control;
             let control = match key.code {
                 KeyCode::Char('r') => Some(Control::Retry),
@@ -1383,6 +1448,22 @@ impl App {
         }
         if self.preview_approval().accepts(key) {
             return self.approve_preview();
+        }
+        if key.code == KeyCode::Char('w')
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            && self.file_review_needs_environment()
+        {
+            return self.activate(Action::EnvironmentPlan);
+        }
+        if key.code == KeyCode::Char('C')
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            && self.environment_review_needs_check()
+        {
+            return self.activate(Action::EnvironmentCheck);
         }
         if let Some(preview) = &mut self.preview {
             match key.code {
@@ -1688,10 +1769,16 @@ impl App {
         {
             self.details_scroll = 0;
         }
-        if self.tab == Tab::Files
-            && let Some(action) = super::context::file_action(key.code, self)
-        {
-            return self.activate(action);
+        if self.tab == Tab::Files {
+            let action = (!self.discovering)
+                .then(|| {
+                    super::context::control_action(key.code, super::files::managed_controls(self))
+                })
+                .flatten()
+                .or_else(|| super::context::file_action(key.code, self));
+            if let Some(action) = action {
+                return self.activate(action);
+            }
         }
         match key.code {
             KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(2),
@@ -1731,13 +1818,20 @@ impl App {
             KeyCode::Char('j') if self.tab == Tab::Checks => {
                 return self.activate(Action::Diagnostics);
             }
+            KeyCode::Char('e') if self.tab == Tab::Checks && !self.showing_diagnostics => {
+                return self.activate(Action::Configure(super::configuration::Kind::Repair));
+            }
+            KeyCode::Char('e')
+                if self.tab == Tab::Recovery && self.history_region == Region::Queue =>
+            {
+                return self.activate(Action::EnvironmentRecord);
+            }
             KeyCode::Char('m') if self.tab == Tab::Checks => {
                 self.showing_diagnostics = false;
                 self.details_scroll = 0;
             }
             KeyCode::Delete if self.tab == Tab::Files => return self.activate(Action::ClearFilter),
             KeyCode::Char('p') => return self.activate(Action::Choose),
-            KeyCode::Char('n') => return self.activate(Action::Init),
             KeyCode::Char('c') => return self.activate(Action::CheckCurrent),
             KeyCode::Char('v') if self.tab != Tab::Tools => {
                 return self.activate(Action::CheckStandalone);
@@ -1831,6 +1925,15 @@ impl App {
             self.git_view.scope_changed();
             self.git_view.root = git_default;
         }
+        self.profiles.selected = self
+            .selected_profile()
+            .and_then(|old| {
+                data.profile_rows
+                    .iter()
+                    .position(|row| row.name == old.name)
+            })
+            .unwrap_or(self.profiles.selected)
+            .min(data.profile_rows.len().saturating_sub(1));
         self.data = Some(data);
         self.selected = position
             .unwrap_or(self.selected)
@@ -1976,6 +2079,16 @@ impl App {
         });
         super::discover_content::sync(self, self.viewport.0, self.viewport.1);
     }
+    pub(super) fn result_action(&self, code: KeyCode) -> Option<Action> {
+        match (&self.result_next, code) {
+            (Some(ResultNext::Repair(_)), KeyCode::Char('m')) => Some(Action::RepairClone),
+            (Some(ResultNext::Attach), KeyCode::Char('a')) => Some(Action::AttachRepaired),
+            (Some(ResultNext::RecoverRun), KeyCode::Char('s')) => Some(Action::EnvironmentResume),
+            (Some(ResultNext::RecoverRun), KeyCode::Char('x')) => Some(Action::EnvironmentAbandon),
+            _ => None,
+        }
+    }
+
     pub(super) fn activate(&mut self, action: Action) -> Option<Task> {
         if action == Action::Help {
             self.open_help();
@@ -1999,19 +2112,33 @@ impl App {
         }
         self.shell.overlay = None;
         match action {
-            Action::SavedProfiles => self.open_saved_profiles(),
-            Action::Configure(kind) if kind.picks_profile() => self.open_profile_picker(kind),
+            Action::ProfilesPage => {
+                self.go_tab(Tab::Overview);
+                self.profiles.open = true;
+            }
+            Action::SaveProfileChoice => self.open_profile_choice(self.selected_profile()?.clone()),
+            Action::Configure(kind) if kind.edits_profile() => {
+                use super::configuration::{Draft, Kind, Request};
+                use dort_core::manifest_edit::{Change, Profile};
+                let name = self.selected_profile()?.name.clone();
+                if kind == Kind::DeleteProfile {
+                    return Some(Task::Configuration(Box::new(Request::Manifest(
+                        Change::Profile {
+                            old: Some(name),
+                            new: None,
+                        },
+                    ))));
+                }
+                let profiles = self.data.as_ref()?.profile_declarations.as_ref()?;
+                let profile = Profile::from_declaration(profiles, name);
+                self.shell.configuration = Some(Draft::for_profile(kind, profile));
+                self.shell.overlay = Some(Overlay::Form(Form::Configure));
+                self.form_focus = self.form_page();
+            }
             Action::Configure(kind) => {
                 use super::configuration::{Draft, Kind};
                 let mapping = if kind == Kind::EditFile {
-                    let data = self.data.as_ref()?;
-                    let (id, _) = data.files.get(self.selected)?;
-                    Some(
-                        data.file_declarations
-                            .iter()
-                            .find(|file| &file.id == id)?
-                            .clone(),
-                    )
+                    Some(self.selected_mapping()?.clone())
                 } else {
                     None
                 };
@@ -2023,8 +2150,29 @@ impl App {
                 self.shell.configuration = Some(Draft::new(kind, mapping, root));
                 self.shell.overlay = Some(Overlay::Form(Form::Configure));
             }
+            Action::RepairClone => {
+                if let Some(ResultNext::Repair(root)) = self.result_next.take() {
+                    let git = self.git.as_ref().ok()?.clone();
+                    return Some(Task::Configuration(Box::new(
+                        super::configuration::Request::OpenRepair(root, git),
+                    )));
+                }
+            }
+            Action::AttachRepaired => {
+                if !matches!(self.result_next.take(), Some(ResultNext::Attach)) {
+                    return None;
+                }
+                let git = self.git.as_ref().ok()?.clone();
+                return Some(Task::Init {
+                    root: PathBuf::from(&self.shell.init_draft),
+                    git,
+                });
+            }
+            Action::EnvironmentRecord => return Some(Task::EnvironmentRecord),
             Action::EnvironmentAbandon => return Some(Task::EnvironmentAbandon),
             Action::EnvironmentPlan | Action::EnvironmentResume => {
+                self.preview = None;
+                self.hits.invalidate_review();
                 return Some(Task::Environment {
                     resume: action == Action::EnvironmentResume,
                 });
@@ -2126,7 +2274,19 @@ impl App {
                 self.tools_view.open_manifest();
             }
             Action::ToolsCheck | Action::EnvironmentCheck => {
+                let after = if action == Action::EnvironmentCheck {
+                    self.preview
+                        .take()
+                        .and_then(|preview| match preview.pending {
+                            Pending::Environment(plan) => Some((self.tab, plan.is_resume())),
+                            _ => None,
+                        })
+                } else {
+                    None
+                };
                 self.go_tab(Tab::Tools);
+                self.return_to_environment = after;
+                self.hits.invalidate_review();
                 let details = self.tools_view.declared_details;
                 self.tools_view.leave_section();
                 self.tools_view.declared_details = details;
@@ -2547,7 +2707,21 @@ impl App {
             self.details_scroll = 0;
         }
     }
+    pub(super) fn environment_review_needs_check(&self) -> bool {
+        self.preview.as_ref().is_some_and(
+            |review| matches!(&review.pending, Pending::Environment(plan) if plan.needs_check()),
+        )
+    }
+
+    pub(super) fn return_to_environment_review(&mut self) -> Option<Task> {
+        let (tab, resume) = self.return_to_environment.take()?;
+        self.go_tab(tab);
+        Some(Task::Environment { resume })
+    }
+
     fn reset_repository_scope(&mut self) {
+        self.return_to_environment = None;
+        self.profiles = Default::default();
         self.tools_view.declared.invalidate();
         self.git_view.discard_preview();
         if self.git_view.follows_files {
@@ -2745,18 +2919,17 @@ impl App {
             | Action::EnvironmentPlan
             | Action::EnvironmentCheck
             | Action::EnvironmentResume
+            | Action::EnvironmentRecord
             | Action::EnvironmentAbandon
-                if self
-                    .data
-                    .as_ref()
-                    .and_then(|d| d.overview.as_ref())
-                    .and_then(|o| o.registered)
-                    != Some(true) =>
+            | Action::ProfilesPage
+                if !self.registered_repository() =>
             {
                 Some("Choose a registered repository.")
             }
             Action::Configure(kind)
-                if (kind.picks_profile() || kind == super::configuration::Kind::CreateProfile)
+                if (kind.edits_profile()
+                    || kind == super::configuration::Kind::CreateProfile
+                    || kind == super::configuration::Kind::File)
                     && self
                         .data
                         .as_ref()
@@ -2764,32 +2937,12 @@ impl App {
             {
                 Some("Choose a repository with a readable manifest.")
             }
-            Action::Configure(kind)
-                if kind.picks_profile()
-                    && self
-                        .data
-                        .as_ref()
-                        .and_then(|data| data.profile_declarations.as_ref())
-                        .is_none_or(|profiles| {
-                            !profiles.available.iter().any(|name| name != "base")
-                        }) =>
-            {
-                Some("Create a profile first. Base stays on.")
-            }
+            Action::Configure(kind) if kind.edits_profile() => self.profile_action_reason(),
+            Action::SaveProfileChoice => self.profile_action_reason(),
             Action::Configure(super::configuration::Kind::EditFile)
-                if self.tab != Tab::Files
-                    || self.discovering
-                    || !self.visible_file_rows().contains(&self.selected) =>
+                if self.selected_mapping().is_none() =>
             {
                 Some("Select a displayed file mapping first.")
-            }
-            Action::SavedProfiles
-                if self
-                    .data
-                    .as_ref()
-                    .is_none_or(|data| data.profile_rows.is_empty()) =>
-            {
-                Some("Choose a repository with a readable manifest.")
             }
             Action::CheckCurrent | Action::Profiles
                 if self
@@ -2949,6 +3102,12 @@ impl App {
             Tab::Recovery => data.history.len(),
             _ => 0,
         })
+    }
+    pub(super) fn file_review_needs_environment(&self) -> bool {
+        self.tab == Tab::Files
+            && self.registered_repository()
+            && matches!(self.preview.as_ref().map(|p| &p.pending), Some(Pending::Files(plan))
+                if plan.has_blockers() && plan.inputs.files.iter().any(|file| !file.mapping.requires.is_empty()))
     }
     pub fn batch_removal_ids(&self) -> Vec<String> {
         match self.preview.as_ref().map(|p| &p.pending) {

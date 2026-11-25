@@ -344,6 +344,39 @@ fn declared_workflow_gallery_export_probe() {
 }
 
 #[test]
+fn managed_prerequisites_route_to_environment_without_running_tools_or_files() {
+    let f = Fixture::new();
+    f.program(
+        "brew",
+        include_str!("../../../tests/support/environment-brew.sh"),
+    );
+    std::fs::write(
+        f.repo.join("dort.toml"),
+        include_str!("../../../tests/support/environment.toml"),
+    )
+    .unwrap();
+    std::fs::write(f.repo.join("settings"), "editor settings\n").unwrap();
+    let mut app = app(&f, false);
+    key(&mut app, KeyCode::Char('f'));
+    let go = |app: &mut super::app::App| {
+        let task = super::tests::click_label(app, 48, 14, "w Env plan").unwrap();
+        assert!(matches!(task, Task::Environment { resume: false }));
+        run(&f, app, task);
+        assert!(app.preview.as_ref().unwrap().text.contains("Requires: b"));
+        assert!(super::tests::approve_ready(app, 48, 14).is_none());
+        assert!(f.calls().is_empty());
+        assert!(!f.host.home.join(".editor").exists());
+        key(app, KeyCode::Esc);
+    };
+    go(&mut app);
+    let task = key(&mut app, KeyCode::Char('a')).unwrap();
+    run(&f, &mut app, task);
+    assert!(app.preview.as_ref().unwrap().pending.blocked());
+    go(&mut app);
+    assert!(render(&app, 140, 40).contains("Files / Managed"));
+}
+
+#[test]
 fn environment_review_and_resume_check_tools_before_touching_editor() {
     let f = Fixture::new();
     f.program(
@@ -358,15 +391,10 @@ fn environment_review_and_resume_check_tools_before_touching_editor() {
     std::fs::write(f.repo.join("settings"), "editor settings\n").unwrap();
     std::fs::write(f.host.home.join("fail-b"), "").unwrap();
     let mut app = app(&f, false);
-    let open = |app: &mut super::app::App, action| {
-        super::tests::more_target(
-            app,
-            |target| matches!(target, super::input::Target::Action(a) if a == action),
-        )
-        .unwrap()
-    };
     let check = |app: &mut super::app::App| {
-        let Task::EnvironmentCheck(mut inputs) = open(app, Action::EnvironmentCheck) else {
+        let Some(Task::EnvironmentCheck(mut inputs)) =
+            super::tests::click_label(app, 80, 24, "C Check tools")
+        else {
             panic!("environment check")
         };
         inputs.search_dirs = vec![f.bin.clone()];
@@ -375,12 +403,17 @@ fn environment_review_and_resume_check_tools_before_touching_editor() {
         assert!(key(app, KeyCode::Enter).is_none());
         let approved = super::tests::approve_ready(app, 80, 24).unwrap();
         run(&f, app, approved);
+        assert!(matches!(
+            app.preview.as_ref().map(|p| &p.pending),
+            Some(super::actions::Pending::Environment(_))
+        ));
     };
-    check(&mut app);
-    assert_eq!(f.calls(), "Q");
-    let task = open(&mut app, Action::EnvironmentPlan);
+    key(&mut app, KeyCode::Char('o'));
+    let task = super::tests::click_label(&mut app, 100, 24, "e Review environment").unwrap();
     run(&f, &mut app, task);
     assert!(app.preview.as_ref().unwrap().text.contains("Requires: b"));
+    assert!(f.calls().is_empty());
+    check(&mut app);
     assert_eq!(f.calls(), "Q");
     let approved = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     run(&f, &mut app, approved);
@@ -396,13 +429,13 @@ fn environment_review_and_resume_check_tools_before_touching_editor() {
     assert!(screen.contains("editor: Pending"));
     assert!(!f.host.home.join(".editor").exists());
     key(&mut app, KeyCode::Esc);
-    let task = open(&mut app, Action::EnvironmentResume);
+    key(&mut app, KeyCode::Char('r'));
+    let task = super::tests::click_label(&mut app, 100, 24, "e Environment run").unwrap();
+    run(&f, &mut app, task);
+    let task = super::tests::click_label(&mut app, 80, 24, "s Review resume").unwrap();
     run(&f, &mut app, task);
     assert!(super::tests::approve_ready(&mut app, 80, 24).is_none());
-    key(&mut app, KeyCode::Esc);
     check(&mut app);
-    let task = open(&mut app, Action::EnvironmentResume);
-    run(&f, &mut app, task);
     let approved = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     run(&f, &mut app, approved);
     assert!(super::tests::render(&app, 100, 26).contains("editor: Confirmed"));

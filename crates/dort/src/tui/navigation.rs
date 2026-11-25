@@ -142,6 +142,7 @@ pub fn group(app: &App) -> usize {
 }
 pub fn location(app: &App) -> &'static str {
     match app.tab {
+        Tab::Overview if app.profiles.open => "Overview / Profiles",
         Tab::Overview => "Overview",
         Tab::Tools if app.tools_view.installed_open => "Tools / Installed packages",
         Tab::Tools if app.tools_view.install_open => match app.tools_view.installation.mode {
@@ -166,7 +167,9 @@ pub fn location(app: &App) -> &'static str {
 impl App {
     pub(super) fn go_tab(&mut self, tab: Tab) {
         if self.tab != tab {
+            self.return_to_environment = None;
             self.form_focus = None;
+            self.profiles.open = false;
             self.tools_view.leave_section();
             self.navigation.selected[index(self.tab)] = self.selected;
             self.navigation.scroll[index(self.tab)] = self.details_scroll;

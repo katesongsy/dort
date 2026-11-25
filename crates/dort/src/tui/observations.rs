@@ -60,18 +60,39 @@ fn count(value: Option<usize>) -> String {
         .unwrap_or_else(|| "Unknown".into())
 }
 
-pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
-    if !app.overview_details {
-        let action = app.overview_primary();
-        app.presented(
-            if action == Action::Apply {
-                "Review changes"
-            } else {
-                "Create or attach"
+pub(super) fn overview_controls(app: &App) -> [ui::ActionButton; 2] {
+    if app.registered_repository() {
+        [
+            ui::ActionButton {
+                label: Action::EnvironmentPlan.label(),
+                key: "e",
+                target: Target::Action(Action::EnvironmentPlan),
             },
-            "Enter",
-            Target::Action(action),
-        );
+            ui::ActionButton {
+                label: Action::ProfilesPage.label(),
+                key: "s",
+                target: Target::Action(Action::ProfilesPage),
+            },
+        ]
+    } else {
+        [
+            ui::ActionButton {
+                label: "Create or attach",
+                key: "n",
+                target: Target::Action(Action::Init),
+            },
+            ui::ActionButton {
+                label: Action::Clone.label(),
+                key: "l",
+                target: Target::Action(Action::Clone),
+            },
+        ]
+    }
+}
+
+pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
+    for control in overview_controls(app) {
+        app.hits.present(control);
     }
     app.presented(
         if app.overview_details {
@@ -150,7 +171,7 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
         );
         lines.push(section("Welcome"));
         lines.push(Line::raw(
-            "Choose a repository or create a local one to manage files.",
+            "Clone, create or attach a repository to manage files.",
         ));
         lines.push(Line::raw(
             "Discovery, standalone checks and Recovery need no repository.",

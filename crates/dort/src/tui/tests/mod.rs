@@ -418,7 +418,7 @@ fn navigation_and_metadata_escaping() {
     assert!(app.tab == Tab::Files);
     app.key(key(KeyCode::Down), 80, 24);
     assert_eq!(app.selected, 0);
-    assert!(render(&app, 48, 14).contains("No active files."));
+    assert!(render(&app, 48, 14).contains("No mappings."));
 }
 
 #[test]
@@ -437,7 +437,8 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     assert!(app.tab == Tab::Files);
     app.key(key(KeyCode::BackTab), 80, 24);
     assert!(app.preview.is_none());
-    app.key(key(KeyCode::Char('n')), 80, 24);
+    app.key(key(KeyCode::Char('p')), 80, 24);
+    click_label(&mut app, 80, 24, "Create/attach");
     focus_form(&mut app);
     for c in "q?/".chars() {
         app.key(key(KeyCode::Char(c)), 80, 24);
@@ -448,8 +449,10 @@ fn shell_focus_help_and_search_restore_destination_without_intercepting_text() {
     app.resize(80, 24);
     assert_eq!(app.shell.init_draft, "q?/");
     app.key(key(KeyCode::Esc), 80, 24);
-    assert!(app.tab == Tab::Files);
-    app.key(key(KeyCode::Char('n')), 80, 24);
+    app.key(key(KeyCode::Esc), 80, 24);
+    assert!(app.tab == Tab::Files && app.shell.overlay.is_none());
+    app.key(key(KeyCode::Char('p')), 80, 24);
+    click_label(&mut app, 80, 24, "Create/attach");
     app.key(
         KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
         80,

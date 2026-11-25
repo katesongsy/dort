@@ -22,7 +22,7 @@ pub enum Topic {
     Choice,
     Form(Form),
     ProfileForm(Kind),
-    ProfilePicker(Kind),
+    Profiles,
     Picker,
     Ignored,
     About,
@@ -48,7 +48,8 @@ impl Topic {
             Self::More => "More actions",
             Self::Choice => "Choose a value",
             Self::Form(_) => "Form",
-            Self::ProfileForm(kind) | Self::ProfilePicker(kind) => kind.label(),
+            Self::ProfileForm(kind) => kind.label(),
+            Self::Profiles => "Profiles",
             Self::Picker => "Session picker",
             Self::Ignored => "Ignored paths / Unignore",
             Self::About => "About",
@@ -94,17 +95,16 @@ impl Topic {
                 "The rows show the current defaults. Focus a row and press Space to turn it on or off. ",
                 "All hosts turns the profile on everywhere, macOS and Linux on that platform. ",
                 "Leave all three off for an optional profile. ",
-                "Use Saved profiles to change your local choice."
+                "Use Local choice on the Profiles page for this machine."
             ),
             Self::ProfileForm(Kind::RenameProfile) => concat!(
                 "Enter a new name for the selected profile. Dort updates files, tools and defaults ",
-                "that use the old name. Set the local choice for the new name in Saved profiles."
+                "that use the old name. Set the local choice for the new name on the Profiles page."
             ),
             Self::ProfileForm(_) => unreachable!("only profile forms have profile field help"),
-            Self::ProfilePicker(Kind::DeleteProfile) => {
-                "Select an unused profile and review its deletion. Base stays on."
+            Self::Profiles => {
+                "Select a profile, then choose an action. Base stays on. Only unused profiles can be deleted."
             }
-            Self::ProfilePicker(_) => "Select the profile you want to change. Base stays on.",
             Self::Form(Form::Repair) => {
                 "Edit one line at a time, then review the manifest diff before saving."
             }
@@ -140,11 +140,16 @@ impl Topic {
     }
     fn keys(self, app: &App) -> &'static [(&'static str, &'static str)] {
         match self {
-            Self::More | Self::Choice | Self::ProfilePicker(_) => &[
+            Self::More | Self::Choice => &[
                 ("Up/Down", "Move between choices"),
                 ("Enter", "Choose"),
                 ("F3", "Inspect choice details"),
                 ("Esc", "Return without choosing"),
+            ],
+            Self::Profiles => &[
+                ("Up/Down", "Select a profile"),
+                ("F2", "More actions when space is limited"),
+                ("Esc", "Return to Overview"),
             ],
             Self::ProfileForm(_) => &[
                 ("Tab / Shift-Tab", "Move between fields"),
@@ -337,10 +342,8 @@ pub struct State {
     pub content_scroll: u16,
 }
 pub fn topic(app: &App) -> Topic {
-    if let Some(choice) = &app.choice {
-        return choice
-            .profile_action()
-            .map_or(Topic::Choice, Topic::ProfilePicker);
+    if app.choice.is_some() {
+        return Topic::Choice;
     }
     if app.more.is_some() {
         return Topic::More;
@@ -383,6 +386,7 @@ pub fn topic(app: &App) -> Topic {
         };
     }
     match app.tab {
+        Tab::Overview if app.profiles.open => Topic::Profiles,
         Tab::Overview => Topic::Overview,
         Tab::Files if app.discovering && app.content.focused => Topic::Content,
         Tab::Files if app.discovering => Topic::Discover,

@@ -2,19 +2,14 @@
 use super::{
     app::{App, Tab},
     components as ui,
-    configuration::{Draft, Kind, Request},
-    shell::{Form, Overlay},
     tool_declaration::PROVIDER_FIELD,
     tools_install,
 };
-use dort_core::manifest_edit::{Change, Profile};
 use ratatui::{Frame, crossterm::event::KeyCode};
 #[derive(Clone)]
 enum Value {
     ClosureProvider(usize),
-    Profile(dort_core::profiles::Row),
     SaveProfile(String, dort_core::profiles::Choice),
-    SelectProfile(Kind, Profile),
     DeclarationProvider {
         field: usize,
         provider: &'static str,
@@ -44,13 +39,6 @@ impl Choice {
             items,
         }
     }
-    pub fn profile_action(&self) -> Option<Kind> {
-        match &self.items.first()?.value {
-            Value::SelectProfile(kind, _) => Some(*kind),
-            _ => None,
-        }
-    }
-
     pub fn select(&mut self, index: usize) {
         self.selected = index.min(self.items.len().saturating_sub(1));
     }
@@ -81,39 +69,21 @@ impl Choice {
     }
 }
 impl App {
-    pub(super) fn open_profile_picker(&mut self, kind: Kind) {
-        let Some(profiles) = self
-            .data
-            .as_ref()
-            .and_then(|d| d.profile_declarations.as_ref())
-        else {
-            return;
-        };
-        let items = profiles
-            .known()
-            .into_iter()
-            .filter(|name| name != "base")
-            .map(|name| Item {
-                label: name.clone(),
-                scope: "Repository profile".into(),
-                value: Value::SelectProfile(kind, Profile::from_declaration(profiles, name)),
-            })
-            .collect();
-        self.choice = Some(Choice::new(kind.label(), items, 0));
-    }
-
-    pub(super) fn open_saved_profiles(&mut self) {
-        let items = self
-            .data
-            .iter()
-            .flat_map(|d| &d.profile_rows)
-            .map(|row| Item {
-                label: row.label(),
-                scope: format!("Local choice: {}", row.choice.label()),
-                value: Value::Profile(row.clone()),
-            })
-            .collect();
-        self.choice = Some(Choice::new("Saved profiles", items, 0));
+    pub(super) fn open_profile_choice(&mut self, row: dort_core::profiles::Row) {
+        use dort_core::profiles::Choice as P;
+        let values = [P::Defaults, P::On, P::Off];
+        self.choice = Some(Choice::new(
+            "Choose saved profile setting",
+            values
+                .into_iter()
+                .map(|value| Item {
+                    label: value.label().into(),
+                    scope: row.name.clone(),
+                    value: Value::SaveProfile(row.name.clone(), value),
+                })
+                .collect(),
+            values.iter().position(|v| *v == row.choice).unwrap_or(0),
+        ));
     }
 
     pub(super) fn open_control_choice(&mut self, code: KeyCode) -> bool {
@@ -220,42 +190,9 @@ impl App {
                 self.choice = None;
                 self.hits.clear();
                 match value {
-                    Value::Profile(row) if row.name != "base" => {
-                        use dort_core::profiles::Choice as P;
-                        let values = [P::Defaults, P::On, P::Off];
-                        self.choice = Some(Choice::new(
-                            "Choose saved profile setting",
-                            values
-                                .into_iter()
-                                .map(|value| Item {
-                                    label: value.label().into(),
-                                    scope: row.name.clone(),
-                                    value: Value::SaveProfile(row.name.clone(), value),
-                                })
-                                .collect(),
-                            values.iter().position(|v| *v == row.choice).unwrap_or(0),
-                        ));
-                    }
-                    Value::Profile(_) => {
-                        self.open_saved_profiles();
-                    }
                     Value::SaveProfile(name, value) => {
                         let root = self.data.as_ref()?.repository.clone()?;
                         return Some(super::actions::Task::Profile(root, name, value));
-                    }
-                    Value::SelectProfile(Kind::DeleteProfile, profile) => {
-                        return Some(super::actions::Task::Configuration(Box::new(
-                            Request::Manifest(Change::Profile {
-                                old: Some(profile.name),
-                                new: None,
-                            }),
-                        )));
-                    }
-                    Value::SelectProfile(kind, profile) => {
-                        self.shell.configuration = Some(Draft::for_profile(kind, profile));
-                        self.shell.overlay = Some(Overlay::Form(Form::Configure));
-                        // Prefilled fields accept edits at once; Tab still traverses.
-                        self.form_focus = Some("configuration");
                     }
                     Value::ClosureProvider(index) => {
                         self.tools_view.installation.choose_closure_provider(index)

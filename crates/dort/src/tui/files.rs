@@ -190,7 +190,56 @@ fn details(app: &App) -> Text<'static> {
     Text::from(lines)
 }
 
+impl App {
+    pub(super) fn selected_mapping(&self) -> Option<&dort_core::model::ManagedFile> {
+        if self.tab != super::app::Tab::Files || self.discovering {
+            return None;
+        }
+        let index = super::tree::selected(self)?.raw?;
+        let data = self.data.as_ref()?;
+        let (id, _) = data.files.get(index)?;
+        data.file_declarations.iter().find(|file| &file.id == id)
+    }
+}
+
+pub(super) fn managed_controls(app: &App) -> impl Iterator<Item = ui::ActionButton> {
+    use super::{configuration::Kind, shell::Action};
+    let mapping = app.selected_mapping();
+    let environment =
+        app.registered_repository() && mapping.is_some_and(|file| !file.requires.is_empty());
+    let add = ("Add file mapping", "n", Action::Configure(Kind::File), true);
+    let edit = (
+        "Edit file mapping",
+        "e",
+        Action::Configure(Kind::EditFile),
+        mapping.is_some(),
+    );
+    let review = (
+        Action::EnvironmentPlan.label(),
+        "w",
+        Action::EnvironmentPlan,
+        environment,
+    );
+    if app.inventory.details {
+        [review, edit, add]
+    } else {
+        [review, add, edit]
+    }
+    .into_iter()
+    .filter(|&(_, _, _, visible)| visible)
+    .map(|(label, key, action, _)| ui::ActionButton {
+        label,
+        key,
+        target: Target::Action(action),
+    })
+}
+
 pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
+    if !app.discovering {
+        for control in managed_controls(app) {
+            app.hits.present(control);
+        }
+    }
     let sections = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
@@ -454,7 +503,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                 .as_ref()
                 .and_then(|d| d.files_error.as_deref())
                 .unwrap_or(if total == 0 {
-                    "No active files. Discover a regular file to start."
+                    "No mappings. Add a mapping or discover a regular file."
                 } else {
                     "No matches. Delete clears the display filter."
                 })

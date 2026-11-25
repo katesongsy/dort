@@ -175,6 +175,21 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         Constraint::Min(3),
     ])
     .split(area);
+    if !app.history_search.editing
+        && app.history_region != Region::Details
+        && app
+            .data
+            .as_ref()
+            .and_then(|d| d.overview.as_ref())
+            .and_then(|o| o.registered)
+            == Some(true)
+    {
+        app.presented(
+            "Environment run",
+            "e",
+            super::input::Target::Action(super::shell::Action::EnvironmentRecord),
+        );
+    }
     let available = app.data.as_ref().filter(|d| d.history_error.is_none());
     let (total, blockers) = available
         .map(|d| {

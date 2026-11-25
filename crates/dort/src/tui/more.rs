@@ -41,41 +41,6 @@ fn session_actions(app: &App) -> Vec<ui::ActionButton> {
     use super::shell::Action;
     let mut actions = vec![
         ui::ActionButton {
-            label: "Review environment plan",
-            key: "",
-            target: Target::Action(Action::EnvironmentPlan),
-        },
-        ui::ActionButton {
-            label: "Environment check",
-            key: "",
-            target: Target::Action(Action::EnvironmentCheck),
-        },
-        ui::ActionButton {
-            label: "Review environment resume",
-            key: "",
-            target: Target::Action(Action::EnvironmentResume),
-        },
-        ui::ActionButton {
-            label: "Abandon environment run",
-            key: "",
-            target: Target::Action(Action::EnvironmentAbandon),
-        },
-        ui::ActionButton {
-            label: "Clone repository",
-            key: "",
-            target: Target::Action(Action::Clone),
-        },
-        ui::ActionButton {
-            label: "Repair unregistered manifest",
-            key: "",
-            target: Target::Action(Action::Configure(super::configuration::Kind::Repair)),
-        },
-        ui::ActionButton {
-            label: "Saved profiles",
-            key: "",
-            target: Target::Action(Action::SavedProfiles),
-        },
-        ui::ActionButton {
             label: "Toggle preview-only mode",
             key: "",
             target: Target::Action(Action::PreviewOnly),
@@ -87,28 +52,15 @@ fn session_actions(app: &App) -> Vec<ui::ActionButton> {
         },
     ];
     use super::configuration::Kind;
-    const PROFILES: &[Kind] = &[
-        Kind::CreateProfile,
-        Kind::EditProfileDefaults,
-        Kind::RenameProfile,
-        Kind::DeleteProfile,
-    ];
     let configurations: &[Kind] = match app.tab {
-        Tab::Files => &[Kind::File, Kind::EditFile],
         Tab::Overview => &[Kind::Startup, Kind::Forget, Kind::Reconnect],
         _ => &[],
     };
-    let profiles = if app.tab == Tab::Files { &[] } else { PROFILES };
-    actions.extend(
-        profiles
-            .iter()
-            .chain(configurations)
-            .map(|&kind| ui::ActionButton {
-                label: kind.label(),
-                key: "",
-                target: Target::Action(Action::Configure(kind)),
-            }),
-    );
+    actions.extend(configurations.iter().map(|&kind| ui::ActionButton {
+        label: kind.label(),
+        key: "",
+        target: Target::Action(Action::Configure(kind)),
+    }));
     if app.tab == Tab::Git && !app.git_view.follows_files {
         actions.push(ui::ActionButton {
             label: "Follow selected repository",

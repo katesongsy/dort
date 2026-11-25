@@ -501,7 +501,7 @@ def run():
         # Text carries navigation/state meaning even with a low-color terminal.
         with Session([binary, "--dry-run", "tui"], dict(env, TERM="vt100", NO_COLOR="1"), (14, 48)) as session:
             session.wait(b"loaded.")
-            for label in [b"Overview", b"DRY RUN", b"Create or attach", b"F2 More", b"F1 Help"]:
+            for label in [b"Overview", b"DRY RUN", b"Create/attach", b"l Clone", b"F2 More", b"F1 Help"]:
                 session.wait(label)
             session.send(b"?")
             session.wait(b"Start with a repository")
@@ -511,7 +511,7 @@ def run():
             session.send(b"\x1b[H")
             session.wait(b"Start with a repository")
             session.send(b"\x1b")
-            session.wait(b"Create or attach")
+            session.wait(b"Create/attach")
             session.send(b"q")
             session.finish()
             assert session.screen.text().isascii() and session.data.isascii()
@@ -1156,7 +1156,9 @@ def run():
         manifest_before = (repo / "dort.toml").read_bytes()
         with Session([binary, "tui"], dict(env, TERM="vt100")) as session:
             session.wait(b"loaded.")
-            session.more_action("Create profile")
+            session.click_action("Profiles")
+            session.wait(b"Overview / Profiles")
+            session.click_action("New profile")
             session.wait(b"Profile name")
             session.send(b"\twork")  # Tab focuses the name field.
             session.wait(b"work")

@@ -137,7 +137,7 @@ fn observe_inner(
         }
         if !environment && !mapping.requires.is_empty() {
             blockers.push(format!(
-                "Requires {}. Use Review environment plan (F2 More) or dort environment plan.",
+                "Requires {}. Choose Review environment in Files, or run dort environment plan.",
                 mapping.requires.join(", ")
             ));
         }

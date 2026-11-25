@@ -37,7 +37,7 @@ After a failure, `R` retries a read or asks for a fresh preview. It never replay
 Use `1` for Managed, `2` for Discover and `3` for Ignored paths. `g` opens Git.
 - **Managed:** `u` Unmanage keeps the local file; `U` Unmanage marked does the same for marked files. `m` Manual adopt opens an adoption draft. `a` Apply reviews all active files; `A` Apply marked reviews marked files only.
 - **Discover:** `a` Adopt opens a draft for the selected file; `A` Adopt marked opens a batch draft. `i` Ignore reviews excluding the selected path from discovery.
-- In **Managed**, use **F2 More → Add file mapping** for a file already in the repository. Select a mapping and use **Edit file mapping** to change its declaration. Review and save before applying. Adoption also lets you choose active profiles.
+- In **Managed**, use **Add mapping** for a file already in the repository. Select a mapping and use **Edit file mapping** to change its declaration. Review and save before applying. Adoption also lets you choose active profiles.
 - In either list, `Space` marks or unmarks, and `Home` / `End` select the first or last row. Hidden marks still count.
 - **Delete link** and **Delete marked** are separate actions. Review the paths and confirm the exact mapping IDs before deleting links.
 ## Tools
@@ -186,9 +186,9 @@ dort profiles list --profile work
 
 `base` is always on. A temporary `--profile` wins over the saved choice, which wins over repository and platform defaults. Saved choices affect only the selected registered repository. Saving a choice leaves files and tools in place. An installed link can appear as **No longer selected** until you remove it separately.
 
-From **Overview**, open **F2 More → Create profile**, enter a name, then press **Space** on each default row to turn it on or off. **All hosts** turns the profile on everywhere; **macOS** and **Linux** turn it on for that platform. Leave all three off for an optional profile. **Edit profile defaults**, **Rename profile**, and **Delete profile** let you pick an existing profile first. Only unused profiles can be deleted. Press **F1 Help** for field details.
+From **Overview**, open **Profiles**, then choose **New profile**. Enter a name, then press **Space** on each default row to turn it on or off. **All hosts** turns the profile on everywhere; **macOS** and **Linux** turn it on for that platform. Leave all three off for an optional profile. **Edit profile defaults**, **Rename profile**, and **Delete profile** let you pick an existing profile first. Only unused profiles can be deleted. Press **F1 Help** for field details.
 
-Open **F2 More → Saved profiles** to set the local choice. Select **Use defaults**, **On**, or **Off**, then review and save. Use **Profiles** to try temporary additions without saving them.
+In **Overview → Profiles**, select a profile and choose **Local choice**. Select **Use defaults**, **On**, or **Off**, then review and save. Use the temporary profile picker in **Checks** to try additions without saving them.
 
 ## Clone or init
 
@@ -201,7 +201,7 @@ dort init /path/to/existing-repository
 
 `clone` accepts an HTTPS URL without credentials or an absolute local Git path. The destination must be new and its parent must exist. Dort keeps a clone with an invalid `dort.toml` without registering it. Fix the manifest, then attach the clone with `dort init PATH`. Clone leaves Home targets, profile choices, and packages unchanged.
 
-`init` creates a local repository or attaches an existing Git tree. In the TUI, open **F2 More → Clone repository** or **Create/attach**.
+`init` creates a local repository or attaches an existing Git tree. In the TUI, use **Clone repository** or **Create or attach** in **Overview**. If a clone needs repair, choose **Repair manifest** on the clone result.
 
 In **Overview → F2 More**, set the startup repository, forget a registration, or reconnect a moved repository. Forgetting leaves the repository, Home files, and history in place. Reconnecting keeps saved choices and history. Check existing Home links after moving a repository.
 
@@ -226,7 +226,7 @@ If a run stops, review **Resume**. Dort rechecks confirmed work without reinstal
 
 An unfinished run cannot be replaced with a new plan. If Resume is blocked and you want to start over, review **Abandon environment run**. Dort keeps the old run record and leaves completed links and packages in place. Before retrying an uncertain install, close any unresolved install record in **Tools History** (or `dort tools close-attempt ID`), run **Environment check**, and review a new plan. Dort does not upgrade, downgrade, or uninstall a mismatched package. Use the package manager outside Dort to select the declared version, or correct the declaration, then check again.
 
-In the TUI, open **F2 More** for **Review environment plan**, **Environment check**, **Review environment resume**, and **Abandon environment run**.
+In the TUI, use **Review environment** in **Overview**. If the plan needs a tool check, choose **Check tools** from the review. Dort returns to a fresh review when the check finishes. To continue after a stopped run, open **Environment run** in **Recovery** and choose **Review resume**. To keep completed changes and start over, choose **Abandon run** on the run record.
 
 ## Checks
 

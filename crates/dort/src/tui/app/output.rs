@@ -68,6 +68,9 @@ impl App {
             self.tools_view.declared.checked = Some(std::sync::Arc::new(checked));
             self.tools_view.declared.installed = None;
             self.tools_view.declared.stale = false;
+            if self.return_to_environment.is_some() {
+                return self.return_to_environment_review();
+            }
             self.status =
                 "Declared tools checked. Select a tool for details, or Install missing.".into();
         }

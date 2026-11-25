@@ -624,6 +624,21 @@ impl Preview {
         })
     }
 
+    pub fn is_resume(&self) -> bool {
+        self.resume
+    }
+
+    pub fn needs_check(&self) -> bool {
+        self.plan.rows.iter().any(|row| row.row.status == "Unknown")
+            || (self.resume
+                && self.blocked()
+                && self
+                    .plan
+                    .rows
+                    .iter()
+                    .any(|row| matches!(row.row.item, Item::Tool(_))))
+    }
+
     pub fn blocked(&self) -> bool {
         !self.blockers.is_empty() || self.plan.rows.iter().any(|r| !r.row.blockers.is_empty())
     }

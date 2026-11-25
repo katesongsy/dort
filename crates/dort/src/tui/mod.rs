@@ -82,6 +82,7 @@ mod observations;
 #[path = "tests/picker.rs"]
 mod picker_tests;
 mod pickers;
+mod profiles;
 mod recovery;
 #[cfg(test)]
 #[path = "tests/recovery.rs"]

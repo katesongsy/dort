@@ -93,8 +93,13 @@ impl App {
         if self.tab == Tab::Git && self.git_view.browsing_details() && !self.git_view.editing_root {
             return Some("Git / Details");
         }
-        if self.tab == Tab::Overview && self.overview_details {
-            return Some("Overview / Details");
+        if self.tab == Tab::Overview {
+            if self.profiles.open {
+                return Some("Overview / Profiles");
+            }
+            if self.overview_details {
+                return Some("Overview / Details");
+            }
         }
         if self.tab == Tab::Tools {
             if let Some(title) = self.tools_view.declared.title() {
@@ -160,6 +165,7 @@ impl App {
         self.show_result = false;
         self.shell.overlay = None;
         self.shell.return_to_adopt = false;
+        self.profiles.open = false;
         self.tools_view.leave();
         self.git_view.leave_page();
         if let Some(editor) = &mut self.batch_editor {

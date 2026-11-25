@@ -47,6 +47,20 @@ pub struct Run {
     pub(super) stale_check: Option<String>,
 }
 impl Run {
+    pub fn latest(host: &HostContext, root: &Path) -> Result<Option<Self>> {
+        let local = LocalConfig::load(host)?;
+        let id = local
+            .repositories
+            .iter()
+            .find(|(_, record)| record.root == root)
+            .map(|(id, _)| id)
+            .ok_or_else(|| invalid("Choose a registered repository."))?;
+        directory(host, id, false)?
+            .map(|dir| read(&dir, "run.json"))
+            .transpose()
+            .map(Option::flatten)
+    }
+
     fn uncertain_tool(&self) -> bool {
         self.steps.iter().any(|step| {
             matches!(step.item, Item::Tool(_))

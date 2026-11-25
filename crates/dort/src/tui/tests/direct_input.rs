@@ -353,7 +353,8 @@ fn mouse_buttons_use_raw_picker_paths_and_modal_hits_do_not_reach_destination_ta
         matches!(task, Some(Task::Select(Some(ref root))) if root.to_str() == Some("/synthetic/raw-root-end"))
     );
     press(&mut app, KeyCode::Esc, size);
-    press(&mut app, KeyCode::Char('n'), size);
+    press(&mut app, KeyCode::Char('p'), size);
+    assert!(super::tests::click_label(&mut app, size.0, size.1, "Create/attach").is_none());
     assert!(app.tab == Tab::Files && matches!(app.shell.overlay, Some(Overlay::Form(Form::Init))));
     press(&mut app, KeyCode::Esc, size);
     assert!(app.shell.overlay.is_none());
