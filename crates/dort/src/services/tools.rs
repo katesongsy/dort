@@ -3,7 +3,7 @@ use dort_core::{Error, Result, context::HostContext, observation, tools::inspect
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Request {
     pub query: inspection::Query,
     pub executable: PathBuf,

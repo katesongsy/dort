@@ -49,6 +49,7 @@ Tools has three tabs: **1 Declared**, **2 Installed**, **3 History**.
 `Enter` opens details. Actions:
 
 - `C` Check installed: review detected package-manager queries, then run once.
+- `m` Check another manifest: enter its absolute path and review the check. The result does not change the selected repository or enable installs.
 - `i` Install missing: review one eligible set, then install serially.
 - `a` Add declaration, `e` Edit, `d` Remove.
 - `s` Tool settings, only when detection needs paths.
@@ -75,7 +76,7 @@ Use settings only when detection cannot find the right program or folder. Enter 
 - Extra program search directories.
 - npm: Node's npm CLI and global prefix.
 
-Saved settings affect later checks. They do not run anything.
+Saved settings stay on this host and apply to the selected repository and tool. npm settings apply to tools that share the selected Node runtime. Saving paths does not run a package manager.
 
 ### CLI
 

@@ -1,6 +1,6 @@
 //! Tools pages. Package-manager details stay internal.
 use super::{actions::Task, components as ui, input::Target, shell::edit_text};
-use crate::services::{inspection_defaults, tools::Request};
+use crate::services::inspection_defaults::{self, SettingsEditor};
 use dort_core::{
     model::Tool,
     tools::{declaration::Change, inspection::Query},
@@ -18,6 +18,7 @@ enum Page {
     Details,
     Declaration,
     Settings,
+    Manifest,
     History,
     Installed,
 }
@@ -26,23 +27,24 @@ pub struct Settings {
     pub tool: String,
     pub fields: [String; 4],
     pub focus: usize,
-    pub request: Option<Request>,
+    pub editor: Option<SettingsEditor>,
     pub error: Option<String>,
 }
 impl Settings {
     pub fn count(&self) -> usize {
         if self
-            .request
+            .editor
             .as_ref()
-            .is_some_and(|r| r.query == Query::NpmGlobals)
+            .is_some_and(|editor| editor.request.query == Query::NpmGlobals)
         {
             4
         } else {
             2
         }
     }
-    fn prepare(&mut self) -> Option<Task> {
-        let mut request = self.request.clone()?;
+    pub fn prepare(&self, preview_only: bool) -> Option<Task> {
+        let mut editor = self.editor.clone()?;
+        let request = &mut editor.request;
         request.executable = PathBuf::from(&self.fields[0]);
         request.search_dirs = self.fields[1]
             .split(':')
@@ -53,7 +55,10 @@ impl Settings {
             request.npm_cli = Some(PathBuf::from(&self.fields[2]));
             request.prefix = Some(PathBuf::from(&self.fields[3]));
         }
-        Some(Task::ToolsSettingsValidate(request))
+        Some(Task::ToolsSettingsSave {
+            editor,
+            preview_only,
+        })
     }
 }
 #[derive(Default)]
@@ -67,9 +72,11 @@ pub struct State {
     declaration_key: Option<String>,
     saved_declarations: BTreeMap<String, super::tool_declaration::State>,
     pub settings_open: bool,
+    pub manifest_open: bool,
+    manifest_path: String,
     pub settings: Settings,
-    settings_drafts: BTreeMap<String, Settings>,
-    overrides: Vec<Request>,
+    settings_key: Option<(PathBuf, String)>,
+    settings_drafts: BTreeMap<(PathBuf, String), Settings>,
     pub install_open: bool,
     pub installation: super::tools_install::State,
     pub installed_open: bool,
@@ -81,6 +88,8 @@ impl State {
             Page::Declaration
         } else if self.settings_open {
             Page::Settings
+        } else if self.manifest_open {
+            Page::Manifest
         } else if self.installed_open {
             Page::Installed
         } else if self.install_open {
@@ -98,7 +107,11 @@ impl State {
         self.parents.push(self.page());
     }
     pub fn landing(&self) -> bool {
-        !self.declaration_open && !self.settings_open && !self.install_open && !self.installed_open
+        !self.declaration_open
+            && !self.settings_open
+            && !self.manifest_open
+            && !self.install_open
+            && !self.installed_open
     }
     pub fn at_root(&self) -> bool {
         self.landing()
@@ -106,12 +119,14 @@ impl State {
             && self.declared.check_preview.is_none()
             && self.declared.install_preview.is_none()
             && !self.declared.result_open
+            && self.declared.standalone_result.is_none()
     }
     pub fn workspace_visible(&self) -> bool {
         self.landing()
             && self.declared.check_preview.is_none()
             && self.declared.install_preview.is_none()
             && !self.declared.result_open
+            && self.declared.standalone_result.is_none()
             || self.installed_open
                 && !self.installed.waiting
                 && self.installed.preview.is_none()
@@ -129,20 +144,21 @@ impl State {
     pub fn text_entry(&self) -> bool {
         self.installed_open && self.installed.searching
             || self.settings_open
+            || self.manifest_open
             || self.declaration_open && self.declaration.change != Some(Change::Remove)
             || self.install_open && self.installation.text_entry()
     }
     pub fn inspection_inputs(&self) -> inspection_defaults::Inputs {
-        let mut input = crate::environment::inspection_inputs();
-        input.overrides = self.overrides.clone();
-        input
+        crate::environment::inspection_inputs()
     }
     pub fn leave(&mut self) {
         self.declared.clear_reviews();
         self.declared.result_open = false;
+        self.declared.standalone_result = None;
         self.declared_details = false;
         self.declaration_open = false;
         self.settings_open = false;
+        self.manifest_open = false;
         self.install_open = false;
         self.installation.clear_approvals();
         self.installed.clear_review();
@@ -159,11 +175,25 @@ impl State {
             Page::Details => self.declared_details = true,
             Page::Declaration => self.declaration_open = true,
             Page::Settings => self.settings_open = true,
+            Page::Manifest => self.manifest_open = true,
             Page::History => self.install_open = true,
             Page::Installed => self.installed_open = true,
             Page::List => (),
         }
         None
+    }
+    pub fn open_manifest(&mut self) {
+        self.remember();
+        self.leave();
+        self.manifest_open = true;
+    }
+    pub fn manifest_check(&mut self) -> Task {
+        self.declared.check_waiting = true;
+        Task::ToolsStandaloneCheckPrepare(crate::services::declared_tools::Input {
+            manifest: PathBuf::from(&self.manifest_path),
+            profiles: Vec::new(),
+            detection: self.inspection_inputs(),
+        })
     }
     fn switch_declaration(&mut self, key: Option<String>) {
         self.remember();
@@ -214,16 +244,19 @@ impl State {
         self.declaration = Default::default();
         self.declaration_key = None;
     }
-    pub fn configure(&mut self, tool: Tool) -> Option<Task> {
+    pub fn configure(&mut self, manifest: PathBuf, tool: Tool) -> Option<Task> {
         self.remember();
         self.leave();
-        if self.settings.tool != tool.id {
+        let key = (manifest, tool.id.clone());
+        if self.settings_key.as_ref() != Some(&key) {
             if self.settings_drafts.len() >= 128 {
                 self.settings_drafts.pop_first();
             }
-            let previous = std::mem::take(&mut self.settings);
-            self.settings_drafts.insert(previous.tool.clone(), previous);
-            self.settings = self.settings_drafts.remove(&tool.id).unwrap_or_default();
+            let next = self.settings_drafts.remove(&key).unwrap_or_default();
+            let previous = std::mem::replace(&mut self.settings, next);
+            if let Some(previous_key) = self.settings_key.replace(key) {
+                self.settings_drafts.insert(previous_key, previous);
+            }
         }
         self.settings.tool = tool.id.clone();
         self.settings_open = true;
@@ -232,11 +265,23 @@ impl State {
             inputs: self.inspection_inputs(),
         })
     }
-    pub fn settings_ready(&mut self, tool: String, request: Request) {
-        if !self.settings_open || self.settings.tool != tool {
+    pub fn settings_ready(&mut self, editor: SettingsEditor) {
+        if !self.settings_open
+            || self
+                .settings_key
+                .as_ref()
+                .is_none_or(|(path, id)| path != &editor.manifest || id != &editor.tool)
+        {
             return;
         }
-        if self.settings.request.is_none() {
+        if self
+            .settings
+            .editor
+            .as_ref()
+            .is_none_or(|previous| !previous.matches(&editor))
+        {
+            let request = &editor.request;
+            self.settings.focus = 0;
             self.settings.fields = [
                 request.executable.display().to_string(),
                 request
@@ -257,16 +302,12 @@ impl State {
                     .unwrap_or_default(),
             ];
         }
-        self.settings.request = Some(request);
+        self.settings.editor = Some(editor);
         self.settings.error = None;
     }
-    pub fn settings_saved(&mut self, request: Request) {
-        if !self.settings_open {
-            return;
-        }
-        self.overrides
-            .retain(|r| r.query != request.query || r.runtime_tool != request.runtime_tool);
-        self.overrides.push(request);
+    pub fn settings_saved(&mut self) {
+        self.settings = Settings::default();
+        self.settings_key = None;
         self.declared.invalidate();
         self.back();
     }
@@ -349,6 +390,16 @@ impl State {
             }
             return Some(self.declaration.key(key));
         }
+        if self.manifest_open {
+            return Some(match key.code {
+                KeyCode::Esc => self.back(),
+                KeyCode::Enter => Some(self.manifest_check()),
+                _ => {
+                    edit_text(&mut self.manifest_path, key);
+                    None
+                }
+            });
+        }
         if self.settings_open {
             let n = self.settings.count();
             return Some(match key.code {
@@ -361,7 +412,7 @@ impl State {
                     self.settings.focus = (self.settings.focus + n - 1) % n;
                     None
                 }
-                KeyCode::Enter => self.settings.prepare(),
+                KeyCode::Enter => self.settings.prepare(dry_run),
                 _ => {
                     edit_text(
                         &mut self.settings.fields[self.settings.focus.min(n - 1)],
@@ -387,13 +438,43 @@ impl State {
             self.installation.draw(frame, area, dry_run, hits);
             return;
         }
+        if self.manifest_open {
+            ui::field_page(
+                frame,
+                area,
+                &[("Absolute manifest path", &self.manifest_path)],
+                0,
+                hits,
+                |_| Target::ToolsControl(0, false),
+                ui::FormActions {
+                    choices: &[],
+                    buttons: &[
+                        ui::ActionButton {
+                            label: "Review checks",
+                            key: "Enter",
+                            target: Target::ToolsControl(1, true),
+                        },
+                        ui::ActionButton {
+                            label: "Back",
+                            key: "Esc",
+                            target: Target::Back,
+                        },
+                    ],
+                    feedback: Some(ui::Feedback {
+                        text: "Check only. This does not select a repository or prepare installs.",
+                        tone: ui::design::Tone::Information,
+                    }),
+                },
+            );
+            return;
+        }
         if self.settings_open {
             let labels = [
                 if self
                     .settings
-                    .request
+                    .editor
                     .as_ref()
-                    .is_some_and(|r| r.query == Query::NpmGlobals)
+                    .is_some_and(|editor| editor.request.query == Query::NpmGlobals)
                 {
                     "Node program"
                 } else {
@@ -409,10 +490,19 @@ impl State {
                 .take(self.settings.count())
                 .map(|(a, b)| (*a, b.as_str()))
                 .collect::<Vec<_>>();
-            let note = format!(
-                "Settings for {} apply to this session. Check installed after saving.",
-                ui::inline(&self.settings.tool)
-            );
+            let scope = if self.settings.count() == 4 {
+                "tools sharing this Node runtime"
+            } else {
+                "this tool"
+            };
+            let note = if dry_run {
+                "Dry run validates paths without saving.".to_string()
+            } else {
+                format!(
+                    "Save settings for {} on this host. They apply to {scope} in this repository.",
+                    ui::inline(&self.settings.tool)
+                )
+            };
             ui::field_page(
                 frame,
                 area,
@@ -424,7 +514,11 @@ impl State {
                     choices: &[],
                     buttons: &[
                         ui::ActionButton {
-                            label: "Save settings",
+                            label: if dry_run {
+                                "Validate paths"
+                            } else {
+                                "Save on this host"
+                            },
                             key: "Enter",
                             target: Target::ToolsControl(4, true),
                         },

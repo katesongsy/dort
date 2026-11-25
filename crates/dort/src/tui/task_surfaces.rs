@@ -108,6 +108,7 @@ impl Activity {
             Task::Environment { resume: true } => "Review environment resume",
             Task::Environment { resume: false } => "Review environment plan",
             Task::EnvironmentCheck(_) => "Prepare environment check (no execution)",
+            Task::ToolsStandaloneCheckPrepare(_) => "Prepare standalone checks (no execution)",
             Task::ToolsCheckPrepare(_) => "Prepare declared-tool checks (no execution)",
             Task::ToolsCheck(_) => "Check declared tools",
             Task::ToolsInstallMissingPrepare(_) => {
@@ -139,7 +140,13 @@ impl Activity {
             Task::ToolClose(_) => "Check package manager and close an unchanged record",
             Task::ToolDeclaration(_) => "Preview declaration change (manifest only)",
             Task::ToolsSettingsDetect { .. } => "Find tool settings (no execution)",
-            Task::ToolsSettingsValidate(_) => "Validate session tool settings (no execution)",
+            Task::ToolsSettingsSave {
+                preview_only: true, ..
+            } => "Validate tool settings (no execution)",
+            Task::ToolsSettingsSave {
+                preview_only: false,
+                ..
+            } => "Save host-local tool settings (no execution)",
             Task::Execute(approved) => {
                 if let Some(reviewed) = &app.reviewed_activity {
                     return reviewed.clone();

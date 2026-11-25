@@ -632,6 +632,7 @@ pub enum Task {
     ToolsInstalledPrepare(crate::services::inspection_defaults::Inputs),
     ToolsInstalledInspect(crate::services::installed_tools::Approval),
     ToolsCheckPrepare(crate::services::inspection_defaults::Inputs),
+    ToolsStandaloneCheckPrepare(crate::services::declared_tools::Input),
     ToolsCheck(Box<crate::services::declared_tools::CheckApproval>),
     ToolsInstallMissingPrepare(std::sync::Arc<crate::services::declared_tools::Checked>),
     ToolsInstallMissing(crate::services::declared_tools::InstallApproval),
@@ -652,7 +653,10 @@ pub enum Task {
         tool: dort_core::model::Tool,
         inputs: crate::services::inspection_defaults::Inputs,
     },
-    ToolsSettingsValidate(crate::services::tools::Request),
+    ToolsSettingsSave {
+        editor: crate::services::inspection_defaults::SettingsEditor,
+        preview_only: bool,
+    },
     Refresh,
     Discover,
     Check {
@@ -704,8 +708,10 @@ pub enum Output {
     Diagnostics(Diagnostics),
     Git(super::git::Metadata),
     GitPreview(super::git::PreviewReport),
-    ToolsSettingsDetected(String, crate::services::tools::Request),
-    ToolsSettingsSaved(crate::services::tools::Request),
+    ToolsSettingsDetected(crate::services::inspection_defaults::SettingsEditor),
+    ToolsSettingsSaved {
+        preview_only: bool,
+    },
     Data(Data),
     Discovery(crate::services::Discovery),
     Checked {
@@ -777,20 +783,21 @@ pub fn perform_scoped_with_install_progress(
                     "Environment check needs a registered repository.".into(),
                 ));
             }
-            crate::services::declared_tools::Input {
+            let input = crate::services::declared_tools::Input {
                 manifest: root.join("dort.toml"),
                 profiles: requested.to_vec(),
                 detection,
+            };
+            if environment {
+                input.prepare(host).map(|p| p.for_environment())
+            } else {
+                input.prepare_for_tools(host, false)
             }
-            .prepare(host)
-            .map(|preview| {
-                Output::ToolsCheckPreview(if environment {
-                    preview.for_environment()
-                } else {
-                    preview
-                })
-            })
+            .map(Output::ToolsCheckPreview)
         }
+        Task::ToolsStandaloneCheckPrepare(input) => input
+            .prepare_for_tools(host, true)
+            .map(Output::ToolsCheckPreview),
         Task::ToolsCheck(approval) => approval.check(host).map(Output::ToolsChecked),
         Task::ToolsInstallMissingPrepare(checked) => checked
             .prepare_missing(host)
@@ -824,17 +831,20 @@ pub fn perform_scoped_with_install_progress(
         }
         Task::ToolsSettingsDetect { tool, inputs } => {
             let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
-            crate::services::inspection_defaults::for_tool(
+            crate::services::inspection_defaults::edit(
                 host,
-                &root.join("dort.toml"),
-                &tool.id,
+                root.join("dort.toml"),
+                tool.id,
                 inputs,
             )
-            .map(|request| Output::ToolsSettingsDetected(tool.id, request))
+            .map(Output::ToolsSettingsDetected)
         }
-        Task::ToolsSettingsValidate(request) => {
-            request.clone().prepare(host)?;
-            Ok(Output::ToolsSettingsSaved(request))
+        Task::ToolsSettingsSave {
+            editor,
+            preview_only,
+        } => {
+            editor.save(host, repository.as_deref(), preview_only)?;
+            Ok(Output::ToolsSettingsSaved { preview_only })
         }
         Task::IgnoredPaths => Ok(Output::IgnoredPaths(
             dort_core::discovery_ignore::Rules::load(host)?

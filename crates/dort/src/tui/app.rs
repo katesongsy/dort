@@ -303,10 +303,12 @@ impl App {
             Ok(Output::ToolAttempts(result)) => self.accept_tool_attempts(result),
             Ok(Output::ToolClosePreview(preview)) => self.accept_tool_close_preview(preview),
             Ok(Output::ToolClosed(result)) => self.accept_tool_closed(result),
-            Ok(Output::ToolsSettingsDetected(tool, request)) => {
-                self.accept_tools_settings_detected(tool, request)
+            Ok(Output::ToolsSettingsDetected(editor)) => {
+                self.accept_tools_settings_detected(editor)
             }
-            Ok(Output::ToolsSettingsSaved(request)) => self.accept_tools_settings_saved(request),
+            Ok(Output::ToolsSettingsSaved { preview_only }) => {
+                self.accept_tools_settings_saved(preview_only)
+            }
             Ok(Output::Git(report)) => self.accept_git(report),
             Ok(Output::Data(data)) => self.accept_data(data),
             Ok(Output::Checked { report, standalone }) => self.accept_checked(report, standalone),
@@ -762,10 +764,12 @@ impl App {
                 None
             }
             Target::ToolsControl(index, activate) => {
-                if self.tab != Tab::Tools || !self.tools_view.settings_open {
+                if self.tab != Tab::Tools
+                    || !(self.tools_view.settings_open || self.tools_view.manifest_open)
+                {
                     return None;
                 }
-                if !activate {
+                if !activate && self.tools_view.settings_open {
                     self.tools_view.settings.focus =
                         index.min(self.tools_view.settings.count() - 1);
                 }
@@ -1300,7 +1304,13 @@ impl App {
                         if self.tools_view.declaration_open {
                             return self.tools_view.declaration.prepare();
                         }
-                        return Some(Task::ToolsCheckPrepare(self.tools_view.inspection_inputs()));
+                        if self.tools_view.manifest_open {
+                            return Some(self.tools_view.manifest_check());
+                        }
+                        if self.tools_view.settings_open {
+                            return self.tools_view.settings.prepare(self.dry_run);
+                        }
+                        return self.activate(Action::ToolsCheck);
                     }
                     return Some(self.refresh_task());
                 }
@@ -2048,9 +2058,9 @@ impl App {
                 self.tools_view.declare();
             }
             Action::ToolsConfigure => {
-                let tool = self
-                    .data
-                    .as_ref()?
+                let data = self.data.as_ref()?;
+                let manifest = data.repository.as_ref()?.join("dort.toml");
+                let tool = data
                     .tools
                     .as_ref()?
                     .as_ref()
@@ -2058,11 +2068,15 @@ impl App {
                     .get(self.tools_view.declared_selected)?
                     .clone();
                 self.go_tab(Tab::Tools);
-                return self.tools_view.configure(tool);
+                return self.tools_view.configure(manifest, tool);
             }
             Action::ToolsInstalled => {
                 self.go_tab(Tab::Tools);
                 return self.tools_view.open_installed();
+            }
+            Action::ToolsStandaloneCheck => {
+                self.go_tab(Tab::Tools);
+                self.tools_view.open_manifest();
             }
             Action::ToolsCheck | Action::EnvironmentCheck => {
                 self.go_tab(Tab::Tools);
@@ -2312,6 +2326,9 @@ impl App {
         }
         if tools.settings_open {
             return Some("tool settings");
+        }
+        if tools.manifest_open {
+            return Some("tool check manifest");
         }
         None
     }

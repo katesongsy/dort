@@ -112,6 +112,8 @@ impl App {
                         "Tools / Remove tool declaration"
                     }
                 }
+            } else if t.manifest_open {
+                "Tools / Check manifest file"
             } else if t.settings_open {
                 "Tools / Tool settings"
             } else if t.install_open {

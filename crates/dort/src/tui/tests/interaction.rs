@@ -156,20 +156,10 @@ fn trusted_separators_render_but_program_path_status_metadata_stays_escaped() {
     let f = Fixture::new();
     let path = f.bin.join("provider·\u{202e}\u{1b}");
     fs::copy(f.bin.join("fake-provider"), &path).unwrap();
-    let request = crate::services::tools::Request {
-        query: dort_core::tools::inspection::Query::BrewFormulae,
-        executable: path.clone(),
-        search_dirs: vec![f.bin.clone()],
-        manifest: None,
-        runtime_tool: None,
-        npm_cli: None,
-        prefix: None,
-    };
     let mut app = App::new(false);
     app.tab = Tab::Tools;
     app.tools_view.settings_open = true;
     app.tools_view.settings.fields[0] = path.display().to_string();
-    app.tools_view.settings.request = Some(request);
     app.status = "Provider metadata: · \u{202e}\u{1b}".to_owned().into();
     let s = render(&app, 320, 40);
     assert!(s.contains("Tool settings"));

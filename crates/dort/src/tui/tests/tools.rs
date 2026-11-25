@@ -7,6 +7,7 @@ use super::{
 };
 use crate::services::declared_tools_tests::Fixture;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::{fs, path::Path};
 
 pub(super) fn key(app: &mut App, code: KeyCode) -> Option<Task> {
     app.key(KeyEvent::new(code, KeyModifiers::NONE), 80, 24)
@@ -17,7 +18,7 @@ pub(super) fn run(f: &Fixture, app: &mut App, task: Task) {
         task,
         Task::ToolsInstallMissing(_) | Task::Execute(_)
     ));
-    let output = actions::perform_scoped(task, &f.host, Some(f.repo.clone()), &[], |_| Ok(()));
+    let output = actions::perform_scoped(task, &f.host, app.repository.clone(), &[], |_| Ok(()));
     if let Some(refresh) = app.complete(output.map_err(|e| actions::diagnostic(&e))) {
         run(f, app, refresh);
     }
@@ -52,7 +53,7 @@ pub(super) fn settings(f: &Fixture, app: &mut App) {
     };
     inputs.search_dirs = vec![f.bin.clone()];
     run(f, app, Task::ToolsSettingsDetect { tool, inputs });
-    assert!(app.tools_view.settings_open && app.tools_view.settings.request.is_some());
+    assert!(app.tools_view.settings_open && app.tools_view.settings.editor.is_some());
 }
 #[test]
 fn list_enter_is_always_details_before_and_after_checks_and_installs() {
@@ -80,47 +81,156 @@ fn list_enter_is_always_details_before_and_after_checks_and_installs() {
     assert_eq!(f.calls().chars().filter(|c| *c == 'A').count(), 1);
 }
 #[test]
-fn settings_detection_and_save_are_process_free_and_only_accepted_values_affect_checks() {
+fn saved_paths_survive_restart_and_are_scoped_to_one_manifest_and_tool() {
     let f = Fixture::new();
-    let mut app = app(&f, false);
-    settings(&f, &mut app);
-    assert_eq!(app.tools_view.settings.count(), 2);
-    assert_eq!(
-        app.tools_view.settings.fields[0],
-        f.bin
-            .join("brew")
-            .canonicalize()
-            .unwrap()
-            .display()
-            .to_string()
+    f.program(
+        "custom-brew",
+        r#"printf Z >> "$HOME/calls"; printf '{"formulae":[]}'"#,
     );
-    assert!(app.tools_view.inspection_inputs().overrides.is_empty());
-    app.tools_view.settings.fields[0] = "relative-program".into();
-    assert!(app.tools_view.inspection_inputs().overrides.is_empty());
-    let task = key(&mut app, KeyCode::Enter).unwrap();
+    let custom = f.bin.join("custom-brew");
+    let config = f.host.local_config_path();
+    let before = fs::read(&config).unwrap();
+    let manifest = fs::read(f.repo.join("dort.toml")).unwrap();
+    let mut first = app(&f, false);
+    settings(&f, &mut first);
+    assert!(render(&first, 100, 30).contains("Save on this host"));
+    first.tools_view.settings.fields[0] = "relative-program".into();
+    let task = key(&mut first, KeyCode::Enter).unwrap();
     assert!(actions::perform_scoped(task, &f.host, Some(f.repo.clone()), &[], |_| Ok(())).is_err());
+    assert_eq!(fs::read(&config).unwrap(), before);
+    first.tools_view.settings.fields[0] = custom.display().to_string();
+    let task = key(&mut first, KeyCode::Enter).unwrap();
+    run(&f, &mut first, task);
+    assert!(!first.tools_view.settings_open && first.tools_view.declared_details);
+    assert_ne!(fs::read(&config).unwrap(), before);
+    assert_eq!(fs::read(f.repo.join("dort.toml")).unwrap(), manifest);
     assert!(f.calls().is_empty());
-    app.tools_view.settings.fields[0] = f
-        .bin
-        .join("brew")
-        .canonicalize()
-        .unwrap()
-        .display()
-        .to_string();
-    let task = key(&mut app, KeyCode::Enter).unwrap();
-    run(&f, &mut app, task);
-    assert!(!app.tools_view.settings_open && app.tools_view.declared_details);
-    assert_eq!(app.tools_view.inspection_inputs().overrides.len(), 1);
-    assert!(f.calls().is_empty());
-    check(&f, &mut app);
-    assert_eq!(f.calls(), "Q");
-    settings(&f, &mut app);
-    app.tools_view.settings.fields[0] = String::new();
+
+    let mut reopened = app(&f, false);
+    settings(&f, &mut reopened);
     assert_eq!(
-        app.tools_view.inspection_inputs().overrides[0].executable,
-        f.bin.join("brew").canonicalize().unwrap()
+        reopened.tools_view.settings.fields[0],
+        custom.display().to_string()
+    );
+    reopened.tools_view.back();
+    check(&f, &mut reopened);
+    assert_eq!(
+        f.calls(),
+        "QZ",
+        "only the configured tool uses the custom manager"
+    );
+
+    let other = f.repo.parent().unwrap().join("other");
+    fs::create_dir(&other).unwrap();
+    fs::create_dir(other.join(".git")).unwrap();
+    fs::write(other.join("dort.toml"), manifest).unwrap();
+    reopened.repository = Some(other);
+    run(&f, &mut reopened, Task::Refresh);
+    check(&f, &mut reopened);
+    assert_eq!(
+        f.calls(),
+        "QZQ",
+        "the other repository uses only the default manager"
     );
 }
+
+#[test]
+fn dry_run_validates_settings_without_writing_configuration_or_running_a_manager() {
+    let f = Fixture::new();
+    let config = f.host.local_config_path();
+    let before = fs::read(&config).unwrap();
+    let mut dry = app(&f, true);
+    settings(&f, &mut dry);
+    assert!(render(&dry, 100, 30).contains("Validate paths"));
+    let task = key(&mut dry, KeyCode::Enter).unwrap();
+    run(&f, &mut dry, task);
+    assert!(dry.tools_view.settings_open);
+    assert_eq!(fs::read(&config).unwrap(), before);
+    assert!(f.calls().is_empty());
+}
+
+fn standalone(f: &Fixture, app: &mut App, path: &Path) -> Task {
+    key(app, KeyCode::Char('m'));
+    assert!(render(app, 100, 30).contains("Absolute manifest path"));
+    key(app, KeyCode::Tab);
+    for c in path.to_str().unwrap().chars() {
+        assert!(key(app, KeyCode::Char(c)).is_none());
+    }
+    let Some(Task::ToolsStandaloneCheckPrepare(mut input)) = key(app, KeyCode::Enter) else {
+        panic!("Expected standalone check preparation");
+    };
+    input.detection.search_dirs = vec![f.bin.clone()];
+    Task::ToolsStandaloneCheckPrepare(input)
+}
+
+#[test]
+fn standalone_check_reviews_an_exact_file_and_cannot_feed_installs() {
+    let f = Fixture::new();
+    let path = f.repo.parent().unwrap().join("alternate.toml");
+    fs::write(&path, "schema=1\n[[tools]]\nid='standalone-tool'\nbinary='a'\n[tools.install]\nprovider='brew'\npackage='a'\n").unwrap();
+    let config = fs::read(f.host.local_config_path()).unwrap();
+    let mut ui = app(&f, false);
+    let task = standalone(&f, &mut ui, &path);
+    run(&f, &mut ui, task);
+    let preview = render(&ui, 120, 32);
+    assert!(preview.contains("alternate.toml") && preview.contains("standalone-tool"));
+    assert!(f.calls().is_empty());
+    assert!(key(&mut ui, KeyCode::Enter).is_none());
+    let task = super::tests::approve_ready(&mut ui, 80, 24).unwrap();
+    run(&f, &mut ui, task);
+    assert_eq!(f.calls(), "Q");
+    assert_eq!(ui.repository.as_ref(), Some(&f.repo));
+    assert_eq!(fs::read(f.host.local_config_path()).unwrap(), config);
+    let result = render(&ui, 120, 32);
+    assert!(result.contains("standalone-tool") && result.contains("Missing"));
+    assert!(ui.tools_view.declared.checked.is_none());
+    let checked = ui.tools_view.declared.standalone_result.as_ref().unwrap();
+    assert!(checked.prepare_missing(&f.host).is_err());
+    key(&mut ui, KeyCode::Enter);
+    assert!(key(&mut ui, KeyCode::Char('i')).is_none());
+    assert_eq!(f.calls(), "Q");
+}
+
+#[test]
+fn standalone_check_rejects_relative_and_symlink_paths_without_running_a_manager() {
+    let f = Fixture::new();
+    let path = f.repo.parent().unwrap().join("alias.toml");
+    std::os::unix::fs::symlink(f.repo.join("dort.toml"), &path).unwrap();
+    for path in [Path::new("dort.toml"), &path] {
+        let mut ui = app(&f, false);
+        let task = standalone(&f, &mut ui, path);
+        run(&f, &mut ui, task);
+        assert!(ui.error.is_some());
+        assert!(ui.tools_view.declared.check_preview.is_none());
+    }
+    assert!(f.calls().is_empty());
+}
+
+#[test]
+fn saved_paths_are_rebound_before_execution_and_never_fall_back_when_invalid() {
+    let f = Fixture::new();
+    f.program(
+        "custom-brew",
+        r#"printf Z >> "$HOME/calls"; printf '{"formulae":[]}'"#,
+    );
+    let mut ui = app(&f, false);
+    settings(&f, &mut ui);
+    let custom = f.bin.join("custom-brew");
+    ui.tools_view.settings.fields[0] = custom.display().to_string();
+    let task = key(&mut ui, KeyCode::Enter).unwrap();
+    run(&f, &mut ui, task);
+    let mut input = f.input();
+    let preview = input.prepare_for_tools(&f.host, false).unwrap();
+    fs::remove_file(custom).unwrap();
+    assert!(preview.approve().check(&f.host).is_err());
+    assert!(f.calls().is_empty());
+    input.detection.search_dirs = vec![f.bin.clone()];
+    let preview = input.prepare_for_tools(&f.host, false).unwrap();
+    assert_eq!(preview.review().needs_setup[0].tool, "a");
+    assert_eq!(preview.review().inspections[0].tools, ["b"]);
+    assert!(f.calls().is_empty());
+}
+
 #[test]
 fn settings_and_declaration_drafts_survive_help_but_navigation_drops_reviews() {
     let f = Fixture::new();
@@ -185,7 +295,7 @@ fn needed_settings_are_selected_tool_configuration_not_internal_binding_forms() 
         .unwrap();
     settings(&f, &mut app);
     assert_eq!(app.tools_view.settings.count(), 4);
-    let request = app.tools_view.settings.request.as_ref().unwrap();
+    let request = &app.tools_view.settings.editor.as_ref().unwrap().request;
     assert_eq!(request.runtime_tool.as_deref(), Some("runtime"));
     assert_eq!(request.manifest.as_ref(), Some(&path));
     let text = render(&app, 140, 40);

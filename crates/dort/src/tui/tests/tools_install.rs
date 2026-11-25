@@ -35,6 +35,7 @@ fn configure_npm(f: &Fixture, app: &mut App) {
         f.calls().is_empty(),
         "Necessary npm destination settings are process-free"
     );
+    assert!(app.error.is_none(), "{:?}", app.error);
 }
 fn install(f: &Fixture, app: &mut App) {
     configure_npm(f, app);

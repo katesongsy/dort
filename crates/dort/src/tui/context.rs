@@ -56,7 +56,7 @@ pub(super) fn entry(action: Action, primary: Option<usize>) -> Entry {
         | KeepMarked | RemoveMarked => Effect::Preview,
         Adopt | AdoptSelected | BatchAdopt | KeepId | RemoveId | Init | CheckStandalone
         | Profiles | StandaloneProfiles | ToolDeclaration | ToolsConfigure | ToolsCheck
-        | ToolsInstallMissing | ToolsInstalled => Effect::Draft,
+        | ToolsStandaloneCheck | ToolsInstallMissing | ToolsInstalled => Effect::Draft,
         Discover | Refresh | CheckCurrent | Diagnostics | GitStatus | GitUnstaged | GitStaged
         | GitRefresh | ToolAttempts => Effect::Read,
         _ => Effect::View,
@@ -117,7 +117,12 @@ pub fn entries(app: &App) -> Vec<Entry> {
         Tab::Git => (vec![GitRefresh], vec![ClearFilter]),
         Tab::Tools => (
             vec![ToolsCheck, ToolsInstallMissing],
-            vec![ToolDeclaration, ToolsInstalled, ToolAttempts],
+            vec![
+                ToolsStandaloneCheck,
+                ToolDeclaration,
+                ToolsInstalled,
+                ToolAttempts,
+            ],
         ),
     };
     let mut rows: Vec<_> = primary

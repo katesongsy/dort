@@ -17,6 +17,7 @@ pub struct State {
     pub install_waiting: bool,
     pub check_preview: Option<workflow::CheckPreview>,
     pub checked: Option<Arc<workflow::Checked>>,
+    pub standalone_result: Option<workflow::Checked>,
     pub install_preview: Option<workflow::InstallPreview>,
     pub installed: Option<workflow::Installed>,
     pub result_open: bool,
@@ -51,16 +52,21 @@ impl State {
     pub fn invalidate(&mut self) {
         self.clear_reviews();
         self.checked = None;
+        self.standalone_result = None;
         self.installed = None;
         self.result_open = false;
         self.stale = false;
     }
     pub fn title(&self) -> Option<&'static str> {
-        if self.result_open {
+        if self.standalone_result.is_some() {
+            Some("Tools / Standalone check results")
+        } else if self.result_open {
             Some("Tools / Install results")
         } else if let Some(preview) = &self.check_preview {
             Some(if preview.saves_environment_check() {
                 "Environment / Review check"
+            } else if preview.standalone() {
+                "Tools / Review standalone check"
             } else {
                 "Tools / Review installed checks"
             })
@@ -121,6 +127,16 @@ fn scroll(app: &mut App, code: KeyCode) {
 pub fn key(app: &mut App, key: KeyEvent) -> Option<Option<Task>> {
     let code = key.code;
     let state = &mut app.tools_view.declared;
+    if state.standalone_result.is_some() {
+        match code {
+            KeyCode::Enter | KeyCode::Esc => {
+                state.standalone_result = None;
+                app.details_scroll = 0;
+            }
+            _ => scroll(app, code),
+        }
+        return Some(None);
+    }
     if state.result_open {
         match code {
             KeyCode::Enter | KeyCode::Esc => {
@@ -190,6 +206,7 @@ pub fn key(app: &mut App, key: KeyEvent) -> Option<Option<Task>> {
     }
     let named = match code {
         KeyCode::Char('c') => Some(Action::ToolsCheck),
+        KeyCode::Char('m') => Some(Action::ToolsStandaloneCheck),
         KeyCode::Char('i') => Some(Action::ToolsInstallMissing),
         KeyCode::Char('a') => Some(Action::ToolDeclaration),
         KeyCode::Char('s') if app.tools_view.declared_details => Some(Action::ToolsConfigure),
@@ -315,6 +332,11 @@ fn commands(app: &App) {
         "a",
         Target::Action(Action::ToolDeclaration),
     );
+    app.presented(
+        "Check manifest file",
+        "m",
+        Target::Action(Action::ToolsStandaloneCheck),
+    );
     if tool.is_some() {
         action(app, "Remove declaration", "d", KeyCode::Char('d'));
     }
@@ -348,7 +370,11 @@ fn review(frame: &mut Frame, area: Rect, app: &App) -> bool {
     let (heading, warning, primary, empty, body) = if let Some(preview) = &state.check_preview {
         let review = preview.review();
         let mut body = vec![
-            Line::raw("Check the tools declared for your active profiles."),
+            Line::raw(if preview.standalone() {
+                "Standalone check. Results cannot be used to install tools."
+            } else {
+                "Check the tools declared for your active profiles."
+            }),
             ui::metadata("Manifest", &review.scope.manifest.display().to_string()),
         ];
         for scope in &review.inspections {
@@ -366,6 +392,8 @@ fn review(frame: &mut Frame, area: Rect, app: &App) -> bool {
         (
             if preview.saves_environment_check() {
                 "Environment check"
+            } else if preview.standalone() {
+                "Check manifest file"
             } else {
                 "Check installed"
             },
@@ -506,6 +534,34 @@ fn review(frame: &mut Frame, area: Rect, app: &App) -> bool {
 }
 fn result(frame: &mut Frame, area: Rect, app: &App) -> bool {
     let state = &app.tools_view.declared;
+    if let Some(checked) = &state.standalone_result {
+        let report = &checked.reconciliation;
+        let mut lines = vec![ui::metadata(
+            "Manifest",
+            &report.scope.manifest.display().to_string(),
+        )];
+        if report.plan.rows.is_empty() {
+            lines.push(Line::raw("No selected tool declarations."));
+        }
+        for row in &report.plan.rows {
+            lines.push(ui::metadata(&row.id, workflow::status(row).label()));
+        }
+        for issue in &checked.needs_setup {
+            lines.push(ui::metadata(&issue.tool, &issue.reason));
+        }
+        ui::reader::Reader::new(&app.hits)
+            .with_wheel(super::input::Wheel::Tools)
+            .report(
+                frame,
+                area,
+                "Standalone check results",
+                lines.into(),
+                app.details_scroll,
+                false,
+            );
+        action(app, "Done", "Enter", KeyCode::Enter);
+        return true;
+    }
     if !state.result_open {
         return false;
     }
@@ -706,7 +762,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         ui::prose(
             frame,
             area,
-            "Choose or attach a repository to view declared tools.",
+            "Press m to check a manifest file, or choose a repository to view its declared tools.",
             ui::muted(),
         );
         return;

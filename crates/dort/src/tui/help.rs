@@ -193,6 +193,7 @@ impl Topic {
                 ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
                 ("Enter", "Open the selected tool"),
                 ("C", "Check installed"),
+                ("m", "Check a standalone manifest file"),
                 ("i", "Install missing tools"),
                 ("e / d", "Edit / remove the selected declaration"),
                 ("a", "Add a declaration"),

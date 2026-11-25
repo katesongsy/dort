@@ -3,6 +3,7 @@ use crate::{
     context::HostContext,
     error::io_error,
     state::{PrivateDir, WriterLock},
+    tools::inspection::Query,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -37,6 +38,23 @@ pub struct RepositoryRecord {
     pub root: PathBuf,
 }
 
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolSettingsScope {
+    pub query: Query,
+    pub id: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolSettings {
+    pub scope: ToolSettingsScope,
+    pub program: PathBuf,
+    pub search_dirs: Vec<PathBuf>,
+    pub npm_cli: Option<PathBuf>,
+    pub prefix: Option<PathBuf>,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LocalConfig {
@@ -46,6 +64,8 @@ pub struct LocalConfig {
     pub active_profiles: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     profile_choices: BTreeMap<String, BTreeMap<String, crate::profiles::Choice>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    tool_settings: BTreeMap<PathBuf, Vec<ToolSettings>>,
     #[serde(default)]
     pub variables: BTreeMap<String, toml::Value>,
     pub active_repository: Option<String>,
@@ -59,6 +79,7 @@ impl Default for LocalConfig {
             schema: 1,
             active_profiles: vec![],
             profile_choices: BTreeMap::new(),
+            tool_settings: BTreeMap::new(),
             variables: BTreeMap::new(),
             active_repository: None,
             repositories: BTreeMap::new(),
@@ -139,6 +160,32 @@ impl LocalConfig {
         let directory =
             PrivateDir::open(&host.config_dir, true)?.expect("created config directory");
         directory.replace("local.toml", &text)
+    }
+
+    pub fn tool_settings(&self, manifest: &Path) -> &[ToolSettings] {
+        self.tool_settings.get(manifest).map_or(&[], Vec::as_slice)
+    }
+
+    pub fn save_tool_settings(
+        host: &HostContext,
+        lock: &WriterLock,
+        manifest: PathBuf,
+        settings: ToolSettings,
+    ) -> Result<()> {
+        lock.check_context(host)?;
+        crate::context::validate_absolute(&manifest)?;
+        for path in std::iter::once(&settings.program)
+            .chain(&settings.search_dirs)
+            .chain(&settings.npm_cli)
+            .chain(&settings.prefix)
+        {
+            crate::context::validate_absolute(path)?;
+        }
+        let mut local = Self::load(host)?;
+        let rows = local.tool_settings.entry(manifest).or_default();
+        rows.retain(|row| row.scope != settings.scope);
+        rows.push(settings);
+        local.save(host, lock)
     }
 
     pub fn profile_rows(

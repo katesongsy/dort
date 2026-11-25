@@ -11,6 +11,7 @@ use ratatui::{Frame, layout::Rect, text::Text, widgets::Paragraph};
 
 pub fn shortcut(action: Action) -> &'static str {
     match action {
+        Action::ToolsStandaloneCheck => "m",
         Action::ToolsCheck => "C",
         Action::ToolsInstallMissing => "i",
         Action::ToolsConfigure => "s",

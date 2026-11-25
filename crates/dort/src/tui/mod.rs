@@ -331,7 +331,13 @@ fn dispatch(
         // Wait for the owned passive read; never detach or launch a second worker.
         app.start(matches!(
             task,
-            Task::Execute(_) | Task::ToolClose(_) | Task::ToolsInstallMissing(_)
+            Task::Execute(_)
+                | Task::ToolClose(_)
+                | Task::ToolsInstallMissing(_)
+                | Task::ToolsSettingsSave {
+                    preview_only: false,
+                    ..
+                }
         ));
         *queued = Some(task);
         Ok(())
@@ -359,7 +365,13 @@ fn launch(
     app.retry = task.retry_intent();
     let writing = matches!(
         task,
-        Task::Execute(_) | Task::ToolClose(_) | Task::ToolsInstallMissing(_)
+        Task::Execute(_)
+            | Task::ToolClose(_)
+            | Task::ToolsInstallMissing(_)
+            | Task::ToolsSettingsSave {
+                preview_only: false,
+                ..
+            }
     );
     let completed = matches!(task, Task::Refresh) && app.status.starts_with("Completed.");
     let activity = task_surfaces::Activity::for_task(&task, app);

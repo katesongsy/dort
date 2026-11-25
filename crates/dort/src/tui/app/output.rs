@@ -41,6 +41,9 @@ impl App {
         preview: crate::services::declared_tools::CheckPreview,
     ) -> Option<Task> {
         if self.tab == Tab::Tools && self.tools_view.declared.check_waiting {
+            if preview.standalone() && self.tools_view.manifest_open {
+                self.tools_view.back();
+            }
             self.tools_view.declared.check_waiting = false;
             self.tools_view.declared.reader = ReviewScroll::default();
             self.tools_view.declared.check_preview = Some(preview);
@@ -55,6 +58,13 @@ impl App {
         checked: crate::services::declared_tools::Checked,
     ) -> Option<Task> {
         if self.tab == Tab::Tools && self.tools_view.landing() {
+            if checked.standalone() {
+                self.tools_view.declared.standalone_result = Some(checked);
+                self.details_scroll = 0;
+                self.status =
+                    "Standalone check complete. The current repository is unchanged.".into();
+                return None;
+            }
             self.tools_view.declared.checked = Some(std::sync::Arc::new(checked));
             self.tools_view.declared.installed = None;
             self.tools_view.declared.stale = false;
@@ -177,26 +187,25 @@ impl App {
 
     pub(super) fn accept_tools_settings_detected(
         &mut self,
-        tool: String,
-        request: crate::services::tools::Request,
+        editor: crate::services::inspection_defaults::SettingsEditor,
     ) -> Option<Task> {
         if self.tab == Tab::Tools && !self.quit {
-            self.tools_view.settings_ready(tool, request);
+            self.tools_view.settings_ready(editor);
         }
 
         None
     }
 
-    pub(super) fn accept_tools_settings_saved(
-        &mut self,
-        request: crate::services::tools::Request,
-    ) -> Option<Task> {
+    pub(super) fn accept_tools_settings_saved(&mut self, preview_only: bool) -> Option<Task> {
         if self.tab == Tab::Tools && self.tools_view.settings_open && !self.quit {
-            self.tools_view.settings_saved(request);
-            self.status =
-                "Tool settings saved for this session. Check installed to refresh status.".into();
+            if preview_only {
+                self.status = "Paths validated. Dry run did not save settings.".into();
+            } else {
+                self.tools_view.settings_saved();
+                self.status =
+                    "Tool settings saved on this host. Check installed to refresh status.".into();
+            }
         }
-
         None
     }
 

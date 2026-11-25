@@ -55,9 +55,19 @@ struct CheckScope {
     id: String,
     tools: Vec<String>,
     preview: tools::Preview,
+    saved: Option<(
+        dort_core::local::ToolSettings,
+        inspection_defaults::SavedPaths,
+    )>,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CheckMode {
+    Declared,
+    Environment,
+    Standalone,
 }
 pub struct CheckPreview {
-    environment: bool,
+    mode: CheckMode,
     prepared: reconciliation::Prepared,
     source: Source,
     scopes: Vec<CheckScope>,
@@ -86,6 +96,8 @@ pub struct Checked {
     pub needs_setup: Vec<Issue>,
     #[serde(skip)]
     pub source: Source,
+    #[serde(skip)]
+    mode: CheckMode,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -191,7 +203,37 @@ fn directories(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
 impl Input {
     /// Process-free preparation; approvals expose every automatically selected scope.
     pub fn prepare(&self, host: &HostContext) -> Result<CheckPreview> {
+        self.prepare_check(host, CheckMode::Declared, false)
+    }
+
+    pub fn prepare_for_tools(&self, host: &HostContext, standalone: bool) -> Result<CheckPreview> {
+        let mode = if standalone {
+            CheckMode::Standalone
+        } else {
+            CheckMode::Declared
+        };
+        self.prepare_check(host, mode, true)
+    }
+
+    fn prepare_check(
+        &self,
+        host: &HostContext,
+        mode: CheckMode,
+        use_local_settings: bool,
+    ) -> Result<CheckPreview> {
         let (manifest, entry) = read_manifest(&self.manifest)?;
+        let source = Source::capture(host, &entry)?;
+        let local = use_local_settings
+            .then(|| dort_core::local::LocalConfig::load(host))
+            .transpose()?;
+        let saved_settings = local
+            .as_ref()
+            .map_or(&[][..], |local| local.tool_settings(&self.manifest));
+        let setting_for = |query, id: &str| {
+            saved_settings
+                .iter()
+                .find(|s| s.scope.query == query && s.scope.id == id)
+        };
         let dirs = directories(&self.detection.search_dirs)?;
         let prepared = reconciliation::Request {
             manifest: self.manifest.clone(),
@@ -200,13 +242,9 @@ impl Input {
         }
         .prepare(host)
         .map_err(withheld)?;
-        let source = Source::capture(host, &entry)?;
-        let (_, after) = read_manifest(&self.manifest)?;
-        if source != Source::capture(host, &after)? {
-            return Err(invalid("Declarations changed; check again."));
-        }
         let mut inputs = self.detection.clone();
         inputs.search_dirs = dirs;
+        inputs.overrides.clear();
         let defaults = inputs.detect(host, Some(self.manifest.clone()));
         let mut scopes = Vec::new();
         let mut bindings = BTreeMap::new();
@@ -223,42 +261,46 @@ impl Input {
             if selected.is_empty() {
                 continue;
             }
-            let groups = if base.query == Query::NpmGlobals {
-                let mut groups: BTreeMap<Option<String>, Vec<_>> = BTreeMap::new();
-                for tool in selected {
-                    let runtime = manifest
+            let mut groups: BTreeMap<Option<String>, Vec<_>> = BTreeMap::new();
+            for tool in selected {
+                let id = if base.query == Query::NpmGlobals {
+                    manifest
                         .tools
                         .iter()
                         .find(|t| t.id == tool.id)
-                        .map(|t| &t.install)
-                        .and_then(|s| s.runtime_tool.clone());
-                    groups.entry(runtime).or_default().push(tool);
-                }
-                groups.into_iter().collect::<Vec<_>>()
-            } else {
-                vec![(None, selected)]
-            };
+                        .and_then(|t| t.install.runtime_tool.clone())
+                } else {
+                    setting_for(base.query, &tool.id).map(|_| tool.id.clone())
+                };
+                groups.entry(id).or_default().push(tool);
+            }
             let multiple = groups.len() > 1;
-            for (index, (runtime, tools)) in groups.into_iter().enumerate() {
-                let saved = self.detection.overrides.iter().find(|r| {
+            for (index, (key, tools)) in groups.into_iter().enumerate() {
+                let saved = key.as_deref().and_then(|id| setting_for(base.query, id));
+                let override_request = self.detection.overrides.iter().find(|r| {
                     r.query == base.query
-                        && (base.query != Query::NpmGlobals || r.runtime_tool == runtime)
+                        && (base.query != Query::NpmGlobals || r.runtime_tool == key)
                 });
-                let mut request = saved.cloned().unwrap_or_else(|| base.clone());
+                let mut request = override_request.cloned().unwrap_or_else(|| base.clone());
                 if request.query == Query::NpmGlobals {
-                    request.runtime_tool = runtime;
+                    request.runtime_tool = key;
                     request.manifest = Some(self.manifest.clone());
                 }
-                let ambiguous = request.query == Query::NpmGlobals && multiple && saved.is_none();
-                let preview = if ambiguous {
-                    None
-                } else {
-                    request.clone().prepare(host).ok()
+                let ambiguous = request.query == Query::NpmGlobals
+                    && multiple
+                    && saved.is_none()
+                    && override_request.is_none();
+                let bound = saved
+                    .and_then(|s| inspection_defaults::bind_saved(host, &self.manifest, s).ok());
+                let preview = match (&bound, saved, ambiguous) {
+                    (Some(bound), _, _) => bound.request.clone().prepare(host).ok(),
+                    (None, None, false) => request.prepare(host).ok(),
+                    _ => None,
                 };
-                let id = if request.query == Query::NpmGlobals && multiple {
-                    format!("{}-{}", scope_id(request.query), index + 1)
+                let id = if multiple {
+                    format!("{}-{}", scope_id(base.query), index + 1)
                 } else {
-                    scope_id(request.query).to_owned()
+                    scope_id(base.query).to_owned()
                 };
                 if let Some(preview) = preview {
                     let mut ids = Vec::new();
@@ -270,6 +312,7 @@ impl Input {
                         id,
                         tools: ids,
                         preview,
+                        saved: saved.cloned().zip(bound),
                     });
                 } else {
                     for tool in tools {
@@ -277,6 +320,8 @@ impl Input {
                             tool: tool.id.clone(),
                             reason: if ambiguous {
                                 "Multiple Node runtimes need separate Node/npm settings.".into()
+                            } else if saved.is_some() || override_request.is_some() {
+                                "Saved package-manager paths are unavailable or invalid.".into()
                             } else {
                                 choice.reason.into()
                             },
@@ -292,8 +337,14 @@ impl Input {
                 "Too many package-manager scopes for one check; select fewer profiles.",
             ));
         }
+        let (_, after) = read_manifest(&self.manifest)?;
+        if source != Source::capture(host, &after)? {
+            return Err(invalid(
+                "Declarations or local settings changed; check again.",
+            ));
+        }
         Ok(CheckPreview {
-            environment: false,
+            mode,
             prepared,
             source,
             scopes,
@@ -304,11 +355,13 @@ impl Input {
 }
 impl CheckPreview {
     pub fn saves_environment_check(&self) -> bool {
-        self.environment
+        self.mode == CheckMode::Environment
     }
-
+    pub fn standalone(&self) -> bool {
+        self.mode == CheckMode::Standalone
+    }
     pub fn for_environment(mut self) -> Self {
-        self.environment = true;
+        self.mode = CheckMode::Environment;
         self
     }
 
@@ -326,7 +379,7 @@ impl CheckPreview {
                 })
                 .collect(),
             needs_setup: &self.issues,
-            warning: if self.environment {
+            warning: if self.saves_environment_check() {
                 "Environment check runs the displayed managers and saves observations for 10 minutes. Checks may change caches. No packages are installed."
             } else {
                 "Checks can run package-manager configuration and plugins, and change caches. No packages are installed. Command lookup reads metadata only."
@@ -349,6 +402,16 @@ impl CheckApproval {
                 "Declaration or profiles changed. Review the check again.",
             ));
         }
+        for scope in &p.scopes {
+            if let Some((saved, bound)) = &scope.saved
+                && !inspection_defaults::bind_saved(host, &p.prepared.scope.manifest, saved)
+                    .is_ok_and(|current| bound.still_matches(&current))
+            {
+                return Err(invalid(
+                    "Saved package-manager paths changed. Review the check again.",
+                ));
+            }
+        }
         let snapshots: Vec<_> = p
             .scopes
             .into_iter()
@@ -370,7 +433,7 @@ impl CheckApproval {
         if p.source != Source::capture(host, &entry)? {
             return Err(invalid("Declaration or profiles changed. Check again."));
         }
-        if p.environment {
+        if p.mode == CheckMode::Environment {
             let scope = &reconciliation.scope;
             let root = scope
                 .manifest
@@ -411,10 +474,15 @@ impl CheckApproval {
             snapshots,
             needs_setup: p.issues,
             source: p.source,
+            mode: p.mode,
         })
     }
 }
 impl Checked {
+    pub fn standalone(&self) -> bool {
+        self.mode == CheckMode::Standalone
+    }
+
     pub fn available(&self) -> bool {
         self.needs_setup.is_empty()
             && self.reconciliation.binaries.available()
@@ -437,6 +505,11 @@ impl Checked {
             .count()
     }
     pub fn prepare_missing(&self, host: &HostContext) -> Result<InstallPreview> {
+        if self.standalone() {
+            return Err(invalid(
+                "Standalone checks cannot be used to install tools.",
+            ));
+        }
         let (_, entry) = read_manifest(&self.reconciliation.scope.manifest)?;
         if self.source != Source::capture(host, &entry)? {
             return Err(invalid(

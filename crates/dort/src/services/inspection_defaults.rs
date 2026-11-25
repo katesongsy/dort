@@ -1,7 +1,17 @@
 //! Read-only suggested paths and defaults. The application captures inputs.
 use super::tools::Request;
-use dort_core::{context::HostContext, observation, tools::inspection::Query};
-use std::{os::unix::fs::PermissionsExt, path::PathBuf};
+use dort_core::{
+    Error, Result,
+    context::HostContext,
+    local::{LocalConfig, ToolSettings, ToolSettingsScope},
+    observation,
+    state::WriterLock,
+    tools::inspection::Query,
+};
+use std::{
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+};
 
 #[derive(Clone, Default)]
 pub struct Inputs {
@@ -186,6 +196,177 @@ impl Inputs {
         Defaults { choices }
     }
 }
+#[derive(Clone)]
+pub struct SettingsEditor {
+    pub manifest: PathBuf,
+    pub tool: String,
+    scope: ToolSettingsScope,
+    pub request: Request,
+}
+
+fn tool_scope(manifest: &Path, id: &str) -> Result<ToolSettingsScope> {
+    let (parsed, _) = observation::read_manifest(manifest).map_err(|_| {
+        Error::Invalid("Cannot read tool declarations; manifest contents withheld.".into())
+    })?;
+    let tool = parsed.tools.iter().find(|t| t.id == id).ok_or_else(|| {
+        Error::Invalid("Tool declaration changed; open its settings again.".into())
+    })?;
+    let (query, id) = match tool.install.provider {
+        dort_core::model::Provider::Brew => (Query::BrewFormulae, tool.id.clone()),
+        dort_core::model::Provider::Npm => (
+            Query::NpmGlobals,
+            tool.install.runtime_tool.clone().ok_or_else(|| {
+                Error::Invalid(
+                    "Declare a Node runtime for this tool before saving settings.".into(),
+                )
+            })?,
+        ),
+    };
+    Ok(ToolSettingsScope { query, id })
+}
+
+pub fn edit(
+    host: &HostContext,
+    manifest: PathBuf,
+    tool: String,
+    inputs: Inputs,
+) -> Result<SettingsEditor> {
+    let scope = tool_scope(&manifest, &tool)?;
+    let local = LocalConfig::load(host)?;
+    let request = if let Some(saved) = local
+        .tool_settings(&manifest)
+        .iter()
+        .find(|s| s.scope == scope)
+    {
+        saved_request(&manifest, saved)
+    } else {
+        for_tool(host, &manifest, &tool, inputs)?
+    };
+    Ok(SettingsEditor {
+        manifest,
+        tool,
+        scope,
+        request,
+    })
+}
+
+impl SettingsEditor {
+    pub fn matches(&self, other: &Self) -> bool {
+        self.manifest == other.manifest && self.tool == other.tool && self.scope == other.scope
+    }
+
+    pub fn save(
+        self,
+        host: &HostContext,
+        repository: Option<&Path>,
+        preview_only: bool,
+    ) -> Result<()> {
+        let lock = (!preview_only)
+            .then(|| WriterLock::acquire(host))
+            .transpose()?;
+        let root = LocalConfig::load(host)?.select_repository(repository)?;
+        if self.manifest != root.join("dort.toml")
+            || self.scope != tool_scope(&self.manifest, &self.tool)?
+        {
+            return Err(Error::Invalid(
+                "Tool settings scope changed; reopen settings.".into(),
+            ));
+        }
+        let paths = ToolSettings {
+            scope: self.scope,
+            program: self.request.executable,
+            search_dirs: self.request.search_dirs,
+            npm_cli: self.request.npm_cli,
+            prefix: self.request.prefix,
+        };
+        bind_saved(host, &self.manifest, &paths)?;
+        if let Some(lock) = lock {
+            LocalConfig::save_tool_settings(host, &lock, self.manifest, paths)?;
+        }
+        Ok(())
+    }
+}
+
+fn saved_request(manifest: &Path, saved: &ToolSettings) -> Request {
+    let npm = saved.scope.query == Query::NpmGlobals;
+    Request {
+        query: saved.scope.query,
+        executable: saved.program.clone(),
+        search_dirs: saved.search_dirs.clone(),
+        manifest: npm.then(|| manifest.to_owned()),
+        runtime_tool: npm.then(|| saved.scope.id.clone()),
+        npm_cli: saved.npm_cli.clone(),
+        prefix: saved.prefix.clone(),
+    }
+}
+
+pub struct SavedPaths {
+    pub request: Request,
+    files: Vec<observation::Entry>,
+}
+
+pub fn bind_saved(host: &HostContext, manifest: &Path, saved: &ToolSettings) -> Result<SavedPaths> {
+    let invalid = || {
+        Error::Invalid("Tool settings need absolute paths to an executable, search folders, and any required npm CLI and prefix.".into())
+    };
+    let mut request = saved_request(manifest, saved);
+    request.clone().prepare(host)?;
+    request.executable = executable(request.executable).ok_or_else(invalid)?;
+    let resolve = |path: &Path, directory: bool| {
+        path.canonicalize()
+            .ok()
+            .filter(|p| {
+                p.to_str().is_some()
+                    && p.metadata()
+                        .is_ok_and(|m| if directory { m.is_dir() } else { m.is_file() })
+            })
+            .ok_or_else(invalid)
+    };
+    request.search_dirs = request
+        .search_dirs
+        .iter()
+        .map(|p| resolve(p, true))
+        .collect::<Result<_>>()?;
+    request.npm_cli = request
+        .npm_cli
+        .as_deref()
+        .map(|p| resolve(p, false))
+        .transpose()?;
+    if let Some(prefix) = &request.prefix {
+        observation::validate_output_path(prefix)?;
+        let entry = observation::inspect(prefix, false)?;
+        match entry.kind {
+            observation::Kind::Directory => request.prefix = Some(resolve(prefix, true)?),
+            observation::Kind::Missing
+                if prefix != &host.home && prefix.starts_with(&host.home) => {}
+            _ => return Err(invalid()),
+        }
+    }
+    let mut files = Vec::new();
+    for path in std::iter::once(&request.executable).chain(&request.npm_cli) {
+        let entry = observation::inspect(path, false)?;
+        if entry.kind != observation::Kind::Regular {
+            return Err(invalid());
+        }
+        files.push(entry);
+    }
+    Ok(SavedPaths { request, files })
+}
+
+impl SavedPaths {
+    pub fn still_matches(&self, other: &Self) -> bool {
+        self.request == other.request
+            && self.files.iter().zip(&other.files).all(|(a, b)| {
+                a.fingerprint == b.fingerprint
+                    && a.parents.iter().zip(&b.parents).all(|(a, b)| {
+                        a.path == b.path
+                            && a.fingerprint.device == b.fingerprint.device
+                            && a.fingerprint.inode == b.fingerprint.inode
+                    })
+            })
+    }
+}
+
 /// Suggestions for one declared tool. Provider and runtime associations are derived.
 pub fn for_tool(
     host: &HostContext,
