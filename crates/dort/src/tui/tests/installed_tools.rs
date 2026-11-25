@@ -157,7 +157,11 @@ fn current_inspection_details_and_prefilled_add_have_separate_approvals_and_no_r
     let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     assert!(matches!(task, Task::Execute(_)));
     run(&f, &mut app, task);
-    assert!(app.tools_view.installed_open && !app.tools_view.declaration_open);
+    assert!(
+        app.tools_view.installed_open && !app.tools_view.declaration_open,
+        "{:?}",
+        app.error
+    );
     assert!(!app.tools_view.installed.details && !app.show_result);
     assert!(render(&app, 80, 24).contains("PACKAGE / MANAGER"));
     assert!(

@@ -63,6 +63,7 @@ impl App {
                 }
                 return Some(match form {
                     Form::Choose => "Session / Exact repository path",
+                    Form::Clone => "Session / Clone repository",
                     Form::Init => "Session / Create or attach repository",
                     Form::Adopt => "Files / Adoption details",
                     Form::Check => "Checks / Standalone manifest",

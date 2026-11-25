@@ -9,6 +9,8 @@ use ratatui::{Frame, crossterm::event::KeyCode};
 #[derive(Clone)]
 enum Value {
     ClosureProvider(usize),
+    Profile(dort_core::profiles::Row),
+    SaveProfile(String, dort_core::profiles::Choice),
     DeclarationProvider {
         field: usize,
         provider: &'static str,
@@ -68,6 +70,20 @@ impl Choice {
     }
 }
 impl App {
+    pub(super) fn open_saved_profiles(&mut self) {
+        let items = self
+            .data
+            .iter()
+            .flat_map(|d| &d.profile_rows)
+            .map(|row| Item {
+                label: row.label(),
+                scope: format!("Local choice: {}", row.choice.label()),
+                value: Value::Profile(row.clone()),
+            })
+            .collect();
+        self.choice = Some(Choice::new("Saved profiles", items, 0));
+    }
+
     pub(super) fn open_control_choice(&mut self, code: KeyCode) -> bool {
         if self.tab != Tab::Tools || self.busy || self.shell.overlay.is_some() {
             return false;
@@ -128,14 +144,14 @@ impl App {
             false
         }
     }
-    pub(super) fn choice_key(&mut self, code: KeyCode) {
+    pub(super) fn choice_key(&mut self, code: KeyCode) -> Option<super::actions::Task> {
         let Some(choice) = &mut self.choice else {
-            return;
+            return None;
         };
         if code == KeyCode::F(3) {
             choice.details = !choice.details;
             choice.scroll = 0;
-            return;
+            return None;
         }
         if choice.details {
             match code {
@@ -147,7 +163,7 @@ impl App {
                 KeyCode::Home => choice.scroll = 0,
                 _ => (),
             }
-            return;
+            return None;
         }
         match code {
             KeyCode::Esc => self.choice = None,
@@ -168,16 +184,33 @@ impl App {
                 choice.feedback = Some("Choose a value or cancel before opening another menu.")
             }
             KeyCode::Enter => {
-                let Some(value) = choice
-                    .items
-                    .get(choice.selected)
-                    .map(|item| item.value.clone())
-                else {
-                    return;
-                };
+                let value = choice.items.get(choice.selected)?.value.clone();
                 self.choice = None;
                 self.hits.clear();
                 match value {
+                    Value::Profile(row) if row.name != "base" => {
+                        use dort_core::profiles::Choice as P;
+                        let values = [P::Defaults, P::On, P::Off];
+                        self.choice = Some(Choice::new(
+                            "Choose saved profile setting",
+                            values
+                                .into_iter()
+                                .map(|value| Item {
+                                    label: value.label().into(),
+                                    scope: row.name.clone(),
+                                    value: Value::SaveProfile(row.name.clone(), value),
+                                })
+                                .collect(),
+                            values.iter().position(|v| *v == row.choice).unwrap_or(0),
+                        ));
+                    }
+                    Value::Profile(_) => {
+                        self.open_saved_profiles();
+                    }
+                    Value::SaveProfile(name, value) => {
+                        let root = self.data.as_ref()?.repository.clone()?;
+                        return Some(super::actions::Task::Profile(root, name, value));
+                    }
                     Value::ClosureProvider(index) => {
                         self.tools_view.installation.choose_closure_provider(index)
                     }
@@ -191,5 +224,6 @@ impl App {
             }
             _ => (),
         }
+        None
     }
 }

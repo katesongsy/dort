@@ -32,6 +32,14 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
             0,
             "Review read-only preview",
         ),
+        Form::Clone => (
+            vec![
+                ("Git source", &s.clone_fields[0]),
+                ("New folder", &s.clone_fields[1]),
+            ],
+            s.path_focused,
+            "Review clone and registration",
+        ),
         Form::Choose | Form::Init => (
             vec![("Path", s.draft(form))],
             0,

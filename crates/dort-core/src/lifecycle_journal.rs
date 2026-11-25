@@ -56,6 +56,8 @@ pub(crate) struct Header {
     pub approved_plan_sha256: String,
     pub action: Action,
     pub removal_acknowledged: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment_file: Option<String>,
     pub profiles: Vec<String>,
     pub watches: Vec<Watch>,
     pub manifest: Entry,

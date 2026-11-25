@@ -92,6 +92,15 @@ pub fn observe(
         // Observe exactly the requested ID, not full-scope Apply. The pure per-file
         // planner then computes Apply semantics on that explicitly observed snapshot.
         if action == Action::Apply {
+            if !crate::profiles::selected(
+                &observed.files[0].mapping.profiles,
+                &observed.active_profiles,
+            ) {
+                return Err(Error::Invalid(format!(
+                    "{}: file profile is off",
+                    observed.files[0].mapping.id
+                )));
+            }
             observed.request = Single::Apply;
         }
         items.push(observed);
@@ -110,7 +119,13 @@ pub fn observe(
             ));
         }
         let mappings: Vec<_> = items.iter().map(|s| s.files[0].mapping.clone()).collect();
-        validate_adoptions(&mut manifest, &mappings, host, profiles, repository)?;
+        validate_adoptions(
+            &mut manifest,
+            &mappings,
+            host,
+            &items[0].active_profiles,
+            repository,
+        )?;
     }
     if items.windows(2).any(|w| {
         canonical(&w[0].manifest).ok() != canonical(&w[1].manifest).ok()
@@ -129,7 +144,7 @@ pub(crate) fn validate_adoptions(
     manifest: &mut Manifest,
     mappings: &[ManagedFile],
     host: &HostContext,
-    profiles: &[String],
+    active: &std::collections::BTreeSet<String>,
     repo: &Path,
 ) -> Result<()> {
     for mapping in mappings {
@@ -145,10 +160,10 @@ pub(crate) fn validate_adoptions(
         }
         manifest.files.push(mapping.clone());
     }
-    let active = manifest.validate_for_host(host, profiles, Some(repo))?;
+    manifest.validate_selection(host, active, Some(repo))?;
     if mappings
         .iter()
-        .any(|m| !crate::profiles::selected(&m.profiles, &active))
+        .any(|m| !crate::profiles::selected(&m.profiles, active))
     {
         return Err(Error::Invalid(
             "batch adoption mappings must all be active".into(),
@@ -262,6 +277,21 @@ impl RemovalAcknowledgements {
         Self(ids)
     }
 }
+pub(crate) fn binding(plan: &Plan) -> Result<String> {
+    let mut stored = plan.clone();
+    for input in stored
+        .inputs
+        .items
+        .iter_mut()
+        .chain(stored.items.iter_mut().map(|p| &mut p.inputs))
+    {
+        input.profiles.clear();
+        input.temporary_profiles.clear();
+        input.inactive_links.clear();
+    }
+    Ok(journal::digest(canonical(&stored)?.as_bytes()))
+}
+
 pub struct Approval {
     pub(crate) plan: Plan,
     pub(crate) digest: String,
@@ -298,7 +328,7 @@ impl Approval {
         {
             return Err(Error::Invalid("batch approval requires an unmodified unblocked combined plan and every removal ID separately acknowledged".into()));
         }
-        let digest = journal::digest(canonical(&plan)?.as_bytes());
+        let digest = binding(&plan)?;
         Ok(Self { plan, digest })
     }
     pub fn sha256(&self) -> &str {

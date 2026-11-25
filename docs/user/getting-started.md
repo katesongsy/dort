@@ -134,7 +134,7 @@ rm -rf "$tmp"
 
 ## Use an existing repository
 
-`dort init` accepts an absent path, or an existing Git working tree with a valid `dort.toml`. It registers the repository; it does not clone or sync.
+`dort init` accepts an absent path, or an existing Git working tree with a valid `dort.toml`. It registers the repository. Use `dort clone SOURCE PATH` to clone and register before reviewing your environment.
 
 To select another registered repository for one command, use `--repo`.
 

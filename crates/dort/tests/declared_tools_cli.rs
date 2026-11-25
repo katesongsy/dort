@@ -331,3 +331,161 @@ fn unavailable_is_not_missing_and_current_claims_never_trigger_upgrades() {
             .all(|r| r["status"] == "could_not_check")
     );
 }
+
+#[test]
+fn environment_plan_stops_on_uncertain_result_and_resumes_without_repeating_installs() {
+    let f = Fixture::new();
+    f.program("brew", include_str!("support/environment-brew.sh"));
+    fs::write(
+        f.repo.join("dort.toml"),
+        include_str!("support/environment.toml"),
+    )
+    .unwrap();
+    fs::write(f.repo.join("settings"), "editor settings\n").unwrap();
+    let editor = f.host.home.join(".editor");
+    fs::write(f.host.home.join("fail-b"), "").unwrap();
+    let unknown = f.json(&["--json", "environment", "plan"], 4);
+    assert_eq!(unknown["rows"][0]["status"], "Unknown");
+    f.json(&["--json", "--dry-run", "environment", "check"], 0);
+    assert_eq!(f.calls(), "");
+    f.json(&["--json", "--yes", "environment", "check"], 0);
+    assert_eq!(f.calls(), "Q");
+    let review = f.json(&["--json", "--dry-run", "environment", "apply"], 0);
+    let ids: Vec<_> = review["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["item"]["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["a", "b", "editor"]);
+    assert_eq!(f.calls(), "Q");
+    let run = f.json(&["--json", "--yes", "environment", "apply"], 4);
+    assert_eq!(run["steps"][0]["progress"]["state"], "confirmed", "{run:#}");
+    assert_eq!(run["steps"][1]["progress"]["state"], "uncertain", "{run:#}");
+    assert_eq!(run["steps"][2]["progress"]["state"], "pending");
+    assert!(!editor.exists());
+    assert!(f.host.home.join("prefix/Cellar/b/1.2.3/bin/b").exists());
+    let calls = f.calls();
+    f.json(&["--json", "--yes", "environment", "resume"], 4);
+    assert_eq!(f.calls(), calls);
+    f.json(&["--json", "--yes", "environment", "check"], 0);
+    let run = f.json(&["--json", "--yes", "environment", "resume"], 0);
+    assert!(
+        run["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|s| s["progress"]["state"] == "confirmed")
+    );
+    assert_eq!(fs::read_link(&editor).unwrap(), f.repo.join("settings"));
+    assert_eq!(
+        f.calls().chars().filter(|c| *c != 'Q').collect::<String>(),
+        "AB"
+    );
+}
+
+#[test]
+fn environment_process_interruption_leaves_durable_intent_and_never_replays() {
+    use std::time::{Duration, Instant};
+    let f = Fixture::new();
+    f.program("brew", include_str!("support/environment-brew.sh"));
+    fs::write(
+        f.repo.join("dort.toml"),
+        include_str!("support/environment.toml"),
+    )
+    .unwrap();
+    fs::write(f.repo.join("settings"), "editor settings\n").unwrap();
+    fs::write(f.host.home.join("hold-b"), "").unwrap();
+    f.json(&["--json", "--yes", "environment", "check"], 0);
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_dort"))
+        .env_clear()
+        .env("HOME", &f.host.home)
+        .env("PATH", &f.bin)
+        .current_dir(&f.repo)
+        .args(["--json", "--yes", "environment", "apply"])
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let wait = |file: &str| {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !f.host.home.join(file).exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        f.host.home.join(file).exists()
+    };
+    let reached = wait("provider-ready");
+    let _ = child.kill();
+    child.wait().unwrap();
+    fs::remove_file(f.host.home.join("hold-b")).unwrap();
+    assert!(reached && wait("provider-done"));
+    let review = f.json(&["--json", "--dry-run", "environment", "resume"], 4);
+    assert_eq!(
+        review["last_run"]["steps"][0]["progress"]["state"],
+        "confirmed"
+    );
+    assert_eq!(
+        review["last_run"]["steps"][1]["progress"]["state"],
+        "in_progress"
+    );
+    assert_eq!(
+        review["last_run"]["steps"][2]["progress"]["state"],
+        "pending"
+    );
+    assert!(!f.host.home.join(".editor").exists());
+    f.json(&["--json", "--yes", "environment", "check"], 0);
+    f.json(&["--json", "--yes", "environment", "resume"], 0);
+    assert_eq!(
+        fs::read_link(f.host.home.join(".editor")).unwrap(),
+        f.repo.join("settings")
+    );
+    assert_eq!(
+        f.calls().chars().filter(|c| *c != 'Q').collect::<String>(),
+        "AB"
+    );
+}
+
+#[test]
+fn environment_links_multiple_files_in_the_same_new_directory() {
+    let f = Fixture::new();
+    fs::write(
+        f.repo.join("dort.toml"),
+        "schema = 1\n[[files]]\nid = 'first'\nsource = 'a'\ntarget = '~/.settings/a'\nmode = 'link'\n\n[[files]]\nid = 'second'\nsource = 'b'\ntarget = '~/.settings/b'\nmode = 'link'\n\n[[files]]\nid = 'third'\nsource = 'c'\ntarget = '~/.settings/c'\nmode = 'link'\n",
+    )
+    .unwrap();
+    for name in ["a", "b", "c"] {
+        fs::write(f.repo.join(name), name).unwrap();
+    }
+    f.json(&["--json", "--yes", "environment", "apply"], 0);
+    for name in ["a", "b", "c"] {
+        assert_eq!(
+            fs::read_link(f.host.home.join(".settings").join(name)).unwrap(),
+            f.repo.join(name)
+        );
+    }
+}
+
+#[test]
+fn environment_review_blocks_inactive_dependency_without_enabling_it() {
+    let f = Fixture::new();
+    f.program("brew", include_str!("support/environment-brew.sh"));
+    fs::write(
+        f.repo.join("dort.toml"),
+        include_str!("support/environment.toml"),
+    )
+    .unwrap();
+    fs::write(f.repo.join("settings"), "editor settings\n").unwrap();
+    f.cmd()
+        .args(["--yes", "profiles", "set", "work", "off"])
+        .assert()
+        .success();
+    f.json(&["--json", "--yes", "environment", "check"], 0);
+    let review = f.json(&["--json", "--yes", "environment", "apply"], 4);
+    assert_eq!(review["rows"][0]["item"]["id"], "b");
+    assert_eq!(
+        review["rows"][0]["blockers"][0],
+        "Required tool a is off. Enable one of: work."
+    );
+    assert_eq!(review["rows"][1]["status"], "Blocked");
+    assert_eq!(f.calls(), "Q");
+    assert!(!f.host.home.join(".editor").exists());
+}

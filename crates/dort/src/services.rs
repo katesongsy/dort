@@ -45,15 +45,6 @@ pub fn doctor(host: &HostContext, local: &LocalConfig) -> DoctorReport {
     }
 }
 
-pub fn requested_profiles(local: &LocalConfig, requested: &[String]) -> Vec<String> {
-    local
-        .active_profiles
-        .iter()
-        .chain(requested)
-        .cloned()
-        .collect()
-}
-
 pub fn observe(
     host: &HostContext,
     local: &LocalConfig,
@@ -62,7 +53,7 @@ pub fn observe(
     request: Request,
 ) -> Result<Snapshot> {
     let root = local.select_repository(explicit)?;
-    planner::observe(host, &root, &requested_profiles(local, requested), request)
+    planner::observe(host, &root, requested, request)
 }
 
 pub struct ProfileChoices {
@@ -111,8 +102,9 @@ pub fn check_manifest(
             path: path.clone(),
             source,
         })?;
-    let active =
-        manifest.validate_for_host(host, &requested_profiles(local, requested), Some(&root))?;
+    let registered =
+        (path.file_name().is_some_and(|name| name == "dort.toml")).then_some(root.as_path());
+    let active = manifest.validate_local_selection(host, requested, registered)?;
     let tools: Vec<_> = manifest
         .tools
         .iter()
@@ -145,9 +137,12 @@ pub fn check_manifest(
             .cloned()
             .unwrap_or_default(),
         local: local.active_profiles.clone(),
-        mandatory: manifest
-            .profiles
-            .resolve(host.platform, &local.active_profiles)?,
+        mandatory: dort_core::profiles::active(&local.profile_rows(
+            &manifest.profiles,
+            host.platform,
+            registered,
+            &[],
+        )?),
     };
     Ok(CheckReport {
         manifest: path,
@@ -178,9 +173,8 @@ pub fn batch_plan(
     request: dort_core::batch::Request,
 ) -> Result<dort_core::batch::Plan> {
     let root = local.select_repository(repository)?;
-    let profiles = requested_profiles(local, requested);
     Ok(dort_core::batch::plan(dort_core::batch::observe(
-        host, &root, &profiles, request,
+        host, &root, requested, request,
     )?))
 }
 

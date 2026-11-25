@@ -440,7 +440,11 @@ impl App {
         if let Some(root) = completion.repository {
             self.repository = Some(root);
             self.reset_repository_scope();
-            self.origin = "approved create/attach";
+            self.origin = if completion.operation == "Clone and register" {
+                "approved clone"
+            } else {
+                "approved create/attach"
+            };
             self.tab = if self.shell.return_to_adopt {
                 Tab::Files
             } else {

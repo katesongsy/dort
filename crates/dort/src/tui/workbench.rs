@@ -422,14 +422,8 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
             ui::reader::ReviewStage::Changes,
             &preview.reader,
         );
-    app.preview_approval().present_key(
-        &app.hits,
-        if preview.pending.adoption() {
-            "Adopt all"
-        } else {
-            "Confirm changes"
-        },
-    );
+    app.preview_approval()
+        .present_key(&app.hits, preview.pending.confirmation_label());
     app.presented("Back", "Esc", Target::Back);
 }
 fn overlay(frame: &mut Frame, inner: Rect, app: &App, overlay: &Overlay) {

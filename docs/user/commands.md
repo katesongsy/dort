@@ -172,14 +172,51 @@ Add `--confirm-remove editor` for an extra guard.
 
 Only ordinary-file links are supported. Templates and secrets are declared but blocked.
 
-## Init
+## Profiles
 
 ```sh
+dort profiles list
+dort profiles set work off
+dort profiles set work on
+dort profiles set work defaults
+dort profiles list --profile work
+```
+
+`base` is always on. A temporary `--profile` wins over the saved choice, which wins over repository and platform defaults. Saved choices affect only the selected registered repository. Saving a choice leaves files and tools in place. An installed link can appear as **No longer selected** until you remove it separately.
+
+In the TUI, open **F2 More → Saved profiles**. Select a profile, choose **Use defaults**, **On**, or **Off**, then review and save.
+
+## Clone or init
+
+```sh
+dort --dry-run clone https://example.org/dotfiles.git /path/to/new-repository
+dort clone /absolute/path/to/local/source /path/to/new-repository
 dort init /path/to/new-repository
 dort init /path/to/existing-repository
 ```
 
-Creates a local repository at an absent path, or attaches an existing Git tree with a valid `dort.toml`. Clone and sync stay manual.
+`clone` accepts an HTTPS URL without credentials or an absolute local Git path. The destination must be new and its parent must exist. Dort keeps a clone with an invalid `dort.toml` without registering it. Fix the manifest, then attach the clone with `dort init PATH`. Clone leaves Home targets, profile choices, and packages unchanged.
+
+`init` creates a local repository or attaches an existing Git tree. In the TUI, open **F2 More → Clone repository** or **Create/attach**.
+
+## Environment
+
+```sh
+dort environment plan
+dort environment check
+dort --dry-run environment apply
+dort environment apply
+dort --dry-run environment resume
+dort environment resume
+```
+
+Use **Environment check** to update unknown tool results. It runs the reviewed package managers and saves results for ten minutes. **Plan** and `--dry-run` never run a manager. Pass the same `--profile NAME` additions to each command in the workflow.
+
+Review tools and links together before applying. A required tool must be selected and available at the checked version before a dependent link changes. A blocked plan makes no changes. Package managers may install dependencies. Dort does not roll back packages.
+
+If a run stops, review **Resume**. Dort rechecks confirmed work without reinstalling it. Run **Environment check** after an uncertain install. Repair the tool if the check cannot confirm its version and command. Changed declarations, choices, files, or approved effects can block the old resume.
+
+In the TUI, open **F2 More** for **Review environment plan**, **Environment check**, and **Review environment resume**.
 
 ## Checks
 

@@ -189,7 +189,7 @@ impl Git {
         Ok(())
     }
 
-    fn preflight(&self, repository: &Path) -> Result<PathBuf> {
+    pub(crate) fn preflight(&self, repository: &Path) -> Result<PathBuf> {
         if !repository.is_absolute() {
             return Err(failure("Git repository must be an absolute path"));
         }
@@ -245,7 +245,45 @@ impl Git {
         Ok(output.stdout)
     }
 
+    pub(crate) fn clone_private(&self, stage: &Path, source: &str) -> Result<()> {
+        let mut command = self.command(stage);
+        command.env_remove("GIT_EXEC_PATH");
+        command.args([
+            "-c",
+            "protocol.allow=never",
+            "-c",
+            if source.starts_with("https://") {
+                "protocol.https.allow=always"
+            } else {
+                "protocol.file.allow=always"
+            },
+            "-c",
+            "http.followRedirects=false",
+            "-c",
+            "credential.helper=",
+            "clone",
+            "--quiet",
+            "--no-local",
+            "--no-recurse-submodules",
+            "--template=",
+            "--",
+            source,
+            ".",
+        ]);
+        if run_bounded(command, LIMIT, Duration::from_secs(120))?.code != Some(0) {
+            return Err(failure("Git clone failed. Check the source and access."));
+        }
+        self.preflight(stage)?;
+        Ok(())
+    }
+
     fn run(&self, root: &Path, args: &[&str]) -> Result<Output> {
+        let mut command = self.command(root);
+        command.args(args);
+        run_bounded(command, LIMIT, TIMEOUT)
+    }
+
+    fn command(&self, root: &Path) -> Command {
         let mut command = Command::new(&self.executable);
         command
             .env_clear()
@@ -280,8 +318,7 @@ impl Git {
         ] {
             command.args(["-c", setting]);
         }
-        command.args(args);
-        run_bounded(command, LIMIT, TIMEOUT)
+        command
     }
 }
 

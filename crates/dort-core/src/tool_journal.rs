@@ -22,6 +22,8 @@ pub(crate) struct Header {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub change: Option<crate::tools::declaration::Change>,
     pub profiles: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<std::collections::BTreeSet<String>>,
     pub manifest: Entry,
     pub local_config: Entry,
     pub anchors: Vec<Parent>,

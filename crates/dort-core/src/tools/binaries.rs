@@ -5,7 +5,8 @@ use super::{
 };
 use crate::{
     Error, Manifest, Result,
-    observation::{self, Fingerprint, Kind},
+    adoption::parent_identity,
+    observation::{self, Entry, Fingerprint, Kind},
     profiles::selected,
 };
 use serde::Serialize;
@@ -162,7 +163,7 @@ pub fn observe(
     // cannot silently turn a raced/partial scope into a healthy empty observation.
     for (index, path) in directories.iter().enumerate() {
         if let Some(original) = &before[index]
-            && observation::inspect(path, false).ok().as_ref() != Some(original)
+            && !unchanged(original, observation::inspect(path, false))
         {
             directory_results[index].unavailable = Some(Failure::Changed);
         }
@@ -205,13 +206,27 @@ pub fn observe(
         tools,
     })
 }
+fn unchanged(before: &Entry, after: Result<Entry>) -> bool {
+    after.is_ok_and(|after| {
+        before.kind == after.kind
+            && before.fingerprint == after.fingerprint
+            && before.link_target == after.link_target
+            && before.parents.len() == after.parents.len()
+            && before
+                .parents
+                .iter()
+                .zip(&after.parents)
+                .all(|(a, b)| a.path == b.path && parent_identity(&a.fingerprint, &b.fingerprint))
+    })
+}
+
 fn inspect_entry(path: &std::path::Path) -> ProbeState {
     let Ok(entry) = observation::inspect(path, false) else {
         return ProbeState::Unavailable {
             reason: Failure::EntryUnavailable,
         };
     };
-    if observation::inspect(path, false).ok().as_ref() != Some(&entry) {
+    if !unchanged(&entry, observation::inspect(path, false)) {
         return ProbeState::Unavailable {
             reason: Failure::Changed,
         };

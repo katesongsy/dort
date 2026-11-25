@@ -342,3 +342,76 @@ fn declared_workflow_gallery_export_probe() {
         .write_all(output.as_bytes())
         .unwrap();
 }
+
+#[test]
+fn environment_review_and_resume_check_tools_before_touching_editor() {
+    let f = Fixture::new();
+    f.program(
+        "brew",
+        include_str!("../../../tests/support/environment-brew.sh"),
+    );
+    std::fs::write(
+        f.repo.join("dort.toml"),
+        include_str!("../../../tests/support/environment.toml"),
+    )
+    .unwrap();
+    std::fs::write(f.repo.join("settings"), "editor settings\n").unwrap();
+    std::fs::write(f.host.home.join("fail-b"), "").unwrap();
+    let mut app = app(&f, false);
+    let open = |app: &mut super::app::App, action| {
+        super::tests::more_target(
+            app,
+            |target| matches!(target, super::input::Target::Action(a) if a == action),
+        )
+        .unwrap()
+    };
+    let check = |app: &mut super::app::App| {
+        let Task::EnvironmentCheck(mut inputs) = open(app, Action::EnvironmentCheck) else {
+            panic!("environment check")
+        };
+        inputs.search_dirs = vec![f.bin.clone()];
+        run(&f, app, Task::EnvironmentCheck(inputs));
+        assert!(app.tools_view.declared.check_preview.is_some());
+        assert!(key(app, KeyCode::Enter).is_none());
+        let approved = super::tests::approve_ready(app, 80, 24).unwrap();
+        run(&f, app, approved);
+    };
+    check(&mut app);
+    assert_eq!(f.calls(), "Q");
+    let task = open(&mut app, Action::EnvironmentPlan);
+    run(&f, &mut app, task);
+    assert!(app.preview.as_ref().unwrap().text.contains("Requires: b"));
+    assert_eq!(f.calls(), "Q");
+    let approved = super::tests::approve_ready(&mut app, 80, 24).unwrap();
+    run(&f, &mut app, approved);
+    let record = app.result.as_deref().unwrap();
+    assert!(
+        record.contains("a: Confirmed")
+            && record.contains("b: Uncertain")
+            && record.contains("editor: Pending"),
+        "{record}"
+    );
+    let screen = super::tests::render(&app, 100, 26);
+    assert!(screen.contains("a: Confirmed") && screen.contains("b: Uncertain"));
+    assert!(screen.contains("editor: Pending"));
+    assert!(!f.host.home.join(".editor").exists());
+    key(&mut app, KeyCode::Esc);
+    let task = open(&mut app, Action::EnvironmentResume);
+    run(&f, &mut app, task);
+    assert!(super::tests::approve_ready(&mut app, 80, 24).is_none());
+    key(&mut app, KeyCode::Esc);
+    check(&mut app);
+    let task = open(&mut app, Action::EnvironmentResume);
+    run(&f, &mut app, task);
+    let approved = super::tests::approve_ready(&mut app, 80, 24).unwrap();
+    run(&f, &mut app, approved);
+    assert!(super::tests::render(&app, 100, 26).contains("editor: Confirmed"));
+    assert_eq!(
+        std::fs::read_link(f.host.home.join(".editor")).unwrap(),
+        f.repo.join("settings")
+    );
+    assert_eq!(
+        f.calls().chars().filter(|c| *c != 'Q').collect::<String>(),
+        "AB"
+    );
+}

@@ -23,6 +23,77 @@ impl Default for Profiles {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Choice {
+    #[default]
+    Defaults,
+    On,
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Reason {
+    Base,
+    Temporary,
+    Saved,
+    Legacy,
+    Platform,
+    RepositoryDefault,
+    NotDefault,
+}
+
+impl Reason {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Base => "always on",
+            Self::Temporary => "temporary for this run",
+            Self::Saved => "saved choice",
+            Self::Legacy => "legacy local setting",
+            Self::Platform => "platform default",
+            Self::RepositoryDefault => "repository default",
+            Self::NotDefault => "not a default",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Row {
+    pub name: String,
+    pub on: bool,
+    pub reason: Reason,
+    pub choice: Choice,
+}
+
+impl Choice {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Defaults => "Use defaults",
+            Self::On => "On",
+            Self::Off => "Off",
+        }
+    }
+}
+
+impl Row {
+    pub fn label(&self) -> String {
+        format!(
+            "{}: {} ({})",
+            self.name,
+            if self.on { "On" } else { "Off" },
+            self.reason.label()
+        )
+    }
+}
+
+pub fn active(rows: &[Row]) -> BTreeSet<String> {
+    rows.iter()
+        .filter(|row| row.on)
+        .map(|row| row.name.clone())
+        .collect()
+}
+
 impl Profiles {
     pub fn known(&self) -> BTreeSet<String> {
         self.available
@@ -33,20 +104,65 @@ impl Profiles {
     }
 
     pub fn resolve(&self, platform: Platform, local: &[String]) -> Result<BTreeSet<String>> {
-        let active: BTreeSet<_> = ["base".to_owned()]
-            .into_iter()
-            .chain(self.default.iter().cloned())
-            .chain(self.platform.get(&platform).into_iter().flatten().cloned())
-            .chain(local.iter().cloned())
+        Ok(active(&self.rows(
+            platform,
+            local,
+            &BTreeMap::new(),
+            &[],
+        )?))
+    }
+
+    pub fn rows(
+        &self,
+        platform: Platform,
+        legacy: &[String],
+        saved: &BTreeMap<String, Choice>,
+        temporary: &[String],
+    ) -> Result<Vec<Row>> {
+        let known = self.known();
+        let platform_defaults = self.platform.get(&platform);
+        let unknown: BTreeSet<_> = self
+            .default
+            .iter()
+            .chain(platform_defaults.into_iter().flatten())
+            .chain(legacy)
+            .chain(temporary)
+            .filter(|name| !known.contains(*name))
+            .cloned()
             .collect();
-        let unknown: Vec<_> = active.difference(&self.known()).cloned().collect();
         if !unknown.is_empty() {
             return Err(Error::Invalid(format!(
                 "unknown active profiles: {}",
-                unknown.join(", ")
+                unknown.into_iter().collect::<Vec<_>>().join(", ")
             )));
         }
-        Ok(active)
+        Ok(known
+            .into_iter()
+            .map(|name| {
+                let choice = saved.get(&name).copied().unwrap_or_default();
+                let (on, reason) = if name == "base" {
+                    (true, Reason::Base)
+                } else if temporary.contains(&name) {
+                    (true, Reason::Temporary)
+                } else if choice != Choice::Defaults {
+                    (choice == Choice::On, Reason::Saved)
+                } else if !saved.contains_key(&name) && legacy.contains(&name) {
+                    (true, Reason::Legacy)
+                } else if platform_defaults.is_some_and(|names| names.contains(&name)) {
+                    (true, Reason::Platform)
+                } else if self.default.contains(&name) {
+                    (true, Reason::RepositoryDefault)
+                } else {
+                    (false, Reason::NotDefault)
+                };
+                Row {
+                    name,
+                    on,
+                    reason,
+                    choice,
+                }
+            })
+            .collect())
     }
 }
 

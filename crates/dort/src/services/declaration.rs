@@ -76,14 +76,13 @@ impl Request {
         repository: &Path,
         profiles: &[String],
     ) -> Result<declaration::Preview> {
-        let effective = effective_profiles(host, profiles)?;
         match self.change {
-            None => declaration::preview(host, repository, &effective, self.tool),
+            None => declaration::preview(host, repository, profiles, self.tool),
             Some(declaration::Change::Edit) => {
-                declaration::preview_edit(host, repository, &effective, self.tool)
+                declaration::preview_edit(host, repository, profiles, self.tool)
             }
             Some(declaration::Change::Remove) => {
-                declaration::preview_remove(host, repository, &effective, &self.tool.id)
+                declaration::preview_remove(host, repository, profiles, &self.tool.id)
             }
         }
     }
@@ -94,14 +93,5 @@ pub fn prepare_remove(
     profiles: &[String],
     id: &str,
 ) -> Result<declaration::Preview> {
-    declaration::preview_remove(host, repository, &effective_profiles(host, profiles)?, id)
-}
-fn effective_profiles(host: &HostContext, profiles: &[String]) -> Result<Vec<String>> {
-    let mut effective = dort_core::local::LocalConfig::load(host)?.active_profiles;
-    for profile in profiles {
-        if !effective.contains(profile) {
-            effective.push(profile.clone());
-        }
-    }
-    Ok(effective)
+    declaration::preview_remove(host, repository, profiles, id)
 }

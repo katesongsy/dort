@@ -3,7 +3,6 @@ use super::{inspection_defaults, installation, reconciliation, tools};
 use dort_core::{
     Error, Result,
     context::HostContext,
-    local::LocalConfig,
     model::Provider,
     observation::{self, Entry, Fingerprint},
     state::WriterLock,
@@ -58,6 +57,7 @@ struct CheckScope {
     preview: tools::Preview,
 }
 pub struct CheckPreview {
+    environment: bool,
     prepared: reconciliation::Prepared,
     source: Source,
     scopes: Vec<CheckScope>,
@@ -192,22 +192,11 @@ impl Input {
     /// Process-free preparation; approvals expose every automatically selected scope.
     pub fn prepare(&self, host: &HostContext) -> Result<CheckPreview> {
         let (manifest, entry) = read_manifest(&self.manifest)?;
-        let local = LocalConfig::load(host).map_err(withheld)?;
-        let root = self.manifest.parent();
-        let profiles = if local
-            .repositories
-            .values()
-            .any(|r| Some(r.root.as_path()) == root)
-        {
-            super::requested_profiles(&local, &self.profiles)
-        } else {
-            self.profiles.clone()
-        };
         let dirs = directories(&self.detection.search_dirs)?;
         let prepared = reconciliation::Request {
             manifest: self.manifest.clone(),
             tool_search_dirs: dirs.clone(),
-            profiles,
+            profiles: self.profiles.clone(),
         }
         .prepare(host)
         .map_err(withheld)?;
@@ -304,6 +293,7 @@ impl Input {
             ));
         }
         Ok(CheckPreview {
+            environment: false,
             prepared,
             source,
             scopes,
@@ -313,6 +303,15 @@ impl Input {
     }
 }
 impl CheckPreview {
+    pub fn saves_environment_check(&self) -> bool {
+        self.environment
+    }
+
+    pub fn for_environment(mut self) -> Self {
+        self.environment = true;
+        self
+    }
+
     pub fn review(&self) -> CheckReview<'_> {
         CheckReview {
             scope: &self.prepared.scope,
@@ -327,7 +326,11 @@ impl CheckPreview {
                 })
                 .collect(),
             needs_setup: &self.issues,
-            warning: "Checks can run package-manager configuration and plugins, and change caches. No packages are installed. Command lookup reads metadata only.",
+            warning: if self.environment {
+                "Environment check runs the displayed managers and saves observations for 10 minutes. Checks may change caches. No packages are installed."
+            } else {
+                "Checks can run package-manager configuration and plugins, and change caches. No packages are installed. Command lookup reads metadata only."
+            },
         }
     }
     pub fn approve(self) -> CheckApproval {
@@ -366,6 +369,42 @@ impl CheckApproval {
         let (_, entry) = read_manifest(&reconciliation.scope.manifest)?;
         if p.source != Source::capture(host, &entry)? {
             return Err(invalid("Declaration or profiles changed. Check again."));
+        }
+        if p.environment {
+            let scope = &reconciliation.scope;
+            let root = scope
+                .manifest
+                .parent()
+                .ok_or_else(|| invalid("Choose a registered repository."))?;
+            let reports = snapshots.iter().map(|snapshot| {
+                let observed = &snapshot.report.provider;
+                (
+                    reconciliation
+                        .bindings
+                        .iter()
+                        .filter(|(_, id)| **id == snapshot.id)
+                        .map(|(tool, _)| tool.clone())
+                        .collect(),
+                    dort_core::tools::inspection::Report {
+                        description: observed.description.clone(),
+                        observation: observed.observation.clone(),
+                    },
+                )
+            });
+            dort_core::environment::save_check(
+                host,
+                root,
+                &scope.temporary_profiles,
+                scope.tool_search_dirs.clone(),
+                reports,
+                || {
+                    let (_, entry) = read_manifest(&scope.manifest)?;
+                    if p.source != Source::capture(host, &entry)? {
+                        return Err(invalid("Declaration or profiles changed. Check again."));
+                    }
+                    Ok(())
+                },
+            )?;
         }
         Ok(Checked {
             reconciliation,

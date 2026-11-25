@@ -121,11 +121,30 @@ pub fn prepare(
     brew: Scope,
     reports: &[&inspection::Report],
 ) -> Result<Preview> {
+    prepare_inner(host, request, brew, reports, false)
+}
+
+pub(crate) fn prepare_environment(
+    host: &HostContext,
+    request: Request,
+    brew: Scope,
+    reports: &[&inspection::Report],
+) -> Result<Preview> {
+    prepare_inner(host, request, brew, reports, true)
+}
+
+fn prepare_inner(
+    host: &HostContext,
+    request: Request,
+    brew: Scope,
+    reports: &[&inspection::Report],
+    environment: bool,
+) -> Result<Preview> {
     let (manifest, scope, sources) = super::sources(host, &request, None, Some(&brew))?;
     super::bounded_metadata(&scope, &sources)?;
     catalogs(&scope, &brew, reports)?;
     let row = super::evaluate_catalogs(host, &manifest, &scope, reports)?;
-    if row.action != planning::PackageAction::ReviewMissingPackage || !row.blockers.is_empty() {
+    if !super::reviewable(&row, environment) {
         return Err(invalid(
             "only an observed missing canonical core formula with clear explicit prerequisites can be reviewed",
         ));
@@ -162,6 +181,12 @@ pub(super) fn catalogs<'a>(
 pub(super) struct Sources {
     bindings: npm::Sources,
     parents: Vec<observation::Parent>,
+}
+pub(super) fn effect_sources(sources: &Sources) -> Sources {
+    Sources {
+        bindings: npm::effect_sources(&sources.bindings),
+        parents: sources.parents.clone(),
+    }
 }
 pub(super) fn same(a: &Sources, b: &Sources) -> bool {
     npm::same(&a.bindings, &b.bindings)

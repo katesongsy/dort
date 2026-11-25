@@ -3,7 +3,6 @@ use super::reconciliation::{Report, Scope, Snapshot};
 use dort_core::{
     Error, Result,
     context::HostContext,
-    local::LocalConfig,
     model::Provider,
     tools::{
         VersionPolicy, install,
@@ -35,35 +34,6 @@ pub fn eligible(row: &Row) -> bool {
 }
 fn invalid(message: &'static str) -> Error {
     Error::Invalid(message.into())
-}
-/// Application-level scope projection only; core preparation/execution revalidates it.
-pub fn profiles(
-    host: &HostContext,
-    manifest: &std::path::Path,
-    additions: &[String],
-) -> Result<Vec<String>> {
-    let root = manifest
-        .parent()
-        .ok_or_else(|| invalid("installation needs a registered repository manifest"))?;
-    if root.join("dort.toml") != manifest {
-        return Err(invalid(
-            "installation needs the registered dort.toml manifest",
-        ));
-    }
-    let local = LocalConfig::load(host)
-        .map_err(|_| invalid("repository selection unavailable; contents withheld"))?;
-    if !local.repositories.values().any(|r| r.root == root) {
-        return Err(invalid(
-            "tool installation requires a registered physical repository root",
-        ));
-    }
-    let mut selected = local.active_profiles;
-    for profile in additions {
-        if !selected.contains(profile) {
-            selected.push(profile.clone());
-        }
-    }
-    Ok(selected)
 }
 impl Request {
     pub fn selected(report: &Report, tool: &str, snapshots: &[Snapshot]) -> Result<Self> {
@@ -130,16 +100,6 @@ impl Request {
                 "installation needs the registered dort.toml manifest",
             ));
         }
-        let profiles = profiles(
-            host,
-            &self.scope.manifest,
-            &self
-                .scope
-                .active_profiles
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>(),
-        )?;
         let id = self
             .bindings
             .get(&self.tool)
@@ -154,7 +114,7 @@ impl Request {
         let description = &snapshot.report.provider.description;
         let request = install::Request {
             repository,
-            profiles,
+            profiles: self.scope.temporary_profiles.clone(),
             tool: self.tool.clone(),
             executable: description.executable.clone(),
             search_dirs: description.trusted_search_path.clone(),

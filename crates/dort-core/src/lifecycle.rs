@@ -170,7 +170,7 @@ pub(crate) fn remove_mapping(
     }
     let new = doc.to_string();
     let parsed = Manifest::parse(&new)?;
-    parsed.validate_for_host(host, profiles, Some(repo))?;
+    parsed.validate_selection(host, &profiles.iter().cloned().collect(), Some(repo))?;
     old.files.remove(index);
     if journal::encode(&old)? != journal::encode(&parsed)? {
         return Err(Error::Invalid(
@@ -186,6 +186,27 @@ pub fn execute(
     host: &HostContext,
     lock: &WriterLock,
     approval: Approval,
+    observer: impl FnMut(&Event) -> Result<()>,
+) -> Result<Option<String>> {
+    execute_inner(host, lock, approval, None, observer)
+}
+
+pub(crate) fn execute_environment(
+    host: &HostContext,
+    lock: &WriterLock,
+    plan: Plan,
+    id: &str,
+    observer: impl FnMut(&Event) -> Result<()>,
+) -> Result<Option<String>> {
+    let digest = journal::digest(canonical(&plan)?.as_bytes());
+    execute_inner(host, lock, Approval { plan, digest }, Some(id), observer)
+}
+
+fn execute_inner(
+    host: &HostContext,
+    lock: &WriterLock,
+    approval: Approval,
+    environment_id: Option<&str>,
     mut observer: impl FnMut(&Event) -> Result<()>,
 ) -> Result<Option<String>> {
     lock.check_context(host)?;
@@ -195,12 +216,19 @@ pub fn execute(
         return Err(Error::Invalid("approval belongs to another host".into()));
     }
     let profiles: Vec<_> = inputs.active_profiles.iter().cloned().collect();
-    let fresh = planner::plan(planner::observe(
-        host,
-        &inputs.repository,
-        &profiles,
-        inputs.request.clone(),
-    )?);
+    let fresh = if let Some(id) = environment_id {
+        let mut snapshot =
+            planner::observe_environment(host, &inputs.repository, &inputs.temporary_profiles)?;
+        snapshot.files.retain(|file| file.mapping.id == id);
+        planner::plan_environment(snapshot)
+    } else {
+        planner::plan(planner::observe(
+            host,
+            &inputs.repository,
+            &inputs.temporary_profiles,
+            inputs.request.clone(),
+        )?)
+    };
     if fresh.has_blockers() || journal::digest(canonical(&fresh)?.as_bytes()) != approval.digest {
         return Err(Error::Invalid(
             "stale or substituted lifecycle plan; observe and approve again".into(),
@@ -262,6 +290,7 @@ pub fn execute(
         approved_plan_sha256: approval.digest,
         action,
         removal_acknowledged: action == Action::Remove,
+        environment_file: environment_id.map(str::to_owned),
         profiles,
         anchors: anchors(&entries),
         watches,
@@ -693,13 +722,25 @@ fn validate_scope(host: &HostContext, j: &Journal) -> Result<()> {
     let manifest = Manifest::parse(
         std::str::from_utf8(&bytes).map_err(|_| Error::Invalid("manifest must be UTF-8".into()))?,
     )?;
-    let active = manifest.validate_for_host(host, &h.profiles, Some(&h.repository))?;
+    let active = h.profiles.iter().cloned().collect();
+    if h.environment_file.is_some() {
+        if h.action != Action::Apply {
+            return Err(Error::Invalid("invalid environment file record".into()));
+        }
+        manifest.validate_file_targets(host, &active, Some(&h.repository), None)?;
+    } else {
+        manifest.validate_selection(host, &active, Some(&h.repository))?;
+    }
     let mut mappings: Vec<_> = manifest
         .files
         .iter()
         .filter(|m| {
-            selected(&m.profiles, &active)
-                && (h.action == Action::Apply || m.id == h.watches[0].mapping.id)
+            if h.action == Action::Apply {
+                selected(&m.profiles, &active)
+                    && h.environment_file.as_ref().is_none_or(|id| *id == m.id)
+            } else {
+                m.id == h.watches[0].mapping.id
+            }
         })
         .cloned()
         .collect();
@@ -731,6 +772,9 @@ fn validate_scope(host: &HostContext, j: &Journal) -> Result<()> {
         manifest: h.manifest.clone(),
         local_config: h.local_config.clone(),
         active_profiles: active,
+        temporary_profiles: vec![],
+        profiles: vec![],
+        inactive_links: vec![],
         request: match h.action {
             Action::Apply => Request::Apply,
             Action::Keep | Action::Remove => Request::Unmanage {
@@ -755,7 +799,12 @@ fn validate_scope(host: &HostContext, j: &Journal) -> Result<()> {
             })
             .collect(),
     };
-    if planner::plan(snapshot).has_blockers() {
+    let plan = if h.environment_file.is_some() {
+        planner::plan_environment(snapshot)
+    } else {
+        planner::plan(snapshot)
+    };
+    if plan.has_blockers() {
         return Err(Error::Invalid("unsafe lifecycle journal inputs".into()));
     }
     let expected = wire::expected(h)?;

@@ -54,7 +54,7 @@ impl Query {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(rename_all = "snake_case")]
 pub enum Failure {
     #[error("inspection requires absolute UTF-8 paths without dot components")]
@@ -84,7 +84,7 @@ pub enum Failure {
 }
 
 /// Whitelisted metadata only. No raw stdout/stderr, configuration or environment values.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Installation {
     /// Provider-reported identifier, not inferred from a binary name.
     pub package: String,
@@ -92,7 +92,7 @@ pub struct Installation {
 }
 
 /// A failed observation is never represented as a healthy empty catalog.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum Observation {
     Complete { installations: Vec<Installation> },

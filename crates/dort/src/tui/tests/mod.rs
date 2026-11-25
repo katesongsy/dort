@@ -398,6 +398,7 @@ fn navigation_and_metadata_escaping() {
         repository: None,
         known_roots: vec![],
         profiles: vec![],
+        profile_rows: vec![],
         files: vec![],
         history: vec![],
         history_error: None,
@@ -492,6 +493,7 @@ fn refresh_preserves_selected_identity_and_clamps_if_it_disappears() {
         repository: None,
         known_roots: vec![],
         profiles: vec![],
+        profile_rows: vec![],
         files: ids
             .iter()
             .map(|id| (id.to_string(), String::new()))
@@ -535,6 +537,7 @@ fn completion_keeps_noop_result_visible_through_refresh_and_read_failure() {
         repository: None,
         known_roots: vec![],
         profiles: vec![],
+        profile_rows: vec![],
         files: vec![],
         history: vec![],
         history_error: None,

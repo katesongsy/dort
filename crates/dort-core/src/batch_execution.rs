@@ -2,7 +2,7 @@
 pub use crate::adoption::{Boundary, Event};
 use crate::{
     Error, Manifest, Result,
-    adoption::{self, anchors, canonical, checked_bytes, parent_identity, same},
+    adoption::{self, anchors, checked_bytes, parent_identity, same},
     batch::{self, Action, Approval},
     batch_journal::{self as wire, Header, Journal, Mutation, Operation, Role, Watch},
     context::HostContext,
@@ -104,7 +104,13 @@ fn edit_manifest(bytes: &[u8], h: &Header, host: &HostContext) -> Result<Option<
         std::str::from_utf8(bytes).map_err(|_| Error::Invalid("manifest must be UTF-8".into()))?;
     let mut expected = Manifest::parse(text)?;
     let mappings: Vec<_> = h.watches.iter().map(|w| w.mapping.clone()).collect();
-    batch::validate_adoptions(&mut expected, &mappings, host, &h.profiles, &h.repository)?;
+    batch::validate_adoptions(
+        &mut expected,
+        &mappings,
+        host,
+        &h.profiles.iter().cloned().collect(),
+        &h.repository,
+    )?;
     #[derive(serde::Serialize)]
     struct Addition<'a> {
         files: &'a [crate::model::ManagedFile],
@@ -149,7 +155,11 @@ fn edit_manifest(bytes: &[u8], h: &Header, host: &HostContext) -> Result<Option<
         if let Ok(parsed) = Manifest::parse(&edited)
             && journal::encode(&parsed)? == expected
         {
-            parsed.validate_for_host(host, &h.profiles, Some(&h.repository))?;
+            parsed.validate_selection(
+                host,
+                &h.profiles.iter().cloned().collect(),
+                Some(&h.repository),
+            )?;
             return Ok(Some(edited.into_bytes()));
         }
     }
@@ -181,10 +191,10 @@ pub fn execute(
     let fresh = batch::plan(batch::observe(
         host,
         &inputs.repository,
-        &profiles,
+        &inputs.temporary_profiles,
         approval.plan.request(),
     )?);
-    if fresh.has_blockers() || journal::digest(canonical(&fresh)?.as_bytes()) != approval.digest {
+    if fresh.has_blockers() || batch::binding(&fresh)? != approval.digest {
         return Err(Error::Invalid(
             "stale or substituted batch plan; observe and approve again".into(),
         ));
@@ -713,17 +723,19 @@ fn validate_scope(host: &HostContext, j: &Journal) -> Result<()> {
     let manifest = Manifest::parse(
         std::str::from_utf8(&bytes).map_err(|_| Error::Invalid("manifest must be UTF-8".into()))?,
     )?;
-    let active = manifest.validate_for_host(host, &h.profiles, Some(&h.repository))?;
+    let active = h.profiles.iter().cloned().collect();
+    manifest.validate_selection(host, &active, Some(&h.repository))?;
     let mappings: Vec<_> = h.watches.iter().map(|w| w.mapping.clone()).collect();
     if h.action == Action::Adopt {
         let mut combined = manifest.clone();
-        batch::validate_adoptions(&mut combined, &mappings, host, &h.profiles, &h.repository)?;
+        batch::validate_adoptions(&mut combined, &mappings, host, &active, &h.repository)?;
     } else {
         for mapping in &mappings {
             if !manifest.files.iter().any(|m| {
                 m.id == mapping.id
                     && selected_mapping(m, mapping)
-                    && crate::profiles::selected(&m.profiles, &active)
+                    && (h.action != Action::Apply
+                        || crate::profiles::selected(&m.profiles, &active))
             }) {
                 return Err(Error::Invalid(
                     "batch watches do not match active original mappings".into(),
@@ -753,6 +765,9 @@ fn validate_scope(host: &HostContext, j: &Journal) -> Result<()> {
             manifest: h.manifest.clone(),
             local_config: h.local_config.clone(),
             active_profiles: active.clone(),
+            temporary_profiles: vec![],
+            profiles: vec![],
+            inactive_links: vec![],
             request: match h.action {
                 Action::Adopt => Request::Adopt {
                     mapping: w.mapping.clone(),
@@ -782,9 +797,7 @@ fn validate_scope(host: &HostContext, j: &Journal) -> Result<()> {
         items: snapshots,
         blockers: vec![],
     });
-    if plan.has_blockers()
-        || journal::digest(canonical(&plan)?.as_bytes()) != h.approved_plan_sha256
-    {
+    if plan.has_blockers() || batch::binding(&plan)? != h.approved_plan_sha256 {
         return Err(Error::Invalid(
             "batch journal does not reconstruct approved combined plan".into(),
         ));

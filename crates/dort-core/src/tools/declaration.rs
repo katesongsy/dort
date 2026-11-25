@@ -38,6 +38,8 @@ pub struct Preview {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub before: Option<Tool>,
     pub profiles: Vec<String>,
+    #[serde(skip)]
+    active: std::collections::BTreeSet<String>,
     pub no_op: bool,
     pub effects: Vec<PathBuf>,
     #[serde(skip)]
@@ -62,7 +64,7 @@ impl Approval {
 }
 fn bind(p: &Preview) -> Result<String> {
     Ok(journal::digest(
-        journal::encode(&(p, &p.host, &p.manifest, &p.local_config))?.as_bytes(),
+        adoption::canonical(&(p, &p.host, &p.manifest, &p.local_config, &p.active))?.as_bytes(),
     ))
 }
 fn parse(bytes: &[u8]) -> Result<Manifest> {
@@ -98,7 +100,7 @@ fn edit(
     bytes: &[u8],
     tool: &Tool,
     host: &HostContext,
-    profiles: &[String],
+    active: &std::collections::BTreeSet<String>,
     repository: &Path,
     change: Option<Change>,
 ) -> Result<Option<Vec<u8>>> {
@@ -135,7 +137,7 @@ fn edit(
     }
     // The original manifest has already passed structural parsing. These are
     // typed declaration diagnostics, never TOML parser excerpts or file bodies.
-    expected.validate_for_host(host, profiles, Some(repository))?;
+    expected.validate_selection(host, active, Some(repository))?;
     #[derive(Serialize)]
     struct Addition<'a> {
         tools: [&'a Tool; 1],
@@ -272,7 +274,7 @@ fn prepare(
 ) -> Result<Preview> {
     crate::context::validate_absolute(repository)?;
     observation::validate_output_path(repository)?;
-    let local = LocalConfig::load(host)?;
+    let (local, local_config) = LocalConfig::load_bound(host)?;
     let repository_id = local
         .repositories
         .iter()
@@ -297,8 +299,13 @@ fn prepare(
             "declaration changed during preparation; review again".into(),
         ));
     }
-    let no_op = edit(&bytes, &tool, host, profiles, repository, change)?.is_none();
-    let local_config = observation::inspect(&host.local_config_path(), false)?;
+    let active = crate::profiles::active(&local.profile_rows(
+        &parse(&bytes)?.profiles,
+        host.platform,
+        Some(repository),
+        profiles,
+    )?);
+    let no_op = edit(&bytes, &tool, host, &active, repository, change)?.is_none();
     let mut p = Preview {
         schema: if change.is_some() { 2 } else { 1 },
         preview_only: true,
@@ -308,6 +315,7 @@ fn prepare(
         change,
         before,
         profiles: profiles.to_vec(),
+        active,
         no_op,
         effects: if no_op {
             vec![]
@@ -394,7 +402,11 @@ fn validate_scope(host: &HostContext, j: &Journal) -> Result<()> {
     }
     j.verify_backup()?;
     let bytes = journal::read_bytes(&j.directory, "manifest.backup")?;
-    if edit(&bytes, &h.tool, host, &h.profiles, &h.repository, h.change)?
+    let active = match &h.active {
+        Some(active) => active.clone(),
+        None => parse(&bytes)?.active_profiles(host, &h.profiles)?,
+    };
+    if edit(&bytes, &h.tool, host, &active, &h.repository, h.change)?
         .as_ref()
         .map(|b| journal::digest(b))
         .as_ref()
@@ -411,7 +423,10 @@ fn validate_layout(host: &HostContext, j: &Journal) -> Result<()> {
         &j.record.header.repository,
     )?;
     j.verify_backup()?;
-    let config = observation::inspect(&host.local_config_path(), false)?;
+    let mut config = observation::inspect(&host.local_config_path(), false)?;
+    if j.record.header.local_config.sha256.is_some() {
+        config = LocalConfig::load_bound(host)?.1;
+    }
     if !same(&j.record.header.local_config, &config, true) {
         return Err(Error::Invalid(
             "local configuration changed since declaration approval".into(),
@@ -493,7 +508,7 @@ pub fn execute(
         &bytes,
         &fresh.tool,
         host,
-        &fresh.profiles,
+        &fresh.active,
         &fresh.repository,
         fresh.change,
     )?
@@ -506,6 +521,7 @@ pub fn execute(
         tool: fresh.tool,
         change: fresh.change,
         profiles: fresh.profiles,
+        active: Some(fresh.active),
         anchors: anchors(&[&fresh.manifest, &fresh.local_config]),
         manifest: fresh.manifest,
         local_config: fresh.local_config,

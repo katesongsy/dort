@@ -42,6 +42,8 @@ pub struct LocalConfig {
     pub schema: u32,
     #[serde(default)]
     pub active_profiles: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    profile_choices: BTreeMap<String, BTreeMap<String, crate::profiles::Choice>>,
     #[serde(default)]
     pub variables: BTreeMap<String, toml::Value>,
     pub active_repository: Option<String>,
@@ -54,6 +56,7 @@ impl Default for LocalConfig {
         Self {
             schema: 1,
             active_profiles: vec![],
+            profile_choices: BTreeMap::new(),
             variables: BTreeMap::new(),
             active_repository: None,
             repositories: BTreeMap::new(),
@@ -136,6 +139,28 @@ impl LocalConfig {
         directory.replace("local.toml", &text)
     }
 
+    pub fn profile_rows(
+        &self,
+        profiles: &crate::profiles::Profiles,
+        platform: crate::platform::Platform,
+        repository: Option<&Path>,
+        temporary: &[String],
+    ) -> Result<Vec<crate::profiles::Row>> {
+        let saved = repository
+            .and_then(|root| {
+                self.repositories
+                    .iter()
+                    .find(|(_, record)| record.root == root)
+            })
+            .and_then(|(id, _)| self.profile_choices.get(id));
+        profiles.rows(
+            platform,
+            &self.active_profiles,
+            saved.unwrap_or(&BTreeMap::new()),
+            temporary,
+        )
+    }
+
     pub fn select_repository(&self, explicit: Option<&Path>) -> Result<PathBuf> {
         if let Some(path) = explicit {
             return path
@@ -147,6 +172,94 @@ impl LocalConfig {
             .and_then(|id| self.repositories.get(id))
             .map(|r| r.root.clone())
             .ok_or(Error::NoRepository)
+    }
+}
+
+#[derive(Serialize)]
+pub struct ProfilePreview {
+    repository: PathBuf,
+    name: String,
+    choice: crate::profiles::Choice,
+    #[serde(skip)]
+    manifest: crate::observation::Entry,
+    #[serde(skip)]
+    config: crate::observation::Entry,
+}
+
+impl ProfilePreview {
+    pub fn prepare(
+        host: &HostContext,
+        repository: &Path,
+        name: &str,
+        choice: crate::profiles::Choice,
+    ) -> Result<Self> {
+        let (local, config) = LocalConfig::load_bound(host)?;
+        if !local.repositories.values().any(|r| r.root == repository) {
+            return Err(Error::Invalid(
+                "Profile choices need a registered repository".into(),
+            ));
+        }
+        let (manifest, entry) = crate::observation::read_manifest(&repository.join("dort.toml"))?;
+        if name == "base" || !manifest.profiles.known().contains(name) {
+            return Err(Error::Invalid(
+                "Choose a known profile other than base".into(),
+            ));
+        }
+        Ok(Self {
+            repository: repository.to_owned(),
+            name: name.into(),
+            choice,
+            manifest: entry,
+            config,
+        })
+    }
+
+    pub fn human(&self) -> String {
+        format!(
+            "Repository: {:?}\nProfile: {}\nSave: {}\n\nChanges the local profile choice only. Files and tools stay in place.",
+            self.repository,
+            self.name,
+            self.choice.label()
+        )
+    }
+
+    pub fn approve(self) -> ProfileApproval {
+        ProfileApproval(self)
+    }
+}
+
+pub struct ProfileApproval(ProfilePreview);
+
+impl ProfileApproval {
+    pub fn execute(self, host: &HostContext) -> Result<()> {
+        let lock = WriterLock::acquire(host)?;
+        let p = self.0;
+        let fresh = ProfilePreview::prepare(host, &p.repository, &p.name, p.choice)?;
+        if !crate::adoption::same(&p.manifest, &fresh.manifest, true)
+            || !crate::adoption::same(&p.config, &fresh.config, true)
+        {
+            return Err(Error::Invalid(
+                "Manifest or profile choices changed. Review again.".into(),
+            ));
+        }
+        let (mut local, config) = LocalConfig::load_bound(host)?;
+        if !same_read(&fresh.config, &config) || fresh.config.sha256 != config.sha256 {
+            return Err(Error::Invalid(
+                "Profile choices changed. Review again.".into(),
+            ));
+        }
+        let id = local
+            .repositories
+            .iter()
+            .find(|(_, r)| r.root == p.repository)
+            .map(|(id, _)| id.clone())
+            .ok_or(Error::NoRepository)?;
+        local
+            .profile_choices
+            .entry(id)
+            .or_default()
+            .insert(p.name, p.choice);
+        local.save(host, &lock)
     }
 }
 

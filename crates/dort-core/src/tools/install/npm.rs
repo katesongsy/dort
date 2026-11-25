@@ -61,7 +61,7 @@ pub(super) fn valid(scope: &super::Scope) -> bool {
     ids == scope.bound_tools
 }
 impl Catalog {
-    pub(super) fn preview(&self, home: &Path) -> Result<inspection::Preview> {
+    pub(crate) fn preview(&self, home: &Path) -> Result<inspection::Preview> {
         let result = if self.query == inspection::Query::NpmGlobals {
             let binding = self
                 .npm_binding
@@ -101,6 +101,25 @@ pub fn prepare(
     npm: Scope,
     reports: &[&inspection::Report],
 ) -> Result<Preview> {
+    prepare_inner(host, request, npm, reports, false)
+}
+
+pub(crate) fn prepare_environment(
+    host: &HostContext,
+    request: Request,
+    npm: Scope,
+    reports: &[&inspection::Report],
+) -> Result<Preview> {
+    prepare_inner(host, request, npm, reports, true)
+}
+
+fn prepare_inner(
+    host: &HostContext,
+    request: Request,
+    npm: Scope,
+    reports: &[&inspection::Report],
+    environment: bool,
+) -> Result<Preview> {
     let (manifest, scope, sources) = super::sources(host, &request, Some(&npm), None)?;
     // The durable intent budget applies before creation. Newly pinned parents
     // expand in-memory fingerprints, not the immutable persisted intent.
@@ -110,7 +129,7 @@ pub fn prepare(
     }
     validate_catalogs(&manifest, &scope, &npm, reports)?;
     let row = super::evaluate_catalogs(host, &manifest, &scope, reports)?;
-    if row.action != planning::PackageAction::ReviewMissingPackage || !row.blockers.is_empty() {
+    if !super::reviewable(&row, environment) {
         return Err(invalid(
             "only an observed missing exact npm package with satisfied explicit runtime and prerequisites can be reviewed",
         ));
@@ -306,6 +325,27 @@ pub(super) fn same_directory(a: &Entry, b: &Entry) -> bool {
             a.path == b.path && adoption::parent_identity(&a.fingerprint, &b.fingerprint)
         })
 }
+pub(super) fn effect_sources(sources: &Sources) -> Sources {
+    let mut stable = sources.clone();
+    for program in &mut stable.programs {
+        *program = program.clone().stable_parents();
+    }
+    for entry in stable
+        .directories
+        .iter_mut()
+        .chain(&mut stable.tool_directories)
+    {
+        *entry = entry.clone().stable_parents();
+        if let Some(fingerprint) = &mut entry.fingerprint {
+            fingerprint.modified = (0, 0);
+            fingerprint.changed = (0, 0);
+            fingerprint.links = 0;
+            fingerprint.size = 0;
+        }
+    }
+    stable
+}
+
 pub(super) fn same(a: &Sources, b: &Sources) -> bool {
     a.tool_directories.len() == b.tool_directories.len()
         && a.tool_directories

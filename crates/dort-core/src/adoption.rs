@@ -282,7 +282,7 @@ pub fn execute(
     let fresh = planner::plan(planner::observe(
         host,
         &inputs.repository,
-        &profiles,
+        &inputs.temporary_profiles,
         inputs.request.clone(),
     )?);
     if fresh.has_blockers() || journal::digest(canonical(&fresh)?.as_bytes()) != approval.digest {
@@ -333,7 +333,11 @@ pub fn execute(
             .map_err(|_| Error::Invalid("manifest must be UTF-8".into()))?,
         addition
     );
-    Manifest::parse(&new_manifest)?.validate_for_host(host, &profiles, Some(&inputs.repository))?;
+    Manifest::parse(&new_manifest)?.validate_selection(
+        host,
+        &inputs.active_profiles,
+        Some(&inputs.repository),
+    )?;
     let header = Header {
         repository_id,
         repository: inputs.repository.clone(),

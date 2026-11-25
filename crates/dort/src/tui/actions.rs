@@ -55,6 +55,7 @@ pub struct Data {
     pub repository: Option<PathBuf>,
     pub known_roots: Vec<PathBuf>,
     pub profiles: Vec<String>,
+    pub profile_rows: Vec<dort_core::profiles::Row>,
     pub files: Vec<(String, String)>,
     pub managed: Vec<ManagedRow>,
     pub tools: Option<std::result::Result<Vec<dort_core::model::Tool>, String>>,
@@ -115,6 +116,7 @@ pub fn load_scoped(
     let mut files_error = None;
     let mut known_roots = vec![];
     let mut profiles = vec![];
+    let mut profile_rows = vec![];
     let mut selected = None;
     let mut tools = None;
     let mut tools_source = None;
@@ -152,6 +154,17 @@ pub fn load_scoped(
                             })
                             .map_err(|error| diagnostic(&error)),
                     );
+                    if let Ok((manifest, _)) =
+                        dort_core::observation::read_manifest(&root.join("dort.toml"))
+                        && let Ok(rows) = local.profile_rows(
+                            &manifest.profiles,
+                            host.platform,
+                            Some(&root),
+                            requested,
+                        )
+                    {
+                        profile_rows = rows;
+                    }
                     match crate::services::observe(
                         host,
                         &local,
@@ -178,6 +191,24 @@ pub fn load_scoped(
                                 }
                             }
                             overview.files = Some(counts);
+                            for link in &plan.inputs.inactive_links {
+                                managed.push(ManagedRow {
+                                    id: link.id.clone(),
+                                    source: link.source.clone(),
+                                    target: link.target.clone(),
+                                    state: "No longer selected",
+                                    source_kind: "Repository source",
+                                    target_kind: "Symbolic link",
+                                    blockers: vec![],
+                                });
+                                files.push((
+                                    link.id.clone(),
+                                    format!(
+                                        "No longer selected. Profiles: {}",
+                                        link.profiles.join(", ")
+                                    ),
+                                ));
+                            }
                             for (file, input) in plan.files.iter().zip(&plan.inputs.files) {
                                 managed.push(ManagedRow {
                                     id: file.id.clone(),
@@ -217,6 +248,7 @@ pub fn load_scoped(
         repository: selected,
         known_roots,
         profiles,
+        profile_rows,
         files,
         managed,
         tools,
@@ -228,6 +260,9 @@ pub fn load_scoped(
 }
 
 pub enum Pending {
+    Environment(Box<dort_core::environment::Preview>),
+    Clone(Box<bootstrap::ClonePreview>),
+    Profile(Box<dort_core::local::ProfilePreview>),
     ToolDeclaration(Box<dort_core::tools::declaration::Preview>),
     Ignore(dort_core::discovery_ignore::Preview),
     Files(Box<Plan>),
@@ -241,6 +276,9 @@ impl Pending {
         Ok(match self {
             Self::ToolDeclaration(p) => crate::services::declaration::report(p),
             Self::Ignore(preview) => preview.human(),
+            Self::Profile(p) => p.human(),
+            Self::Environment(p) => p.human(),
+            Self::Clone(p) => p.human(),
             Self::Batch(plan) => plan.human(),
             Self::Files(plan) => format!(
                 "Repository: {:?}\nProfiles: {:?}\nScope: every mapping selected by this request. The preview shows what runs.\n{}",
@@ -287,6 +325,15 @@ impl Pending {
             ),
         })
     }
+    pub fn confirmation_label(&self) -> &'static str {
+        match self {
+            Self::Clone(_) => "Clone and register",
+            Self::Environment(_) => "Run environment",
+            Self::Profile(_) => "Save profile choice",
+            _ if self.adoption() => "Adopt all",
+            _ => "Confirm changes",
+        }
+    }
     pub fn adoption(&self) -> bool {
         match self {
             Self::Files(p) => matches!(p.inputs.request, Request::Adopt { .. }),
@@ -317,6 +364,7 @@ impl Pending {
         match self {
             Self::Files(plan) => plan.has_blockers(),
             Self::Batch(plan) => plan.has_blockers(),
+            Self::Environment(p) => p.blocked(),
             _ => false,
         }
     }
@@ -325,6 +373,12 @@ impl Pending {
             Self::ToolDeclaration(p) => dort_core::tools::declaration::Approval::from_preview(*p)
                 .map(|a| Approved::ToolDeclaration(Box::new(a))),
             Self::Ignore(preview) => Ok(Approved::Ignore(preview.approve())),
+            Self::Profile(p) => Ok(Approved::Profile(Box::new(p.approve()))),
+            Self::Environment(p) => Ok(Approved::Environment(Box::new(p.approve()?))),
+            Self::Clone(p) => {
+                let root = p.destination().to_owned();
+                Ok(Approved::Clone(Box::new(p.approve()), root))
+            }
             Self::Batch(plan) => {
                 dort_core::batch::Approval::from_plan(*plan).map(|a| Approved::Batch(Box::new(a)))
             }
@@ -349,6 +403,9 @@ impl Pending {
 }
 
 pub enum Approved {
+    Environment(Box<dort_core::environment::Approval>),
+    Clone(Box<bootstrap::CloneApproval>, PathBuf),
+    Profile(Box<dort_core::local::ProfileApproval>),
     ToolDeclaration(Box<dort_core::tools::declaration::Approval>),
     Ignore(dort_core::discovery_ignore::Approval),
     Files(Box<FileApproval>),
@@ -367,8 +424,9 @@ impl Approved {
         self,
         host: &HostContext,
         observer: impl FnMut(&Event) -> Result<()>,
-    ) -> Result<Completion> {
+    ) -> Result<Output> {
         let (operation, transaction_id, repository) = match self {
+            Self::Environment(p) => return p.execute(host, observer).map(Output::EnvironmentRun),
             Self::ToolDeclaration(a) => {
                 let lock = WriterLock::acquire(host)?;
                 (
@@ -376,6 +434,14 @@ impl Approved {
                     dort_core::tools::declaration::execute(host, &lock, *a, observer)?,
                     None,
                 )
+            }
+            Self::Clone(p, root) => {
+                p.execute(host)?;
+                ("Clone and register", None, Some(root))
+            }
+            Self::Profile(p) => {
+                p.execute(host)?;
+                ("Save profile choice", None, None)
             }
             Self::Ignore(approval) => {
                 approval.execute(host, false)?;
@@ -406,11 +472,11 @@ impl Approved {
                 ("Repository setup recovery", Some(tid), None)
             }
         };
-        Ok(Completion {
+        Ok(Output::Completed(Completion {
             operation,
             transaction_id,
             repository,
-        })
+        }))
     }
 }
 
@@ -504,6 +570,10 @@ impl Task {
     }
 }
 pub enum Task {
+    Environment {
+        resume: bool,
+    },
+    EnvironmentCheck(crate::services::inspection_defaults::Inputs),
     ToolsInstalledPrepare(crate::services::inspection_defaults::Inputs),
     ToolsInstalledInspect(crate::services::installed_tools::Approval),
     ToolsCheckPrepare(crate::services::inspection_defaults::Inputs),
@@ -548,9 +618,16 @@ pub enum Task {
     Batch(dort_core::batch::Request),
     Rollback(String, String),
     Bootstrap(String, String, bootstrap::RecoveryAction),
+    Clone {
+        source: String,
+        root: PathBuf,
+        git: PathBuf,
+    },
+    Profile(PathBuf, String, dort_core::profiles::Choice),
     Execute(Approved),
 }
 pub enum Output {
+    EnvironmentRun(dort_core::environment::Run),
     RecoveryRequired(Box<journal::WriteBlocker>),
     ToolsInstalledPreview(crate::services::installed_tools::Preview),
     ToolsInstalled(crate::services::installed_tools::Current),
@@ -627,15 +704,37 @@ pub fn perform_scoped_with_install_progress(
                 .map(Output::ToolsInstalledPreview)
         }
         Task::ToolsInstalledInspect(approval) => approval.inspect().map(Output::ToolsInstalled),
-        Task::ToolsCheckPrepare(detection) => {
+        Task::Environment { resume } => {
             let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
+            dort_core::environment::Preview::prepare(host, &root, requested, resume)
+                .map(|p| Output::Preview(Pending::Environment(Box::new(p))))
+        }
+        Task::ToolsCheckPrepare(_) | Task::EnvironmentCheck(_) => {
+            let (detection, environment) = match task {
+                Task::ToolsCheckPrepare(detection) => (detection, false),
+                Task::EnvironmentCheck(detection) => (detection, true),
+                _ => unreachable!(),
+            };
+            let local = LocalConfig::load(host)?;
+            let root = local.select_repository(repository.as_deref())?;
+            if environment && !local.repositories.values().any(|r| r.root == root) {
+                return Err(Error::Invalid(
+                    "Environment check needs a registered repository.".into(),
+                ));
+            }
             crate::services::declared_tools::Input {
                 manifest: root.join("dort.toml"),
                 profiles: requested.to_vec(),
                 detection,
             }
             .prepare(host)
-            .map(Output::ToolsCheckPreview)
+            .map(|preview| {
+                Output::ToolsCheckPreview(if environment {
+                    preview.for_environment()
+                } else {
+                    preview
+                })
+            })
         }
         Task::ToolsCheck(approval) => approval.check(host).map(Output::ToolsChecked),
         Task::ToolsInstallMissingPrepare(checked) => checked
@@ -780,6 +879,14 @@ pub fn perform_scoped_with_install_progress(
             let data = load_scoped(host, Some(&root), &[])?;
             Ok(Output::Selected(explicit.map(|_| root), data))
         }
+        Task::Profile(root, name, choice) => {
+            dort_core::local::ProfilePreview::prepare(host, &root, &name, choice)
+                .map(|p| Output::Preview(Pending::Profile(Box::new(p))))
+        }
+        Task::Clone { source, root, git } => {
+            bootstrap::ClonePreview::prepare(host, &source, &root, &git)
+                .map(|p| Output::Preview(Pending::Clone(Box::new(p))))
+        }
         Task::Init { root, git } => BootstrapPreview::prepare(host, &root, &git)
             .map(|p| Output::Preview(Pending::Init(Box::new(p)))),
         Task::Batch(request) => {
@@ -800,6 +907,6 @@ pub fn perform_scoped_with_install_progress(
         }
         Task::Bootstrap(r, t, action) => bootstrap::recovery_preview(host, &r, &t, action)
             .map(|p| Output::Preview(Pending::Bootstrap(p))),
-        Task::Execute(approval) => approval.execute(host, observer).map(Output::Completed),
+        Task::Execute(approval) => approval.execute(host, observer),
     }
 }

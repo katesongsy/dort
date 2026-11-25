@@ -1,0 +1,28 @@
+schema = 1
+
+[profiles]
+available = ['work']
+default = ['work']
+
+[[tools]]
+id = 'a'
+binary = 'a'
+profiles = ['work']
+[tools.install]
+provider = 'brew'
+package = 'a'
+
+[[tools]]
+id = 'b'
+binary = 'b'
+requires = ['a']
+[tools.install]
+provider = 'brew'
+package = 'b'
+
+[[files]]
+id = 'editor'
+source = 'settings'
+target = '~/.editor'
+mode = 'link'
+requires = ['b']

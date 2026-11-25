@@ -369,3 +369,131 @@ fn blocked_plans_and_lock_contention_do_not_execute() {
         .success();
     s.cmd().args(["--json", "history"]).assert().success();
 }
+
+#[test]
+fn saved_profile_off_keeps_installed_link_and_temporary_flag_wins_once() {
+    let s = Sandbox::new();
+    fs::write(s.repo.join("source"), "settings\n").unwrap();
+    fs::write(s.repo.join("dort.toml"), "schema=1\n[profiles]\navailable=['work']\ndefault=['work']\n[[files]]\nid='workrc'\nsource='source'\ntarget='~/.workrc'\nmode='link'\nprofiles=['work']\n").unwrap();
+    s.init();
+    s.cmd().args(["--yes", "files", "apply"]).assert().success();
+    let link = s.home.join(".workrc");
+    let target = fs::read_link(&link).unwrap();
+    s.cmd()
+        .args(["--yes", "profiles", "set", "work", "off"])
+        .assert()
+        .success();
+    assert!(
+        String::from_utf8_lossy(
+            &s.cmd()
+                .args(["profiles", "list"])
+                .assert()
+                .success()
+                .get_output()
+                .stdout
+        )
+        .contains("work: Off (saved choice)")
+    );
+    assert!(
+        String::from_utf8_lossy(&s.cmd().arg("plan").assert().success().get_output().stdout)
+            .contains("workrc: No longer selected")
+    );
+    assert!(
+        String::from_utf8_lossy(
+            &s.cmd()
+                .args(["plan", "--profile", "work"])
+                .assert()
+                .success()
+                .get_output()
+                .stdout
+        )
+        .contains("work: On (temporary for this run)")
+    );
+    assert!(
+        String::from_utf8_lossy(
+            &s.cmd()
+                .args(["profiles", "list"])
+                .assert()
+                .success()
+                .get_output()
+                .stdout
+        )
+        .contains("work: Off (saved choice)")
+    );
+    assert_eq!(fs::read_link(&link).unwrap(), target);
+    assert_eq!(fs::read_to_string(&link).unwrap(), "settings\n");
+    s.cmd()
+        .args(["--yes", "profiles", "set", "base", "off"])
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn clone_review_and_invalid_manifest_keep_home_targets_untouched() {
+    let s = Sandbox::new();
+    let git = std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(git.status.success());
+    let source = s.root.join("remote");
+    fs::create_dir(&source).unwrap();
+    let run = |args: &[&str]| {
+        assert!(
+            std::process::Command::new("git")
+                .current_dir(&source)
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    };
+    run(&["init", "-q"]);
+    fs::write(source.join("dort.toml"), "schema=999\n").unwrap();
+    run(&["add", "."]);
+    run(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.org",
+        "commit",
+        "-qm",
+        "invalid",
+    ]);
+    let invoke = |flags: &[&str], name: &str| {
+        let mut c = s.cmd();
+        c.env("PATH", std::env::var_os("PATH").unwrap())
+            .args(flags)
+            .arg("clone")
+            .arg(&source)
+            .arg(s.root.join(name));
+        c
+    };
+    invoke(&["--dry-run"], "invalid").assert().success();
+    invoke(&[], "invalid").assert().code(2);
+    assert!(!s.root.join("invalid").exists());
+    s.assert_no_state();
+    invoke(&["--yes"], "invalid").assert().code(2);
+    assert!(s.root.join("invalid/.git").is_dir());
+    assert!(!s.home.join(".config").exists());
+    fs::write(
+        source.join("dort.toml"),
+        "schema=1\n[[files]]\nid='editor'\nsource='settings'\ntarget='~/.editor'\nmode='link'\n",
+    )
+    .unwrap();
+    fs::write(source.join("settings"), "settings\n").unwrap();
+    run(&["add", "."]);
+    run(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.org",
+        "commit",
+        "-qm",
+        "valid",
+    ]);
+    invoke(&["--yes"], "valid").assert().success();
+    invoke(&["--yes"], "valid").assert().code(2);
+    assert!(!s.home.join(".editor").exists());
+    s.cmd().args(["profiles", "list"]).assert().success();
+}

@@ -240,13 +240,13 @@ fn sources(
         .map_err(|_| {
             invalid("installation manifest unavailable, unsafe or invalid; contents withheld")
         })?;
-    let mut profiles = local.active_profiles;
-    for profile in &request.profiles {
-        if !profiles.contains(profile) {
-            profiles.push(profile.clone());
-        }
-    }
-    let active = manifest.profiles.resolve(host.platform, &profiles)?;
+    let rows = local.profile_rows(
+        &manifest.profiles,
+        host.platform,
+        Some(&request.repository),
+        &request.profiles,
+    )?;
+    let active = crate::profiles::active(&rows);
     let tool = manifest
         .tools
         .iter()
@@ -405,6 +405,36 @@ fn evaluate_catalogs(
         .find(|r| r.id == scope.tool)
         .ok_or_else(|| invalid("selected installation row disappeared"))
 }
+fn reviewable(row: &planning::Row, environment: bool) -> bool {
+    matches!(row.package, planning::PackageFinding::Absent)
+        && row.blockers.iter().all(|blocker| {
+            environment
+                && matches!(
+                    blocker,
+                    planning::Blocker::DependencyNeedsReview { .. }
+                        | planning::Blocker::DependencyBlocked { .. }
+                )
+        })
+}
+
+pub(crate) fn preview_binding(preview: &Preview) -> Result<String> {
+    let sources = &preview.sources;
+    let brew = sources.brew.as_ref().map(brew::effect_sources);
+    let npm = sources.npm.as_ref().map(npm::effect_sources);
+    Ok(journal::digest(
+        adoption::canonical(&(
+            &preview.scope,
+            sources.manifest.clone().stable_parents(),
+            sources.local_config.clone().stable_parents(),
+            sources.executable.clone().stable_parents(),
+            &sources.host_sha256,
+            brew,
+            npm,
+        ))?
+        .as_bytes(),
+    ))
+}
+
 fn row_versions(row: &planning::Row) -> Vec<String> {
     match &row.package {
         planning::PackageFinding::Present { versions } => {

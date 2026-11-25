@@ -104,6 +104,9 @@ impl Activity {
         let operation = match task {
             Task::ToolsInstalledPrepare(_) => "Prepare installed-package inspection (no execution)",
             Task::ToolsInstalledInspect(_) => "Inspect installed packages",
+            Task::Environment { resume: true } => "Review environment resume",
+            Task::Environment { resume: false } => "Review environment plan",
+            Task::EnvironmentCheck(_) => "Prepare environment check (no execution)",
             Task::ToolsCheckPrepare(_) => "Prepare declared-tool checks (no execution)",
             Task::ToolsCheck(_) => "Check declared tools",
             Task::ToolsInstallMissingPrepare(_) => {
@@ -120,8 +123,10 @@ impl Activity {
             Task::Diagnostics => "Read Diagnostics",
             Task::Discover => "Discover files",
             Task::Check { .. } => "Check manifest",
+            Task::Profile(..) => "Review profile choice",
             Task::Profiles { .. } => "Read profile selection",
             Task::Select(_) => "Select session repository",
+            Task::Clone { .. } => "Preview clone and registration",
             Task::Init { .. } => "Preview create/attach",
             Task::Files(request) => request_label(request),
             Task::Batch(request) => batch_label(request.action()),
@@ -140,9 +145,12 @@ impl Activity {
                 }
                 match approved {
                     Approved::ToolDeclaration(_) => "Tool declaration",
+                    Approved::Environment(_) => "Run environment",
+                    Approved::Profile(_) => "Save profile choice",
                     Approved::Ignore(_) => "Discovery preferences",
                     Approved::Files(_) => "File operation",
                     Approved::Batch(_) => "Batch file operation",
+                    Approved::Clone(..) => "Clone and register",
                     Approved::Init(..) => "Create/attach",
                     Approved::Rollback(..) => "Rollback",
                     Approved::Bootstrap(..) => "Repository setup recovery",
@@ -316,6 +324,12 @@ impl Activity {
                     ("No-op", p.no_op.to_string()),
                 ],
             ),
+            Pending::Clone(p) => (
+                "Clone and register",
+                vec![("New folder", p.destination().display().to_string())],
+            ),
+            Pending::Environment(_) => ("Environment", vec![]),
+            Pending::Profile(_) => ("Save profile choice", vec![]),
             Pending::Ignore(_) => (
                 "Discovery preferences",
                 vec![("Scope", "Local HOME discovery only".into())],
@@ -423,7 +437,7 @@ fn panel(
     area: Rect,
     app: &App,
     title: &str,
-    banner: &'static str,
+    banner: &str,
     danger: bool,
     lines: Vec<Line<'static>>,
 ) {
@@ -579,6 +593,22 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
         if !app.busy {
             controls(frame, actions, app, false);
         }
+    } else if app.show_result
+        && let Some(result) = &app.result
+    {
+        panel(
+            frame,
+            area,
+            app,
+            "Operation result",
+            &app.status,
+            false,
+            result
+                .lines()
+                .map(|line| Line::raw(line.to_owned()))
+                .collect(),
+        );
+        controls(frame, actions, app, false);
     } else if app.busy {
         let mut lines = vec![];
         let progress = app.activity.as_ref().and_then(|a| a.progress.as_ref());

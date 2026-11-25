@@ -84,6 +84,9 @@ impl Topic {
             Self::Form(Form::Choose) => {
                 "Select a repository root for this session. The choice is not saved."
             }
+            Self::Form(Form::Clone) => {
+                "Enter an HTTPS Git URL or absolute local Git path and a new folder. Review clone and registration."
+            }
             Self::Form(Form::Init) => {
                 "Prepare a local repository. The next review saves the change."
             }

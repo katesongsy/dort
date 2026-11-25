@@ -6,6 +6,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub enum Form {
     Choose,
     Init,
+    Clone,
     Adopt,
     Check,
     KeepId,
@@ -95,6 +96,7 @@ pub enum Action {
     ToolAttempts,
     Choose,
     Init,
+    Clone,
     Discover,
     IgnoreSelected,
     ManageIgnored,
@@ -109,6 +111,10 @@ pub enum Action {
     ExpandAll,
     CollapseAll,
     Profiles,
+    SavedProfiles,
+    EnvironmentPlan,
+    EnvironmentCheck,
+    EnvironmentResume,
     CheckCurrent,
     CheckStandalone,
     StandaloneProfiles,
@@ -150,6 +156,7 @@ impl Action {
             Self::GitStaged => "Git: Staged summary",
             Self::GitRefresh => "Git: Refresh",
             Self::Choose => "Choose repository (session only)",
+            Self::Clone => "Clone repository",
             Self::Init => "Create/attach local repository",
             Self::Discover => "Discover files (no repository needed)",
             Self::IgnoreSelected => "Ignore selected file or folder (saved locally)",
@@ -164,6 +171,10 @@ impl Action {
             Self::ClearMarks => "Clear marks (current Files inventory)",
             Self::ExpandAll => "Expand all tree groups",
             Self::CollapseAll => "Collapse all tree groups",
+            Self::EnvironmentPlan => "Review environment plan",
+            Self::EnvironmentCheck => "Environment check",
+            Self::EnvironmentResume => "Review environment resume",
+            Self::SavedProfiles => "Saved profiles",
             Self::Profiles => "Profiles: extra profiles for this session",
             Self::CheckCurrent => "Check current repository manifest",
             Self::CheckStandalone => "Check standalone manifest (no repository needed)",
@@ -191,6 +202,7 @@ pub struct Shell {
     pub scroll: u16,
     pub page_rows: std::cell::Cell<u16>,
     pub init_draft: String,
+    pub clone_fields: [String; 2],
     pub path_focused: usize,
     pub form_details: bool,
     pub form_feedback: Option<(Form, &'static str)>,
@@ -223,6 +235,7 @@ impl Shell {
             scroll: 0,
             page_rows: std::cell::Cell::new(1),
             init_draft: String::new(),
+            clone_fields: Default::default(),
             path_focused: 0,
             form_details: false,
             form_feedback: None,
@@ -253,8 +266,8 @@ impl Shell {
         }
         matches!(
             self.overlay,
-            Some(Overlay::Form(Form::Choose | Form::Init))
-                if self.path_focused == 0
+            Some(Overlay::Form(Form::Clone | Form::Choose | Form::Init))
+                if self.path_focused < 2
         ) || (matches!(self.overlay, Some(Overlay::Form(Form::Adopt))) && self.adoption.focused < 3)
             || (matches!(self.overlay, Some(Overlay::Form(Form::Check)))
                 && self.manifest_focused == 0)
@@ -276,6 +289,7 @@ impl Shell {
         match form {
             Form::Choose => &self.choose_draft,
             Form::Init => &self.init_draft,
+            Form::Clone => &self.clone_fields[1],
             Form::Adopt => &self.adoption.target,
             Form::Check => &self.manifest_draft,
             Form::KeepId | Form::RemoveId => &self.unmanage_id,
@@ -482,12 +496,20 @@ impl Shell {
                     },
                 }
             }
+            Overlay::Form(Form::Clone) => match key.code {
+                KeyCode::Esc => self.back(),
+                KeyCode::Tab | KeyCode::BackTab => self.path_focused ^= 1,
+                KeyCode::Enter => return Some(Intent::Submit(Form::Clone)),
+                _ => edit_text(&mut self.clone_fields[self.path_focused], key),
+            },
             Overlay::Form(form) => {
                 let form = *form;
                 let draft = match form {
                     Form::Choose => &mut self.choose_draft,
                     Form::Init => &mut self.init_draft,
-                    Form::Adopt | Form::Check | Form::KeepId | Form::RemoveId => unreachable!(),
+                    Form::Clone | Form::Adopt | Form::Check | Form::KeepId | Form::RemoveId => {
+                        unreachable!()
+                    }
                 };
                 match key.code {
                     KeyCode::Esc => self.back(),

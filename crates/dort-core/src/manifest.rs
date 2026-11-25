@@ -170,19 +170,38 @@ impl Manifest {
         local: &[String],
         repository: Option<&Path>,
     ) -> Result<BTreeSet<String>> {
-        self.validate()?;
         let active = self.active_profiles(host, local)?;
+        self.validate_selection(host, &active, repository)?;
+        Ok(active)
+    }
+
+    pub(crate) fn validate_selection(
+        &self,
+        host: &HostContext,
+        active: &BTreeSet<String>,
+        repository: Option<&Path>,
+    ) -> Result<()> {
+        self.dependency_order(host.platform, active)?;
         let selected_tools: BTreeSet<_> = self
             .tools
             .iter()
-            .filter(|t| selected(&t.profiles, &active))
+            .filter(|t| selected(&t.profiles, active))
             .map(|t| t.id.clone())
             .collect();
-        self.dependency_order(host.platform, &active)?;
+        self.validate_file_targets(host, active, repository, Some(&selected_tools))
+    }
+
+    pub(crate) fn validate_file_targets(
+        &self,
+        host: &HostContext,
+        active: &BTreeSet<String>,
+        repository: Option<&Path>,
+        selected_tools: Option<&BTreeSet<String>>,
+    ) -> Result<()> {
         let mut targets: Vec<(&str, std::path::PathBuf)> = vec![];
-        for file in self.files.iter().filter(|f| selected(&f.profiles, &active)) {
+        for file in self.files.iter().filter(|f| selected(&f.profiles, active)) {
             for dependency in &file.requires {
-                if !selected_tools.contains(dependency) {
+                if selected_tools.is_some_and(|tools| !tools.contains(dependency)) {
                     return Err(Error::Invalid(format!(
                         "{}: required tool {dependency} is inactive",
                         file.id
@@ -198,6 +217,31 @@ impl Manifest {
             }
             targets.push((&file.id, path));
         }
+        Ok(())
+    }
+
+    pub fn profile_rows(
+        &self,
+        host: &HostContext,
+        repository: Option<&Path>,
+        temporary: &[String],
+    ) -> Result<Vec<crate::profiles::Row>> {
+        crate::local::LocalConfig::load(host)?.profile_rows(
+            &self.profiles,
+            host.platform,
+            repository,
+            temporary,
+        )
+    }
+
+    pub fn validate_local_selection(
+        &self,
+        host: &HostContext,
+        temporary: &[String],
+        repository: Option<&Path>,
+    ) -> Result<BTreeSet<String>> {
+        let active = crate::profiles::active(&self.profile_rows(host, repository, temporary)?);
+        self.validate_selection(host, &active, repository)?;
         Ok(active)
     }
 

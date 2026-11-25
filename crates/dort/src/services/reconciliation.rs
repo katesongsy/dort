@@ -51,6 +51,8 @@ pub struct Scope {
     pub tool_search_dirs: Vec<PathBuf>,
     pub platform: Platform,
     pub active_profiles: BTreeSet<String>,
+    #[serde(skip)]
+    pub temporary_profiles: Vec<String>,
 }
 pub struct ToolChoice {
     pub id: String,
@@ -80,7 +82,21 @@ impl Request {
         let (manifest, entry) = observation::read_manifest(&self.manifest).map_err(|_| {
             invalid("reconciliation manifest unavailable, unsafe or invalid; contents withheld")
         })?;
-        let active = manifest.profiles.resolve(host.platform, &self.profiles)?;
+        let local = dort_core::local::LocalConfig::load(host)?;
+        let root = self.manifest.parent().filter(|root| {
+            root.join("dort.toml") == self.manifest
+                && local.repositories.values().any(|r| r.root == *root)
+        });
+        let active = if root.is_some() {
+            dort_core::profiles::active(&local.profile_rows(
+                &manifest.profiles,
+                host.platform,
+                root,
+                &self.profiles,
+            )?)
+        } else {
+            manifest.profiles.resolve(host.platform, &self.profiles)?
+        };
         binaries::validate(&manifest, &active, &self.tool_search_dirs)?;
         let mut tools: Vec<_> = manifest
             .tools
@@ -98,6 +114,7 @@ impl Request {
                 tool_search_dirs: self.tool_search_dirs.clone(),
                 platform: host.platform,
                 active_profiles: active,
+                temporary_profiles: self.profiles.clone(),
             },
             tools,
             source: tools::Source::from_entry(&entry),

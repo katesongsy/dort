@@ -348,6 +348,9 @@ impl Case {
                 sensitive: false,
             },
             // Never read by `plan`; empty keeps the check cheap.
+            temporary_profiles: vec![],
+            profiles: vec![],
+            inactive_links: vec![],
             active_profiles: BTreeSet::new(),
             request: request_of(self.request, mapping.clone()),
             files: vec![planner::FileSnapshot {

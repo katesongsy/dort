@@ -12,6 +12,7 @@ Every feature below is reachable from both the CLI and the TUI. A change to a se
 | Feature | TUI | CLI |
 | --- | --- | --- |
 | [Repository create and attach](repository.md) | `o` Overview, `F2` More → Create or attach | `dort init PATH` |
+| [Profiles, clone and environment](environment.md) | `F2` More | `dort profiles`, `dort clone`, `dort environment` |
 | [Files: discover, adopt, apply, keep, remove](files.md) | `f` Files | `dort files ...` |
 | [Tools: declared, installed, history](tools.md) | `t` Tools | `dort tools ...` |
 | [Checks: manifest and diagnostics](checks.md) | `c` Checks | `dort manifest check`, `dort doctor` |
@@ -30,4 +31,4 @@ eval "$(python3 /abs/path/to/repo/.pi/skills/verify-dort/drive.py env <name>)"
 
 ## Not covered here
 
-Templates, secrets, Git clone/sync, staging/commit/push and general package upgrades are declared but not implemented. A journey that needs them fails at the declaration, not at a bug — record the block in that feature's Gotchas instead of weakening the journey.
+Templates, secrets, Git sync, staging/commit/push and general package upgrades are declared but not implemented. A journey that needs them fails at the declaration, not at a bug — record the block in that feature's Gotchas instead of weakening the journey.

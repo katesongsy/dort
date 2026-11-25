@@ -41,6 +41,31 @@ fn session_actions(app: &App) -> Vec<ui::ActionButton> {
     use super::shell::Action;
     let mut actions = vec![
         ui::ActionButton {
+            label: "Review environment plan",
+            key: "",
+            target: Target::Action(Action::EnvironmentPlan),
+        },
+        ui::ActionButton {
+            label: "Environment check",
+            key: "",
+            target: Target::Action(Action::EnvironmentCheck),
+        },
+        ui::ActionButton {
+            label: "Review environment resume",
+            key: "",
+            target: Target::Action(Action::EnvironmentResume),
+        },
+        ui::ActionButton {
+            label: "Clone repository",
+            key: "",
+            target: Target::Action(Action::Clone),
+        },
+        ui::ActionButton {
+            label: "Saved profiles",
+            key: "",
+            target: Target::Action(Action::SavedProfiles),
+        },
+        ui::ActionButton {
             label: "Toggle preview-only mode",
             key: "",
             target: Target::Action(Action::PreviewOnly),

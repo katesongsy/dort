@@ -43,6 +43,18 @@ enum Command {
     Tui,
     /// Create a local repository at a new path, or attach an existing one.
     Init { path: PathBuf },
+    /// Clone into a new folder and register only after the manifest passes.
+    Clone { source: String, path: PathBuf },
+    /// Preview, check, apply, or resume a repository environment.
+    Environment {
+        #[command(subcommand)]
+        command: EnvironmentCommand,
+    },
+    /// List and save profiles for a repository.
+    Profiles {
+        #[command(subcommand)]
+        command: ProfileCommand,
+    },
     /// Show active file links and blockers.
     Status {
         #[arg(long = "profile")]
@@ -87,6 +99,45 @@ enum Command {
         #[command(subcommand)]
         command: ManifestCommand,
     },
+}
+
+#[derive(Subcommand)]
+enum EnvironmentCommand {
+    /// Read-only files and tools plan. Does not run package managers.
+    Plan {
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
+    /// Review package-manager checks and save their results.
+    Check(DeclaredToolsArgs),
+    /// Review and run one dependency-ordered environment plan.
+    Apply {
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
+    /// Review the last run and continue only after checking completed work.
+    Resume {
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProfileCommand {
+    /// List resolved profile choices and reasons.
+    List {
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
+    /// Save a local profile choice after review.
+    Set { name: String, choice: ProfileChoice },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum ProfileChoice {
+    Defaults,
+    On,
+    Off,
 }
 
 #[derive(Subcommand)]
@@ -336,11 +387,17 @@ fn declared_tools(
     host: &HostContext,
     args: &DeclaredToolsArgs,
     install_missing: bool,
+    environment: bool,
 ) -> dort_core::Result<ExitCode> {
     use crate::services::declared_tools::{Input, Status};
     if cli.confirm_remove.is_some() {
         return Err(Error::Invalid(
             "Tool checks and installation do not use --confirm-remove".into(),
+        ));
+    }
+    if environment && args.manifest.is_some() {
+        return Err(Error::Invalid(
+            "Environment check uses the selected registered repository. Omit --manifest.".into(),
         ));
     }
     let launch = crate::environment::launch_directory()?;
@@ -357,6 +414,16 @@ fn declared_tools(
             )
         }
     };
+    if environment
+        && !LocalConfig::load(host)?
+            .repositories
+            .values()
+            .any(|r| r.root.join("dort.toml") == manifest)
+    {
+        return Err(Error::Invalid(
+            "Environment check needs a registered repository.".into(),
+        ));
+    }
     let detection = crate::environment::inspection_inputs().with_settings(
         host,
         &manifest,
@@ -370,6 +437,11 @@ fn declared_tools(
         detection,
     }
     .prepare(host)?;
+    let preview = if environment {
+        preview.for_environment()
+    } else {
+        preview
+    };
     if cli.dry_run {
         if cli.json {
             print_git_json(
@@ -420,7 +492,7 @@ fn declared_tools(
         .all(|r| crate::services::declared_tools::status(r) == Status::Installed);
     let mut exit = if !checked.available() {
         1
-    } else if complete {
+    } else if complete || environment {
         0
     } else {
         4
@@ -564,8 +636,8 @@ fn tools_command(
 ) -> dort_core::Result<ExitCode> {
     match command {
         ToolsCommand::Inspect(args) => return installed_tools(cli, host, args),
-        ToolsCommand::Check(args) => return declared_tools(cli, host, args, false),
-        ToolsCommand::InstallMissing(args) => return declared_tools(cli, host, args, true),
+        ToolsCommand::Check(args) => return declared_tools(cli, host, args, false, false),
+        ToolsCommand::InstallMissing(args) => return declared_tools(cli, host, args, true, false),
         _ => (),
     }
     if matches!(
@@ -813,6 +885,109 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                 )?;
             }
         }
+        Command::Clone { source, path } => {
+            if cli.repo.is_some() {
+                return Err(Error::Invalid(
+                    "clone uses its own destination; omit --repo".into(),
+                ));
+            }
+            let path =
+                crate::services::resolve_root(path, &crate::environment::launch_directory()?);
+            let preview = bootstrap::ClonePreview::prepare(
+                &host,
+                source,
+                &path,
+                &crate::environment::resolve_git()?,
+            )?;
+            if !cli.json {
+                println!("{}", preview.human());
+            }
+            if cli.dry_run {
+                if cli.json {
+                    print_git_json(&preview)?;
+                }
+            } else {
+                approve(cli)?;
+                let id = preview.approve().execute(&host)?;
+                print_git_json(
+                    &serde_json::json!({"operation":"clone", "repository":path, "repository_id":id}),
+                )?;
+            }
+        }
+        Command::Environment { command } => {
+            let (profiles, preview_only, resume) = match command {
+                EnvironmentCommand::Check(args) => {
+                    return declared_tools(cli, &host, args, false, true);
+                }
+                EnvironmentCommand::Plan { profiles } => (profiles, true, false),
+                EnvironmentCommand::Apply { profiles } => (profiles, false, false),
+                EnvironmentCommand::Resume { profiles } => (profiles, false, true),
+            };
+            let root = local.select_repository(cli.repo.as_deref())?;
+            let preview = dort_core::environment::Preview::prepare(&host, &root, profiles, resume)?;
+            if !cli.json {
+                print!("{}", crate::services::presentation::safe(&preview.human()));
+            }
+            let blocked = preview.blocked();
+            if preview_only || cli.dry_run || blocked {
+                if cli.json {
+                    print_git_json(&preview.review())?;
+                }
+                return Ok(ExitCode::from(if blocked { 4 } else { 0 }));
+            }
+            approve(cli)?;
+            let run = preview.approve()?.execute(&host, |_| Ok(()))?;
+            if cli.json {
+                print_git_json(&run)?;
+            } else {
+                println!("{}", crate::services::presentation::safe(&run.human()));
+            }
+            return Ok(ExitCode::from(if run.complete() { 0 } else { 4 }));
+        }
+        Command::Profiles { command } => {
+            let root = local.select_repository(cli.repo.as_deref())?;
+            match command {
+                ProfileCommand::List { profiles } => {
+                    let (manifest, _) =
+                        dort_core::observation::read_manifest(&root.join("dort.toml"))?;
+                    let rows = local.profile_rows(
+                        &manifest.profiles,
+                        host.platform,
+                        Some(&root),
+                        profiles,
+                    )?;
+                    if cli.json {
+                        print_git_json(&rows)?;
+                    } else {
+                        for row in rows {
+                            println!("{}", row.label());
+                        }
+                    }
+                }
+                ProfileCommand::Set { name, choice } => {
+                    use dort_core::profiles::Choice;
+                    let choice = match choice {
+                        ProfileChoice::Defaults => Choice::Defaults,
+                        ProfileChoice::On => Choice::On,
+                        ProfileChoice::Off => Choice::Off,
+                    };
+                    let preview =
+                        dort_core::local::ProfilePreview::prepare(&host, &root, name, choice)?;
+                    if !cli.json {
+                        println!("{}", preview.human());
+                    }
+                    if cli.dry_run {
+                        if cli.json {
+                            print_git_json(&preview)?;
+                        }
+                    } else {
+                        approve(cli)?;
+                        preview.approve().execute(&host)?;
+                        mutation_report("profiles", None)?;
+                    }
+                }
+            }
+        }
         Command::Status { profiles } | Command::Plan { profiles } => {
             return file_operation(cli, &host, &local, profiles, Request::Apply, false);
         }
@@ -1055,6 +1230,12 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                 if cli.json {
                     print_json(&snapshot)?;
                 } else {
+                    for link in &snapshot.inactive_links {
+                        println!(
+                            "{}: No longer selected. Keep {:?} in place.",
+                            link.id, link.target
+                        );
+                    }
                     for file in &snapshot.files {
                         println!(
                             "{}: {} -> {}",

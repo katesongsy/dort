@@ -58,8 +58,12 @@ impl State {
     pub fn title(&self) -> Option<&'static str> {
         if self.result_open {
             Some("Tools / Install results")
-        } else if self.check_preview.is_some() {
-            Some("Tools / Review installed checks")
+        } else if let Some(preview) = &self.check_preview {
+            Some(if preview.saves_environment_check() {
+                "Environment / Review check"
+            } else {
+                "Tools / Review installed checks"
+            })
         } else if let Some(preview) = &self.install_preview {
             Some(if preview.is_empty() {
                 "Tools / Installation needs attention"
@@ -360,8 +364,16 @@ fn review(frame: &mut Frame, area: Rect, app: &App) -> bool {
             body.push(ui::metadata("Next", &issue.next_step));
         }
         (
-            "Check installed",
-            "Checks can run package-manager configuration and plugins, and change caches. No packages are installed.",
+            if preview.saves_environment_check() {
+                "Environment check"
+            } else {
+                "Check installed"
+            },
+            if preview.saves_environment_check() {
+                review.warning
+            } else {
+                "Checks can run package-manager configuration and plugins, and change caches. No packages are installed."
+            },
             "Run checks",
             false,
             body,

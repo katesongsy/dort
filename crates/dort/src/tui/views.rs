@@ -40,6 +40,10 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, _height: u16, _width: u
             "Manifest: {:?}\nExtra profiles: {:?}\nRelative paths from: {:?}\n\nAn independent manifest needs no registration or Git. Base and local profiles still apply. This checks declarations, dependencies and support. It does not read files or check installed tools.",
             app.shell.manifest_draft, app.shell.check_profiles, app.launch_directory
         ),
+        Overlay::Form(Form::Clone) => format!(
+            "Git source: {:?}\nNew folder: {:?}\n\nUse an HTTPS URL or an absolute local path.\nThe clone is registered only if dort.toml passes. Home files and tools stay in place.",
+            app.shell.clone_fields[0], app.shell.clone_fields[1]
+        ),
         Overlay::Form(form) => {
             let draft = app.shell.draft(*form);
             let root = (!draft.is_empty()).then(|| {

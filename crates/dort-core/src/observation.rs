@@ -79,6 +79,18 @@ pub struct Entry {
     pub sensitive: bool,
 }
 
+impl Entry {
+    pub(crate) fn stable_parents(mut self) -> Self {
+        for parent in &mut self.parents {
+            parent.fingerprint.links = 0;
+            parent.fingerprint.size = 0;
+            parent.fingerprint.modified = (0, 0);
+            parent.fingerprint.changed = (0, 0);
+        }
+        self
+    }
+}
+
 pub(crate) struct ParentHandle {
     pub(crate) directory: File,
     pub(crate) name: OsString,

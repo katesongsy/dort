@@ -1965,3 +1965,103 @@ fn malformed_journal_tail_is_a_global_blocker_not_a_recovery_permission() {
         "deliberately malformed fixture tail"
     );
 }
+
+#[test]
+fn saved_profiles_requires_review_then_reopens_from_local_configuration() {
+    let f = Fixture::new(true);
+    let manifest = f.root.join("dort.toml");
+    fs::write(&manifest, "schema=1\n[profiles]\navailable=['work']\ndefault=['work']\n[[files]]\nid='editor'\nsource='source'\ntarget='~/.editor'\nmode='link'\nprofiles=['work']\n").unwrap();
+    let mut app = App::new(false);
+    app.complete(Ok(Output::Data(actions::load(&f.host, None).unwrap())));
+    let show = |app: &mut App| {
+        super::tests::more_target(app, |target| {
+            matches!(
+                target,
+                super::input::Target::Action(super::shell::Action::SavedProfiles)
+            )
+        })
+    };
+    assert!(show(&mut app).is_none());
+    assert!(super::tests::render(&app, 80, 24).contains("work: On (repository default)"));
+    key(&mut app, KeyCode::Down);
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    key(&mut app, KeyCode::End);
+    let preview = key(&mut app, KeyCode::Enter).unwrap();
+    let original = fs::read(f.host.local_config_path()).unwrap();
+    let pending = actions::perform(preview, &f.host, None, |_| Ok(())).unwrap();
+    app.complete(Ok(pending));
+    assert!(super::tests::render(&app, 80, 24).contains("profile choice"));
+    assert_eq!(fs::read(f.host.local_config_path()).unwrap(), original);
+    let task = super::tests::approve_ready(&mut app, 80, 24).unwrap();
+    f.execute(task);
+    let mut reopened = App::new(false);
+    reopened.complete(Ok(Output::Data(actions::load(&f.host, None).unwrap())));
+    assert!(show(&mut reopened).is_none());
+    assert!(super::tests::render(&reopened, 80, 24).contains("work: Off (saved choice)"));
+    assert!(!f.host.home.join(".editor").exists());
+}
+
+#[test]
+fn clone_form_review_registers_without_creating_home_link() {
+    let f = Fixture::new(false);
+    fs::remove_dir(f.root.join(".git")).unwrap();
+    let git = crate::environment::resolve_git().unwrap();
+    let run = |args: &[&str]| {
+        assert!(
+            std::process::Command::new(&git)
+                .current_dir(&f.root)
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    };
+    run(&["init", "-q"]);
+    run(&["add", "."]);
+    run(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.org",
+        "commit",
+        "-qm",
+        "manifest",
+    ]);
+    let clone = f.root.with_file_name("clone");
+    let mut app = App::new(false);
+    app.git = Ok(git);
+    app.complete(Ok(Output::Data(actions::load(&f.host, None).unwrap())));
+    assert!(
+        super::tests::more_target(&mut app, |target| matches!(
+            target,
+            super::input::Target::Action(super::shell::Action::Clone)
+        ))
+        .is_none()
+    );
+    type_text(&mut app, f.root.to_str().unwrap());
+    key(&mut app, KeyCode::Tab);
+    type_text(&mut app, clone.to_str().unwrap());
+    let task = key(&mut app, KeyCode::Enter).unwrap();
+    app.complete(Ok(
+        actions::perform(task, &f.host, None, |_| Ok(())).unwrap()
+    ));
+    assert!(
+        app.preview
+            .as_ref()
+            .unwrap()
+            .text
+            .contains("register and select")
+    );
+    assert!(!clone.exists());
+    assert!(!f.host.local_config_path().exists());
+    f.execute(super::tests::approve_ready(&mut app, 80, 24).unwrap());
+    assert!(clone.join(".git").is_dir());
+    assert_eq!(
+        dort_core::local::LocalConfig::load(&f.host)
+            .unwrap()
+            .select_repository(None)
+            .unwrap(),
+        clone
+    );
+    assert!(!f.host.home.join(".editor").exists());
+}

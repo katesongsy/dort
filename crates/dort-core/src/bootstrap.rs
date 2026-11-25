@@ -124,6 +124,192 @@ fn root_scope(host: &HostContext, root: &Path) -> Result<()> {
     }
     Ok(())
 }
+#[derive(Serialize)]
+pub struct ClonePreview {
+    source: String,
+    destination: PathBuf,
+    effects: [&'static str; 2],
+    #[serde(skip)]
+    root: Entry,
+    #[serde(skip)]
+    config: Entry,
+    #[serde(skip)]
+    git: Entry,
+    #[serde(skip)]
+    local_source: Option<Entry>,
+}
+
+impl ClonePreview {
+    pub fn prepare(
+        host: &HostContext,
+        source: &str,
+        destination: &Path,
+        git: &Path,
+    ) -> Result<Self> {
+        let local_source = if let Some(url) = source.strip_prefix("https://") {
+            let authority = url.split('/').next().unwrap_or_default();
+            if authority.is_empty()
+                || authority.contains('@')
+                || source.contains(['?', '#', '\\'])
+                || source.bytes().any(|b| !b.is_ascii_graphic())
+            {
+                return Err(invalid(
+                    "Use an HTTPS Git URL without credentials, query or fragment",
+                ));
+            }
+            None
+        } else {
+            let path = Path::new(source);
+            observation::validate_output_path(path)
+                .map_err(|_| invalid("Use an HTTPS URL or an absolute local Git path"))?;
+            let entry = observation::inspect(path, false)?;
+            if entry.kind != Kind::Directory || destination.starts_with(path) {
+                return Err(invalid(
+                    "Choose a local Git directory and a destination outside it",
+                ));
+            }
+            Some(entry)
+        };
+        root_scope(host, destination)?;
+        if destination.to_str().is_none() {
+            return Err(invalid("Clone destination must be a UTF-8 path"));
+        }
+        let root = observation::inspect(destination, false)?;
+        let parent = observation::parent_handle(destination)?;
+        if parent.missing || root.kind != Kind::Missing {
+            return Err(invalid("Clone needs a new path with an existing parent"));
+        }
+        let stat = fs::fstat(&parent.directory)
+            .map_err(|e| io_error("inspect clone parent", destination, e))?;
+        if stat.st_uid != rustix::process::geteuid().as_raw() || stat.st_mode & 0o022 != 0 {
+            return Err(invalid(
+                "Clone parent must be owned and not group/world writable",
+            ));
+        }
+        if local::LocalConfig::load(host)?
+            .repositories
+            .values()
+            .any(|r| r.root == destination)
+        {
+            return Err(invalid("Clone destination is already registered"));
+        }
+        Git::new(git.to_owned())?;
+        let git = observation::inspect(git, false)?;
+        if git.kind != Kind::Regular || git.fingerprint.as_ref().is_none_or(|f| f.mode & 0o111 == 0)
+        {
+            return Err(invalid("Clone needs a regular Git executable"));
+        }
+        Ok(Self {
+            source: source.into(),
+            destination: destination.to_owned(),
+            root,
+            config: config_entry(host)?.0,
+            git,
+            local_source,
+            effects: [
+                "Clone Git source into the new folder",
+                "Validate dort.toml, then register and select the folder",
+            ],
+        })
+    }
+
+    pub fn destination(&self) -> &Path {
+        &self.destination
+    }
+
+    pub fn human(&self) -> String {
+        format!(
+            "Source: {:?}\nNew folder: {:?}\n\n1. {}.\n2. {}.\n\nAn invalid manifest leaves the clone unregistered. No Home files, profile choices or packages change.",
+            self.source, self.destination, self.effects[0], self.effects[1]
+        )
+    }
+
+    pub fn approve(self) -> CloneApproval {
+        CloneApproval(self)
+    }
+}
+
+pub struct CloneApproval(ClonePreview);
+
+impl CloneApproval {
+    pub fn execute(self, host: &HostContext) -> Result<String> {
+        let _lock = WriterLock::acquire(host)?;
+        journal::ensure_writable(host)?;
+        let p = self.0;
+        let fresh = ClonePreview::prepare(host, &p.source, &p.destination, &p.git.path)?;
+        let matches = |a: &Entry, b: &Entry| same(a, b, true) && parents_match(a, b);
+        if !matches(&p.root, &fresh.root)
+            || !matches(&p.config, &fresh.config)
+            || !matches(&p.git, &fresh.git)
+            || p.local_source
+                .as_ref()
+                .zip(fresh.local_source.as_ref())
+                .is_some_and(|(a, b)| !matches(a, b))
+        {
+            return Err(invalid("Clone inputs changed. Review again."));
+        }
+        let parent = observation::parent_handle(&p.destination)?;
+        let stage_name = format!(".dort-clone-{}", adoption::transaction_id());
+        let stage = p.destination.with_file_name(&stage_name);
+        fs::mkdirat(&parent.directory, stage_name.as_str(), Mode::RWXU)
+            .map_err(|e| io_error("create private clone folder", &stage, e))?;
+        let staged = observation::inspect(&stage, false)?;
+        let backend = Git::new(p.git.path.clone())?;
+        if let Err(error) = backend.clone_private(&stage, &p.source) {
+            let _ = fs::unlinkat(
+                &parent.directory,
+                stage_name.as_str(),
+                fs::AtFlags::REMOVEDIR,
+            );
+            return Err(Error::Invalid(format!(
+                "{error} Any partial clone is at {stage:?}."
+            )));
+        }
+        if !matches(&staged, &observation::inspect(&stage, false)?)
+            || !matches(&p.root, &observation::inspect(&p.destination, false)?)
+        {
+            return Err(Error::Invalid(format!(
+                "Clone paths changed. Review the clone at {stage:?}."
+            )));
+        }
+        fs::renameat_with(
+            &parent.directory,
+            stage_name.as_str(),
+            &parent.directory,
+            &parent.name,
+            RenameFlags::NOREPLACE,
+        )
+        .map_err(|e| io_error("publish clone without replacement", &stage, e))?;
+        parent
+            .directory
+            .sync_all()
+            .map_err(|e| io_error("sync clone parent", &p.destination, e))?;
+        let check = || -> Result<()> {
+            let (manifest, _) = observation::read_manifest(&p.destination.join("dort.toml"))?;
+            let active = manifest.active_profiles(host, &[])?;
+            manifest.validate_file_targets(host, &active, Some(&p.destination), None)?;
+            Ok(())
+        };
+        check().map_err(|error| {
+            Error::Invalid(format!(
+                "Clone kept at {:?}. Fix dort.toml before registering: {}",
+                p.destination,
+                match error {
+                    Error::Parse(_) => "invalid TOML (contents withheld)".into(),
+                    other => other.to_string(),
+                }
+            ))
+        })?;
+        if !matches(&p.config, &config_entry(host)?.0) {
+            return Err(Error::Invalid(format!(
+                "Clone kept at {:?}. Registration changed. Review attaching the clone.",
+                p.destination
+            )));
+        }
+        local::RepositoryRegistry::register(host, &_lock, &p.destination)
+    }
+}
+
 /// Destination must be absolute/physical, absent with an existing owned safe parent,
 /// or an already-valid non-bare repository. No directories, lock or state are created.
 pub fn preview(host: &HostContext, root: &Path, git: &Path) -> Result<Preview> {
@@ -157,20 +343,12 @@ pub fn preview(host: &HostContext, root: &Path, git: &Path) -> Result<Preview> {
         ));
     }
     let (manifest, git_marker) = if create {
-        Manifest::parse("schema = 1\n")?.validate_for_host(
-            host,
-            &local::LocalConfig::load(host)?.active_profiles,
-            Some(root),
-        )?;
+        Manifest::parse("schema = 1\n")?;
         (None, None)
     } else {
         Git::new(git.to_owned())?.status(root)?;
         let (manifest, entry) = observation::read_manifest(&root.join("dort.toml"))?;
-        manifest.validate_for_host(
-            host,
-            &local::LocalConfig::load(host)?.active_profiles,
-            Some(root),
-        )?;
+        manifest.validate_local_selection(host, &[], Some(root))?;
         let marker = observation::inspect(&root.join(".git"), true)?;
         if !matches!(marker.kind, Kind::Directory | Kind::Regular) {
             return Err(invalid(

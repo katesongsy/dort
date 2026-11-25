@@ -38,6 +38,14 @@ pub struct FileSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct InactiveLink {
+    pub id: String,
+    pub target: PathBuf,
+    pub source: PathBuf,
+    pub profiles: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Snapshot {
     pub user_id: u32,
     pub host: HostContext,
@@ -45,6 +53,12 @@ pub struct Snapshot {
     pub manifest: Entry,
     pub local_config: Entry,
     pub active_profiles: BTreeSet<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub temporary_profiles: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<crate::profiles::Row>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub inactive_links: Vec<InactiveLink>,
     pub request: Request,
     pub files: Vec<FileSnapshot>,
 }
@@ -57,11 +71,36 @@ pub fn observe(
     profiles: &[String],
     request: Request,
 ) -> Result<Snapshot> {
+    observe_inner(host, repository, profiles, request, false)
+}
+
+pub(crate) fn observe_environment(
+    host: &HostContext,
+    repository: &Path,
+    profiles: &[String],
+) -> Result<Snapshot> {
+    observe_inner(host, repository, profiles, Request::Apply, true)
+}
+
+fn observe_inner(
+    host: &HostContext,
+    repository: &Path,
+    profiles: &[String],
+    request: Request,
+    environment: bool,
+) -> Result<Snapshot> {
     observation::validate_output_path(repository)?;
     let (manifest, manifest_entry) = observation::read_manifest(&repository.join("dort.toml"))?;
-    let active = manifest.validate_for_host(host, profiles, Some(repository))?;
+    let config = observation::inspect(&host.local_config_path(), false)?;
+    let rows = manifest.profile_rows(host, Some(repository), profiles)?;
+    let active = crate::profiles::active(&rows);
+    if environment {
+        manifest.validate_file_targets(host, &active, Some(repository), None)?;
+    } else {
+        manifest.validate_selection(host, &active, Some(repository))?;
+    }
     if let Request::Adopt { mapping } = &request {
-        validate_adoption(&manifest, mapping, host, profiles, repository)?;
+        validate_adoption(&manifest, mapping, host, &active, repository)?;
     }
     let mappings: Vec<_> = match &request {
         Request::Adopt { mapping } => vec![mapping.clone()],
@@ -75,9 +114,9 @@ pub fn observe(
             manifest
                 .files
                 .iter()
-                .find(|f| &f.id == id && selected(&f.profiles, &active))
+                .find(|f| &f.id == id)
                 .cloned()
-                .ok_or_else(|| Error::Invalid(format!("no active file mapping: {id}")))?,
+                .ok_or_else(|| Error::Invalid(format!("no file mapping: {id}")))?,
         ],
     };
     let mut files = vec![];
@@ -96,7 +135,7 @@ pub fn observe(
                 mapping.mode
             ));
         }
-        if !mapping.requires.is_empty() {
+        if !environment && !mapping.requires.is_empty() {
             blockers.push("tool prerequisites cannot yet be verified".into());
         }
         let hash = blockers.is_empty();
@@ -118,14 +157,50 @@ pub fn observe(
             blockers,
         });
     }
+    let mut inactive_links = vec![];
+    if matches!(request, Request::Apply) {
+        for mapping in manifest
+            .files
+            .iter()
+            .filter(|f| f.mode == FileMode::Link && !selected(&f.profiles, &active))
+        {
+            let source = repository.join(
+                mapping
+                    .overrides
+                    .get(&host.platform)
+                    .unwrap_or(&mapping.source),
+            );
+            if let Ok(target) = host.target_path(&mapping.target, Some(repository))
+                && let Ok(entry) = observation::inspect(&target, false)
+                && observation::link_path(&entry).as_ref() == Some(&source)
+            {
+                inactive_links.push(InactiveLink {
+                    id: mapping.id.clone(),
+                    target,
+                    source,
+                    profiles: mapping.profiles.clone(),
+                });
+            }
+        }
+        inactive_links.sort_by(|a, b| a.id.cmp(&b.id));
+    }
+    let after = observation::inspect(&host.local_config_path(), false)?;
+    if !crate::adoption::same(&config, &after, true) {
+        return Err(Error::Invalid(
+            "local configuration changed during observation".into(),
+        ));
+    }
     files.sort_by(|a, b| a.mapping.id.cmp(&b.mapping.id));
     Ok(Snapshot {
         user_id: rustix::process::geteuid().as_raw(),
         host: host.clone(),
         repository: repository.to_owned(),
         manifest: manifest_entry,
-        local_config: observation::inspect(&host.local_config_path(), false)?,
+        local_config: after,
         active_profiles: active,
+        temporary_profiles: profiles.to_vec(),
+        profiles: rows,
+        inactive_links,
         request,
         files,
     })
@@ -135,13 +210,13 @@ fn validate_adoption(
     manifest: &Manifest,
     mapping: &ManagedFile,
     host: &HostContext,
-    profiles: &[String],
+    active: &BTreeSet<String>,
     repository: &Path,
 ) -> Result<()> {
     let mut candidate = manifest.clone();
     candidate.files.push(mapping.clone());
-    let active = candidate.validate_for_host(host, profiles, Some(repository))?;
-    if !selected(&mapping.profiles, &active) {
+    candidate.validate_selection(host, active, Some(repository))?;
+    if !selected(&mapping.profiles, active) {
         return Err(Error::Invalid("adoption mapping must be active".into()));
     }
     if !mapping.overrides.is_empty() {
@@ -261,6 +336,14 @@ fn permissions(entry: &Entry) -> String {
 
 /// Identical snapshots produce identical plans. No reads, writes, clocks or random IDs.
 pub fn plan(snapshot: Snapshot) -> Plan {
+    plan_inner(snapshot, false)
+}
+
+pub(crate) fn plan_environment(snapshot: Snapshot) -> Plan {
+    plan_inner(snapshot, true)
+}
+
+fn plan_inner(snapshot: Snapshot, environment: bool) -> Plan {
     let mut files = vec![];
     let manifest = snapshot.manifest.path.clone();
     for file in &snapshot.files {
@@ -275,7 +358,7 @@ pub fn plan(snapshot: Snapshot) -> Plan {
         if file.mapping.mode != FileMode::Link {
             result.blockers.push("only link mode is supported".into());
         }
-        if !file.mapping.requires.is_empty() {
+        if !environment && !file.mapping.requires.is_empty() {
             result
                 .blockers
                 .push("tool prerequisite verification is unsupported".into());
@@ -419,6 +502,18 @@ impl Plan {
     pub fn human(&self) -> String {
         use std::fmt::Write;
         let mut text = String::from("Read-only plan (schema 1; not executable)\n");
+        for row in &self.inputs.profiles {
+            let _ = writeln!(text, "Profile {}", row.label());
+        }
+        for link in &self.inputs.inactive_links {
+            let _ = writeln!(
+                text,
+                "{}: No longer selected. Keep {} in place. Profiles: {}",
+                link.id,
+                link.target.display(),
+                link.profiles.join(", ")
+            );
+        }
         for file in &self.files {
             let _ = writeln!(text, "{}: {:?}", file.id, file.outcome);
             if let Some(input) = self

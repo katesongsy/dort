@@ -325,6 +325,19 @@ impl App {
                 None
             }
             Ok(Output::Preview(pending)) => self.accept_preview(pending),
+            Ok(Output::EnvironmentRun(run)) => {
+                self.receipt = None;
+                self.result = Some(run.human());
+                self.show_result = true;
+                self.details_scroll = 0;
+                self.status = if run.complete() {
+                    "Environment completed.".into()
+                } else {
+                    "Environment stopped. Review the run record before resuming.".into()
+                };
+                self.tools_view.declared.invalidate();
+                None
+            }
             Ok(Output::Completed(completion)) => self.accept_completed(completion, activity),
         };
         if task.is_some() {
@@ -776,6 +789,7 @@ impl App {
                     Some(Overlay::Form(Form::KeepId | Form::RemoveId)) => {
                         self.shell.unmanage_focused = 0
                     }
+                    Some(Overlay::Form(Form::Clone)) => self.shell.path_focused = index.min(1),
                     Some(Overlay::Form(Form::Choose | Form::Init)) => self.shell.path_focused = 0,
                     _ => return None,
                 }
@@ -1162,8 +1176,7 @@ impl App {
             return None;
         }
         if self.choice.is_some() {
-            self.choice_key(key.code);
-            return None;
+            return self.choice_key(key.code);
         }
         if self.more.is_some() {
             return self.more_key(key.code, width, height);
@@ -1851,6 +1864,21 @@ impl App {
                 match form {
                     Form::Adopt | Form::Check | Form::KeepId | Form::RemoveId => unreachable!(),
                     Form::Choose => Some(Task::Select(Some(root))),
+                    Form::Clone => match &self.git {
+                        Ok(git) if !self.shell.clone_fields[0].is_empty() => Some(Task::Clone {
+                            source: self.shell.clone_fields[0].clone(),
+                            root,
+                            git: git.clone(),
+                        }),
+                        Ok(_) => {
+                            self.shell.form_feedback = Some((form, "Enter a Git source."));
+                            None
+                        }
+                        Err(error) => {
+                            self.error = Some(error.to_string());
+                            None
+                        }
+                    },
                     Form::Init => match &self.git {
                         Ok(git) => Some(Task::Init {
                             root,
@@ -1902,6 +1930,12 @@ impl App {
         }
         self.shell.overlay = None;
         match action {
+            Action::SavedProfiles => self.open_saved_profiles(),
+            Action::EnvironmentPlan | Action::EnvironmentResume => {
+                return Some(Task::Environment {
+                    resume: action == Action::EnvironmentResume,
+                });
+            }
             Action::ToggleMark => super::tree::toggle(self),
             Action::ClearMarks => {
                 if self.discovering {
@@ -1994,13 +2028,18 @@ impl App {
                 self.go_tab(Tab::Tools);
                 return self.tools_view.open_installed();
             }
-            Action::ToolsCheck => {
+            Action::ToolsCheck | Action::EnvironmentCheck => {
                 self.go_tab(Tab::Tools);
                 let details = self.tools_view.declared_details;
                 self.tools_view.leave_section();
                 self.tools_view.declared_details = details;
                 self.tools_view.declared.check_waiting = true;
-                return Some(Task::ToolsCheckPrepare(self.tools_view.inspection_inputs()));
+                let inputs = self.tools_view.inspection_inputs();
+                return Some(if action == Action::EnvironmentCheck {
+                    Task::EnvironmentCheck(inputs)
+                } else {
+                    Task::ToolsCheckPrepare(inputs)
+                });
             }
             Action::ToolsInstallMissing => {
                 self.go_tab(Tab::Tools);
@@ -2016,6 +2055,10 @@ impl App {
                 return Some(self.tools_view.open_attempts());
             }
             Action::Choose => self.shell.overlay = Some(Overlay::Repositories { selected: 0 }),
+            Action::Clone => {
+                self.shell.path_focused = 0;
+                self.shell.overlay = Some(Overlay::Form(Form::Clone));
+            }
             Action::Init => {
                 self.shell.path_focused = 0;
                 self.shell.overlay = Some(Overlay::Form(Form::Init));
@@ -2197,6 +2240,7 @@ impl App {
                 Form::Check => "check",
                 Form::Choose => "choose",
                 Form::Init => "init",
+                Form::Clone => "clone",
                 Form::KeepId => "keep",
                 Form::RemoveId => "remove",
             });
@@ -2241,7 +2285,7 @@ impl App {
     fn focus_first_field(&mut self) {
         self.shell.scroll = 0;
         match self.form_page() {
-            Some("choose" | "init") => self.shell.path_focused = 0,
+            Some("choose" | "init" | "clone") => self.shell.path_focused = 0,
             Some("check") => self.shell.manifest_focused = 0,
             Some("keep" | "remove") => self.shell.unmanage_focused = 0,
             Some("adopt") => self.shell.adoption.focused = 0,
@@ -2587,6 +2631,24 @@ impl App {
                     .is_none() =>
             {
                 Some("Choose a repository to check its declared tools.")
+            }
+            Action::EnvironmentPlan | Action::EnvironmentCheck | Action::EnvironmentResume
+                if self
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.overview.as_ref())
+                    .and_then(|o| o.registered)
+                    != Some(true) =>
+            {
+                Some("Choose a registered repository.")
+            }
+            Action::SavedProfiles
+                if self
+                    .data
+                    .as_ref()
+                    .is_none_or(|data| data.profile_rows.is_empty()) =>
+            {
+                Some("Choose a repository with a readable manifest.")
             }
             Action::CheckCurrent | Action::Profiles
                 if self

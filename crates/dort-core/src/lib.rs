@@ -30,3 +30,5 @@ pub mod tools;
 
 pub use error::{Error, Result};
 pub use manifest::Manifest;
+
+pub mod environment;
