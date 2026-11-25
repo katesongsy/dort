@@ -40,6 +40,10 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, _height: u16, _width: u
             "Manifest: {:?}\nExtra profiles: {:?}\nRelative paths from: {:?}\n\nAn independent manifest needs no registration or Git. Base and local profiles still apply. This checks declarations, dependencies and support. It does not read files or check installed tools.",
             app.shell.manifest_draft, app.shell.check_profiles, app.launch_directory
         ),
+        Overlay::Form(Form::Repair) => format!(
+            "Repository: {:?}\n\nUp/Down select a line. Ctrl-U clears it, Backspace edits its end, Del removes it, and F4 inserts a line after it. Enter validates the draft and opens the diff.\n\nOnly dort.toml is saved after approval. If a legacy tool has more than one rule or an unsupported manager, choose a supported rule or manage that tool separately and fix its references. Edit larger repairs externally.",
+            app.shell.repair.as_ref().map(|draft| draft.repository())
+        ),
         Overlay::Form(Form::Configure) => {
             "Review the changes to dort.toml before saving. Home files and packages stay in place."
                 .into()

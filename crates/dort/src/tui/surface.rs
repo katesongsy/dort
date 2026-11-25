@@ -64,6 +64,7 @@ impl App {
                 return Some(match form {
                     Form::Choose => "Session / Exact repository path",
                     Form::Clone => "Session / Clone repository",
+                    Form::Repair => "Manifest repair draft",
                     Form::Configure => self
                         .shell
                         .configuration

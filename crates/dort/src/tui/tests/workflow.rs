@@ -2144,3 +2144,70 @@ fn clone_form_review_registers_without_creating_home_link() {
     );
     assert!(!f.host.home.join(".editor").exists());
 }
+
+#[test]
+fn unregistered_manifest_repair_opens_a_draft_and_requires_diff_approval() {
+    let f = Fixture::new(false);
+    let git = crate::environment::resolve_git().unwrap();
+    fs::remove_dir(f.root.join(".git")).unwrap();
+    assert!(
+        std::process::Command::new(&git)
+            .current_dir(&f.root)
+            .args(["init", "-q"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let path = f.root.join("dort.toml");
+    let original =
+        "schema = 1\n[profiles]\navailable = ['dev']\n[profiles.platform]\nubuntu = ['dev']\n";
+    fs::write(&path, original).unwrap();
+    let mut app = App::new(false);
+    app.git = Ok(git);
+    app.complete(Ok(Output::Data(
+        actions::load(&f.host, Some(&f.root)).unwrap(),
+    )));
+    assert!(
+        super::tests::more_target(&mut app, |target| matches!(
+            target,
+            super::input::Target::Action(super::shell::Action::Configure(
+                super::configuration::Kind::Repair
+            ))
+        ))
+        .is_none()
+    );
+    let run = |app: &mut App, task| {
+        app.complete(Ok(
+            actions::perform(task, &f.host, None, |_| Ok(())).unwrap()
+        ));
+    };
+    let open = key(&mut app, KeyCode::Enter).unwrap();
+    run(&mut app, open);
+    assert!(super::tests::render(&app, 80, 24).contains("Manifest repair draft"));
+    key(&mut app, KeyCode::End);
+    type_text(&mut app, "# reviewed");
+    let preview = key(&mut app, KeyCode::Enter).unwrap();
+    run(&mut app, preview);
+    assert!(
+        app.preview
+            .as_ref()
+            .unwrap()
+            .text
+            .contains("Before | ubuntu")
+    );
+    assert!(super::tests::render(&app, 80, 24).contains("After  | linux"));
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    assert!(!f.host.state_dir.exists());
+    let approved = approve(&mut app);
+    run(&mut app, approved);
+    assert!(fs::read_to_string(&path).unwrap().contains("# reviewed"));
+    assert!(
+        app.result
+            .as_deref()
+            .unwrap()
+            .contains("still unregistered")
+    );
+    assert!(!f.host.local_config_path().exists());
+    assert!(!f.host.home.join(".editor").exists());
+}

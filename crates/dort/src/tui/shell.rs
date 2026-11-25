@@ -8,6 +8,7 @@ pub enum Form {
     Init,
     Clone,
     Configure,
+    Repair,
     Adopt,
     Check,
     KeepId,
@@ -145,8 +146,8 @@ pub enum Action {
     EnvironmentPlan,
     EnvironmentCheck,
     EnvironmentResume,
-    CheckCurrent,
     EnvironmentAbandon,
+    CheckCurrent,
     CheckStandalone,
     StandaloneProfiles,
     Refresh,
@@ -206,8 +207,8 @@ impl Action {
             Self::EnvironmentPlan => "Review environment plan",
             Self::EnvironmentCheck => "Environment check",
             Self::EnvironmentResume => "Review environment resume",
-            Self::SavedProfiles => "Saved profiles",
             Self::EnvironmentAbandon => "Abandon environment run",
+            Self::SavedProfiles => "Saved profiles",
             Self::Configure(kind) => kind.label(),
             Self::Profiles => "Profiles: extra profiles for this session",
             Self::CheckCurrent => "Check current repository manifest",
@@ -237,6 +238,7 @@ pub struct Shell {
     pub page_rows: std::cell::Cell<u16>,
     pub init_draft: String,
     pub clone_fields: [String; 2],
+    pub repair: Option<super::configuration::RepairEditor>,
     pub configuration: Option<super::configuration::Draft>,
     pub path_focused: usize,
     pub form_details: bool,
@@ -271,6 +273,7 @@ impl Shell {
             page_rows: std::cell::Cell::new(1),
             init_draft: String::new(),
             clone_fields: Default::default(),
+            repair: None,
             configuration: None,
             path_focused: 0,
             form_details: false,
@@ -304,9 +307,11 @@ impl Shell {
             self.overlay,
             Some(Overlay::Form(Form::Clone | Form::Choose | Form::Init))
                 if self.path_focused < 2
-        ) || matches!(self.overlay, Some(Overlay::Form(Form::Configure)))
-            || (matches!(self.overlay, Some(Overlay::Form(Form::Adopt)))
-                && self.adoption.focused < AdoptionDraft::FIELDS)
+        ) || matches!(
+            self.overlay,
+            Some(Overlay::Form(Form::Configure | Form::Repair))
+        ) || (matches!(self.overlay, Some(Overlay::Form(Form::Adopt)))
+            && self.adoption.focused < AdoptionDraft::FIELDS)
             || (matches!(self.overlay, Some(Overlay::Form(Form::Check)))
                 && self.manifest_focused == 0)
             || (matches!(
@@ -328,7 +333,7 @@ impl Shell {
             Form::Choose => &self.choose_draft,
             Form::Init => &self.init_draft,
             Form::Clone => &self.clone_fields[1],
-            Form::Configure => "",
+            Form::Configure | Form::Repair => "",
             Form::Adopt => &self.adoption.target,
             Form::Check => &self.manifest_draft,
             Form::KeepId | Form::RemoveId => &self.unmanage_id,
@@ -341,6 +346,10 @@ impl Shell {
         use super::forms::Command;
         match command {
             Command::Submit => Some(Intent::Submit(form)),
+            Command::InsertLine => {
+                self.repair.as_mut()?.insert();
+                None
+            }
             Command::Choose => Some(Intent::Action(Action::Choose)),
             Command::Create => Some(Intent::Action(Action::Init)),
             Command::Profiles if form == Form::Check => {
@@ -536,6 +545,11 @@ impl Shell {
                     _ => edit_text(draft.field(draft.focused), key),
                 }
             }
+            Overlay::Form(Form::Repair) => match key.code {
+                KeyCode::Esc => self.back(),
+                KeyCode::Enter => return Some(Intent::Submit(Form::Repair)),
+                _ => self.repair.as_mut()?.key(key),
+            },
             Overlay::Form(Form::Configure) => match key.code {
                 KeyCode::Esc => self.back(),
                 KeyCode::Enter => return Some(Intent::Submit(Form::Configure)),
@@ -553,6 +567,7 @@ impl Shell {
                     Form::Choose => &mut self.choose_draft,
                     Form::Init => &mut self.init_draft,
                     Form::Configure
+                    | Form::Repair
                     | Form::Clone
                     | Form::Adopt
                     | Form::Check

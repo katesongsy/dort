@@ -342,6 +342,28 @@ impl App {
                 self.tools_view.declared.invalidate();
                 None
             }
+            Ok(Output::RepairDraft(draft)) => {
+                self.shell.repair = Some(super::configuration::RepairEditor::new(*draft));
+                self.shell.overlay = Some(Overlay::Form(Form::Repair));
+                self.form_focus = Some("manifest repair");
+                self.status =
+                    "Edit the draft, then review the diff. Nothing has been saved.".into();
+                None
+            }
+            Ok(Output::ManifestRepaired(backup)) => {
+                if let Some(draft) = self.shell.repair.take() {
+                    self.shell.init_draft = draft.repository().display().to_string();
+                }
+                self.shell.back();
+                self.receipt = None;
+                self.result = Some(format!(
+                    "Saved repaired manifest. The folder is still unregistered.\n\nPrivate backup: {backup:?}\n\nReview Create/attach for this exact folder to register it."
+                ));
+                self.show_result = true;
+                self.details_scroll = 0;
+                self.status = "Manifest repaired. Review attaching the repository next.".into();
+                None
+            }
             Ok(Output::Completed(completion)) => self.accept_completed(completion, activity),
         };
         if task.is_some() {
@@ -800,6 +822,9 @@ impl App {
                         self.shell.unmanage_focused = 0
                     }
                     Some(Overlay::Form(Form::Clone)) => self.shell.path_focused = index.min(1),
+                    Some(Overlay::Form(Form::Repair)) => {
+                        self.shell.repair.as_mut()?.focus_at(index)
+                    }
                     Some(Overlay::Form(Form::Configure)) => {
                         self.shell.configuration.as_mut()?.focus_at(index)
                     }
@@ -1866,7 +1891,15 @@ impl App {
                     mapping: draft.mapping(),
                 }))
             }
-            Intent::Submit(Form::Configure) => match self.shell.configuration.as_ref()?.change() {
+            Intent::Submit(Form::Repair) => Some(Task::Configuration(Box::new(
+                self.shell.repair.as_ref()?.change(),
+            ))),
+            Intent::Submit(Form::Configure) => match self
+                .shell
+                .configuration
+                .as_ref()?
+                .change(self.git.as_ref().ok())
+            {
                 Ok(change) => Some(Task::Configuration(Box::new(change))),
                 Err(error) => {
                     self.status = error.to_string().into();
@@ -1886,7 +1919,12 @@ impl App {
                     &self.launch_directory,
                 );
                 match form {
-                    Form::Configure | Form::Adopt | Form::Check | Form::KeepId | Form::RemoveId => {
+                    Form::Configure
+                    | Form::Repair
+                    | Form::Adopt
+                    | Form::Check
+                    | Form::KeepId
+                    | Form::RemoveId => {
                         unreachable!()
                     }
                     Form::Choose => Some(Task::Select(Some(root))),
@@ -1979,6 +2017,7 @@ impl App {
                 self.shell.configuration = Some(Draft::new(kind, mapping, root));
                 self.shell.overlay = Some(Overlay::Form(Form::Configure));
             }
+            Action::EnvironmentAbandon => return Some(Task::EnvironmentAbandon),
             Action::EnvironmentPlan | Action::EnvironmentResume => {
                 return Some(Task::Environment {
                     resume: action == Action::EnvironmentResume,
@@ -2017,7 +2056,6 @@ impl App {
                     ));
                 }
             }
-            Action::EnvironmentAbandon => return Some(Task::EnvironmentAbandon),
             Action::ApplyMarked | Action::KeepMarked | Action::RemoveMarked => {
                 let ids = self.inventory.managed_marks.iter().cloned().collect();
                 return Some(Task::Batch(match action {
@@ -2295,6 +2333,7 @@ impl App {
                 Form::Init => "init",
                 Form::Clone => "clone",
                 Form::Configure => "configuration",
+                Form::Repair => "manifest repair",
                 Form::KeepId => "keep",
                 Form::RemoveId => "remove",
             });
@@ -2698,6 +2737,7 @@ impl App {
             | Action::EnvironmentPlan
             | Action::EnvironmentCheck
             | Action::EnvironmentResume
+            | Action::EnvironmentAbandon
                 if self
                     .data
                     .as_ref()
@@ -2737,7 +2777,6 @@ impl App {
             Action::IgnoreSelected
                 if self.tab != Tab::Files
                     || !self.discovering
-            | Action::EnvironmentAbandon
                     || super::tree::selected(self).is_none() =>
             {
                 Some(

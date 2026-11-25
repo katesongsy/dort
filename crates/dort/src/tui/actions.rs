@@ -475,6 +475,10 @@ impl Approved {
             Self::Configuration(super::configuration::Approval::Registry(p)) => {
                 ("Repository registration", None, p.execute(host)?)
             }
+            Self::Configuration(super::configuration::Approval::Repair(p)) => {
+                let backup = p.execute(host)?.expect("a repair changes the manifest");
+                return Ok(Output::ManifestRepaired(backup));
+            }
             Self::Configuration(super::configuration::Approval::Manifest(p)) => {
                 let backup = p.execute(host)?;
                 let id = backup
@@ -486,11 +490,11 @@ impl Approved {
                 ("Manifest change", id, None)
             }
             Self::Environment(p) => return p.execute(host, observer).map(Output::EnvironmentRun),
+            Self::EnvironmentAbandon(p) => return p.execute(host).map(Output::EnvironmentRun),
             Self::ToolDeclaration(a) => {
                 let lock = WriterLock::acquire(host)?;
                 (
                     "Tool declaration",
-            Self::EnvironmentAbandon(p) => return p.execute(host).map(Output::EnvironmentRun),
                     dort_core::tools::declaration::execute(host, &lock, *a, observer)?,
                     None,
                 )
@@ -635,12 +639,12 @@ pub enum Task {
         resume: bool,
     },
     EnvironmentCheck(crate::services::inspection_defaults::Inputs),
+    EnvironmentAbandon,
     ToolsInstalledPrepare(crate::services::inspection_defaults::Inputs),
     ToolsInstalledInspect(crate::services::installed_tools::Approval),
     ToolsCheckPrepare(crate::services::inspection_defaults::Inputs),
     ToolsStandaloneCheckPrepare(crate::services::declared_tools::Input),
     ToolsCheck(Box<crate::services::declared_tools::CheckApproval>),
-    EnvironmentAbandon,
     ToolsInstallMissingPrepare(std::sync::Arc<crate::services::declared_tools::Checked>),
     ToolsInstallMissing(crate::services::declared_tools::InstallApproval),
 
@@ -733,6 +737,8 @@ pub enum Output {
     },
     Selected(Option<PathBuf>, Data),
     Preview(Pending),
+    RepairDraft(Box<dort_core::manifest_edit::RepairDraft>),
+    ManifestRepaired(PathBuf),
     Completed(Completion),
 }
 #[cfg(test)]
@@ -772,17 +778,17 @@ pub fn perform_scoped_with_install_progress(
                 .map(Output::ToolsInstalledPreview)
         }
         Task::ToolsInstalledInspect(approval) => approval.inspect().map(Output::ToolsInstalled),
+        Task::EnvironmentAbandon => {
+            let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
+            dort_core::environment::AbandonPreview::prepare(host, &root)
+                .map(|p| Output::Preview(Pending::EnvironmentAbandon(Box::new(p))))
+        }
         Task::Environment { resume } => {
             let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
             dort_core::environment::Preview::prepare(host, &root, requested, resume)
                 .map(|p| Output::Preview(Pending::Environment(Box::new(p))))
         }
         Task::ToolsCheckPrepare(_) | Task::EnvironmentCheck(_) => {
-        Task::EnvironmentAbandon => {
-            let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
-            dort_core::environment::AbandonPreview::prepare(host, &root)
-                .map(|p| Output::Preview(Pending::EnvironmentAbandon(Box::new(p))))
-        }
             let (detection, environment) = match task {
                 Task::ToolsCheckPrepare(detection) => (detection, false),
                 Task::EnvironmentCheck(detection) => (detection, true),
@@ -966,6 +972,13 @@ pub fn perform_scoped_with_install_progress(
                     Preview::Manifest(Box::new(dort_core::manifest_edit::Preview::prepare(
                         host, &root, &change,
                     )?))
+                }
+                Request::OpenRepair(root, git) => {
+                    return dort_core::manifest_edit::RepairDraft::open(host, &root, &git)
+                        .map(|draft| Output::RepairDraft(Box::new(draft)));
+                }
+                Request::Repair(draft, replacement) => {
+                    Preview::Repair(Box::new(draft.review(host, replacement)?))
                 }
                 Request::Registry(change) => Preview::Registry(Box::new(
                     dort_core::local::registry_edit::Preview::prepare(host, change)?,

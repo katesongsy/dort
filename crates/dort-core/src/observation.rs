@@ -276,6 +276,13 @@ pub(crate) fn read_checked_bounded(
 
 /// Read a manifest through the same no-follow boundary. Contents are never in snapshots.
 pub fn read_manifest(path: &Path) -> Result<(crate::Manifest, Entry)> {
+    let (bytes, entry) = read_manifest_bytes(path)?;
+    let text =
+        std::str::from_utf8(&bytes).map_err(|_| Error::Invalid("manifest must be UTF-8".into()))?;
+    Ok((crate::Manifest::parse(text)?, entry))
+}
+
+pub(crate) fn read_manifest_bytes(path: &Path) -> Result<(Vec<u8>, Entry)> {
     let entry = inspect(path, false)?;
     let fp = entry
         .fingerprint
@@ -290,12 +297,9 @@ pub fn read_manifest(path: &Path) -> Result<(crate::Manifest, Entry)> {
         })?;
     let handle = parent_handle(path)?;
     let bytes = read_checked(&handle, path, fp)?;
-    let text =
-        std::str::from_utf8(&bytes).map_err(|_| Error::Invalid("manifest must be UTF-8".into()))?;
-    let manifest = crate::Manifest::parse(text)?;
     let mut entry = entry;
     entry.sha256 = Some(format!("{:x}", Sha256::digest(&bytes)));
-    Ok((manifest, entry))
+    Ok((bytes, entry))
 }
 
 /// Normalize a link lexically; this does not grant permission to follow it.

@@ -5,6 +5,7 @@ use dort_core::{
     model::{FileMode, ManagedFile},
     platform::Platform,
 };
+use std::{path::PathBuf, sync::Arc};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -15,21 +16,26 @@ pub enum Kind {
     Startup,
     Forget,
     Reconnect,
+    Repair,
 }
 
 pub enum Request {
     Manifest(Change),
     Registry(registry_edit::Change),
+    OpenRepair(PathBuf, PathBuf),
+    Repair(Arc<manifest_edit::RepairDraft>, String),
 }
 
 pub enum Preview {
     Manifest(Box<manifest_edit::Preview>),
     Registry(Box<registry_edit::Preview>),
+    Repair(Box<manifest_edit::RepairPreview>),
 }
 
 pub enum Approval {
     Manifest(Box<manifest_edit::Approval>),
     Registry(Box<registry_edit::Approval>),
+    Repair(Box<manifest_edit::Approval>),
 }
 
 impl Preview {
@@ -37,6 +43,7 @@ impl Preview {
         match self {
             Self::Manifest(p) => p.human(),
             Self::Registry(p) => p.human(),
+            Self::Repair(p) => p.human(),
         }
     }
 
@@ -44,6 +51,7 @@ impl Preview {
         match self {
             Self::Manifest(_) => "Save manifest change",
             Self::Registry(_) => "Save repository change",
+            Self::Repair(_) => "Save repaired manifest",
         }
     }
 
@@ -51,6 +59,7 @@ impl Preview {
         match self {
             Self::Manifest(p) => Approval::Manifest(Box::new(p.approve())),
             Self::Registry(p) => Approval::Registry(Box::new(p.approve())),
+            Self::Repair(p) => Approval::Repair(Box::new(p.approve())),
         }
     }
 }
@@ -65,6 +74,7 @@ impl Kind {
             Self::Startup => "Set startup repository",
             Self::Forget => "Forget repository",
             Self::Reconnect => "Reconnect moved repository",
+            Self::Repair => "Repair unregistered manifest",
         }
     }
 
@@ -80,6 +90,7 @@ impl Kind {
             Self::EditFile => &Self::FILE_FIELDS[1..],
             Self::Startup | Self::Forget => &["Registered repository path"],
             Self::Reconnect => &["Previous registered path", "New repository path"],
+            Self::Repair => &["Exact unregistered Git repository path"],
         }
     }
 
@@ -126,8 +137,10 @@ impl Draft {
                     .map_or_else(String::new, |p| p.display().to_string()),
             ];
         }
-        if matches!(kind, Kind::Startup | Kind::Forget | Kind::Reconnect)
-            && let Some(root) = root
+        if matches!(
+            kind,
+            Kind::Startup | Kind::Forget | Kind::Reconnect | Kind::Repair
+        ) && let Some(root) = root
         {
             fields[0] = root.display().to_string();
         }
@@ -163,7 +176,15 @@ impl Draft {
         }
     }
 
-    pub fn change(&self) -> Result<Request> {
+    pub fn primary(&self) -> &'static str {
+        if self.kind == Kind::Repair {
+            "Open repair draft"
+        } else {
+            "Review changes"
+        }
+    }
+
+    pub fn change(&self, git: Option<&PathBuf>) -> Result<Request> {
         let value = |i: usize| self.fields[i].trim();
         let required = |index: usize| -> Result<&str> {
             let text = value(index);
@@ -176,6 +197,18 @@ impl Draft {
                 Ok(text)
             }
         };
+        if self.kind == Kind::Repair {
+            required(0)?;
+            let git = git.ok_or_else(|| {
+                Error::Invalid(
+                    "Install Git separately and restart Dort before opening this draft.".into(),
+                )
+            })?;
+            return Ok(Request::OpenRepair(
+                self.fields[0].clone().into(),
+                git.clone(),
+            ));
+        }
         let registry = match self.kind {
             Kind::Startup => Some(registry_edit::Change::Startup(required(0)?.into())),
             Kind::Forget => Some(registry_edit::Change::Forget(required(0)?.into())),
@@ -189,7 +222,7 @@ impl Draft {
             return Ok(Request::Registry(change));
         }
         Ok(Request::Manifest(match self.kind {
-            Kind::Startup | Kind::Forget | Kind::Reconnect => unreachable!(),
+            Kind::Startup | Kind::Forget | Kind::Reconnect | Kind::Repair => unreachable!(),
             Kind::DeleteProfile => Change::Profile {
                 old: Some(required(0)?.into()),
                 new: None,
@@ -253,5 +286,63 @@ impl Draft {
                 }))
             }
         }))
+    }
+}
+
+pub struct RepairEditor {
+    draft: Arc<manifest_edit::RepairDraft>,
+    lines: Vec<String>,
+    pub focus: usize,
+}
+
+impl RepairEditor {
+    pub fn new(draft: manifest_edit::RepairDraft) -> Self {
+        let lines = draft.suggested().split('\n').map(str::to_owned).collect();
+        Self {
+            draft: Arc::new(draft),
+            lines,
+            focus: 0,
+        }
+    }
+
+    pub fn repository(&self) -> &std::path::Path {
+        self.draft.repository()
+    }
+
+    pub fn lines(&self) -> &[String] {
+        &self.lines
+    }
+
+    pub fn change(&self) -> Request {
+        Request::Repair(self.draft.clone(), self.lines.join("\n"))
+    }
+
+    pub fn focus_at(&mut self, index: usize) {
+        self.focus = index.min(self.lines.len() - 1);
+    }
+
+    pub fn insert(&mut self) {
+        if self.lines.len() < 256 {
+            self.focus += 1;
+            self.lines.insert(self.focus, String::new());
+        }
+    }
+
+    pub fn key(&mut self, key: ratatui::crossterm::event::KeyEvent) {
+        use ratatui::crossterm::event::KeyCode;
+        match key.code {
+            KeyCode::Up | KeyCode::BackTab => self.focus = self.focus.saturating_sub(1),
+            KeyCode::Down | KeyCode::Tab => self.focus_at(self.focus + 1),
+            KeyCode::Home => self.focus = 0,
+            KeyCode::End => self.focus_at(self.lines.len() - 1),
+            KeyCode::PageUp => self.focus = self.focus.saturating_sub(5),
+            KeyCode::PageDown => self.focus_at(self.focus + 5),
+            KeyCode::Delete if self.lines.len() > 1 => {
+                self.lines.remove(self.focus);
+                self.focus_at(self.focus);
+            }
+            KeyCode::F(4) => self.insert(),
+            _ => super::shell::edit_text(&mut self.lines[self.focus], key),
+        }
     }
 }

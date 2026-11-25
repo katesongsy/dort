@@ -9,9 +9,11 @@ pub enum Command {
     Profiles,
     Discard,
     Details,
+    InsertLine,
 }
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
     let s = &app.shell;
+    let line_labels;
     let (fields, focus, primary): (Vec<(&str, &str)>, usize, &'static str) = match form {
         Form::Adopt => (
             vec![
@@ -27,7 +29,21 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
             let Some(draft) = &s.configuration else {
                 return;
             };
-            (draft.fields(), draft.focus, "Review changes")
+            (draft.fields(), draft.focus, draft.primary())
+        }
+        Form::Repair => {
+            let Some(editor) = &s.repair else {
+                return;
+            };
+            line_labels = (1..=editor.lines().len())
+                .map(|i| format!("Line {i}"))
+                .collect::<Vec<_>>();
+            let fields = line_labels
+                .iter()
+                .map(String::as_str)
+                .zip(editor.lines().iter().map(String::as_str))
+                .collect();
+            (fields, editor.focus, "Review manifest diff")
         }
         Form::Check => (
             vec![("Manifest path", &s.manifest_draft)],
@@ -92,6 +108,11 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                 target: Target::FormAction(Command::Discard),
             });
         }
+        Form::Repair => actions.push(ui::ActionButton {
+            label: "Insert line",
+            key: "F4",
+            target: Target::FormAction(Command::InsertLine),
+        }),
         Form::Choose => actions.push(ui::ActionButton {
             label: "New",
             key: "Ctrl-N",

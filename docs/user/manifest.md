@@ -14,6 +14,15 @@ Back up `dort.toml` before upgrading. Keep `schema = 1` and make these changes:
 
 Run `dort manifest check --manifest /absolute/path/to/dort.toml` before applying changes.
 
+### Repair an unregistered clone
+
+1. Open **F2 More > Repair unregistered manifest**. Enter the exact absolute path to the clone or another unregistered Git working tree. Opening the draft displays the manifest text.
+2. Review the draft suggestions for legacy `ubuntu` keys and single Homebrew or npm rules. Edit the remaining lines. Use **Up/Down** to select a line, **Ctrl-U** to clear it, **Del** to remove it, and **F4** to insert a line.
+3. Press **Enter** to validate the draft and open the diff. Read it and confirm **Save repaired manifest**. Dort writes only `dort.toml` and keeps its original contents in a private backup. It does not change the Git index, registration, Home files or packages.
+4. Review **Create/attach local repository** for the repaired folder to register it.
+
+Dort does not choose between competing platform install rules, substitute a manager for APT or mise, or change an unsupported `schema` value. Use a compatible Dort version or migrate the manifest externally if the schema differs. For unsupported managers, choose a supported rule or manage the package separately and update the declaration and its references. Use an external editor for larger files, registered repositories, or files the draft refuses. The guarded TUI write needs the repository and Dort state on the same filesystem.
+
 ## Files
 
 ```toml

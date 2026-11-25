@@ -66,6 +66,11 @@ fn session_actions(app: &App) -> Vec<ui::ActionButton> {
             target: Target::Action(Action::Clone),
         },
         ui::ActionButton {
+            label: "Repair unregistered manifest",
+            key: "",
+            target: Target::Action(Action::Configure(super::configuration::Kind::Repair)),
+        },
+        ui::ActionButton {
             label: "Saved profiles",
             key: "",
             target: Target::Action(Action::SavedProfiles),

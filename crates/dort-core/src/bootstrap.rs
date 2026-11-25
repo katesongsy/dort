@@ -109,7 +109,7 @@ fn config_entry(host: &HostContext) -> Result<(Entry, Option<Vec<u8>>)> {
     entry.sha256 = bytes.as_deref().map(journal::digest);
     Ok((entry, bytes))
 }
-fn root_scope(host: &HostContext, root: &Path) -> Result<()> {
+pub(crate) fn root_scope(host: &HostContext, root: &Path) -> Result<()> {
     observation::validate_output_path(root)?;
     if root == host.home
         || root.parent().is_none()
@@ -292,7 +292,7 @@ impl CloneApproval {
         };
         check().map_err(|error| {
             Error::Invalid(format!(
-                "Clone kept at {:?}. Fix dort.toml before registering: {}",
+                "Clone kept at {:?}. Use More > Repair unregistered manifest (or edit dort.toml externally), then review attaching this folder: {}",
                 p.destination,
                 match error {
                     Error::Parse(_) => "invalid TOML (contents withheld)".into(),

@@ -5,10 +5,12 @@
 - Save a repository profile choice and reopen Dort. A temporary addition applies once.
 - Clone and register into a new folder without applying its files or tools.
 - Review one ordered environment plan. Check and resume an uncertain install without repeating it.
+- Abandon an unfinished environment run without changing completed work.
+- Repair the invalid manifest of an unregistered clone without changing its registration.
 
 ## How to get to it (user POV)
 
-Use `F2` **More** for **Saved profiles**, **Clone repository**, **Review environment plan**, **Environment check**, and **Review environment resume**. Select the named action and press Enter. Scroll to the end of effects before approving.
+Use `F2` **More** for **Saved profiles**, **Clone repository**, **Review environment plan**, **Environment check**, and **Review environment resume**, **Abandon environment run**, and **Repair unregistered manifest**. Select the named action and press Enter. Scroll to the end of effects before approving.
 
 ## Driving it with the harness
 
@@ -19,6 +21,10 @@ python3 scripts/test.py full
 ```
 
 The CLI cases are `saved_profile_off_keeps_installed_link_and_temporary_flag_wins_once`, `clone_review_and_invalid_manifest_keep_home_targets_untouched`, `environment_plan_stops_on_uncertain_result_and_resumes_without_repeating_installs`, and `environment_process_interruption_leaves_durable_intent_and_never_replays`. The TUI cases are `saved_profiles_requires_review_then_reopens_from_local_configuration`, `clone_form_review_registers_without_creating_home_link`, and `environment_review_and_resume_check_tools_before_touching_editor`. They use the production input and approval handlers, a real local Git source, and a disposable Homebrew fixture. The environment cases read the actual link and verify that each package installs once.
+
+For TUI recovery, create a disposable run with `drive.py new`. Use the `support/environment.toml` and `support/environment-brew.sh` fixtures under `crates/dort/tests/` to stop a run after `a` is confirmed and `b` is uncertain. In **More**, open **Abandon environment run**, inspect the review and cancel. Check that neither the run record nor provider call log changed. Open the review again and confirm. Check that the old record is archived in the repository's private `environment` directory, the completed `a` command and package remain, and no new provider command ran. Open **Review environment plan** and verify it requires **Environment check** before retry. The CLI interruption test `environment_abandon_archives_and_requires_fresh_check_and_install_close` also proves that a fresh check alone cannot bypass an unresolved journal.
+
+For manifest recovery, clone a local Git source whose `dort.toml` contains `schema = 1` and a legacy `ubuntu` key. Confirm clone publishes the folder but does not register it. Open **Repair unregistered manifest**, enter the exact clone path, and inspect the `ubuntu`/`linux` diff. Cancel and compare the original bytes. Approve a new review, then compare the private `before.toml` to the original and verify the repaired manifest parses. Confirm the registry is unchanged until a separate attach.
 
 ## Gotchas
 

@@ -79,6 +79,9 @@ impl Topic {
             Self::Choice => "Choose a value for the form. Selecting a value runs nothing.",
             Self::Form(Form::Adopt) => "Describe one regular-file link, then review its effects.",
             Self::Form(Form::Configure) => "Enter the declaration, then review before saving.",
+            Self::Form(Form::Repair) => {
+                "Edit one line at a time, then review the manifest diff before saving."
+            }
             Self::Form(Form::Check) => {
                 "Check an independent manifest with extra profiles for this run."
             }

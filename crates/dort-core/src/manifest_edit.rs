@@ -16,6 +16,9 @@ use std::{
     path::{Path, PathBuf},
 };
 use toml_edit::{Array, DocumentMut, Item, Table, Value, value};
+mod repair;
+use repair::verify_repair_scope;
+pub use repair::{RepairDraft, RepairPreview};
 
 #[derive(Debug, Clone)]
 pub struct Profile {
@@ -42,7 +45,8 @@ pub struct FileChange {
 
 pub struct Preview {
     repository: PathBuf,
-    repository_id: String,
+    backup_root: PathBuf,
+    repair_git: Option<Entry>,
     config: Entry,
     manifest: Entry,
     watched_target: Option<Entry>,
@@ -336,7 +340,8 @@ impl Preview {
         parsed.validate_file_targets(host, &parsed.profiles.known(), Some(repository), None)?;
         Ok(Self {
             repository: repository.to_owned(),
-            repository_id,
+            backup_root: repository_state_path(host, &repository_id)?.join("manifest-edits"),
+            repair_git: None,
             config,
             manifest: entry,
             watched_target,
@@ -364,12 +369,16 @@ impl Approval {
         let lock = WriterLock::acquire(host)?;
         lock.check_context(host)?;
         journal::ensure_writable(host)?;
-        if !same_entry(&p.config, &LocalConfig::load_bound(host)?.1) {
-            return Err(invalid("Repository settings changed. Review again."));
-        }
         let path = &p.manifest.path;
         let compare = || -> Result<()> {
-            let (_, current) = observation::read_manifest(path)?;
+            let config = match &p.repair_git {
+                Some(git) => verify_repair_scope(host, &p.repository, git)?,
+                None => LocalConfig::load_bound(host)?.1,
+            };
+            if !same_entry(&p.config, &config) {
+                return Err(invalid("Repository settings changed. Review again."));
+            }
+            let (_, current) = observation::read_manifest_bytes(path)?;
             if !same_entry(&p.manifest, &current) {
                 return Err(invalid("Manifest changed. Review again."));
             }
@@ -394,9 +403,7 @@ impl Approval {
                 "The repository folder must be owned and not group/world writable.",
             ));
         }
-        let backup_path = repository_state_path(host, &p.repository_id)?
-            .join("manifest-edits")
-            .join(transaction_id());
+        let backup_path = p.backup_root.join(transaction_id());
         let backup = PrivateDir::open(&backup_path, true)?.expect("created backup directory");
         let device = fs::fstat(&backup.file)
             .map_err(|e| io_error("inspect backup device", &backup_path, e))?

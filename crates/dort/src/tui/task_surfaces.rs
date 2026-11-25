@@ -102,7 +102,6 @@ fn batch_label(action: dort_core::batch::Action) -> &'static str {
 impl Activity {
     pub fn for_task(task: &Task, app: &App) -> Self {
         let operation = match task {
-            Task::Configuration(_) => "Review configuration change",
             Task::ToolsInstalledPrepare(_) => "Prepare installed-package inspection (no execution)",
             Task::ToolsInstalledInspect(_) => "Inspect installed packages",
             Task::Environment { resume: true } => "Review environment resume",
@@ -128,6 +127,11 @@ impl Activity {
             Task::Profile(..) => "Review profile choice",
             Task::Profiles { .. } => "Read profile selection",
             Task::Select(_) => "Select session repository",
+            Task::Configuration(request) => match request.as_ref() {
+                super::configuration::Request::OpenRepair(..) => "Open manifest repair draft",
+                super::configuration::Request::Repair(..) => "Review manifest diff",
+                _ => "Preview configuration change",
+            },
             Task::EnvironmentAbandon => "Review environment abandonment",
             Task::Clone { .. } => "Preview clone and registration",
             Task::Init { .. } => "Preview create/attach",
@@ -155,11 +159,11 @@ impl Activity {
                 match approved {
                     Approved::ToolDeclaration(_) => "Tool declaration",
                     Approved::Environment(_) => "Run environment",
+                    Approved::EnvironmentAbandon(_) => "Abandon environment run",
                     Approved::Profile(_) => "Save profile choice",
                     Approved::Configuration(_) => "Save configuration change",
                     Approved::Ignore(_) => "Discovery preferences",
                     Approved::Files(_) => "File operation",
-                    Approved::EnvironmentAbandon(_) => "Abandon environment run",
                     Approved::Batch(_) => "Batch file operation",
                     Approved::Clone(..) => "Clone and register",
                     Approved::Init(..) => "Create/attach",
@@ -327,6 +331,10 @@ impl Activity {
     }
     pub fn for_pending(pending: &Pending) -> Self {
         let (operation, scope) = match pending {
+            Pending::Configuration(super::configuration::Preview::Repair(p)) => (
+                "Save repaired manifest",
+                vec![("Repository", p.repository().display().to_string())],
+            ),
             Pending::Configuration(change) => (change.label(), vec![]),
             Pending::ToolDeclaration(p) => (
                 "Tool declaration · manifest only",
@@ -336,6 +344,10 @@ impl Activity {
                     ("No-op", p.no_op.to_string()),
                 ],
             ),
+            Pending::EnvironmentAbandon(p) => (
+                "Abandon environment run",
+                vec![("Repository", p.repository().display().to_string())],
+            ),
             Pending::Clone(p) => (
                 "Clone and register",
                 vec![("New folder", p.destination().display().to_string())],
@@ -344,10 +356,6 @@ impl Activity {
             Pending::Profile(_) => ("Save profile choice", vec![]),
             Pending::Ignore(_) => (
                 "Discovery preferences",
-            Pending::EnvironmentAbandon(p) => (
-                "Abandon environment run",
-                vec![("Repository", p.repository().display().to_string())],
-            ),
                 vec![("Scope", "Local HOME discovery only".into())],
             ),
             Pending::Files(plan) => (
