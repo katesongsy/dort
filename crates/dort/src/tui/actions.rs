@@ -56,6 +56,7 @@ pub struct Data {
     pub known_roots: Vec<PathBuf>,
     pub profiles: Vec<String>,
     pub profile_rows: Vec<dort_core::profiles::Row>,
+    pub profile_declarations: Option<dort_core::profiles::Profiles>,
     pub files: Vec<(String, String)>,
     pub managed: Vec<ManagedRow>,
     pub file_declarations: Vec<dort_core::model::ManagedFile>,
@@ -118,6 +119,7 @@ pub fn load_scoped(
     let mut known_roots = vec![];
     let mut profiles = vec![];
     let mut profile_rows = vec![];
+    let mut profile_declarations = None;
     let mut file_declarations = vec![];
     let mut selected = None;
     let mut tools = None;
@@ -152,22 +154,20 @@ pub fn load_scoped(
                                 tools_source =
                                     crate::services::declared_tools::Source::capture(host, &entry)
                                         .ok();
+                                profile_rows = local
+                                    .profile_rows(
+                                        &manifest.profiles,
+                                        host.platform,
+                                        Some(&root),
+                                        requested,
+                                    )
+                                    .unwrap_or_default();
+                                profile_declarations = Some(manifest.profiles);
                                 file_declarations = manifest.files;
                                 manifest.tools
                             })
                             .map_err(|error| diagnostic(&error)),
                     );
-                    if let Ok((manifest, _)) =
-                        dort_core::observation::read_manifest(&root.join("dort.toml"))
-                        && let Ok(rows) = local.profile_rows(
-                            &manifest.profiles,
-                            host.platform,
-                            Some(&root),
-                            requested,
-                        )
-                    {
-                        profile_rows = rows;
-                    }
                     match crate::services::observe(
                         host,
                         &local,
@@ -284,6 +284,7 @@ pub fn load_scoped(
         known_roots,
         profiles,
         profile_rows,
+        profile_declarations,
         file_declarations,
         files,
         managed,

@@ -2,6 +2,7 @@
 use super::{
     app::{App, Tab},
     components as ui,
+    configuration::Kind,
     shell::{Form, Overlay},
 };
 use ratatui::Frame;
@@ -20,6 +21,8 @@ pub enum Topic {
     More,
     Choice,
     Form(Form),
+    ProfileForm(Kind),
+    ProfilePicker(Kind),
     Picker,
     Ignored,
     About,
@@ -45,6 +48,7 @@ impl Topic {
             Self::More => "More actions",
             Self::Choice => "Choose a value",
             Self::Form(_) => "Form",
+            Self::ProfileForm(kind) | Self::ProfilePicker(kind) => kind.label(),
             Self::Picker => "Session picker",
             Self::Ignored => "Ignored paths / Unignore",
             Self::About => "About",
@@ -79,6 +83,26 @@ impl Topic {
             Self::Choice => "Choose a value for the form. Selecting a value runs nothing.",
             Self::Form(Form::Adopt) => "Describe one regular-file link, then review its effects.",
             Self::Form(Form::Configure) => "Enter the declaration, then review before saving.",
+            Self::ProfileForm(Kind::CreateProfile) => concat!(
+                "Profile name: enter a new name, such as work. ",
+                "Defaults: leave blank for an optional profile. Enter repository for all hosts, ",
+                "macos for macOS, or linux for Linux. Separate values with commas. ",
+                "Assign files and tools to the profile separately."
+            ),
+            Self::ProfileForm(Kind::EditProfileDefaults) => concat!(
+                "Defaults shows the current settings. Leave it blank for an optional profile. ",
+                "Enter repository for all hosts, macos for macOS, or linux for Linux. ",
+                "Separate values with commas. Use Saved profiles to change your local choice."
+            ),
+            Self::ProfileForm(Kind::RenameProfile) => concat!(
+                "Enter a new name for the selected profile. Dort updates files, tools and defaults ",
+                "that use the old name. Set the local choice for the new name in Saved profiles."
+            ),
+            Self::ProfileForm(_) => unreachable!("only profile forms have profile field help"),
+            Self::ProfilePicker(Kind::DeleteProfile) => {
+                "Select an unused profile and review its deletion. Base stays on."
+            }
+            Self::ProfilePicker(_) => "Select the profile you want to change. Base stays on.",
             Self::Form(Form::Repair) => {
                 "Edit one line at a time, then review the manifest diff before saving."
             }
@@ -114,11 +138,17 @@ impl Topic {
     }
     fn keys(self, app: &App) -> &'static [(&'static str, &'static str)] {
         match self {
-            Self::More | Self::Choice => &[
+            Self::More | Self::Choice | Self::ProfilePicker(_) => &[
                 ("Up/Down", "Move between choices"),
                 ("Enter", "Choose"),
                 ("F3", "Inspect choice details"),
                 ("Esc", "Return without choosing"),
+            ],
+            Self::ProfileForm(_) => &[
+                ("Tab / Shift-Tab", "Move between fields"),
+                ("Ctrl-U", "Clear current field"),
+                ("Enter", "Review manifest change"),
+                ("Esc", "Back"),
             ],
             Self::Form(_) | Self::BatchItem => &[
                 ("Tab / Shift-Tab", "Traverse fields only"),
@@ -304,8 +334,10 @@ pub struct State {
     pub content_scroll: u16,
 }
 pub fn topic(app: &App) -> Topic {
-    if app.choice.is_some() {
-        return Topic::Choice;
+    if let Some(choice) = &app.choice {
+        return choice
+            .profile_action()
+            .map_or(Topic::Choice, Topic::ProfilePicker);
     }
     if app.more.is_some() {
         return Topic::More;
@@ -331,6 +363,16 @@ pub fn topic(app: &App) -> Topic {
     }
     if let Some(o) = &app.shell.overlay {
         return match o {
+            Overlay::Form(Form::Configure) => {
+                match app.shell.configuration.as_ref().map(|d| d.kind) {
+                    Some(
+                        kind @ (Kind::CreateProfile
+                        | Kind::EditProfileDefaults
+                        | Kind::RenameProfile),
+                    ) => Topic::ProfileForm(kind),
+                    _ => Topic::Form(Form::Configure),
+                }
+            }
             Overlay::Form(f) => Topic::Form(*f),
             Overlay::Ignored { .. } => Topic::Ignored,
             Overlay::About => Topic::About,

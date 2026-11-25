@@ -1989,7 +1989,7 @@ fn malformed_journal_tail_is_a_global_blocker_not_a_recovery_permission() {
 }
 
 #[test]
-fn define_profile_and_map_existing_repository_file_without_deploying() {
+fn create_profile_and_map_existing_repository_file_without_deploying() {
     use super::{configuration::Kind, input::Target, shell::Action};
     let fixture = Fixture::new(true);
     let manifest_path = fixture.root.join("dort.toml");
@@ -2013,8 +2013,16 @@ fn define_profile_and_map_existing_repository_file_without_deploying() {
         }
         key(app, KeyCode::Esc);
     };
-    go(&mut app, Kind::Profile);
+    go(&mut app, Kind::CreateProfile);
     type_text(&mut app, "work");
+    let form = super::tests::render(&app, 80, 24);
+    assert!(form.contains("Defaults: repository, macos, linux"));
+    assert!(!form.contains("Existing name"));
+    assert!(key(&mut app, KeyCode::F(1)).is_none());
+    let help = super::tests::render(&app, 80, 24);
+    assert!(help.contains("Profile name: enter a new name"));
+    assert!(help.contains("optional profile"));
+    assert!(key(&mut app, KeyCode::F(1)).is_none());
     save(&mut app);
     assert_ne!(fs::read(&manifest_path).unwrap(), original);
     app.tab = super::app::Tab::Files;
@@ -2043,6 +2051,87 @@ fn define_profile_and_map_existing_repository_file_without_deploying() {
             .iter()
             .any(|row| row.id == "work-file" && row.state == "Not selected")
     );
+}
+
+#[test]
+fn profile_edit_rename_and_delete_use_the_selected_name() {
+    use super::{configuration::Kind, input::Target, shell::Action};
+    use dort_core::platform::Platform;
+    let f = Fixture::new(true);
+    let path = f.root.join("dort.toml");
+    fs::write(&path, "schema=1\n[profiles]\navailable=['unused', 'work']\n[profiles.platform]\nlinux=['work']\n[[files]]\nid='editor'\nsource='source'\ntarget='~/.editor'\nmode='link'\nprofiles=['work']\n").unwrap();
+    let mut app = onboarding_app(&f, false);
+    let pick = |app: &mut App, kind, name| {
+        assert!(
+            super::tests::more_target(app, |target| matches!(
+                target, Target::Action(Action::Configure(k)) if k == kind
+            ))
+            .is_none()
+        );
+        let choices = super::tests::render(app, 80, 24);
+        assert!(!choices.contains("› base"));
+        assert!(choices.contains("› unused"));
+        if name == "work" {
+            key(app, KeyCode::Down);
+        }
+        key(app, KeyCode::Enter)
+    };
+    let save = |app: &mut App, read| {
+        let before = fs::read(&path).unwrap();
+        run_task(app, &f, read);
+        assert_eq!(fs::read(&path).unwrap(), before);
+        let write = super::tests::approve_ready(app, 80, 24).unwrap();
+        if let Some(refresh) = run_task(app, &f, write) {
+            run_task(app, &f, refresh);
+        }
+        key(app, KeyCode::Esc);
+        dort_core::Manifest::parse(&fs::read_to_string(&path).unwrap()).unwrap()
+    };
+
+    assert!(pick(&mut app, Kind::EditProfileDefaults, "work").is_none());
+    assert_eq!(
+        app.shell.configuration.as_ref().unwrap().fields(),
+        [("Defaults for work", "linux")]
+    );
+    for _ in 0.."linux".len() {
+        key(&mut app, KeyCode::Backspace);
+    }
+    type_text(&mut app, "macos, linux");
+    let read = key(&mut app, KeyCode::Enter).unwrap();
+    let manifest = save(&mut app, read);
+    assert_eq!(manifest.profiles.platform[&Platform::Macos], ["work"]);
+    assert_eq!(manifest.profiles.platform[&Platform::Linux], ["work"]);
+    assert_eq!(manifest.files[0].profiles, ["work"]);
+
+    assert!(pick(&mut app, Kind::RenameProfile, "work").is_none());
+    assert_eq!(
+        app.shell.configuration.as_ref().unwrap().fields(),
+        [("New name for work", "")]
+    );
+    type_text(&mut app, "dev");
+    // Rename uses the defaults at review time, not the earlier picker snapshot.
+    let current = fs::read_to_string(&path).unwrap();
+    let changed = current.replace("linux=[\"work\"]", "linux=[]");
+    assert_ne!(changed, current);
+    fs::write(&path, changed).unwrap();
+    let read = key(&mut app, KeyCode::Enter).unwrap();
+    let manifest = save(&mut app, read);
+    assert_eq!(manifest.profiles.platform[&Platform::Macos], ["dev"]);
+    assert!(manifest.profiles.platform[&Platform::Linux].is_empty());
+    assert_eq!(manifest.files[0].profiles, ["dev"]);
+
+    assert!(
+        super::tests::more_target(&mut app, |target| matches!(
+            target,
+            Target::Action(Action::Configure(Kind::DeleteProfile))
+        ))
+        .is_none()
+    );
+    key(&mut app, KeyCode::End);
+    let read = key(&mut app, KeyCode::Enter).unwrap();
+    let manifest = save(&mut app, read);
+    assert_eq!(manifest.profiles.available, ["dev"]);
+    assert!(!f.host.home.join(".editor").exists());
 }
 
 #[test]

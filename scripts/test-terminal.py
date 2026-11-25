@@ -1153,6 +1153,32 @@ def run():
             f'[repositories."{identity}"]\nroot={json.dumps(str(repo))}\n'
         )
         local.chmod(0o600)
+        manifest_before = (repo / "dort.toml").read_bytes()
+        with Session([binary, "tui"], dict(env, TERM="vt100")) as session:
+            session.wait(b"loaded.")
+            session.more_action("Create profile")
+            session.wait(b"Profile name")
+            session.send(b"\twork\tlinux")  # Tab focuses the first field.
+            session.wait(b"work")
+            session.send(b"\x1bOP")  # VT100 PF1.
+            session.wait(b"Profile name: enter a new name")
+            session.wait(b"optional profile")
+            session.send(b"\x1bOP")
+            session.wait(b"Defaults: repository, macos, linux")
+            screen = session.screen.text()
+            assert b"work" in screen and b"Existing name" not in screen
+            session.send(b"\x1b[11~")  # CSI PF1.
+            session.wait(b"Profile name: enter a new name")
+            session.send(b"\x1b[11~")
+            session.wait(b"Defaults: repository, macos, linux")
+            session.send(b"\x1b")
+            session.send(b"\x1b")
+            session.wait(b"F2 More")
+            session.send(b"q")
+            session.finish()
+        assert (repo / "dort.toml").read_bytes() == manifest_before
+        print("PASS PF1 shows profile field help and preserves the draft")
+
         target = home / ".editor"
         state = home / ".local/state"
         with Session([binary, "tui"], env) as session:

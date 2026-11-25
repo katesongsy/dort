@@ -9,7 +9,9 @@ use std::{path::PathBuf, sync::Arc};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    Profile,
+    CreateProfile,
+    EditProfileDefaults,
+    RenameProfile,
     DeleteProfile,
     File,
     EditFile,
@@ -67,7 +69,9 @@ impl Preview {
 impl Kind {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Profile => "Define profile",
+            Self::CreateProfile => "Create profile",
+            Self::EditProfileDefaults => "Edit profile defaults",
+            Self::RenameProfile => "Rename profile",
             Self::DeleteProfile => "Delete profile",
             Self::File => "Add file mapping",
             Self::EditFile => "Edit file mapping",
@@ -78,14 +82,19 @@ impl Kind {
         }
     }
 
+    pub fn picks_profile(self) -> bool {
+        matches!(
+            self,
+            Self::EditProfileDefaults | Self::RenameProfile | Self::DeleteProfile
+        )
+    }
+
     fn fields(self) -> &'static [&'static str] {
         match self {
-            Self::Profile => &[
-                "Profile name",
-                "Existing name (edit or rename)",
-                "Defaults: repository, macos, linux",
-            ],
-            Self::DeleteProfile => &["Profile name"],
+            Self::CreateProfile => &["Profile name", "Defaults: repository, macos, linux"],
+            Self::EditProfileDefaults => &["Defaults"],
+            Self::RenameProfile => &["New profile name"],
+            Self::DeleteProfile => &[],
             Self::File => Self::FILE_FIELDS,
             Self::EditFile => &Self::FILE_FIELDS[1..],
             Self::Startup | Self::Forget => &["Registered repository path"],
@@ -109,6 +118,8 @@ pub struct Draft {
     pub kind: Kind,
     pub focus: usize,
     fields: Vec<String>,
+    profile: Option<String>,
+    profile_field_label: Option<String>,
     mapping: Option<ManagedFile>,
 }
 
@@ -148,25 +159,62 @@ impl Draft {
             kind,
             focus: 0,
             fields,
+            profile: None,
+            profile_field_label: None,
             mapping,
         }
+    }
+
+    pub fn for_profile(kind: Kind, profile: Profile) -> Self {
+        let mut draft = Self::new(kind, None, None);
+        let label = match kind {
+            Kind::EditProfileDefaults => {
+                draft.fields[0] = [
+                    (profile.default, "repository"),
+                    (profile.macos, "macos"),
+                    (profile.linux, "linux"),
+                ]
+                .into_iter()
+                .filter_map(|(on, label)| on.then_some(label))
+                .collect::<Vec<_>>()
+                .join(", ");
+                format!("Defaults for {}", profile.name)
+            }
+            Kind::RenameProfile => format!("New name for {}", profile.name),
+            _ => unreachable!("only edit and rename open a profile form"),
+        };
+        draft.profile = Some(profile.name);
+        draft.profile_field_label = Some(label);
+        draft
     }
 
     pub fn fields(&self) -> Vec<(&str, &str)> {
         self.kind
             .fields()
             .iter()
-            .copied()
+            .enumerate()
+            .map(|(i, &label)| {
+                if i == 0 {
+                    self.profile_field_label.as_deref().unwrap_or(label)
+                } else {
+                    label
+                }
+            })
             .zip(self.fields.iter().map(String::as_str))
             .collect()
     }
 
     pub fn focus_at(&mut self, index: usize) {
-        self.focus = index.min(self.fields.len() - 1);
+        if !self.fields.is_empty() {
+            self.focus = index.min(self.fields.len() - 1);
+        }
     }
 
     pub fn key(&mut self, key: ratatui::crossterm::event::KeyEvent) {
         use ratatui::crossterm::event::KeyCode;
+        if self.fields.is_empty() {
+            return;
+        }
         match key.code {
             KeyCode::Tab => self.focus = (self.focus + 1) % self.fields.len(),
             KeyCode::BackTab => {
@@ -222,13 +270,20 @@ impl Draft {
             return Ok(Request::Registry(change));
         }
         Ok(Request::Manifest(match self.kind {
-            Kind::Startup | Kind::Forget | Kind::Reconnect | Kind::Repair => unreachable!(),
-            Kind::DeleteProfile => Change::Profile {
-                old: Some(required(0)?.into()),
-                new: None,
+            Kind::Startup | Kind::Forget | Kind::Reconnect | Kind::Repair | Kind::DeleteProfile => {
+                unreachable!()
+            }
+            Kind::RenameProfile => Change::RenameProfile {
+                old: self.profile.clone().expect("selected profile"),
+                new: required(0)?.into(),
             },
-            Kind::Profile => {
-                let flags = list(value(2));
+            Kind::CreateProfile | Kind::EditProfileDefaults => {
+                let defaults = if self.kind == Kind::CreateProfile {
+                    value(1)
+                } else {
+                    value(0)
+                };
+                let flags = list(defaults);
                 if flags
                     .iter()
                     .any(|flag| !matches!(flag.as_str(), "repository" | "macos" | "linux"))
@@ -238,14 +293,12 @@ impl Draft {
                     ));
                 }
                 let has = |name: &str| flags.iter().any(|flag| flag == name);
-                let name = required(0)?;
-                let old = if value(1).is_empty() {
-                    None
-                } else {
-                    Some(value(1).into())
+                let name = match self.profile.as_deref() {
+                    Some(name) => name,
+                    None => required(0)?,
                 };
                 Change::Profile {
-                    old,
+                    old: self.profile.clone(),
                     new: Some(Profile {
                         name: name.into(),
                         default: has("repository"),

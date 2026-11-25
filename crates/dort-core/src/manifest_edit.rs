@@ -28,11 +28,32 @@ pub struct Profile {
     pub linux: bool,
 }
 
+impl Profile {
+    pub fn from_declaration(profiles: &crate::profiles::Profiles, name: String) -> Self {
+        let platform_default = |platform| {
+            profiles
+                .platform
+                .get(&platform)
+                .is_some_and(|names| names.contains(&name))
+        };
+        Self {
+            default: profiles.default.contains(&name),
+            macos: platform_default(Platform::Macos),
+            linux: platform_default(Platform::Linux),
+            name,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Change {
     Profile {
         old: Option<String>,
         new: Option<Profile>,
+    },
+    RenameProfile {
+        old: String,
+        new: String,
     },
     File(Box<FileChange>),
 }
@@ -204,9 +225,22 @@ impl Preview {
             .map_err(|_| invalid("Invalid manifest. Contents withheld."))?;
         let mut watched_target = None;
         let description = match change {
-            Change::Profile { old, new } => {
-                let old = old.as_deref();
-                let new = new.as_ref();
+            Change::Profile { .. } | Change::RenameProfile { .. } => {
+                let renamed;
+                let (old, new) = match change {
+                    Change::Profile { old, new } => (old.as_deref(), new.as_ref()),
+                    Change::RenameProfile { old, new } => {
+                        if old == new {
+                            return Err(invalid("Enter a different profile name."));
+                        }
+                        renamed = Profile {
+                            name: new.clone(),
+                            ..Profile::from_declaration(&manifest.profiles, old.clone())
+                        };
+                        (Some(old.as_str()), Some(&renamed))
+                    }
+                    _ => unreachable!(),
+                };
                 let names = manifest.profiles.known();
                 if old.is_none() && new.is_none()
                     || old == Some("base")

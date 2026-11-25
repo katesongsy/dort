@@ -1995,6 +1995,7 @@ impl App {
         self.shell.overlay = None;
         match action {
             Action::SavedProfiles => self.open_saved_profiles(),
+            Action::Configure(kind) if kind.picks_profile() => self.open_profile_picker(kind),
             Action::Configure(kind) => {
                 use super::configuration::{Draft, Kind};
                 let mapping = if kind == Kind::EditFile {
@@ -2729,7 +2730,9 @@ impl App {
                 Some("Choose a repository to check its declared tools.")
             }
             Action::Configure(
-                super::configuration::Kind::Profile
+                super::configuration::Kind::CreateProfile
+                | super::configuration::Kind::EditProfileDefaults
+                | super::configuration::Kind::RenameProfile
                 | super::configuration::Kind::DeleteProfile
                 | super::configuration::Kind::File
                 | super::configuration::Kind::EditFile,
@@ -2746,6 +2749,27 @@ impl App {
                     != Some(true) =>
             {
                 Some("Choose a registered repository.")
+            }
+            Action::Configure(kind)
+                if (kind.picks_profile() || kind == super::configuration::Kind::CreateProfile)
+                    && self
+                        .data
+                        .as_ref()
+                        .is_none_or(|data| data.profile_declarations.is_none()) =>
+            {
+                Some("Choose a repository with a readable manifest.")
+            }
+            Action::Configure(kind)
+                if kind.picks_profile()
+                    && self
+                        .data
+                        .as_ref()
+                        .and_then(|data| data.profile_declarations.as_ref())
+                        .is_none_or(|profiles| {
+                            !profiles.available.iter().any(|name| name != "base")
+                        }) =>
+            {
+                Some("Create a profile first. Base stays on.")
             }
             Action::Configure(super::configuration::Kind::EditFile)
                 if self.tab != Tab::Files

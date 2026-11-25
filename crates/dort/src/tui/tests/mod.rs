@@ -400,6 +400,7 @@ fn navigation_and_metadata_escaping() {
         known_roots: vec![],
         profiles: vec![],
         profile_rows: vec![],
+        profile_declarations: None,
         files: vec![],
         history: vec![],
         history_error: None,
@@ -495,6 +496,7 @@ fn refresh_preserves_selected_identity_and_clamps_if_it_disappears() {
         known_roots: vec![],
         profiles: vec![],
         profile_rows: vec![],
+        profile_declarations: None,
         file_declarations: vec![],
         files: ids
             .iter()
@@ -540,6 +542,7 @@ fn completion_keeps_noop_result_visible_through_refresh_and_read_failure() {
         known_roots: vec![],
         profiles: vec![],
         profile_rows: vec![],
+        profile_declarations: None,
         file_declarations: vec![],
         files: vec![],
         history: vec![],
