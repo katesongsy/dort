@@ -51,6 +51,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Tests
 
+- **tui:** leave file operation results through Done ([13a91f6](https://github.com/katesongsy/dort/commit/13a91f63a8c0a80104b6a89d34b39f3c6de3cb65))
+
 - **tui:** select the adoption preview action directly ([1f8c3c4](https://github.com/katesongsy/dort/commit/1f8c3c4427bd89b89fc2560802fcce8851bc4309))
 
 - **tui:** follow visible tool review and help text ([8895d80](https://github.com/katesongsy/dort/commit/8895d800ee3a78d88ec2739313886a555636f639))
