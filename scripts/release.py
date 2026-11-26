@@ -225,9 +225,11 @@ def notes(tag):
 
 Dort manages local dotfiles and tools from the terminal or command line.
 
-- The terminal app shows file and Git patch previews as you browse. Review privately: previews can show secrets.
-- Write reviews show the effects of a change. Read to the end before approving.
-- Homebrew and npm checks and installs use one tool declaration across macOS, Linux and WSL.
+## What's new
+
+- Clone a repository, save a profile for this machine, and resume an interrupted environment setup.
+- Manage repositories, profiles, file mappings, and tool settings in the terminal app. Pick declared profiles and tools in forms.
+- Press F1 for help with the current screen or field.
 
 ## Upgrade from v0.1.0
 
@@ -239,7 +241,7 @@ Choose the archive matching your CPU and OS. Linux binaries require Ubuntu 24.04
 See the [getting-started guide](https://github.com/katesongsy/dort/blob/{tag}/docs/user/getting-started.md) for installation, a disposable-HOME walkthrough and TUI workflows, and the [safety guide](https://github.com/katesongsy/dort/blob/{tag}/docs/user/safety.md) before touching real configuration.
 
 ## Boundaries
-Dort remains experimental. Templates, secrets, cloning/sync, Git writes and other package managers are not supported. Installs can run package-manager and package code and may leave partial effects. Repository, HOME and state writes use same-filesystem operations. Recovery is manual and refuses later edits. Backups are private, not encrypted. Tests do not establish power-loss or failing-fsync safety.
+Dort is experimental. Start with a disposable HOME. File and Git patch previews can show secrets. Read write reviews to the end before approving. Installs can run package-manager and package code and may leave partial effects. Backups are private, not encrypted.
 
 [Full generated history](https://github.com/katesongsy/dort/blob/{tag}/CHANGELOG.md). Rust 1.99.1 is required only for building from source; Cargo installation is also documented in the getting-started guide.
 """
