@@ -51,6 +51,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Tests
 
+- **tui:** select the adoption preview action directly ([1f8c3c4](https://github.com/katesongsy/dort/commit/1f8c3c4427bd89b89fc2560802fcce8851bc4309))
+
 - **tui:** follow visible tool review and help text ([8895d80](https://github.com/katesongsy/dort/commit/8895d800ee3a78d88ec2739313886a555636f639))
 
 - **tui:** wait for the profile form after closing PF1 help ([0a1dd9b](https://github.com/katesongsy/dort/commit/0a1dd9ba85adf0df4cfe88678ae1a242f56368f2))
