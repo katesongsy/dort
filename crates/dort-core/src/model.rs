@@ -55,5 +55,13 @@ pub struct ManagedFile {
     pub requires: Vec<String>,
     #[serde(default)]
     pub overrides: BTreeMap<Platform, PathBuf>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub inputs: BTreeMap<String, String>,
     pub permissions: Option<String>,
+}
+
+impl ManagedFile {
+    pub(crate) fn source_for(&self, platform: Platform) -> &std::path::Path {
+        self.overrides.get(&platform).unwrap_or(&self.source)
+    }
 }

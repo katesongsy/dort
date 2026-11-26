@@ -20,6 +20,7 @@ pub(super) enum Topic {
     ManagedContent,
     Managed,
     ManagedDetails,
+    Generated,
     Recovery,
     RecoveryDetails,
     Checks,
@@ -232,6 +233,7 @@ impl Topic {
                     Self::form(*form, app.shell.configuration.as_ref().map(|d| d.kind))
                 }
                 Overlay::Ignored { .. } => Some(Self::Ignored),
+                Overlay::Generated(_) => Some(Self::Generated),
                 Overlay::About => Some(Self::About),
                 Overlay::Repositories { .. } => Some(Self::Repositories),
                 Overlay::Profiles(picker) if picker.standalone => Some(Self::StandaloneProfiles),

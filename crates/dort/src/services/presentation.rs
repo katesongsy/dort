@@ -14,6 +14,39 @@ pub fn safe(text: &str) -> String {
 pub fn inline(text: &str) -> String {
     safe(text).replace('\n', "\\n")
 }
+pub fn generated_inputs(preview: &dort_core::generated::Preview) -> String {
+    if preview.inputs.is_empty() {
+        "None".into()
+    } else {
+        preview
+            .inputs
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+pub fn generated(preview: &dort_core::generated::Preview) -> String {
+    use std::fmt::Write;
+    let mut text = format!(
+        "Generated file preview: {}\nNo files written.\nSource: {}\nDestination: {}\nDestination status: {}\nInputs from dort.toml: {}\n",
+        inline(&preview.id),
+        inline(&preview.source.display().to_string()),
+        inline(&preview.destination.display().to_string()),
+        preview.destination_status.label(),
+        generated_inputs(preview),
+    );
+    if let Some(mode) = &preview.permissions {
+        let _ = writeln!(text, "Declared permissions: {mode}");
+    }
+    text.push_str("\nRendered output\n");
+    text.push_str(&safe(&preview.rendered));
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text
+}
 fn paths(paths: &[std::path::PathBuf]) -> String {
     paths
         .iter()

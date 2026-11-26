@@ -109,6 +109,7 @@ pub enum Overlay {
     Form(Form),
     Profiles(Box<ProfilePicker>),
     About,
+    Generated(Box<super::generated::Report>),
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -135,6 +136,7 @@ pub enum Action {
     Adopt,
     AdoptSelected,
     BatchAdopt,
+    PreviewGenerated,
     ApplyMarked,
     KeepMarked,
     RemoveMarked,
@@ -203,6 +205,7 @@ impl Action {
             Self::Adopt => "Adopt a file (editable target / ID / source)",
             Self::AdoptSelected => "Adopt selected eligible file (editable draft)",
             Self::BatchAdopt => "Adopt marked files (combined editable batch)",
+            Self::PreviewGenerated => "Preview generated file",
             Self::ApplyMarked => "Apply marked mappings (selected batch)",
             Self::KeepMarked => "Keep marked mappings (combined batch)",
             Self::RemoveMarked => "Delete marked links (each exact ID then yes)",
@@ -470,6 +473,7 @@ impl Shell {
                 }
                 _ => (),
             },
+            Overlay::Generated(_) => unreachable!("generated reader handles keys"),
             Overlay::About => {
                 if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?')) {
                     self.overlay = None;

@@ -156,7 +156,7 @@ pub(super) fn approve_ready(
     }
     app.key(key(KeyCode::Char('y')), width, height)
 }
-fn key(code: KeyCode) -> KeyEvent {
+pub(super) fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 pub(super) fn destination(app: &mut App, tab: super::app::Tab, width: u16, height: u16) {

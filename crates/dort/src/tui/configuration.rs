@@ -389,6 +389,7 @@ impl Draft {
                         mode: FileMode::Link,
                         profiles,
                         requires: list(value(i + 3)),
+                        inputs: Default::default(),
                         permissions: None,
                         overrides: [
                             (Platform::Macos, value(i + 4)),

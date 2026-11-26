@@ -261,6 +261,8 @@ fn compact(label: &'static str) -> &'static str {
         "Clone"
     } else if label == Action::EnvironmentPlan.label() {
         "Env plan"
+    } else if label == Action::PreviewGenerated.label() {
+        "Preview generated"
     } else if label == "Add file mapping" {
         "Add"
     } else if label == "Edit file mapping" {
@@ -471,7 +473,7 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
             frame,
             area,
             None,
-            ui::review_text(&preview.text),
+            &ui::review_text(&preview.text),
             ui::reader::ReviewStage::Changes,
             &preview.reader,
         );
@@ -496,6 +498,14 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
 fn overlay(frame: &mut Frame, inner: Rect, app: &App, overlay: &Overlay) {
     app.hits.wheel(inner, Wheel::Overlay);
     match overlay {
+        Overlay::Generated(report) => {
+            report.draw(frame, inner, app);
+            app.presented(
+                "Last line",
+                "End",
+                Target::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)),
+            );
+        }
         Overlay::Ignored { paths, selected } => {
             super::ignored::draw(frame, inner, app, paths, *selected)
         }

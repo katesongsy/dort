@@ -64,6 +64,7 @@ impl Topic {
             Self::Managed => {
                 guide!("Managed files", "A mapping tells Dort which repository file to link into your home folder. Select a mapping and press Enter to inspect its source, destination and status.";
                     "Read status" => "Linked means the destination points to the expected source. Needs apply means it is not in place yet. Blocked means Dort found a conflict. Read the reason in Details before applying.",
+                    "Generated files" => "Select a generated file and choose Preview generated file (Enter or v) to read its output. No files are written.",
                     "Choose which files to apply" => "Apply reviews the active profiles, even with a filter on screen. To review a subset, press Space to mark the mappings and use Apply marked. Marks can be hidden by the filter.",
                     "Change what Dort manages" => "Add file mapping or Edit file mapping saves a declaration for later apply. Unmanage leaves a regular copy at the destination. Delete link removes the link at the destination. Both keep the repository source.",
                 )
@@ -72,6 +73,11 @@ impl Topic {
                 guide!("Managed file details", "Compare Source in the repository with Destination in your home folder. Linked means the destination points to the expected source. If Blocked, read Reason and check the two file types.";
                     "Choose a change" => "Edit file mapping changes the declaration. Review environment checks required tools before you apply. Unmanage leaves a regular copy at the destination. Delete link removes the link. Both keep the source.",
                     "Return to the list" => "Press Esc to choose a different mapping or mark a group. Apply marked uses the marks. Filtering alone never limits Apply.",
+                )
+            }
+            Self::Generated => {
+                guide!("Generated file preview", "Read the template output and its destination status. Inputs come from dort.toml. No files are written.";
+                    "Read the output" => "Use arrows or page keys to scroll. Home goes to the top; End goes to the last line. Esc returns to Managed.",
                 )
             }
             Self::Recovery => {

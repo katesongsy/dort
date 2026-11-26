@@ -119,6 +119,7 @@ impl Manifest {
                 }
             }
             targets.push((&file.id, &file.target));
+            issues.extend(crate::generated::input_issues(file));
             if let Some(permissions) = &file.permissions {
                 let valid = permissions.len() == 4
                     && permissions.starts_with('0')
@@ -404,7 +405,7 @@ fn valid_target(path: &Path) -> bool {
             > usize::from(path.starts_with("~"))
 }
 
-fn paths_overlap(a: &Path, b: &Path) -> bool {
+pub(crate) fn paths_overlap(a: &Path, b: &Path) -> bool {
     a.starts_with(b) || b.starts_with(a)
 }
 

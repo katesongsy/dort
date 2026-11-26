@@ -342,6 +342,13 @@ impl App {
                 | Output::GitPreview(_)
                 | Output::RecoveryRequired(_),
             ) => unreachable!(),
+            Ok(Output::Generated(preview)) => {
+                self.shell.overlay = Some(Overlay::Generated(Box::new(
+                    super::generated::Report::new(&preview),
+                )));
+                self.status = "".into();
+                None
+            }
             Ok(Output::History { rows, error }) => self.accept_history(rows, error),
             Ok(Output::Diagnostics(report)) => self.accept_diagnostics(report),
             Ok(Output::ToolAttempts(result)) => self.accept_tool_attempts(result),
@@ -1603,6 +1610,18 @@ impl App {
         if self.open_control_choice(key) {
             return None;
         }
+        if let Some(Overlay::Generated(report)) = &self.shell.overlay {
+            if key.code == KeyCode::Esc {
+                self.shell.back();
+            } else {
+                report.scroll.key(
+                    &self.hits,
+                    super::components::reader::ReviewStage::Generated,
+                    key.code,
+                );
+            }
+            return None;
+        }
         if self.shell.overlay.is_some() {
             let report_scroll = !self.shell.form_details
                 && !self.shell.picker_details
@@ -1693,6 +1712,13 @@ impl App {
                 KeyCode::Enter => return None,
                 _ => (),
             }
+        }
+        if key.code == KeyCode::Enter
+            && key.modifiers == KeyModifiers::NONE
+            && !self.text_entry()
+            && self.template_selected()
+        {
+            return self.activate(Action::PreviewGenerated);
         }
         if self.tab == Tab::Files
             && self.inventory.details
@@ -2187,6 +2213,9 @@ impl App {
         }
         self.shell.overlay = None;
         match action {
+            Action::PreviewGenerated => {
+                return Some(Task::PreviewGenerated(self.selected_mapping()?.id.clone()));
+            }
             Action::ProfilesPage => {
                 self.go_tab(Tab::Overview);
                 self.profiles.open = true;
@@ -3028,6 +3057,16 @@ impl App {
             }
             Action::Configure(kind) if kind.edits_profile() => self.profile_action_reason(),
             Action::SaveProfileChoice => self.profile_action_reason(),
+            Action::PreviewGenerated if !self.template_selected() => {
+                Some("Select a generated file in Files / Managed.")
+            }
+            Action::Configure(super::configuration::Kind::EditFile)
+            | Action::Keep
+            | Action::Remove
+                if self.template_selected() =>
+            {
+                Some("Choose Preview generated file. Generated files are preview-only.")
+            }
             Action::Configure(super::configuration::Kind::EditFile)
                 if self.selected_mapping().is_none() =>
             {

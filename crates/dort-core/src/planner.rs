@@ -121,12 +121,7 @@ fn observe_inner(
     };
     let mut files = vec![];
     for mapping in mappings {
-        let source_path = repository.join(
-            mapping
-                .overrides
-                .get(&host.platform)
-                .unwrap_or(&mapping.source),
-        );
+        let source_path = repository.join(mapping.source_for(host.platform));
         let target_path = host.target_path(&mapping.target, Some(repository))?;
         let mut blockers = vec![];
         if mapping.mode != FileMode::Link {
@@ -167,12 +162,7 @@ fn observe_inner(
             .iter()
             .filter(|f| f.mode == FileMode::Link && !selected(&f.profiles, &active))
         {
-            let source = repository.join(
-                mapping
-                    .overrides
-                    .get(&host.platform)
-                    .unwrap_or(&mapping.source),
-            );
+            let source = repository.join(mapping.source_for(host.platform));
             if let Ok(target) = host.target_path(&mapping.target, Some(repository))
                 && let Ok(entry) = observation::inspect(&target, false)
                 && observation::link_path(&entry).as_ref() == Some(&source)

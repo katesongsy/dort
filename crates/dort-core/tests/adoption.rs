@@ -29,6 +29,7 @@ fn mapping() -> ManagedFile {
         profiles: vec!["base".into()],
         requires: vec![],
         overrides: BTreeMap::new(),
+        inputs: Default::default(),
         permissions: None,
     }
 }

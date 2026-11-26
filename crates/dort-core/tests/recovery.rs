@@ -88,6 +88,7 @@ fn schema_one_preview_revalidates_source_edits_without_mutations() {
         profiles: vec!["base".into()],
         requires: vec![],
         overrides: Default::default(),
+        inputs: Default::default(),
         permissions: None,
     };
     let plan =

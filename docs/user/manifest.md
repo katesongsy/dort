@@ -38,7 +38,7 @@ mode = "link"
 - `id`: unique name for this mapping.
 - `source`: file inside the repository. No absolute paths, `..`, `.git` or `dort.toml`.
 - `target`: absolute path or `~/...` under your HOME. Dort config, state, the repository and overlapping targets are refused.
-- `mode`: `link`, `template` or `secret`. Only links can be deployed today. Templates and secrets are validated but blocked.
+- `mode`: `link`, `template` or `secret`. Only links can be deployed. Use `template` for generated previews.
 - `profiles`: defaults to `["base"]`. An empty list is invalid.
 - `requires`: tool IDs this file needs. Missing or unverified prerequisites block the file plan.
 - `permissions`: links do not take one. Templates accept an octal mode; secrets require `"0600"`.
@@ -52,6 +52,21 @@ linux = "files/linux/shellrc"
 ```
 
 Symlinks, directories, hard links and special files cannot be adopted as ordinary files.
+
+### Generated preview
+
+```toml
+[[files]]
+id = "editor-settings"
+source = "files/editor-settings.tmpl"
+target = "~/.config/editor/settings.conf"
+mode = "template"
+inputs = { theme = "dark" }
+```
+
+Put `theme = {{ theme }}` in the template. Dort renders `theme = dark`. Use a single input name in each `{{ ... }}`. Names use ASCII letters, digits and underscores and start with a letter or underscore. Values are literal strings from `dort.toml`, never expanded again. Keep secrets out of the template and inputs.
+
+Limits: 64 KiB per UTF-8 template, 16 KiB per input value, and 128 KiB of rendered text.
 
 ## Profiles
 

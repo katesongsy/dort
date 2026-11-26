@@ -56,6 +56,16 @@ pub fn observe(
     planner::observe(host, &root, requested, request)
 }
 
+pub fn preview_generated(
+    host: &HostContext,
+    local: &LocalConfig,
+    repository: Option<&Path>,
+    id: &str,
+) -> Result<dort_core::generated::Preview> {
+    let root = local.select_repository(repository)?;
+    dort_core::generated::Preview::prepare(host, &root, id)
+}
+
 pub struct ProfileChoices {
     pub known: BTreeSet<String>,
     pub defaults: Vec<String>,
@@ -226,6 +236,7 @@ pub fn adopt_request(target: &Path, id: &str, source: &Path) -> Request {
             profiles: vec!["base".into()],
             requires: vec![],
             overrides: Default::default(),
+            inputs: Default::default(),
             permissions: None,
         },
     }

@@ -561,6 +561,7 @@ fn pure_package_planning_does_not_expand_or_observe_unrelated_file_targets() {
         profiles: vec!["base".into()],
         requires: vec![],
         overrides: BTreeMap::new(),
+        inputs: Default::default(),
         permissions: None,
     });
     let r = report(Query::BrewFormulae, &[("node", "22.0.0")]);

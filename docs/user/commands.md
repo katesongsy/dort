@@ -39,6 +39,7 @@ Use `1` for Managed, `2` for Discover and `3` for Ignored paths. `g` opens Git.
 - **Managed:** `u` Unmanage keeps the local file; `U` Unmanage marked does the same for marked files. `m` Manual adopt opens an adoption draft. `a` Apply reviews all active files; `A` Apply marked reviews marked files only.
 - **Discover:** `a` Adopt opens a draft for the selected file; `A` Adopt marked opens a batch draft. `i` Ignore reviews excluding the selected path from discovery.
 - In **Managed**, use **Add mapping** for a file already in the repository. Select a mapping and use **Edit file mapping** to change its declaration. Review and save before applying. Adoption also lets you choose active profiles.
+- Select a generated file in **Managed** and choose **Preview generated file** (`Enter` or `v`). Scroll with the arrows or page keys. `End` jumps to the end of the output; `Esc` returns to Managed.
 - In either list, `Space` marks or unmarks, and `Home` / `End` select the first or last row. Hidden marks still count.
 - **Delete link** and **Delete marked** are separate actions. Review the paths and confirm the exact mapping IDs before deleting links.
 ## Tools
@@ -133,6 +134,15 @@ dort --repo PATH files list --profile dev
 
 Shows active mappings and blockers without touching files or tools.
 
+### Preview a generated file
+
+```sh
+dort --repo PATH files preview-generated editor-settings
+dort --repo PATH --json files preview-generated editor-settings
+```
+
+Renders the repository template with literal inputs from `dort.toml`. Shows if the destination is missing, exists and must be kept, or is unsafe. Dort checks the destination without reading its contents. No files are written. JSON includes the exact rendered text and input values.
+
 ### Plan
 
 ```sh
@@ -173,7 +183,7 @@ dort --repo PATH files remove editor --mode remove
 
 Add `--confirm-remove editor` for an extra guard.
 
-Only ordinary-file links are supported. Templates and secrets are declared but blocked.
+Remove supports ordinary-file links only.
 
 ## Profiles
 

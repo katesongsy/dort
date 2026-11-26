@@ -117,6 +117,7 @@ impl Activity {
             Task::DiscoverContent(_) | Task::DiscoveryTree(_) | Task::GitPreview(_) => {
                 unreachable!("private passive reads have no activity surface")
             }
+            Task::PreviewGenerated(_) => "Preview generated file",
             Task::IgnoredPaths => "Manage ignored paths",
             Task::Ignore(..) => "Preview discovery preferences",
             Task::Refresh => "Refresh data",

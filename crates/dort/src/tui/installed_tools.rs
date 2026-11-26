@@ -274,7 +274,7 @@ impl State {
                         area.height.saturating_sub(top),
                     ),
                     Some("Inspect installed tools"),
-                    lines.into(),
+                    &lines.into(),
                     ReviewStage::InstalledInspect,
                     &self.reader,
                 );

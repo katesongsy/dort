@@ -91,6 +91,19 @@ impl Entry {
     }
 }
 
+pub(crate) fn same_parent_identity_and_access(a: &[Parent], b: &[Parent]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(a, b)| {
+            let (x, y) = (&a.fingerprint, &b.fingerprint);
+            a.path == b.path
+                && x.device == y.device
+                && x.inode == y.inode
+                && x.mode == y.mode
+                && x.uid == y.uid
+                && x.gid == y.gid
+        })
+}
+
 pub(crate) struct ParentHandle {
     pub(crate) directory: File,
     pub(crate) name: OsString,

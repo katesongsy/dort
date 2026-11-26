@@ -1,5 +1,5 @@
 //! UI-independent planning, file lifecycle and guarded recovery for Dort.
-//! Package installation supports Homebrew and npm. Templates, secrets and remote Git workflows are not implemented.
+//! Package installation supports Homebrew and npm. Generated files support read-only previews.
 #[cfg(not(unix))]
 compile_error!("Dort supports macOS, Linux and WSL.");
 
@@ -12,6 +12,7 @@ pub mod context;
 pub mod discovery;
 pub mod discovery_ignore;
 pub mod error;
+pub mod generated;
 pub mod git;
 pub mod journal;
 pub mod lifecycle;

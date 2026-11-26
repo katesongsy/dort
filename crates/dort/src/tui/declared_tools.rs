@@ -511,7 +511,7 @@ fn review(frame: &mut Frame, area: Rect, app: &App) -> bool {
                 area.height.saturating_sub(top),
             ),
             Some(heading),
-            body.into(),
+            &body.into(),
             state.stage(),
             &state.reader,
         );

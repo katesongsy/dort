@@ -210,7 +210,13 @@ pub fn sync(app: &mut App, width: u16, height: u16) {
     {
         app.data
             .as_ref()
-            .and_then(|d| d.managed.get(app.selected))
+            .and_then(|data| {
+                data.managed.get(app.selected).filter(|row| {
+                    !data.file_declarations.iter().any(|file| {
+                        file.id == row.id && file.mode == dort_core::model::FileMode::Template
+                    })
+                })
+            })
             .map(|row| Selection::Path(row.target.clone()))
     } else {
         None

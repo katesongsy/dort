@@ -152,7 +152,7 @@ impl<'a> Reader<'a> {
         frame: &mut Frame,
         area: Rect,
         title: Option<&str>,
-        body: Text<'static>,
+        body: &Text<'static>,
         stage: ReviewStage,
         scroll: &ReviewScroll,
     ) {
@@ -174,6 +174,7 @@ impl<'a> Reader<'a> {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ReviewStage {
     Changes,
+    Generated,
     DeclaredCheck,
     InstallMissing,
     InstalledInspect,
@@ -271,17 +272,28 @@ pub fn report(
     text_view(frame, inner, body, offset);
 }
 pub fn text_view(frame: &mut Frame, inner: Rect, body: Text<'static>, offset: u16) {
-    text_view_at(frame, inner, body, usize::from(offset));
+    text_view_at(frame, inner, &body, usize::from(offset));
 }
 pub fn text_view_at(
     frame: &mut Frame,
     inner: Rect,
-    body: Text<'static>,
+    body: &Text<'static>,
     offset: usize,
 ) -> VisibleRows {
     let width = usize::from(inner.width).max(1);
     let mut lines = Vec::new();
     for line in &body.lines {
+        if let [span] = line.spans.as_slice()
+            && span.content.bytes().all(|byte| matches!(byte, b' '..=b'~'))
+            && !span.content.is_empty()
+        {
+            let style = body.style.patch(line.style).patch(span.style);
+            lines.extend((0..span.content.len()).step_by(width).map(|start| {
+                let end = (start + width).min(span.content.len());
+                Line::styled(&span.content[start..end], style)
+            }));
+            continue;
+        }
         let mut row = Vec::new();
         let mut used = 0;
         for grapheme in line.styled_graphemes(body.style) {
