@@ -957,7 +957,7 @@ def run():
             session.wait(b"Selected content")
             session.send(b"a")  # Direct adoption action.
             session.edit_fields('TARGET')
-            session.send(b"\t\t\t\r")  # fields -> Review, no repository selected
+            session.click_label('Review read-only preview')
             session.wait(b"Read failed")
             session.click_action('Retry read')  # Fresh read/preview intent, never execution.
             session.settle()
