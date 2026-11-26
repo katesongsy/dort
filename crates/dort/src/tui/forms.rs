@@ -1,5 +1,10 @@
 //! Workflow forms with field-only traversal and labelled actions.
-use super::{app::App, components as ui, input::Target, shell::Form};
+use super::{
+    app::App,
+    components as ui,
+    input::Target,
+    shell::{AdoptionDraft, Form},
+};
 use ratatui::{Frame, layout::Rect};
 #[derive(Clone, Copy)]
 pub enum Command {
@@ -143,6 +148,15 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
         key: "F3",
         target: Target::FormAction(Command::Details),
     });
+    let choices = match form {
+        Form::Adopt => vec![AdoptionDraft::PROFILES_FIELD],
+        Form::Configure => s
+            .configuration
+            .as_ref()
+            .map(|d| d.choice_rows())
+            .unwrap_or_default(),
+        _ => vec![],
+    };
     let toggles = s
         .configuration
         .as_ref()
@@ -179,7 +193,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
         &app.hits,
         |i| Target::FormControl(i, false),
         ui::FormActions {
-            choices: &[],
+            choices: &choices,
             toggles: &toggles,
             buttons: &actions,
             feedback,

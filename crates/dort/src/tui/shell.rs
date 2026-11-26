@@ -32,6 +32,7 @@ pub struct AdoptionDraft {
 }
 impl AdoptionDraft {
     pub const FIELDS: usize = 4;
+    pub const PROFILES_FIELD: usize = 3;
 
     pub fn mapping(&self) -> dort_core::model::ManagedFile {
         let dort_core::planner::Request::Adopt { mut mapping } = crate::services::adopt_request(
@@ -559,7 +560,10 @@ impl Shell {
                         self.scroll = 0;
                     }
                     KeyCode::Enter => return Some(Intent::Submit(Form::Adopt)),
-                    _ => edit_text(draft.field(draft.focused), key),
+                    _ if draft.focused != AdoptionDraft::PROFILES_FIELD => {
+                        edit_text(draft.field(draft.focused), key);
+                    }
+                    _ => (),
                 }
             }
             Overlay::Form(Form::Repair) => match key.code {

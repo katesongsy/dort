@@ -53,6 +53,12 @@ python3 .pi/skills/verify-dort/drive.py tui my-proof --label discover \
   "wait:loaded." "send:'f'" "wait:Managed" "send:'2'" "wait:Discover" "snap:discover"
 ```
 
+## Form pickers
+
+Seed an inactive profile and an existing mapping with a required tool. From **Discover**, open **Adoption details** and click **Profiles (blank uses base)**. Click the inactive profile, press Esc, then reopen the picker. Confirm the profile is clear. Select it with Space and press Enter. Confirm it appears in the draft and `dort.toml` stays unchanged.
+
+From **Managed**, select the mapping and press `e`. Open **Required tools** and confirm the saved tool is selected. Change the profiles, then open **F2 More** and press Enter on **Review changes**. Approve **Save manifest change**. Check that only the mapping profiles changed in `dort.toml` and that no link was created.
+
 ## Observable end state
 
 An adoption worked when all four hold:
