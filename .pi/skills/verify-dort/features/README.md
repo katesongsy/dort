@@ -7,10 +7,11 @@
 
 # Dort feature map
 
-Every feature below is reachable from both the CLI and the TUI. A change to a service usually reaches both, so state which surface you proved.
+A service change usually reaches the CLI and TUI. State which surface you proved.
 
 | Feature | TUI | CLI |
 | --- | --- | --- |
+| [Help for the current page or form](help.md) | `F1` or `?` outside text fields | — |
 | [Repository create and attach](repository.md) | `o` Overview, `F2` More → Create or attach | `dort init PATH` |
 | [Profiles, clone and environment](environment.md) | `F2` More | `dort profiles`, `dort clone`, `dort environment` |
 | [Files: discover, adopt, apply, keep, remove](files.md) | `f` Files | `dort files ...` |
