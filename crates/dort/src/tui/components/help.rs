@@ -49,7 +49,7 @@ pub fn draw(
     if has_progress {
         body.height -= 1;
     }
-    let rows = reader::text_view_at(frame, body, Text::from(lines), offset);
+    let rows = reader::text_view_at(frame, body, &Text::from(lines), offset);
     if has_progress {
         let height = usize::from(body.height);
         let progress = format!(

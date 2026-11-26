@@ -51,7 +51,7 @@ fn preview(
         return Err("Content withheld: exceeds 64 KiB preview limit");
     }
     let handle = observation::parent_handle(path).map_err(|_| "Unsafe parent; content withheld")?;
-    if !same_parents(&handle.parents, &entry.parents) {
+    if !observation::same_parent_identity_and_access(&handle.parents, &entry.parents) {
         return Err("Parent changed; content withheld");
     }
     let bytes = observation::read_checked_bounded(&handle, path, fp, 65536)
@@ -59,7 +59,7 @@ fn preview(
     if observation::inspect(path, false).ok().is_none_or(|after| {
         after.kind != Kind::Regular
             || after.fingerprint.as_ref() != Some(fp)
-            || !same_parents(&after.parents, &entry.parents)
+            || !observation::same_parent_identity_and_access(&after.parents, &entry.parents)
     }) {
         return Err("File or parent changed; content withheld");
     }
@@ -135,7 +135,7 @@ pub fn selected_content(
         || current.kind != expected.kind
         || current.fingerprint != expected.fingerprint
         || current.link_target != expected.link_target
-        || !same_parents(&current.parents, &expected.parents)
+        || !observation::same_parent_identity_and_access(&current.parents, &expected.parents)
     {
         return Err("Changed or ineligible file; content withheld");
     }
@@ -161,21 +161,6 @@ pub fn selected_content(
         }
         _ => Err("Changed or ineligible file; content withheld"),
     }
-}
-
-fn same_parents(a: &[observation::Parent], b: &[observation::Parent]) -> bool {
-    // Directory timestamps/size/link counts change when unrelated siblings change;
-    // retain identity, ownership and permissions, as in existing approval guards.
-    a.len() == b.len()
-        && a.iter().zip(b).all(|(a, b)| {
-            let (x, y) = (&a.fingerprint, &b.fingerprint);
-            a.path == b.path
-                && x.device == y.device
-                && x.inode == y.inode
-                && x.mode == y.mode
-                && x.uid == y.uid
-                && x.gid == y.gid
-        })
 }
 
 pub fn discover(host: &HostContext, repository: Option<&Path>) -> Result<Discovery> {

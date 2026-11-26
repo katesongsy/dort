@@ -218,6 +218,13 @@ pub fn toggle(app: &mut App) {
     } else {
         std::slice::from_ref(&node)
     };
+    let templates = app
+        .data
+        .iter()
+        .flat_map(|data| &data.file_declarations)
+        .filter(|file| file.mode == dort_core::model::FileMode::Template)
+        .map(|file| file.id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
     let matching = scope
         .iter()
         .filter(|n| {
@@ -230,25 +237,30 @@ pub fn toggle(app: &mut App) {
             !n.branch && (n.path == node.path || (node.branch && n.path.starts_with(&node.path)))
         })
         .filter(|n| {
-            !app.discovering
-                || n.raw
+            if app.discovering {
+                n.raw
                     .and_then(|r| app.discovery.as_ref()?.report.candidates.get(r))
                     .is_some_and(|c| c.supported_for_adoption)
+            } else {
+                !n.raw
+                    .and_then(|r| app.data.as_ref()?.files.get(r))
+                    .is_some_and(|(id, _)| templates.contains(id.as_str()))
+            }
         })
         .collect();
     if eligible.is_empty() {
-        let reason =
-            "Cannot mark: no eligible files. Only owned, single-link regular files can be adopted.";
+        let reason = if app.discovering {
+            "Cannot mark: no eligible files. Only owned, single-link regular files can be adopted."
+        } else {
+            "No files to mark. Generated files only support preview."
+        };
         app.inventory.mark_refusal = Some(reason.into());
         app.status = reason.into();
         return;
     }
     let skipped = matching.saturating_sub(eligible.len());
-    app.inventory.mark_refusal = (skipped > 0).then(|| {
-        format!(
-            "{skipped} ineligible descendant(s) NOT marked; only eligible regular files selected."
-        )
-    });
+    app.inventory.mark_refusal =
+        (skipped > 0).then(|| format!("Skipped {skipped} files that cannot be marked."));
     let all = eligible.iter().all(|n| marked(app, n));
     if app.discovering {
         app.inventory.candidate_mark_revision =

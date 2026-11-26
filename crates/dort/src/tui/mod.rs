@@ -46,6 +46,10 @@ mod events;
 mod files;
 mod forms;
 mod full_check;
+mod generated;
+#[cfg(test)]
+#[path = "tests/generated.rs"]
+mod generated_tests;
 mod git;
 #[cfg(test)]
 #[path = "tests/git.rs"]

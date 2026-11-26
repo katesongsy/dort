@@ -28,6 +28,6 @@ Upgrading? See [Upgrade from v0.1.0](manifest.md#upgrade-from-v010).
 | Add, edit or remove declarations | Tools `a` / `e` / `d`, `tools declare` / `edit` / `remove` |
 | Inspect or recover interrupted writes | `history`, `recovery list`, Recovery |
 
-Not implemented: templates, secrets, Git sync, staging/commit/push, and general package upgrades.
+Not implemented: generated file deployment, secrets, Git sync, staging/commit/push, and general package upgrades.
 
 Every write needs a preview and confirmation. `--dry-run` previews without writing. Run `dort --help` for command syntax.

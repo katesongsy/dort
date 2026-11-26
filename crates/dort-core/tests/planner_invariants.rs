@@ -323,6 +323,7 @@ impl Case {
                 vec![]
             },
             overrides: Default::default(),
+            inputs: Default::default(),
             permissions: None,
         };
         Snapshot {

@@ -241,10 +241,16 @@ pub fn load_scoped(
                                     target: input.target_path.clone(),
                                     source_kind: entry_kind(input.source.as_ref()),
                                     target_kind: entry_kind(input.destination.as_ref()),
-                                    state: match file.outcome {
-                                        planner::Outcome::NoOp => "Linked",
-                                        planner::Outcome::Change => "Needs apply",
-                                        planner::Outcome::Blocked => "Blocked",
+                                    state: if input.mapping.mode
+                                        == dort_core::model::FileMode::Template
+                                    {
+                                        "Preview only"
+                                    } else {
+                                        match file.outcome {
+                                            planner::Outcome::NoOp => "Linked",
+                                            planner::Outcome::Change => "Needs apply",
+                                            planner::Outcome::Blocked => "Blocked",
+                                        }
                                     },
                                     blockers: file.blockers.clone(),
                                 });
@@ -689,6 +695,7 @@ pub enum Task {
     ToolDeclaration(crate::services::declaration::Request),
     IgnoredPaths,
     Ignore(PathBuf, bool),
+    PreviewGenerated(String),
     DiscoveryTree(super::discovery_tree::Read),
     DiscoverContent(super::discover_content::Read),
     History,
@@ -753,6 +760,7 @@ pub enum Output {
     ToolClosePreview(Box<dort_core::tools::install::ClosePreview>),
     ToolClosed(std::result::Result<dort_core::tools::install::Attempt, String>),
     IgnoredPaths(Vec<PathBuf>),
+    Generated(Box<dort_core::generated::Preview>),
     DiscoveryTree(super::discovery_tree::Report),
     DiscoverContent(super::discover_content::Report),
     History {
@@ -952,6 +960,13 @@ pub fn perform_scoped_with_install_progress(
             dort_core::discovery_ignore::Preview::prepare(host, relative, ignored)
                 .map(|p| Output::Preview(Pending::Ignore(p)))
         }
+        Task::PreviewGenerated(id) => crate::services::preview_generated(
+            host,
+            &LocalConfig::load(host)?,
+            repository.as_deref(),
+            &id,
+        )
+        .map(|preview| Output::Generated(Box::new(preview))),
         Task::DiscoveryTree(read) => Ok(Output::DiscoveryTree(read.perform())),
         Task::DiscoverContent(read) => Ok(Output::DiscoverContent(read.perform(host))),
         Task::History => Ok(match journal::diagnose(host) {

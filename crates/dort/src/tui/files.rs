@@ -2,7 +2,10 @@
 use super::input::{Target, Wheel};
 use super::workspace::{Region, Scope, Workspace};
 use super::{app::App, components as ui, views::safe};
-use dort_core::observation::Kind;
+use dort_core::{
+    model::{FileMode, ManagedFile},
+    observation::Kind,
+};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -144,6 +147,15 @@ fn details(app: &App) -> Text<'static> {
             .filter(|_| app.visible_file_rows().contains(&app.selected))
         {
             lines.push(section(&row.id));
+            if app.template_selected() {
+                lines.extend([
+                    field("Type", "Generated configuration", Tone::Neutral),
+                    ui::metadata("Source", row.source.to_str().unwrap_or("unavailable")),
+                    ui::metadata("Destination", row.target.to_str().unwrap_or("unavailable")),
+                    Line::raw("Preview the output from inputs in dort.toml. No files are written."),
+                ]);
+                return Text::from(lines);
+            }
             lines.push(field(
                 "Status",
                 row.state,
@@ -191,28 +203,43 @@ fn details(app: &App) -> Text<'static> {
 }
 
 impl App {
-    pub(super) fn selected_mapping(&self) -> Option<&dort_core::model::ManagedFile> {
-        if self.tab != super::app::Tab::Files || self.discovering {
-            return None;
-        }
-        let index = super::tree::selected(self)?.raw?;
+    fn mapping_at(&self, index: usize) -> Option<&ManagedFile> {
         let data = self.data.as_ref()?;
         let (id, _) = data.files.get(index)?;
         data.file_declarations.iter().find(|file| &file.id == id)
+    }
+
+    pub(super) fn selected_mapping(&self) -> Option<&ManagedFile> {
+        if self.tab != super::app::Tab::Files || self.discovering {
+            return None;
+        }
+        self.mapping_at(super::tree::selected(self)?.raw?)
+    }
+
+    pub(super) fn template_selected(&self) -> bool {
+        self.selected_mapping()
+            .is_some_and(|file| file.mode == FileMode::Template)
     }
 }
 
 pub(super) fn managed_controls(app: &App) -> impl Iterator<Item = ui::ActionButton> {
     use super::{configuration::Kind, shell::Action};
     let mapping = app.selected_mapping();
-    let environment =
-        app.registered_repository() && mapping.is_some_and(|file| !file.requires.is_empty());
+    let template = mapping.is_some_and(|file| file.mode == FileMode::Template);
+    let environment = app.registered_repository()
+        && mapping.is_some_and(|file| file.mode != FileMode::Template && !file.requires.is_empty());
+    let preview = (
+        Action::PreviewGenerated.label(),
+        "v",
+        Action::PreviewGenerated,
+        template,
+    );
     let add = ("Add file mapping", "n", Action::Configure(Kind::File), true);
     let edit = (
         "Edit file mapping",
         "e",
         Action::Configure(Kind::EditFile),
-        mapping.is_some(),
+        mapping.is_some() && !template,
     );
     let review = (
         Action::EnvironmentPlan.label(),
@@ -221,9 +248,9 @@ pub(super) fn managed_controls(app: &App) -> impl Iterator<Item = ui::ActionButt
         environment,
     );
     if app.inventory.details {
-        [review, edit, add]
+        [preview, review, edit, add]
     } else {
-        [review, add, edit]
+        [preview, review, add, edit]
     }
     .into_iter()
     .filter(|&(_, _, _, visible)| visible)
@@ -305,6 +332,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                 ratatui::crossterm::event::KeyCode::Enter,
                 ratatui::crossterm::event::KeyModifiers::NONE,
             )),
+        );
+    } else if app.template_selected() {
+        use super::shell::Action;
+        app.presented(
+            Action::PreviewGenerated.label(),
+            "Enter",
+            Target::Action(Action::PreviewGenerated),
         );
     } else if !nodes.is_empty() && !app.inventory.details && !app.content.focused {
         app.presented(
@@ -461,7 +495,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                         Cell::from(format!(
                             "{}{} {}",
                             "  ".repeat(node.depth.min(indent_limit)),
-                            if super::tree::marked(app, node) {
+                            if row.state == "Preview only"
+                                || app
+                                    .mapping_at(i)
+                                    .is_some_and(|file| file.mode == FileMode::Template)
+                            {
+                                "   "
+                            } else if super::tree::marked(app, node) {
                                 "[x]"
                             } else {
                                 "[ ]"
@@ -537,7 +577,14 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             .zip(visible.into_iter().skip(rendered.offset))
         {
             let x = row.x + 2 + (node.depth.min(indent_limit) * 2) as u16;
-            if x + 3 < row.right() {
+            if x + 3 < row.right()
+                && (app.discovering
+                    || node.branch
+                    || !node
+                        .raw
+                        .and_then(|i| app.mapping_at(i))
+                        .is_some_and(|file| file.mode == FileMode::Template))
+            {
                 app.hits.click(
                     Rect::new(x, row.y, 3, 1),
                     if node.branch {

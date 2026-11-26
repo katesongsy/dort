@@ -13,7 +13,10 @@ pub fn draw(frame: &mut ratatui::Frame, app: &App) {
 /// Metadata-only reading views. Controls and instructions belong to the shared strip/Help.
 pub(super) fn overlay_text(app: &App, overlay: &Overlay, _height: u16, _width: u16) -> String {
     match overlay {
-        Overlay::Ignored { .. } | Overlay::Profiles(_) | Overlay::Repositories { .. } => {
+        Overlay::Ignored { .. }
+        | Overlay::Profiles(_)
+        | Overlay::Repositories { .. }
+        | Overlay::Generated(_) => {
             unreachable!("typed overlay renderer")
         }
         Overlay::Form(Form::Adopt) => format!(

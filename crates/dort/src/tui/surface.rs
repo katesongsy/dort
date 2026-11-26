@@ -85,6 +85,7 @@ impl App {
                 });
             }
             Some(Overlay::Ignored { .. }) => return Some("Files / Manage ignored paths"),
+            Some(Overlay::Generated(_)) => return Some("Files / Generated file preview"),
             _ => (),
         }
         if self.tab == Tab::Files && (self.inventory.details || self.content.focused) {

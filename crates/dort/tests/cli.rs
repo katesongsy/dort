@@ -557,3 +557,84 @@ fn malformed_local_configuration_does_not_leak_variable_values() {
     );
     assert!(!sandbox.home.join(".local").exists());
 }
+
+#[test]
+fn generated_preview_cli_preserves_json_bytes_and_never_writes() {
+    let sandbox = Sandbox::new();
+    let manifest = r#"schema = 1
+[profiles]
+available = ["dev"]
+[[files]]
+id = "settings"
+source = "editor.tmpl"
+target = "~/settings"
+mode = "template"
+profiles = ["dev"]
+inputs = { name = "\u202efriendly", color = "blue" }
+"#;
+    let manifest_path = sandbox.manifest(manifest);
+    let repo = manifest_path.parent().unwrap();
+    let recipe = "name={{ name }}\ncolor={{ color }}\n\x1b[31m";
+    fs::write(repo.join("editor.tmpl"), recipe).unwrap();
+    let preview = || {
+        sandbox
+            .command()
+            .arg("--repo")
+            .arg("repository")
+            .args(["--json", "files", "preview-generated", "settings"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone()
+    };
+    let bytes = preview();
+    assert!(bytes.is_ascii());
+    assert_eq!(bytes, preview());
+    let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(parsed["source"], repo.join("editor.tmpl").to_str().unwrap());
+    assert_eq!(
+        parsed["destination"],
+        sandbox.home.join("settings").to_str().unwrap()
+    );
+    assert_eq!(parsed["destination_status"], "missing");
+    assert_eq!(parsed["inputs"]["color"], "blue");
+    assert_eq!(
+        parsed["rendered"],
+        "name=\u{202e}friendly\ncolor=blue\n\x1b[31m"
+    );
+    sandbox.assert_readonly();
+    fs::write(sandbox.home.join("settings"), "private destination bytes").unwrap();
+    let result = sandbox
+        .command()
+        .arg("--repo")
+        .arg(repo)
+        .args(["files", "preview-generated", "settings"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let result = String::from_utf8(result).unwrap();
+    for expected in [
+        "Existing file. Do not overwrite.",
+        "No files written.",
+        "Inputs from dort.toml: color, name",
+        "name=\\u{202e}friendly",
+        "\\u{1b}[31m",
+    ] {
+        assert!(result.contains(expected), "{result:?} lacks {expected:?}");
+    }
+    assert!(!result.contains("private destination bytes"));
+    assert_eq!(
+        fs::read_to_string(sandbox.home.join("settings")).unwrap(),
+        "private destination bytes"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.join("editor.tmpl")).unwrap(),
+        recipe
+    );
+    assert_eq!(fs::read_to_string(&manifest_path).unwrap(), manifest);
+    assert_eq!(fs::read_dir(&sandbox.home).unwrap().count(), 1);
+    assert_eq!(fs::read_dir(repo).unwrap().count(), 2);
+}

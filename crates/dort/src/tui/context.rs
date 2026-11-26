@@ -99,7 +99,11 @@ pub fn entries(app: &App) -> Vec<Entry> {
         .collect();
     // Diagnostics is a refresh operation only when already in that subview.
     // Section destinations and session commands stay on keys and the rail.
+    let template = app.template_selected();
     rows.retain(|e| {
+        if template && matches!(e.action, Apply | Keep | Remove | ToggleMark) {
+            return false;
+        }
         !matches!(
             e.action,
             Discover

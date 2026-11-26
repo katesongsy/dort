@@ -204,6 +204,7 @@ impl Fixture {
                     profiles: vec!["base".into()],
                     requires: vec![],
                     overrides: BTreeMap::new(),
+                    inputs: Default::default(),
                     permissions: None,
                 },
             },
@@ -279,6 +280,7 @@ fn mapping(id: &str) -> ManagedFile {
         profiles: vec!["base".into()],
         requires: vec![],
         overrides: BTreeMap::new(),
+        inputs: Default::default(),
         permissions: None,
     }
 }

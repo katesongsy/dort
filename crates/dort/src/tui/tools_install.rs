@@ -404,7 +404,7 @@ impl State {
                     frame,
                     area,
                     Some("Close installation record"),
-                    lines.into(),
+                    &lines.into(),
                     ReviewStage::CloseRecord,
                     &self.reader,
                 );

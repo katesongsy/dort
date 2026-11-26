@@ -30,6 +30,7 @@ fn adopt() -> Request {
             profiles: vec!["base".into()],
             requires: vec![],
             overrides: Default::default(),
+            inputs: Default::default(),
             permissions: None,
         },
     }

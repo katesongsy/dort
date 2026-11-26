@@ -225,6 +225,8 @@ enum FilesCommand {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
+    /// Render a template declared in dort.toml without writing files.
+    PreviewGenerated { id: String },
     /// Preview only. No writes, approvals, backups or history records.
     Plan {
         #[arg(long = "profile", global = true)]
@@ -1185,6 +1187,15 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
             }
         }
         Command::Files { command } => match command {
+            FilesCommand::PreviewGenerated { id } => {
+                let preview =
+                    crate::services::preview_generated(&host, &local, cli.repo.as_deref(), id)?;
+                if cli.json {
+                    print_ascii_json(&preview, "could not encode generated preview")?;
+                } else {
+                    print!("{}", crate::services::presentation::generated(&preview));
+                }
+            }
             FilesCommand::Add {
                 target,
                 id,
@@ -1468,12 +1479,14 @@ fn file_operation(
     Ok(ExitCode::SUCCESS)
 }
 
-// ASCII-only JSON protects terminals from C1/bidi controls while preserving the
-// exact decoded Unicode path identity, including supplementary-plane characters.
 fn print_git_json(value: &impl Serialize) -> dort_core::Result<()> {
+    print_ascii_json(value, "could not encode Git output")
+}
+
+fn print_ascii_json(value: &impl Serialize, encode_error: &str) -> dort_core::Result<()> {
     use std::fmt::Write;
-    let json = serde_json::to_string_pretty(value)
-        .map_err(|_| Error::Invalid("could not encode Git output".into()))?;
+    let json =
+        serde_json::to_string_pretty(value).map_err(|_| Error::Invalid(encode_error.into()))?;
     let mut escaped = String::new();
     for character in json.chars() {
         if character >= '\u{7f}' {
