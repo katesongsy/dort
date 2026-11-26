@@ -196,7 +196,7 @@ def batch_guards(Session, binary, base, env):
         with Session(args, scoped) as session:
             session.wait(b'loaded.')
             session.send(b'tC')
-            session.wait(b'Review installed checks')
+            session.wait(b'Check the tools declared for your active profiles.')
             assert calls(home) == ''
             if mode == 'dry-run':
                 session.send(b'\r\ry')
@@ -441,10 +441,10 @@ def interaction_surface_workflows(Session, binary, base, env):
             session.send(b'\tq?/')
             session.settle()
             session.send(b'\x1bOP')
-            session.wait(b'Enter opens the selected')
+            session.wait(b'Record a tool in the manifest')
             session.settle()
             rows = session.screen.text().splitlines()
-            footer = next(row for row in rows if b'Esc Back' in row)
+            footer = next(row for row in rows if b'Esc Close Help' in row)
             assert footer != rows[-1] and b'Review' not in footer
             session.mouse(0, 0, 0)
             session.wait(b'q?/')
