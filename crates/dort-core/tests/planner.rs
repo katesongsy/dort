@@ -155,7 +155,7 @@ fn adoption_refuses_existing_source_duplicate_mapping_and_unsafe_source_paths() 
         planner::observe(&home.host, &repo, &[], adopt())
             .unwrap_err()
             .to_string()
-            .contains("source overlaps")
+            .contains("Source overlaps an existing mapping")
     );
     manifest(&repo, &[("zshrc", "other", "~/.other")]);
     assert!(planner::observe(&home.host, &repo, &[], adopt()).is_err());

@@ -32,7 +32,7 @@ use ratatui::{
     Frame,
     layout::Rect,
     style::{Modifier, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Paragraph, Wrap},
 };
 
@@ -225,29 +225,57 @@ pub fn action_bar(
     for action in controls.buttons {
         hits.present(*action);
     }
-    if let Some(feedback) = controls.feedback {
-        let height = area.height.min(2);
-        design::notice(
-            frame,
-            Rect::new(area.x, area.bottom() - height, area.width, height),
-            match feedback.tone {
-                design::Tone::Neutral | design::Tone::Information => "Information",
-                design::Tone::Success => "Complete",
-                design::Tone::Attention => "Needs attention",
-                design::Tone::Error => "Invalid input",
-            },
-            feedback.text,
-            feedback.tone,
-        );
-        Rect::new(
-            area.x,
-            area.y,
-            area.width,
-            area.height.saturating_sub(height),
-        )
-    } else {
-        area
+    let Some(feedback) = controls.feedback else {
+        return area;
+    };
+    let max_height = usize::from(area.height.saturating_sub(2));
+    if max_height < 2 {
+        return area;
     }
+    let text = super::views::safe(feedback.text);
+    let mut lines = feedback_lines(&text, usize::from(area.width).max(1))
+        .take(max_height)
+        .map(Line::raw)
+        .collect::<Vec<_>>();
+    if lines.len() == max_height {
+        lines.truncate(max_height - 1);
+        if max_height > 2 {
+            lines[max_height - 2] = Line::raw(chrome_clip("More details omitted.", area.width));
+        }
+    }
+    let label = match feedback.tone {
+        design::Tone::Neutral => "Note",
+        design::Tone::Success => "Complete",
+        design::Tone::Attention => "Needs attention",
+        design::Tone::Error => "Invalid input",
+    };
+    lines.insert(0, design::badge(label, feedback.tone));
+    let height = lines.len() as u16;
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)),
+        Rect::new(area.x, area.bottom() - height, area.width, height),
+    );
+    Rect::new(area.x, area.y, area.width, area.height - height)
+}
+fn feedback_lines(text: &str, width: usize) -> impl Iterator<Item = &str> {
+    text.lines().flat_map(move |mut line| {
+        std::iter::from_fn(move || {
+            if line.is_empty() {
+                return None;
+            }
+            if line.len() <= width {
+                return Some(std::mem::take(&mut line));
+            }
+            let end = line.as_bytes()[..=width]
+                .iter()
+                .rposition(|&b| b == b' ')
+                .filter(|&i| i > 0)
+                .unwrap_or(width);
+            let (row, rest) = line.split_at(end);
+            line = rest.trim_start_matches(' ');
+            Some(row)
+        })
+    })
 }
 /// Trusted UI prose composed only with escaped metadata at dynamic boundaries.
 pub fn chrome_prose(frame: &mut Frame, area: Rect, text: &str, style: Style) {

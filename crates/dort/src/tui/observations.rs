@@ -136,7 +136,7 @@ pub fn overview(frame: &mut Frame, area: Rect, app: &App) {
             "Repository",
             registration,
             if observation.and_then(|o| o.registered) == Some(true) {
-                ui::design::Tone::Information.style()
+                ui::design::Tone::Neutral.style()
             } else {
                 ui::warning()
             },
@@ -355,8 +355,14 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
         ));
         lines.push(fact("Selected files", report.selected_files));
         lines.push(fact("Selected tools", report.selected_tools));
+        if !app.manifest_tool_results.is_empty() {
+            start_section(&mut lines, "Declared tools");
+            for (tool, status) in &app.manifest_tool_results {
+                lines.push(fact(tool, status));
+            }
+        }
         lines.push(Line::raw(
-            "Files shows live state. Check tools and prerequisites separately.",
+            "Review the environment to see changes to Home files.",
         ));
         start_section(&mut lines, "Limits");
         if report.unsupported_capabilities.is_empty() {
@@ -369,10 +375,7 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
                 lines.push(field("Unavailable", capability, Tone::Attention));
             }
         }
-        lines.push(note(
-            "Check tools and prerequisites separately.",
-            Tone::Neutral,
-        ));
+
         start_section(&mut lines, "Manifest and profiles");
         lines.push(fact("Manifest", format!("{:?}", report.manifest)));
         lines.push(fact(
@@ -420,7 +423,7 @@ pub fn checks(frame: &mut Frame, area: Rect, app: &App) {
             Tone::Neutral,
         ));
         lines.push(note(
-            "Checks validate declarations. Files shows live state; check tools separately.",
+            "Check the manifest and its declared tools together.",
             Tone::Neutral,
         ));
     }

@@ -70,8 +70,30 @@ pub struct Data {
 // TOML parser Display includes source lines. Ordinary TUI errors are metadata only.
 pub fn diagnostic(error: &Error) -> String {
     match error {
-        Error::Parse(_) => "Invalid TOML. Manifest text is not shown.".into(),
+        Error::Parse(_) => {
+            "Invalid TOML. Fix the manifest syntax or choose another manifest.".into()
+        }
+        Error::Validation(issues) if !issues.is_empty() => issues.join("\n"),
         _ => error.to_string(),
+    }
+}
+
+pub fn input_problem(error: &Error) -> Option<String> {
+    match error {
+        Error::Invalid(_) | Error::Validation(_) | Error::Parse(_) => Some(diagnostic(error)),
+        Error::Io { path, source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
+            Some(format!(
+                "Path not found. Check the path and try again.\n{}",
+                path.display()
+            ))
+        }
+        Error::Io { path, source, .. } if source.kind() == std::io::ErrorKind::NotADirectory => {
+            Some(format!(
+                "A folder in this path is a file. Correct the path and try again.\n{}",
+                path.display()
+            ))
+        }
+        _ => None,
     }
 }
 
@@ -297,6 +319,7 @@ pub fn load_scoped(
 }
 
 pub enum Pending {
+    FullCheck(Box<super::full_check::Preview>),
     Configuration(super::configuration::Preview),
     Environment(Box<dort_core::environment::Preview>),
     EnvironmentAbandon(Box<dort_core::environment::AbandonPreview>),
@@ -318,6 +341,7 @@ impl Pending {
             Self::Profile(p) => p.human(),
             Self::Configuration(p) => p.human(),
             Self::Environment(p) => p.human(),
+            Self::FullCheck(p) => p.human(),
             Self::EnvironmentAbandon(p) => p.human(),
             Self::Clone(p) => p.human(),
             Self::Batch(plan) => plan.human(),
@@ -370,6 +394,7 @@ impl Pending {
         match self {
             Self::Clone(_) => "Clone and register",
             Self::Environment(_) => "Run environment",
+            Self::FullCheck(_) => "Run checks",
             Self::EnvironmentAbandon(_) => "Abandon environment run",
             Self::Profile(_) => "Save profile choice",
             Self::Configuration(p) => p.label(),
@@ -419,6 +444,7 @@ impl Pending {
             Self::Profile(p) => Ok(Approved::Profile(Box::new(p.approve()))),
             Self::Configuration(p) => Ok(Approved::Configuration(p.approve())),
             Self::Environment(p) => Ok(Approved::Environment(Box::new(p.approve()?))),
+            Self::FullCheck(p) => Ok(Approved::FullCheck(Box::new(p.approve()))),
             Self::EnvironmentAbandon(p) => Ok(Approved::EnvironmentAbandon(Box::new(p.approve()))),
             Self::Clone(p) => {
                 let root = p.destination().to_owned();
@@ -448,6 +474,7 @@ impl Pending {
 }
 
 pub enum Approved {
+    FullCheck(Box<super::full_check::Approval>),
     Configuration(super::configuration::Approval),
     Environment(Box<dort_core::environment::Approval>),
     EnvironmentAbandon(Box<dort_core::environment::AbandonApproval>),
@@ -491,6 +518,7 @@ impl Approved {
                 ("Manifest change", id, None)
             }
             Self::Environment(p) => return p.execute(host, observer).map(Output::EnvironmentRun),
+            Self::FullCheck(p) => return p.execute(host),
             Self::EnvironmentAbandon(p) => return p.execute(host).map(Output::EnvironmentRun),
             Self::ToolDeclaration(a) => {
                 let lock = WriterLock::acquire(host)?;
@@ -641,7 +669,10 @@ pub enum Task {
     Environment {
         resume: bool,
     },
-    EnvironmentCheck(crate::services::inspection_defaults::Inputs),
+    EnvironmentCheck {
+        detection: crate::services::inspection_defaults::Inputs,
+        resume: bool,
+    },
     EnvironmentAbandon,
     EnvironmentRecord,
     ToolsInstalledPrepare(crate::services::inspection_defaults::Inputs),
@@ -701,6 +732,13 @@ pub enum Task {
     Execute(Approved),
 }
 pub enum Output {
+    ManifestChecked {
+        report: Box<crate::services::CheckReport>,
+        standalone: bool,
+        tools: Vec<(String, &'static str)>,
+    },
+    MappingUnchanged,
+    InputRejected,
     EnvironmentRun(dort_core::environment::Run),
     EnvironmentRecord(Option<dort_core::environment::Run>),
     RecoveryRequired(Box<journal::WriteBlocker>),
@@ -728,6 +766,7 @@ pub enum Output {
     ToolsSettingsSaved {
         preview_only: bool,
     },
+    ToolSettingsRejected(String),
     Data(Data),
     Discovery(crate::services::Discovery),
     Checked {
@@ -801,30 +840,43 @@ pub fn perform_scoped_with_install_progress(
             dort_core::environment::Preview::prepare(host, &root, requested, resume)
                 .map(|p| Output::Preview(Pending::Environment(Box::new(p))))
         }
-        Task::ToolsCheckPrepare(_) | Task::EnvironmentCheck(_) => {
-            let (detection, environment) = match task {
-                Task::ToolsCheckPrepare(detection) => (detection, false),
-                Task::EnvironmentCheck(detection) => (detection, true),
-                _ => unreachable!(),
-            };
+        Task::EnvironmentCheck { detection, resume } => {
             let local = LocalConfig::load(host)?;
             let root = local.select_repository(repository.as_deref())?;
-            if environment && !local.repositories.values().any(|r| r.root == root) {
+            if !local.repositories.values().any(|r| r.root == root) {
                 return Err(Error::Invalid(
-                    "Environment check needs a registered repository.".into(),
+                    "Choose a registered repository to check the environment.".into(),
                 ));
             }
+            let profiles = requested.to_vec();
+            let tools = crate::services::declared_tools::Input {
+                manifest: root.join("dort.toml"),
+                profiles: profiles.clone(),
+                detection,
+            }
+            .prepare_for_tools(host, false)?
+            .for_environment();
+            super::full_check::Preview {
+                tools,
+                destination: super::full_check::Destination::Environment {
+                    root,
+                    profiles,
+                    resume,
+                },
+            }
+            .finish_or_review(host)
+        }
+        Task::ToolsCheckPrepare(detection) => {
+            let local = LocalConfig::load(host)?;
+            let root = local.select_repository(repository.as_deref())?;
             let input = crate::services::declared_tools::Input {
                 manifest: root.join("dort.toml"),
                 profiles: requested.to_vec(),
                 detection,
             };
-            if environment {
-                input.prepare(host).map(|p| p.for_environment())
-            } else {
-                input.prepare_for_tools(host, false)
-            }
-            .map(Output::ToolsCheckPreview)
+            input
+                .prepare_for_tools(host, false)
+                .map(Output::ToolsCheckPreview)
         }
         Task::ToolsStandaloneCheckPrepare(input) => input
             .prepare_for_tools(host, true)
@@ -874,8 +926,15 @@ pub fn perform_scoped_with_install_progress(
             editor,
             preview_only,
         } => {
-            editor.save(host, repository.as_deref(), preview_only)?;
-            Ok(Output::ToolsSettingsSaved { preview_only })
+            use crate::services::inspection_defaults::SettingsSave;
+            Ok(
+                match editor.save(host, repository.as_deref(), preview_only)? {
+                    SettingsSave::Saved => Output::ToolsSettingsSaved { preview_only },
+                    SettingsSave::InvalidInput(error) => {
+                        Output::ToolSettingsRejected(diagnostic(&error))
+                    }
+                },
+            )
         }
         Task::IgnoredPaths => Ok(Output::IgnoredPaths(
             dort_core::discovery_ignore::Rules::load(host)?
@@ -934,7 +993,20 @@ pub fn perform_scoped_with_install_progress(
             let report = Box::new(crate::services::check_manifest(
                 host, &local, path, &requested,
             )?);
-            Ok(Output::Checked { report, standalone })
+            if report.selected_tools == 0 {
+                return Ok(Output::Checked { report, standalone });
+            }
+            let tools = crate::services::declared_tools::Input {
+                manifest: report.manifest.clone(),
+                profiles: requested,
+                detection: crate::environment::inspection_inputs(),
+            }
+            .prepare_for_tools(host, true)?;
+            super::full_check::Preview {
+                tools,
+                destination: super::full_check::Destination::Manifest(report, standalone),
+            }
+            .finish_or_review(host)
         }
         Task::Profiles {
             manifest,
@@ -982,9 +1054,13 @@ pub fn perform_scoped_with_install_progress(
             let preview = match *request {
                 Request::Manifest(change) => {
                     let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
-                    Preview::Manifest(Box::new(dort_core::manifest_edit::Preview::prepare(
-                        host, &root, &change,
-                    )?))
+                    let preview = dort_core::manifest_edit::Preview::prepare(host, &root, &change)?;
+                    if matches!(change, dort_core::manifest_edit::Change::File(_))
+                        && preview.unchanged()
+                    {
+                        return Ok(Output::MappingUnchanged);
+                    }
+                    Preview::Manifest(Box::new(preview))
                 }
                 Request::OpenRepair(root, git) => {
                     return dort_core::manifest_edit::RepairDraft::open(host, &root, &git)

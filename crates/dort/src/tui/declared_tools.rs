@@ -181,7 +181,6 @@ pub fn key(app: &mut App, key: KeyEvent) -> Option<Option<Task>> {
             KeyCode::Esc => {
                 app.hits.invalidate_review();
                 state.clear_reviews();
-                return Some(app.return_to_environment_review());
             }
             _ if state.approval(app.dry_run, &app.hits).accepts(key) => {
                 if let Some(preview) = state.check_preview.take() {

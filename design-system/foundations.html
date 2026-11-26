@@ -34,15 +34,18 @@
     <div class="chapter-body">
       <section id="text">
         <h2>Text roles</h2>
-        <p>Use terminal theme colors by role, not by fixed RGB value. Reserve status colors for a change in state or a condition that needs attention.</p>
+        <p>Use terminal theme colors for body text. Reserve status colors for a change in state or a condition that needs attention. Use default text for instructions and routine messages.</p>
         <dl class="roles">
           <div><dt><span class="sample heading">Section heading</span></dt><dd><strong>Cyan, bold.</strong> Names a section of the interface or a group of fields.</dd></div>
           <div><dt><span class="sample label">Snapshot</span></dt><dd><strong>Default color, bold.</strong> Identifies a field but does not compete with a heading.</dd></div>
           <div><dt><span class="sample">2026-06-18</span></dt><dd><strong>Default color and weight.</strong> Shows the value. Keep long paths and command text readable.</dd></div>
+          <div><dt><span class="sample">Secondary note</span></dt><dd><strong>Terminal dark gray.</strong> Use for optional hints. Keep instructions and next steps in default text.</dd></div>
           <div><dt><span class="sample finished">Finished</span></dt><dd><strong>Green.</strong> Marks completed work, never work that is only ready.</dd></div>
           <div><dt><span class="sample warning">Warning</span></dt><dd><strong>Yellow.</strong> Names a condition to consider before proceeding.</dd></div>
           <div><dt><span class="sample blocker">Blocker</span></dt><dd><strong>Red.</strong> Names a condition that prevents the action. Give a next step.</dd></div>
         </dl>
+        <h3>Navigation and selection</h3>
+        <p>The frame uses slate <code>#16242e</code> and pale text <code>#e3edf4</code>. Use <code>#a3b7c7</code> for the location and <code>#b9cbd8</code> for secondary keys. Use teal <code>#77e2cd</code> for the brand, focus marker, and primary action. The primary action uses dark text <code>#0c2225</code>. Selected rows use dark teal <code>#17363c</code> and a visible marker.</p>
       </section>
       <section id="monochrome">
         <h2>Without color</h2>

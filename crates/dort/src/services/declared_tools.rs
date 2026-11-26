@@ -161,14 +161,14 @@ fn invalid(message: &'static str) -> Error {
 }
 fn withheld(error: Error) -> Error {
     match error {
-        Error::Parse(_) => invalid("Invalid TOML; contents withheld."),
+        Error::Parse(_) => {
+            invalid("Invalid TOML. Fix the manifest syntax or choose another manifest.")
+        }
         other => other,
     }
 }
 fn read_manifest(path: &Path) -> Result<(dort_core::Manifest, Entry)> {
-    observation::read_manifest(path).map_err(|_| {
-        invalid("Declared tools manifest unavailable, unsafe or invalid; contents withheld.")
-    })
+    observation::read_manifest(path).map_err(withheld)
 }
 
 /// Resolve captured PATH entries without running programs. Existing unresolved paths

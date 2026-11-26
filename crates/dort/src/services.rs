@@ -80,6 +80,9 @@ pub struct CheckReport {
 
 /// Preserve CLI structural-check semantics, including its ordinary manifest read.
 /// This is not file observation and deliberately does not inspect source contents.
+pub const TOOL_CHECK_LIMIT: &str =
+    "tool inventory and installation in structural checks (use Tools)";
+
 pub fn check_manifest(
     host: &HostContext,
     local: &LocalConfig,
@@ -145,14 +148,17 @@ fn manifest_report(
         .collect();
     let mut unsupported = vec![];
     if !tools.is_empty() {
-        unsupported.push("tool inventory and installation in structural checks (use Tools)".into());
+        unsupported.push(TOOL_CHECK_LIMIT.into());
     }
     for file in &files {
         if file.mode != FileMode::Link {
             unsupported.push(format!("{}: {:?} deployment", file.id, file.mode));
         }
         if !file.requires.is_empty() {
-            unsupported.push(format!("{}: tool prerequisite verification", file.id));
+            unsupported.push(format!(
+                "{}: review the environment to check file prerequisites",
+                file.id
+            ));
         }
     }
     let choices = ProfileChoices {

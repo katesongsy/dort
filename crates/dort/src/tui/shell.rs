@@ -16,6 +16,7 @@ pub enum Form {
 }
 
 pub struct ProfilePicker {
+    pub problem: Option<String>,
     pub report: Box<crate::services::CheckReport>,
     pub requested: Vec<String>,
     pub standalone: bool,
@@ -250,7 +251,7 @@ pub struct Shell {
     pub configuration: Option<super::configuration::Draft>,
     pub path_focused: usize,
     pub form_details: bool,
-    pub form_feedback: Option<(Form, &'static str)>,
+    pub form_feedback: Option<(Form, String)>,
     pub picker_details: bool,
     pub ignored_viewport: super::navigation::ListViewport,
     pub choose_draft: String,
@@ -506,6 +507,7 @@ impl Shell {
                         if let Some(name) = picker.report.choices.known.iter().nth(picker.selected)
                             && !picker.report.choices.mandatory.contains(name)
                         {
+                            picker.problem = None;
                             if picker.requested.contains(name) {
                                 picker.requested.retain(|p| p != name);
                             } else {

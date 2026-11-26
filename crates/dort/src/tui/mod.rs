@@ -45,6 +45,7 @@ mod discovery_tree;
 mod events;
 mod files;
 mod forms;
+mod full_check;
 mod git;
 #[cfg(test)]
 #[path = "tests/git.rs"]
@@ -233,9 +234,9 @@ fn run_loop(
                 // A deferred quit must not hide a failure before it could be displayed.
                 let output = match output {
                     Err(error) if app.exit_requested => return Err(actions::exit_error(error)),
-                    other => actions::present(other),
+                    other => other,
                 };
-                if let Some(task) = app.complete(output) {
+                if let Some(task) = app.complete_task(output) {
                     queued = Some(task);
                 }
                 if let Some(task) = queued.take() {
@@ -330,22 +331,27 @@ fn dispatch(
 ) -> Result<()> {
     if worker.is_some() {
         // Wait for the owned passive read; never detach or launch a second worker.
-        app.start(matches!(
-            task,
-            Task::Execute(_)
-                | Task::ToolClose(_)
-                | Task::ToolsInstallMissing(_)
-                | Task::ToolsSettingsSave {
-                    preview_only: false,
-                    ..
-                }
-        ));
+        app.start(writes(&task));
         *queued = Some(task);
         Ok(())
     } else {
         launch(task, host, app, worker)
     }
 }
+fn writes(task: &Task) -> bool {
+    match task {
+        Task::Execute(actions::Approved::FullCheck(_)) => false,
+        Task::Execute(_)
+        | Task::ToolClose(_)
+        | Task::ToolsInstallMissing(_)
+        | Task::ToolsSettingsSave {
+            preview_only: false,
+            ..
+        } => true,
+        _ => false,
+    }
+}
+
 fn launch(
     task: Task,
     host: &HostContext,
@@ -364,16 +370,7 @@ fn launch(
         return Ok(());
     }
     app.retry = task.retry_intent();
-    let writing = matches!(
-        task,
-        Task::Execute(_)
-            | Task::ToolClose(_)
-            | Task::ToolsInstallMissing(_)
-            | Task::ToolsSettingsSave {
-                preview_only: false,
-                ..
-            }
-    );
+    let writing = writes(&task);
     let completed = matches!(task, Task::Refresh) && app.status.starts_with("Completed.");
     let activity = task_surfaces::Activity::for_task(&task, app);
     if !matches!(task, Task::Refresh) {

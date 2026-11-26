@@ -106,7 +106,7 @@ impl Activity {
             Task::ToolsInstalledInspect(_) => "Inspect installed packages",
             Task::Environment { resume: true } => "Review environment resume",
             Task::Environment { resume: false } => "Review environment plan",
-            Task::EnvironmentCheck(_) => "Prepare environment check (no execution)",
+            Task::EnvironmentCheck { .. } => "Review environment check",
             Task::ToolsStandaloneCheckPrepare(_) => "Prepare standalone checks (no execution)",
             Task::ToolsCheckPrepare(_) => "Prepare declared-tool checks (no execution)",
             Task::ToolsCheck(_) => "Check declared tools",
@@ -160,6 +160,7 @@ impl Activity {
                 match approved {
                     Approved::ToolDeclaration(_) => "Tool declaration",
                     Approved::Environment(_) => "Run environment",
+                    Approved::FullCheck(_) => "Run checks",
                     Approved::EnvironmentAbandon(_) => "Abandon environment run",
                     Approved::Profile(_) => "Save profile choice",
                     Approved::Configuration(_) => "Save configuration change",
@@ -345,6 +346,7 @@ impl Activity {
                     ("No-op", p.no_op.to_string()),
                 ],
             ),
+            Pending::FullCheck(_) => ("Check files and tools", vec![]),
             Pending::EnvironmentAbandon(p) => (
                 "Abandon environment run",
                 vec![("Repository", p.repository().display().to_string())],
@@ -445,7 +447,7 @@ impl Activity {
             operation,
             scope,
             progress: None,
-            provider_inspection: false,
+            provider_inspection: matches!(pending, Pending::FullCheck(_)),
         }
     }
 }

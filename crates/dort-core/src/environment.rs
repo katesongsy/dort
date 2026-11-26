@@ -624,19 +624,22 @@ impl Preview {
         })
     }
 
+    pub fn scope(&self) -> (&Path, &BTreeSet<String>) {
+        (
+            &self.plan.input.files.repository,
+            &self.plan.input.files.active_profiles,
+        )
+    }
+
     pub fn is_resume(&self) -> bool {
         self.resume
     }
 
-    pub fn needs_check(&self) -> bool {
-        self.plan.rows.iter().any(|row| row.row.status == "Unknown")
-            || (self.resume
-                && self.blocked()
-                && self
-                    .plan
-                    .rows
-                    .iter()
-                    .any(|row| matches!(row.row.item, Item::Tool(_))))
+    pub fn has_tools(&self) -> bool {
+        self.plan
+            .rows
+            .iter()
+            .any(|row| matches!(row.row.item, Item::Tool(_)))
     }
 
     pub fn blocked(&self) -> bool {

@@ -74,6 +74,7 @@ pub struct State {
     pub settings_open: bool,
     pub manifest_open: bool,
     manifest_path: String,
+    pub(super) manifest_error: Option<String>,
     pub settings: Settings,
     settings_key: Option<(PathBuf, String)>,
     settings_drafts: BTreeMap<(PathBuf, String), Settings>,
@@ -188,6 +189,7 @@ impl State {
         self.manifest_open = true;
     }
     pub fn manifest_check(&mut self) -> Task {
+        self.manifest_error = None;
         self.declared.check_waiting = true;
         Task::ToolsStandaloneCheckPrepare(crate::services::declared_tools::Input {
             manifest: PathBuf::from(&self.manifest_path),
@@ -395,6 +397,7 @@ impl State {
                 KeyCode::Esc => self.back(),
                 KeyCode::Enter => Some(self.manifest_check()),
                 _ => {
+                    self.manifest_error = None;
                     edit_text(&mut self.manifest_path, key);
                     None
                 }
@@ -414,6 +417,7 @@ impl State {
                 }
                 KeyCode::Enter => self.settings.prepare(dry_run),
                 _ => {
+                    self.settings.error = None;
                     edit_text(
                         &mut self.settings.fields[self.settings.focus.min(n - 1)],
                         key,
@@ -462,8 +466,14 @@ impl State {
                         },
                     ],
                     feedback: Some(ui::Feedback {
-                        text: "Check only. This does not select a repository or prepare installs.",
-                        tone: ui::design::Tone::Information,
+                        text: self.manifest_error.as_deref().unwrap_or(
+                            "Check only. This does not select a repository or prepare installs.",
+                        ),
+                        tone: if self.manifest_error.is_some() {
+                            ui::design::Tone::Attention
+                        } else {
+                            ui::design::Tone::Neutral
+                        },
                     }),
                 },
             );
@@ -535,7 +545,7 @@ impl State {
                         tone: if self.settings.error.is_some() {
                             ui::design::Tone::Error
                         } else {
-                            ui::design::Tone::Information
+                            ui::design::Tone::Neutral
                         },
                     }),
                 },

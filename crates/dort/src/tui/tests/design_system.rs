@@ -66,7 +66,7 @@ fn gallery(width: u16, height: u16, ascii: bool, mono: bool) -> Buffer {
                 Rect::new(0, 8, width, 1),
             );
             frame.render_widget(
-                Paragraph::new(design::badge("Package reported present", Tone::Information)),
+                Paragraph::new(design::badge("Package reported present", Tone::Neutral)),
                 Rect::new(0, 9, width, 1),
             );
             design::notice(
@@ -119,7 +119,7 @@ fn workflow_gallery(kind: &str, width: u16, height: u16, ascii: bool, mono: bool
     let hits = Hits::default();
     terminal.draw(|frame| {
         hits.begin(frame.area());
-        let areas = ui::chrome::shell(frame, "Fixture", super::app::Tab::Tools, false, false, &hits);
+        let areas = ui::chrome::shell(frame, "Fixture", super::app::Tab::Tools, false, false, &hits, None);
         let mut footer = areas.footer;
         match kind {
             "Help" => {
@@ -280,6 +280,7 @@ fn compact_shell_keeps_dry_run_and_tools_help_visible() {
                 true,
                 false,
                 &Hits::default(),
+                None,
             );
         })
         .unwrap();

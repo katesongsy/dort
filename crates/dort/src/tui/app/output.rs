@@ -68,9 +68,6 @@ impl App {
             self.tools_view.declared.checked = Some(std::sync::Arc::new(checked));
             self.tools_view.declared.installed = None;
             self.tools_view.declared.stale = false;
-            if self.return_to_environment.is_some() {
-                return self.return_to_environment_review();
-            }
             self.status =
                 "Declared tools checked. Select a tool for details, or Install missing.".into();
         }
@@ -254,8 +251,7 @@ impl App {
         self.tab = Tab::Checks;
         self.shell.overlay = None;
         self.details_scroll = 0;
-        self.status =
-                "Declarations validated; inspect Files for live state and verify installed tools separately.".into();
+        self.status = "Manifest check complete.".into();
 
         None
     }
@@ -295,6 +291,7 @@ impl App {
         } else {
             self.shell.scroll = 0;
             self.shell.overlay = Some(Overlay::Profiles(Box::new(ProfilePicker {
+                problem: None,
                 report,
                 requested,
                 standalone,
@@ -403,7 +400,13 @@ impl App {
                 }
                 .into();
             }
-            Err(error) => self.status = crate::tui::actions::diagnostic(&error).into(),
+            Err(error) => {
+                let text = crate::tui::actions::diagnostic(&error);
+                self.status = "".into();
+                if !self.show_input_problem(text.clone()) {
+                    self.error = Some(text);
+                }
+            }
         }
         None
     }

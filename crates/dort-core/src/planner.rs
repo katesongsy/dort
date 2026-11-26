@@ -231,7 +231,8 @@ fn validate_adoption(
         for source in std::iter::once(&existing.source).chain(existing.overrides.values()) {
             if source.starts_with(&mapping.source) || mapping.source.starts_with(source) {
                 return Err(Error::Invalid(
-                    "adoption source overlaps an existing mapping".into(),
+                    "Source overlaps an existing mapping. Choose a different repository source."
+                        .into(),
                 ));
             }
         }

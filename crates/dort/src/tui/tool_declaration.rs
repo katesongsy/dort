@@ -253,13 +253,13 @@ impl State {
             .or_else(|| {
                 editing.as_deref().map(|text| ui::Feedback {
                     text,
-                    tone: ui::design::Tone::Information,
+                    tone: ui::design::Tone::Neutral,
                 })
             })
             .or_else(|| {
                 (!self.advanced && !self.fields[3].is_empty()).then_some(ui::Feedback {
                     text: "Dependencies are configured and included in review.",
-                    tone: ui::design::Tone::Information,
+                    tone: ui::design::Tone::Neutral,
                 })
             });
         ui::field_page(

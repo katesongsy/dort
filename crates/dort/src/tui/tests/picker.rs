@@ -28,6 +28,7 @@ fn long_path() -> String {
 fn profiles(standalone: bool) -> App {
     let mut app = App::new(false);
     app.shell.overlay = Some(Overlay::Profiles(Box::new(ProfilePicker {
+        problem: None,
         standalone,
         selected: 0,
         requested: vec![],

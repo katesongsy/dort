@@ -224,7 +224,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, overlay: &Overlay) {
             choices: &[],
             toggles: &[],
             buttons: &actions,
-            feedback: None,
+            feedback: match overlay {
+                Overlay::Profiles(picker) => picker.problem.as_deref().map(|text| ui::Feedback {
+                    text,
+                    tone: Tone::Attention,
+                }),
+                _ => None,
+            },
         },
     );
     let active = Region::from_details(app.shell.picker_details);

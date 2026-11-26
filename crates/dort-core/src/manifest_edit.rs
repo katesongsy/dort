@@ -172,15 +172,30 @@ fn edit_file(doc: &mut DocumentMut, manifest: &Manifest, file: &ManagedFile) -> 
         .map_err(|_| invalid("Cannot encode this file mapping."))?
         .parse()
         .map_err(|_| invalid("Cannot save this file mapping."))?;
-    if let Some(index) = manifest.files.iter().position(|entry| entry.id == file.id) {
+    if let Some((index, before)) = manifest
+        .files
+        .iter()
+        .enumerate()
+        .find(|(_, entry)| entry.id == file.id)
+    {
         let existing = doc["files"]
             .as_array_of_tables_mut()
             .and_then(|files| files.get_mut(index))
             .ok_or_else(|| invalid("Use an array of file tables to edit this mapping."))?;
-        for key in ["source", "target", "profiles", "requires", "overrides"] {
-            if let Some(field) = fields.get(key) {
-                existing.insert(key, field.clone());
-            } else {
+        for (key, changed) in [
+            ("source", before.source != file.source),
+            ("target", before.target != file.target),
+            ("profiles", before.profiles != file.profiles),
+            ("requires", before.requires != file.requires),
+            ("overrides", before.overrides != file.overrides),
+        ] {
+            if changed && let Some(field) = fields.get(key) {
+                let field = field
+                    .clone()
+                    .into_value()
+                    .map_err(|_| invalid("Could not prepare the file mapping."))?;
+                existing.insert(key, Item::Value(field));
+            } else if changed {
                 existing.remove(key);
             }
         }
@@ -344,7 +359,9 @@ impl Preview {
                         watched_target = Some(before);
                     }
                 }
-                edit_file(&mut doc, &manifest, file)?;
+                if previous != Some(file) {
+                    edit_file(&mut doc, &manifest, file)?;
+                }
                 let override_path = |p: Platform| {
                     file.overrides
                         .get(&p)
@@ -366,7 +383,12 @@ impl Preview {
                 )
             }
         };
-        let replacement = doc.to_string();
+        let replacement = if matches!(change, Change::File(change) if change.before.as_ref() == Some(&change.mapping))
+        {
+            text.to_owned()
+        } else {
+            doc.to_string()
+        };
         let parsed = Manifest::parse(&replacement).map_err(|error| match error {
             Error::Parse(_) => invalid("Cannot save an invalid manifest."),
             error => error,
@@ -383,6 +405,10 @@ impl Preview {
             replacement,
             description,
         })
+    }
+
+    pub fn unchanged(&self) -> bool {
+        self.original == self.replacement.as_bytes()
     }
 
     pub fn human(&self) -> String {

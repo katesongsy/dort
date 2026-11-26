@@ -433,6 +433,7 @@ pub fn draw(frame: &mut Frame, mut area: ratatui::layout::Rect, app: &App, help:
     area.x += u16::from(area.width > 2);
     area.width = area.width.saturating_sub(2);
     let mut sections = vec![("Switch pages", "o Overview   f Files   t Tools\nr Recovery   c Checks   g Git\nUse the number on a tab to open it. While editing, keys type into the field or filter.".to_owned())];
+    sections.push(("Switch working scope", "On browsing pages, click the repository or profiles in the header. Ctrl-P chooses a repository. Ctrl-T opens its profiles. Leave a review before switching scope.".to_owned()));
     if matches!(help.topic, Topic::Tools) {
         sections.insert(0, ("Tools guide", "Tools opens declarations. Check installed asks which package managers to query, then shows each result for approval. Installed means the package manager reports the package, not that the command works. Install missing reviews eligible tools once, installs in order and stops on failure. Earlier installs stay; there is no rollback. Settings and history live under Tools.".to_owned()));
     }

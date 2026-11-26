@@ -41,6 +41,13 @@ impl App {
         if self.busy {
             return Some("Activity / Work in progress");
         }
+        if self.environment_review_open() {
+            return Some(if self.tab == Tab::Overview {
+                "Overview / Environment"
+            } else {
+                "Review environment"
+            });
+        }
         if self.preview.is_some() {
             return Some("Review changes");
         }
@@ -163,6 +170,7 @@ impl App {
         self.failure = None;
         self.retry = None;
         self.show_result = false;
+        self.status = "".into();
         self.shell.overlay = None;
         self.shell.return_to_adopt = false;
         self.profiles.open = false;

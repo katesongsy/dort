@@ -19,6 +19,7 @@ JSON and nonterminal writes still need `--yes`.
 Run `dort` or `dort tui`.
 
 - `F1`: Help.
+- `Ctrl-P`: Choose a repository. `Ctrl-T`: Open its profiles. You can also click the scope in the header. Leave a review before switching.
 - `F2`: More actions, including preview-only mode and About.
 - Sections: Overview `o`, Files `f`, Tools `t`, Recovery `r`, Checks `c`, Git `g`.
 - `Enter`: open the selected item or invoke the primary action.
@@ -186,7 +187,7 @@ dort profiles list --profile work
 
 `base` is always on. A temporary `--profile` wins over the saved choice, which wins over repository and platform defaults. Saved choices affect only the selected registered repository. Saving a choice leaves files and tools in place. An installed link can appear as **No longer selected** until you remove it separately.
 
-From **Overview**, open **Profiles**, then choose **New profile**. Enter a name, then press **Space** on each default row to turn it on or off. **All hosts** turns the profile on everywhere; **macOS** and **Linux** turn it on for that platform. Leave all three off for an optional profile. **Edit profile defaults**, **Rename profile**, and **Delete profile** let you pick an existing profile first. Only unused profiles can be deleted. Press **F1 Help** for field details.
+From **Overview**, open **Profiles** with `2`, then choose **New profile**. Enter a name, then press **Space** on each default row to turn it on or off. **All hosts** turns the profile on everywhere; **macOS** and **Linux** turn it on for that platform. Leave all three off for an optional profile. **Edit profile defaults**, **Rename profile**, and **Delete profile** let you pick an existing profile first. Only unused profiles can be deleted. Press **F1 Help** for field details.
 
 In **Overview → Profiles**, select a profile and choose **Local choice**. Select **Use defaults**, **On**, or **Off**, then review and save. Use the temporary profile picker in **Checks** to try additions without saving them.
 
@@ -226,7 +227,7 @@ If a run stops, review **Resume**. Dort rechecks confirmed work without reinstal
 
 An unfinished run cannot be replaced with a new plan. If Resume is blocked and you want to start over, review **Abandon environment run**. Dort keeps the old run record and leaves completed links and packages in place. Before retrying an uncertain install, close any unresolved install record in **Tools History** (or `dort tools close-attempt ID`), run **Environment check**, and review a new plan. Dort does not upgrade, downgrade, or uninstall a mismatched package. Use the package manager outside Dort to select the declared version, or correct the declaration, then check again.
 
-In the TUI, use **Review environment** in **Overview**. If the plan needs a tool check, choose **Check tools** from the review. Dort returns to a fresh review when the check finishes. To continue after a stopped run, open **Environment run** in **Recovery** and choose **Review resume**. To keep completed changes and start over, choose **Abandon run** on the run record.
+In the TUI, open **Overview → Environment** with `3`, or choose **Review environment**. Press `C` or choose **Check environment** to review and run the checks, including package-manager checks for the selected tools. Dort returns to the updated environment review. Checking does not apply files or install packages. To continue after a stopped run, open **Environment run** in **Recovery** and choose **Review resume**. To keep completed changes and start over, choose **Abandon run** on the run record.
 
 ## Checks
 

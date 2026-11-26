@@ -446,8 +446,12 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
         );
     app.preview_approval()
         .present_key(&app.hits, preview.pending.confirmation_label());
-    if app.environment_review_needs_check() {
-        app.presented("Check tools", "c", Target::Action(Action::EnvironmentCheck));
+    if app.environment_can_check() {
+        app.presented(
+            "Check environment",
+            "c",
+            Target::Action(Action::EnvironmentCheck),
+        );
     }
     if app.file_review_needs_environment() {
         app.presented(
@@ -467,16 +471,23 @@ fn overlay(frame: &mut Frame, inner: Rect, app: &App, overlay: &Overlay) {
         Overlay::Profiles(_) | Overlay::Repositories { .. } => {
             super::pickers::draw(frame, inner, app, overlay)
         }
-        Overlay::Form(_) if app.shell.form_details => ui::reader::Reader::new(&app.hits)
-            .with_wheel(Wheel::Overlay)
-            .report(
-                frame,
-                inner,
-                "Draft details",
-                document(views::overlay_text(app, overlay, inner.height, inner.width)),
-                app.shell.scroll,
-                true,
-            ),
+        Overlay::Form(form) if app.shell.form_details => {
+            let draft = views::overlay_text(app, overlay, inner.height, inner.width);
+            let details = match &app.shell.form_feedback {
+                Some((owner, text)) if owner == form => format!("{text}\n\n{draft}"),
+                _ => draft,
+            };
+            ui::reader::Reader::new(&app.hits)
+                .with_wheel(Wheel::Overlay)
+                .report(
+                    frame,
+                    inner,
+                    "Draft details",
+                    document(details),
+                    app.shell.scroll,
+                    true,
+                );
+        }
         Overlay::Form(form) => super::forms::draw(frame, inner, app, *form),
         _ => ui::text_view(
             frame,
@@ -494,6 +505,103 @@ fn overlay(frame: &mut Frame, inner: Rect, app: &App, overlay: &Overlay) {
     }
     app.presented("Back", "Esc", Target::Back);
 }
+fn scope_header(app: &App, width: u16) -> Option<(String, Option<String>)> {
+    let short_path = |path: &std::path::Path| {
+        ui::inline(
+            &path
+                .file_name()
+                .unwrap_or(path.as_os_str())
+                .to_string_lossy(),
+        )
+    };
+    let profile_label = |names: Vec<&str>| {
+        let names = if names.is_empty() {
+            "Unknown".into()
+        } else if width < 105 && names.len() > 2 {
+            format!("{}, +{}", names[0], names.len() - 1)
+        } else {
+            names.join(", ")
+        };
+        format!("Profiles: {names}")
+    };
+    if app.dialog_title().is_some() || app.error.is_some() || app.busy || app.show_result {
+        return None;
+    }
+    if let Some(review) = &app.preview {
+        use super::actions::Pending;
+        let (kind, path, profiles) = match &review.pending {
+            Pending::Environment(plan) => {
+                let (path, profiles) = plan.scope();
+                ("Repo", path, profiles)
+            }
+            Pending::Files(plan) => (
+                "Repo",
+                plan.inputs.repository.as_path(),
+                &plan.inputs.active_profiles,
+            ),
+            Pending::FullCheck(check) => {
+                let (path, profiles) = check.scope();
+                ("Manifest", path, profiles)
+            }
+            _ => return None,
+        };
+        return Some((
+            format!("{kind}: {}", short_path(path)),
+            Some(profile_label(profiles.iter().map(String::as_str).collect())),
+        ));
+    }
+    if app.tab == Tab::Git && !app.git_view.follows_files {
+        return app
+            .git_view
+            .root
+            .as_deref()
+            .map(|root| (format!("Git: {}", short_path(root)), None));
+    }
+    if app.tab == Tab::Checks
+        && let Some((report, true)) = &app.check
+    {
+        return Some((format!("Manifest: {}", short_path(&report.manifest)), None));
+    }
+    if app.tab == Tab::Tools
+        && let Some(result) = &app.tools_view.declared.standalone_result
+    {
+        return Some((
+            format!(
+                "Manifest: {}",
+                short_path(&result.reconciliation.scope.manifest)
+            ),
+            None,
+        ));
+    }
+    if app.tab == Tab::Recovery {
+        return Some(("History: all repositories".into(), None));
+    }
+    if app.tab == Tab::Tools && app.tools_view.installed_open {
+        return Some(("Installed packages: this host".into(), None));
+    }
+    if app.tab == Tab::Tools && app.tools_view.install_open {
+        return Some(("Installs: this host".into(), None));
+    }
+    let data = app.data.as_ref().filter(|d| d.overview.is_some())?;
+    let repository = data.repository.as_deref().map_or_else(
+        || "No repository".into(),
+        |root| format!("Repo: {}", short_path(root)),
+    );
+    let profiles = data.repository.as_ref().map(|_| {
+        let mut names = data
+            .profile_rows
+            .iter()
+            .filter(|row| row.on)
+            .map(|row| row.name.as_str())
+            .collect::<Vec<_>>();
+        if names.is_empty() {
+            names.extend(data.profiles.iter().map(String::as_str));
+        }
+        profile_label(names)
+    });
+    Some((repository, profiles))
+}
+
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
     app.hits.begin(area);
@@ -513,6 +621,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         }
         return;
     }
+    let scope = scope_header(app, area.width);
     let areas = ui::chrome::shell(
         frame,
         title(app),
@@ -520,46 +629,55 @@ pub fn draw(frame: &mut Frame, app: &App) {
         app.dry_run,
         app.navigation_block().is_some(),
         &app.hits,
+        scope
+            .as_ref()
+            .map(|(repository, profiles)| ui::chrome::Scope {
+                repository,
+                profiles: profiles.as_deref(),
+                switch: app.can_switch_scope() && app.tab != Tab::Recovery,
+                switch_profiles: app.can_switch_scope() && app.registered_repository(),
+            }),
     );
     let mut body = super::navigation::local(frame, areas.body, app);
-    if app.write_warning && !app.busy {
-        frame.render_widget(
-            Paragraph::new(ui::design::badge(
-                "Earlier write failed: Possible partial effects",
-                ui::design::Tone::Error,
-            )),
-            Rect::new(body.x, body.y, body.width, 1),
-        );
-        body.y += 1;
-        body.height = body.height.saturating_sub(1);
-    }
-    app.hits.wheel(body, Wheel::Details);
     let foreground = app.help.is_some() || app.more.is_some() || app.choice.is_some();
-    if !foreground && !app.busy && app.error.is_none() {
-        if let Some(notice) = app.interaction_notice {
-            let height = (1 + notice.len().div_ceil(usize::from(body.width).max(1)) as u16)
-                .min(3)
-                .min(body.height);
-            ui::design::notice(
-                frame,
-                Rect::new(body.x, body.y, body.width, height),
-                "Action unavailable",
-                notice,
-                ui::design::Tone::Attention,
-            );
-            body.y += height;
-            body.height = body.height.saturating_sub(height);
-        } else if app.tab == Tab::Overview && !app.status.as_str().is_empty() && body.height > 0 {
-            ui::chrome_prose(
-                frame,
-                Rect::new(body.x, body.y, body.width, 1),
-                app.status.as_str(),
-                ui::design::Tone::Information.style(),
-            );
-            body.y += 1;
+    if !foreground && !app.busy {
+        let bottom_line = |body: &mut Rect| {
             body.height = body.height.saturating_sub(1);
+            Rect::new(body.x, body.bottom(), body.width, 1)
+        };
+        if app.write_warning && body.height > 0 {
+            frame.render_widget(
+                Paragraph::new(ui::design::badge(
+                    "Earlier write failed: Possible partial effects",
+                    ui::design::Tone::Error,
+                )),
+                bottom_line(&mut body),
+            );
+        }
+        if app.error.is_none() && !app.show_result && body.height > 0 {
+            if let Some(notice) = app.interaction_notice {
+                let height = (1 + notice.len().div_ceil(usize::from(body.width).max(1)) as u16)
+                    .min(3)
+                    .min(body.height);
+                body.height -= height;
+                ui::design::notice(
+                    frame,
+                    Rect::new(body.x, body.bottom(), body.width, height),
+                    "Action unavailable",
+                    notice,
+                    ui::design::Tone::Attention,
+                );
+            } else if !app.status.as_str().is_empty() && app.form_page().is_none() {
+                ui::chrome_prose(
+                    frame,
+                    bottom_line(&mut body),
+                    app.status.as_str(),
+                    ui::design::Tone::Neutral.style(),
+                );
+            }
         }
     }
+    app.hits.wheel(body, Wheel::Details);
     let (body, footer) = if let Some(title) = app.dialog_title() {
         let dialog = ui::design::choice_dialog(frame, title, &app.hits);
         (dialog.body, dialog.footer)

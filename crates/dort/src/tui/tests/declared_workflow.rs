@@ -391,15 +391,28 @@ fn environment_review_and_resume_check_tools_before_touching_editor() {
     std::fs::write(f.repo.join("settings"), "editor settings\n").unwrap();
     std::fs::write(f.host.home.join("fail-b"), "").unwrap();
     let mut app = app(&f, false);
-    let check = |app: &mut super::app::App| {
-        let Some(Task::EnvironmentCheck(mut inputs)) =
-            super::tests::click_label(app, 80, 24, "C Check tools")
+    let check = |app: &mut super::app::App, keyboard| {
+        assert!(render(app, 80, 24).contains("C Check environment"));
+        let task = if keyboard {
+            key(app, KeyCode::Char('C'))
+        } else {
+            super::tests::click_label(app, 80, 24, "C Check environment")
+        };
+        let Some(Task::EnvironmentCheck {
+            mut detection,
+            resume,
+        }) = task
         else {
             panic!("environment check")
         };
-        inputs.search_dirs = vec![f.bin.clone()];
-        run(&f, app, Task::EnvironmentCheck(inputs));
-        assert!(app.tools_view.declared.check_preview.is_some());
+        detection.search_dirs = vec![f.bin.clone()];
+        let tab = app.tab;
+        run(&f, app, Task::EnvironmentCheck { detection, resume });
+        assert!(matches!(
+            app.preview.as_ref().map(|p| &p.pending),
+            Some(super::actions::Pending::FullCheck(_))
+        ));
+        assert!(app.tab == tab);
         assert!(key(app, KeyCode::Enter).is_none());
         let approved = super::tests::approve_ready(app, 80, 24).unwrap();
         run(&f, app, approved);
@@ -413,7 +426,7 @@ fn environment_review_and_resume_check_tools_before_touching_editor() {
     run(&f, &mut app, task);
     assert!(app.preview.as_ref().unwrap().text.contains("Requires: b"));
     assert!(f.calls().is_empty());
-    check(&mut app);
+    check(&mut app, true);
     assert_eq!(f.calls(), "Q");
     let approved = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     run(&f, &mut app, approved);
@@ -435,7 +448,7 @@ fn environment_review_and_resume_check_tools_before_touching_editor() {
     let task = super::tests::click_label(&mut app, 80, 24, "s Review resume").unwrap();
     run(&f, &mut app, task);
     assert!(super::tests::approve_ready(&mut app, 80, 24).is_none());
-    check(&mut app);
+    check(&mut app, false);
     let approved = super::tests::approve_ready(&mut app, 80, 24).unwrap();
     run(&f, &mut app, approved);
     assert!(super::tests::render(&app, 100, 26).contains("editor: Confirmed"));

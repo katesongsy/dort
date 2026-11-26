@@ -247,7 +247,10 @@ fn compact_forms_and_profile_picker_always_show_focused_control() {
     app.key(key(KeyCode::Char('é')), 80, 24);
     assert_eq!(app.shell.adoption.target.len(), 4096);
     let screen = render(&app, 48, 14);
-    assert!(screen.contains("..."));
+    assert!(
+        screen.contains("\\u{e9}") && screen.contains("TARGET"),
+        "{screen}"
+    );
     app.shell.overlay = Some(Overlay::Form(Form::Check));
     super::tests::focus_form(&mut app);
     for _ in 0..8 {

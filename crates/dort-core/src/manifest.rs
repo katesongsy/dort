@@ -346,7 +346,9 @@ fn check_profiles(
     }
     for value in values {
         if !known.contains(value) {
-            issues.push(format!("{label}: unknown profile {value}"));
+            issues.push(format!(
+                "{label}: unknown profile {value}. Use a declared profile or remove the name."
+            ));
         }
     }
 }
@@ -360,7 +362,9 @@ fn check_references(
     check_names(&format!("dependencies in {label}"), values, issues);
     for value in values {
         if !known.contains(value.as_str()) {
-            issues.push(format!("{label}: unknown required tool {value}"));
+            issues.push(format!(
+                "{label}: unknown required tool {value}. Use a declared tool ID."
+            ));
         }
     }
 }

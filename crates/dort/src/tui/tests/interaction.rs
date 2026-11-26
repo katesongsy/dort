@@ -245,6 +245,7 @@ fn workflow_pages_keep_field_text_focus_until_the_form_is_left() {
 fn profile_app() -> App {
     let mut app = App::new(false);
     app.shell.overlay = Some(Overlay::Profiles(Box::new(ProfilePicker {
+        problem: None,
         standalone: false,
         selected: 0,
         requested: vec![],

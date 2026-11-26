@@ -67,7 +67,7 @@ pub struct App {
     pub receipt: Option<super::task_surfaces::Receipt>,
     pub show_result: bool,
     pub(super) result_next: Option<ResultNext>,
-    pub(super) return_to_environment: Option<(Tab, bool)>,
+    pub(super) manifest_tool_results: Vec<(String, &'static str)>,
     pub activity: Option<super::task_surfaces::Activity>,
     pub reviewed_activity: Option<super::task_surfaces::Activity>,
     pub failure: Option<super::task_surfaces::Failure>,
@@ -158,7 +158,7 @@ impl App {
             receipt: None,
             show_result: false,
             result_next: None,
-            return_to_environment: None,
+            manifest_tool_results: vec![],
             activity: None,
             reviewed_activity: None,
             failure: None,
@@ -217,6 +217,41 @@ impl App {
         .into();
         super::discover_content::sync(self, self.viewport.0, self.viewport.1);
     }
+    pub(super) fn complete_task(&mut self, result: dort_core::Result<Output>) -> Option<Task> {
+        if !self.writing
+            && let Err(error) = &result
+            && let Some(text) = super::actions::input_problem(error)
+            && self.show_input_problem(text)
+        {
+            return self.complete(Ok(Output::InputRejected));
+        }
+        self.complete(super::actions::present(result))
+    }
+
+    fn show_input_problem(&mut self, text: String) -> bool {
+        if let Some(Overlay::Form(form)) = self.shell.overlay {
+            self.shell.form_details = false;
+            if let Some(draft) = &mut self.shell.configuration {
+                draft.feedback = None;
+            }
+            self.shell.form_feedback = Some((form, text));
+        } else if let Some(Overlay::Profiles(picker)) = &mut self.shell.overlay {
+            picker.problem = Some(text);
+        } else if let Some(editor) = &mut self.batch_editor
+            && editor.open
+        {
+            editor.problem = Some(text);
+        } else if self.tab == Tab::Tools && self.tools_view.declaration_open {
+            self.tools_view.declaration.failure = Some(text);
+        } else if self.tab == Tab::Tools && self.tools_view.manifest_open {
+            self.tools_view.declared.clear_reviews();
+            self.tools_view.manifest_error = Some(text);
+        } else {
+            return false;
+        }
+        true
+    }
+
     pub fn complete(&mut self, result: Result<Output, String>) -> Option<Task> {
         let (result, recovery) = match result {
             Ok(Output::RecoveryRequired(blocker)) => (Err(blocker.to_string()), Some(blocker)),
@@ -318,9 +353,25 @@ impl App {
             Ok(Output::ToolsSettingsSaved { preview_only }) => {
                 self.accept_tools_settings_saved(preview_only)
             }
+            Ok(Output::ToolSettingsRejected(text)) => {
+                self.tools_view.settings.error = Some(text);
+                self.status = "".into();
+                None
+            }
             Ok(Output::Git(report)) => self.accept_git(report),
             Ok(Output::Data(data)) => self.accept_data(data),
-            Ok(Output::Checked { report, standalone }) => self.accept_checked(report, standalone),
+            Ok(Output::Checked { report, standalone }) => {
+                self.manifest_tool_results.clear();
+                self.accept_checked(report, standalone)
+            }
+            Ok(Output::ManifestChecked {
+                report,
+                standalone,
+                tools,
+            }) => {
+                self.manifest_tool_results = tools;
+                self.accept_checked(report, standalone)
+            }
             Ok(Output::Profiles {
                 report,
                 requested,
@@ -336,6 +387,17 @@ impl App {
                 None
             }
             Ok(Output::Preview(pending)) => self.accept_preview(pending),
+            Ok(Output::MappingUnchanged) => {
+                if let Some(draft) = &mut self.shell.configuration {
+                    draft.feedback = Some(("No changes to this mapping.".into(), false));
+                }
+                self.status = "".into();
+                None
+            }
+            Ok(Output::InputRejected) => {
+                self.status = "".into();
+                None
+            }
             Ok(Output::EnvironmentRecord(run)) => {
                 self.receipt = None;
                 self.result_next = run
@@ -969,7 +1031,10 @@ impl App {
                 self.shell.overlay = None;
                 Some(Task::History)
             }
-            Control::Back => None,
+            Control::Back => {
+                self.status = "".into();
+                None
+            }
         }
     }
     fn workspace_region(&self, scope: Scope) -> Option<Region> {
@@ -1182,10 +1247,25 @@ impl App {
             return None;
         }
         self.resize(width, height);
+        if width >= 48
+            && height >= 14
+            && key.modifiers == KeyModifiers::CONTROL
+            && self.can_switch_scope()
+        {
+            let action = match key.code {
+                KeyCode::Char('p') => Some(Action::Choose),
+                KeyCode::Char('t') if self.registered_repository() => Some(Action::ProfilesPage),
+                _ => None,
+            };
+            if let Some(action) = action {
+                return self.go_place(super::navigation::Place::Action(action));
+            }
+        }
         if section_shortcuts
             && key.modifiers == KeyModifiers::NONE
             && !self.key_text_entry()
             && let KeyCode::Char(letter) = key.code
+            && !(letter == 'c' && self.environment_can_check())
             && let Some(place) = super::navigation::section_shortcut(letter)
         {
             if width < 48 || height < 14 {
@@ -1408,8 +1488,9 @@ impl App {
                     self.failure = None;
                     self.failed_write = false;
                     self.retry = None;
+                    self.status = "".into();
                     self.details_scroll = 0;
-                    return self.return_to_environment_review();
+                    return None;
                 }
                 KeyCode::Home => self.details_scroll = 0,
                 KeyCode::PageDown => self.details_scroll = self.details_scroll.saturating_add(2),
@@ -1457,20 +1538,25 @@ impl App {
         {
             return self.activate(Action::EnvironmentPlan);
         }
-        if key.code == KeyCode::Char('C')
+        if matches!(key.code, KeyCode::Char('c' | 'C'))
             && !key
                 .modifiers
                 .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-            && self.environment_review_needs_check()
+            && self.environment_can_check()
         {
             return self.activate(Action::EnvironmentCheck);
         }
         if let Some(preview) = &mut self.preview {
             match key.code {
                 KeyCode::Esc => {
+                    let back = match &preview.pending {
+                        Pending::FullCheck(check) => check.cancel(),
+                        _ => None,
+                    };
                     self.preview = None;
                     self.hits.invalidate_review();
-                    self.status = "Returned to the draft.".into();
+                    self.status = "".into();
+                    return back;
                 }
                 code => preview.reader.key(&self.hits, ReviewStage::Changes, code),
             }
@@ -1961,7 +2047,7 @@ impl App {
             Intent::Submit(form @ (Form::KeepId | Form::RemoveId)) => {
                 if self.shell.unmanage_id.is_empty() {
                     self.shell.form_feedback =
-                        Some((form, "Enter the exact mapping ID to review."));
+                        Some((form, "Enter the exact mapping ID to review.".into()));
                     self.status = "Exact mapping ID required.".into();
                     return None;
                 }
@@ -1989,7 +2075,7 @@ impl App {
                     self.shell.adoption.focused = i;
                     self.shell.form_feedback = Some((
                         Form::Adopt,
-                        "Complete TARGET, ID and repository-relative SOURCE.",
+                        "Complete TARGET, ID and repository-relative SOURCE.".into(),
                     ));
                     self.status = "Adoption fields are incomplete; draft retained.".into();
                     return None;
@@ -2010,15 +2096,14 @@ impl App {
             {
                 Ok(change) => Some(Task::Configuration(Box::new(change))),
                 Err(error) => {
-                    self.status = error.to_string().into();
+                    self.show_input_problem(super::actions::diagnostic(&error));
                     None
                 }
             },
             Intent::Submit(form) => {
                 let draft = self.shell.draft(form);
                 if draft.is_empty() {
-                    self.shell.form_feedback =
-                        Some((form, "Enter an exact path. Input stays in memory only."));
+                    self.shell.form_feedback = Some((form, "Enter an exact path.".into()));
                     self.status = "Exact path required.".into();
                     return None;
                 }
@@ -2043,7 +2128,7 @@ impl App {
                             git: git.clone(),
                         }),
                         Ok(_) => {
-                            self.shell.form_feedback = Some((form, "Enter a Git source."));
+                            self.shell.form_feedback = Some((form, "Enter a Git source.".into()));
                             None
                         }
                         Err(error) => {
@@ -2099,6 +2184,8 @@ impl App {
             self.status = reason.into();
             return None;
         }
+        self.status = "".into();
+        self.interaction_notice = None;
         self.form_focus = None;
         self.failed_write = false;
         self.show_result = false;
@@ -2273,30 +2360,21 @@ impl App {
                 self.go_tab(Tab::Tools);
                 self.tools_view.open_manifest();
             }
-            Action::ToolsCheck | Action::EnvironmentCheck => {
-                let after = if action == Action::EnvironmentCheck {
-                    self.preview
-                        .take()
-                        .and_then(|preview| match preview.pending {
-                            Pending::Environment(plan) => Some((self.tab, plan.is_resume())),
-                            _ => None,
-                        })
-                } else {
-                    None
-                };
-                self.go_tab(Tab::Tools);
-                self.return_to_environment = after;
+            Action::EnvironmentCheck => {
+                let resume = self.preview.take().is_some_and(|review| matches!(review.pending, Pending::Environment(plan) if plan.is_resume()));
                 self.hits.invalidate_review();
+                return Some(Task::EnvironmentCheck {
+                    detection: self.tools_view.inspection_inputs(),
+                    resume,
+                });
+            }
+            Action::ToolsCheck => {
+                self.go_tab(Tab::Tools);
                 let details = self.tools_view.declared_details;
                 self.tools_view.leave_section();
                 self.tools_view.declared_details = details;
                 self.tools_view.declared.check_waiting = true;
-                let inputs = self.tools_view.inspection_inputs();
-                return Some(if action == Action::EnvironmentCheck {
-                    Task::EnvironmentCheck(inputs)
-                } else {
-                    Task::ToolsCheckPrepare(inputs)
-                });
+                return Some(Task::ToolsCheckPrepare(self.tools_view.inspection_inputs()));
             }
             Action::ToolsInstallMissing => {
                 self.go_tab(Tab::Tools);
@@ -2707,20 +2785,43 @@ impl App {
             self.details_scroll = 0;
         }
     }
-    pub(super) fn environment_review_needs_check(&self) -> bool {
+    pub(super) fn can_switch_scope(&self) -> bool {
+        self.data
+            .as_ref()
+            .is_some_and(|data| data.overview.is_some())
+            && self.dialog_title().is_none()
+            && !self.busy
+            && self.error.is_none()
+            && self.preview.is_none()
+            && !self.show_result
+            && self.shell.overlay.is_none()
+            && !self.text_entry()
+            && self.batch_editor.as_ref().is_none_or(|editor| !editor.open)
+            && (self.tab != Tab::Tools
+                || self.tools_view.workspace_visible() && !self.tools_view.installed_open)
+            && (self.tab != Tab::Recovery || self.history_region == Region::Queue)
+            && (self.tab != Tab::Checks
+                || self
+                    .check
+                    .as_ref()
+                    .is_none_or(|(_, standalone)| !standalone))
+            && (self.tab != Tab::Git || self.git_view.follows_files && !self.git_view.editing_root)
+    }
+
+    pub(super) fn environment_review_open(&self) -> bool {
+        self.preview
+            .as_ref()
+            .is_some_and(|review| matches!(review.pending, Pending::Environment(_)))
+    }
+
+    pub(super) fn environment_can_check(&self) -> bool {
         self.preview.as_ref().is_some_and(
-            |review| matches!(&review.pending, Pending::Environment(plan) if plan.needs_check()),
+            |review| matches!(&review.pending, Pending::Environment(plan) if plan.has_tools()),
         )
     }
 
-    pub(super) fn return_to_environment_review(&mut self) -> Option<Task> {
-        let (tab, resume) = self.return_to_environment.take()?;
-        self.go_tab(tab);
-        Some(Task::Environment { resume })
-    }
-
     fn reset_repository_scope(&mut self) {
-        self.return_to_environment = None;
+        self.manifest_tool_results.clear();
         self.profiles = Default::default();
         self.tools_view.declared.invalidate();
         self.git_view.discard_preview();
@@ -2749,7 +2850,7 @@ impl App {
             if self.shell.manifest_draft.is_empty() {
                 self.shell.overlay = Some(Overlay::Form(Form::Check));
                 self.shell.form_feedback =
-                    Some((Form::Check, "Enter the standalone manifest path."));
+                    Some((Form::Check, "Enter the standalone manifest path.".into()));
                 self.status = "Manifest path required; draft retained.".into();
                 return None;
             }

@@ -464,7 +464,7 @@ impl State {
                     ],
                     feedback: Some(ui::Feedback {
                         text: "This selection applies to this session only.",
-                        tone: ui::design::Tone::Information,
+                        tone: ui::design::Tone::Neutral,
                     }),
                 },
             );

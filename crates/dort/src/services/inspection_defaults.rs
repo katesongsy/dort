@@ -250,6 +250,11 @@ pub fn edit(
     })
 }
 
+pub enum SettingsSave {
+    Saved,
+    InvalidInput(Error),
+}
+
 impl SettingsEditor {
     pub fn matches(&self, other: &Self) -> bool {
         self.manifest == other.manifest && self.tool == other.tool && self.scope == other.scope
@@ -260,7 +265,7 @@ impl SettingsEditor {
         host: &HostContext,
         repository: Option<&Path>,
         preview_only: bool,
-    ) -> Result<()> {
+    ) -> Result<SettingsSave> {
         let lock = (!preview_only)
             .then(|| WriterLock::acquire(host))
             .transpose()?;
@@ -279,11 +284,13 @@ impl SettingsEditor {
             npm_cli: self.request.npm_cli,
             prefix: self.request.prefix,
         };
-        bind_saved(host, &self.manifest, &paths)?;
+        if let Err(error) = bind_saved(host, &self.manifest, &paths) {
+            return Ok(SettingsSave::InvalidInput(error));
+        }
         if let Some(lock) = lock {
             LocalConfig::save_tool_settings(host, &lock, self.manifest, paths)?;
         }
-        Ok(())
+        Ok(SettingsSave::Saved)
     }
 }
 
@@ -306,13 +313,12 @@ pub struct SavedPaths {
 }
 
 pub fn bind_saved(host: &HostContext, manifest: &Path, saved: &ToolSettings) -> Result<SavedPaths> {
-    let invalid = || {
-        Error::Invalid("Tool settings need absolute paths to an executable, search folders, and any required npm CLI and prefix.".into())
-    };
+    let invalid = |message: &str| Error::Invalid(message.into());
     let mut request = saved_request(manifest, saved);
     request.clone().prepare(host)?;
-    request.executable = executable(request.executable).ok_or_else(invalid)?;
-    let resolve = |path: &Path, directory: bool| {
+    request.executable = executable(request.executable)
+        .ok_or_else(|| invalid("Enter the full path to an executable package manager."))?;
+    let resolve = |path: &Path, directory: bool, message: &str| {
         path.canonicalize()
             .ok()
             .filter(|p| {
@@ -320,33 +326,42 @@ pub fn bind_saved(host: &HostContext, manifest: &Path, saved: &ToolSettings) -> 
                     && p.metadata()
                         .is_ok_and(|m| if directory { m.is_dir() } else { m.is_file() })
             })
-            .ok_or_else(invalid)
+            .ok_or_else(|| invalid(message))
     };
     request.search_dirs = request
         .search_dirs
         .iter()
-        .map(|p| resolve(p, true))
+        .map(|p| resolve(p, true, "Use existing folders in the search path."))
         .collect::<Result<_>>()?;
     request.npm_cli = request
         .npm_cli
         .as_deref()
-        .map(|p| resolve(p, false))
+        .map(|p| resolve(p, false, "Enter the full path to the npm CLI file."))
         .transpose()?;
     if let Some(prefix) = &request.prefix {
         observation::validate_output_path(prefix)?;
         let entry = observation::inspect(prefix, false)?;
         match entry.kind {
-            observation::Kind::Directory => request.prefix = Some(resolve(prefix, true)?),
+            observation::Kind::Directory => {
+                request.prefix = Some(resolve(prefix, true, "Use a folder for the npm prefix.")?)
+            }
             observation::Kind::Missing
                 if prefix != &host.home && prefix.starts_with(&host.home) => {}
-            _ => return Err(invalid()),
+            _ => {
+                return Err(invalid(
+                    "Use an existing folder or a new folder inside your home for the npm prefix.",
+                ));
+            }
         }
     }
     let mut files = Vec::new();
     for path in std::iter::once(&request.executable).chain(&request.npm_cli) {
         let entry = observation::inspect(path, false)?;
         if entry.kind != observation::Kind::Regular {
-            return Err(invalid());
+            return Err(Error::Invalid(format!(
+                "Choose an existing file instead of {}.",
+                path.display()
+            )));
         }
         files.push(entry);
     }

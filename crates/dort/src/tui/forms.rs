@@ -149,6 +149,28 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
         .filter(|_| form == Form::Configure)
         .map(|draft| draft.toggle_rows())
         .unwrap_or_default();
+    let feedback = s
+        .configuration
+        .as_ref()
+        .filter(|_| form == Form::Configure)
+        .and_then(|draft| draft.feedback.as_ref())
+        .map(|(text, problem)| ui::Feedback {
+            text,
+            tone: if *problem {
+                ui::design::Tone::Attention
+            } else {
+                ui::design::Tone::Neutral
+            },
+        })
+        .or_else(|| {
+            s.form_feedback
+                .as_ref()
+                .filter(|(owner, _)| *owner == form)
+                .map(|(_, text)| ui::Feedback {
+                    text,
+                    tone: ui::design::Tone::Attention,
+                })
+        });
     ui::field_page(
         frame,
         area,
@@ -160,13 +182,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
             choices: &[],
             toggles: &toggles,
             buttons: &actions,
-            feedback: s
-                .form_feedback
-                .filter(|(owner, _)| *owner == form)
-                .map(|(_, text)| ui::Feedback {
-                    text,
-                    tone: ui::design::Tone::Attention,
-                }),
+            feedback,
         },
     );
 }

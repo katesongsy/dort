@@ -1,6 +1,7 @@
 use super::{
     actions::{self, Output, Task},
     app::App,
+    tests::render,
 };
 use dort_core::{
     context::HostContext,
@@ -583,16 +584,15 @@ fn onboarding_app(fixture: &Fixture, dry_run: bool) -> App {
 fn run_task(app: &mut App, fixture: &Fixture, task: Task) -> Option<Task> {
     app.retry = task.retry_intent();
     app.activity = Some(super::task_surfaces::Activity::for_task(&task, app));
-    app.start(matches!(task, Task::Execute(_)));
+    app.start(super::writes(&task));
     let result = actions::perform_scoped(
         task,
         &fixture.host,
         app.repository.clone(),
         &app.requested_profiles,
         |_| Ok(()),
-    )
-    .map_err(|error| actions::diagnostic(&error));
-    app.complete(result)
+    );
+    app.complete_task(result)
 }
 
 #[test]
@@ -732,8 +732,12 @@ fn invalid_path_missing_git_and_read_errors_preserve_draft_and_old_scope() {
     type_text(&mut app, "absent/q?path");
     let task = submit_path(&mut app);
     run_task(&mut app, &fixture, task);
-    assert!(app.error.as_ref().unwrap().contains("Read failed"));
-    assert!(!app.error.as_ref().unwrap().contains("partial effects"));
+    let screen = render(&app, 80, 24);
+    assert!(
+        screen.contains("Path not found. Check the path") && !screen.contains("Retry read"),
+        "{screen}"
+    );
+    assert!(app.error.is_none());
     assert_eq!(
         app.data.as_ref().unwrap().repository,
         Some(fixture.root.clone())
@@ -1133,15 +1137,12 @@ fn adoption_blockers_dry_run_and_back_never_write_or_lose_drafts() {
     adoption_fields(&mut app, "~/.ordinary", "ordinary", "source"); // existing source
     let task = key(&mut app, KeyCode::Enter).unwrap();
     run_task(&mut app, &fixture, task);
-    assert!(app.error.is_some() || app.preview.as_ref().is_some_and(|p| p.pending.blocked()));
-    if let Some(retry) = key(&mut app, KeyCode::Enter) {
-        assert!(
-            matches!(retry, Task::Files(_)),
-            "Only a fresh read may be retried"
-        );
-        run_task(&mut app, &fixture, retry);
-    }
-    key(&mut app, KeyCode::Esc);
+    let screen = render(&app, 80, 24);
+    assert!(
+        screen.contains("Source overlaps an existing mapping") && !screen.contains("Retry read"),
+        "{screen}"
+    );
+    assert!(app.error.is_none() && app.preview.is_none());
     app.shell.adoption.source = "files/ordinary".into();
     let task = key(&mut app, KeyCode::Enter).unwrap();
     run_task(&mut app, &fixture, task);
@@ -1246,8 +1247,12 @@ fn standalone_check_is_independent_and_preserves_path_profile_drafts_on_errors()
     app.shell.manifest_focused = 0;
     let task = key(&mut app, KeyCode::Enter).unwrap();
     run_task(&mut app, &fixture, task);
-    assert!(app.error.is_some());
-    key(&mut app, KeyCode::Esc);
+    let screen = render(&app, 48, 14);
+    assert!(
+        screen.contains("Invalid TOML") && !screen.contains("Retry read"),
+        "{screen}"
+    );
+    assert!(app.error.is_none());
     assert_eq!(app.shell.manifest_draft, "standalone-q?.toml");
     assert_eq!(app.shell.check_profiles, ["extra"]);
     assert!(!fixture.host.config_dir.exists() && !fixture.host.state_dir.exists());
@@ -1529,8 +1534,14 @@ fn failed_profile_union_leaves_prior_scope_and_invalid_inventory_is_not_empty_su
     key(&mut app, KeyCode::Down);
     let task = key(&mut app, KeyCode::Enter).unwrap();
     run_task(&mut app, &fixture, task);
-    assert!(app.error.is_some() && app.requested_profiles.is_empty());
-    key(&mut app, KeyCode::Esc);
+    let screen = render(&app, 80, 24);
+    assert!(
+        screen.contains("extra")
+            && screen.contains("Needs attention")
+            && !screen.contains("Retry read"),
+        "{screen}"
+    );
+    assert!(app.error.is_none() && app.requested_profiles.is_empty());
     key(&mut app, KeyCode::Esc); // picker -> destination
     fs::write(fixture.root.join("dort.toml"), "bad manifest").unwrap();
     let data = actions::load(&fixture.host, Some(&fixture.root)).unwrap();
@@ -1549,16 +1560,17 @@ fn structural_check_reports_dependencies_and_capability_limits_without_observing
         include_str!("../../../examples/dort.toml"),
     )
     .unwrap();
-    let output = actions::perform(
-        Task::Check {
-            manifest: Some(fixture.root.join("dort.toml")),
-            requested: vec!["dev".into()],
-        },
+    let report = crate::services::check_manifest(
         &fixture.host,
-        Some(fixture.root.join("invalid")),
-        |_| Ok(()),
+        &Default::default(),
+        fixture.root.join("dort.toml"),
+        &["dev".into()],
     )
     .unwrap();
+    let output = Output::Checked {
+        report: Box::new(report),
+        standalone: true,
+    };
     let Output::Checked { report, standalone } = &output else {
         panic!("structural report")
     };
@@ -1581,7 +1593,7 @@ fn structural_check_reports_dependencies_and_capability_limits_without_observing
     app.complete(Ok(output));
     let screen = super::tests::render(&app, 160, 40);
     assert!(screen.contains("Declarations are valid"));
-    assert!(screen.contains("tool inventory and installation"));
+    assert!(screen.contains("Template") && screen.contains("Secret"));
     assert!(!fixture.root.join("templates").exists() && !fixture.root.join("secrets").exists());
     assert!(!fixture.host.config_dir.exists() && !fixture.host.state_dir.exists());
 }
@@ -2138,6 +2150,145 @@ fn profile_edit_rename_and_delete_use_the_selected_name() {
     let manifest = save(&mut app, read);
     assert_eq!(manifest.profiles.available, ["dev"]);
     assert!(!f.host.home.join(".editor").exists());
+}
+
+#[test]
+fn managed_edit_keeps_unchanged_files_and_away_from_generic_retry() {
+    use super::tests::{approve_ready, click_label, render};
+    let f = Fixture::new(true);
+    let path = f.root.join("dort.toml");
+    let original = "schema=1\n[[files]]\nid='editor'\nsource='source'\ntarget='~/.editor'\nmode='link'\n[files.overrides]\n\n[[files]]\nid='other'\nsource='other'\ntarget='~/.other'\nmode='link'\n[files.overrides]\n\n[profiles]\navailable=['work']\n";
+    fs::write(&path, original).unwrap();
+    let mut app = onboarding_app(&f, false);
+    key(&mut app, KeyCode::Char('f'));
+    click_label(&mut app, 80, 24, "Enter Details");
+    click_label(&mut app, 80, 24, "e Edit file mapping");
+    let submit = |app: &mut App| {
+        let task = key(app, KeyCode::Enter).unwrap();
+        run_task(app, &f, task);
+    };
+    submit(&mut app);
+    let screen = render(&app, 80, 24);
+    assert!(screen.contains("No changes to this mapping."), "{screen}");
+    assert!(app.preview.is_none() && app.error.is_none());
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+
+    click_label(&mut app, 80, 24, "Repository source");
+    for _ in 0..6 {
+        key(&mut app, KeyCode::Backspace);
+    }
+    type_text(&mut app, "../bad");
+    submit(&mut app);
+    let screen = render(&app, 80, 24);
+    assert!(
+        screen.contains("source must be repository-relative") && !screen.contains("Retry read"),
+        "{screen}"
+    );
+    assert!(app.preview.is_none() && app.error.is_none());
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    for _ in 0..6 {
+        key(&mut app, KeyCode::Backspace);
+    }
+    type_text(&mut app, "source");
+    click_label(&mut app, 80, 24, "Linux source");
+    type_text(&mut app, "source");
+    submit(&mut app);
+    assert!(app.preview.is_some());
+    let approved = approve_ready(&mut app, 80, 24).unwrap();
+    run_task(&mut app, &f, approved);
+    let saved = dort_core::Manifest::parse(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(
+        saved.files[0].overrides[&Platform::Linux],
+        PathBuf::from("source")
+    );
+    assert!(saved.files[1].overrides.is_empty());
+}
+
+#[test]
+fn managed_edit_shows_specific_profile_and_tool_errors_in_a_compact_form() {
+    use super::tests::{click_label, render};
+    let f = Fixture::new(true);
+    let path = f.root.join("dort.toml");
+    let original = "schema=1\n[[files]]\nid='editor'\nsource='source'\ntarget='~/.editor'\nmode='link'\n[profiles]\navailable=['work']\n";
+    fs::write(&path, original).unwrap();
+    let mut app = onboarding_app(&f, false);
+    key(&mut app, KeyCode::Char('f'));
+    click_label(&mut app, 80, 24, "Enter Details");
+    click_label(&mut app, 80, 24, "e Edit file mapping");
+    click_label(&mut app, 80, 24, "Profiles (blank uses base)");
+    for _ in 0..4 {
+        key(&mut app, KeyCode::Backspace);
+    }
+    type_text(&mut app, "typo");
+    key(&mut app, KeyCode::Tab);
+    type_text(&mut app, "missing");
+    let task = key(&mut app, KeyCode::Enter).unwrap();
+    run_task(&mut app, &f, task);
+
+    let screen = render(&app, 48, 14);
+    assert!(screen.contains("unknown profile typo"), "{screen}");
+    assert!(screen.contains("unknown required tool missing"), "{screen}");
+    assert!(
+        screen.contains("Required tools") && !screen.contains("Retry read"),
+        "{screen}"
+    );
+    assert!(app.preview.is_none() && app.error.is_none());
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    key(&mut app, KeyCode::F(3));
+    let details = render(&app, 48, 14);
+    assert!(
+        details.contains("unknown required tool missing"),
+        "{details}"
+    );
+    key(&mut app, KeyCode::F(3));
+    click_label(&mut app, 48, 14, "Required tools");
+
+    for _ in 0..7 {
+        key(&mut app, KeyCode::Backspace);
+    }
+    key(&mut app, KeyCode::BackTab);
+    for _ in 0..4 {
+        key(&mut app, KeyCode::Backspace);
+    }
+    type_text(&mut app, "work");
+    let task = key(&mut app, KeyCode::Enter).unwrap();
+    run_task(&mut app, &f, task);
+    assert!(app.preview.is_some());
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+}
+
+#[test]
+fn scope_header_switches_while_browsing_and_feedback_stays_with_its_page() {
+    use super::tests::{click_label, render};
+    let f = Fixture::new(true);
+    let mut app = onboarding_app(&f, false);
+    app.status = "Repository check finished.".into();
+    let overview = render(&app, 64, 18);
+    let rows: Vec<_> = overview.lines().collect();
+    assert!(
+        rows.iter()
+            .take(2)
+            .any(|line| line.contains("Repo: repository") && line.contains("Profiles: base")),
+        "{overview}"
+    );
+    assert!(
+        rows[rows.len() - 2].contains("Repository check finished."),
+        "{overview}"
+    );
+    assert!(click_label(&mut app, 64, 18, "Profiles: base").is_none());
+    let profile = render(&app, 64, 18);
+    assert!(profile.contains("Overview / Profiles"));
+    assert!(!profile.contains("Repository check finished."));
+    key(&mut app, KeyCode::Char('f'));
+    let event = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
+    assert!(app.key(event, 80, 24).is_none());
+    assert!(render(&app, 80, 24).contains("Choose repository"));
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Char('o'));
+    let review = key(&mut app, KeyCode::Char('3')).unwrap();
+    run_task(&mut app, &f, review);
+    app.key(event, 80, 24);
+    assert!(app.preview.is_some() && app.shell.overlay.is_none());
 }
 
 #[test]

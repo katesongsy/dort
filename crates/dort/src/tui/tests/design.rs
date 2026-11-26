@@ -159,6 +159,16 @@ fn file_details_show_selected_blocker_before_file_types_and_old_result() {
     assert!(app.preview.is_none());
 }
 #[test]
+fn routine_feedback_uses_default_text_above_the_keys() {
+    let mut app = App::new(false);
+    app.status = "Check finished.".into();
+    let screen = buffer(&app, 80, 24);
+    let at = locate(&screen, "Check finished.");
+    assert_eq!(at.1, 22);
+    assert_eq!(screen[at].fg, ratatui::style::Color::Reset);
+}
+
+#[test]
 fn input_has_a_real_visible_caret_and_field_button_hierarchy() {
     let mut app = App::new(false);
     app.shell.overlay = Some(Overlay::Form(Form::Adopt));

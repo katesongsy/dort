@@ -16,7 +16,6 @@ use ratatui::{
 #[derive(Clone, Copy)]
 pub enum Tone {
     Neutral,
-    Information,
     Success,
     Attention,
     Error,
@@ -25,7 +24,6 @@ impl Tone {
     pub fn style(self) -> Style {
         match self {
             Self::Neutral => TextRole::Value,
-            Self::Information => TextRole::Information,
             Self::Success => TextRole::Success,
             Self::Attention => TextRole::Warning,
             Self::Error => TextRole::Blocker,
@@ -35,7 +33,6 @@ impl Tone {
     fn symbol(self) -> &'static str {
         match self {
             Self::Neutral => glyphs::PENDING,
-            Self::Information => "i",
             Self::Success => glyphs::COMPLETE,
             Self::Attention => "!",
             Self::Error => glyphs::FAILED,

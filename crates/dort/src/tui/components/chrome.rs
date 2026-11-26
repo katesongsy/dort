@@ -18,6 +18,13 @@ pub struct Areas {
     pub body: Rect,
     pub footer: Rect,
 }
+pub struct Scope<'a> {
+    pub repository: &'a str,
+    pub profiles: Option<&'a str>,
+    pub switch: bool,
+    pub switch_profiles: bool,
+}
+
 pub fn shell(
     frame: &mut Frame,
     title: &'static str,
@@ -25,6 +32,7 @@ pub fn shell(
     dry_run: bool,
     blocked: bool,
     hits: &Hits,
+    scope: Option<Scope<'_>>,
 ) -> Areas {
     let area = frame.area();
     let suffix = if dry_run { " [DRY RUN]" } else { "" };
@@ -32,9 +40,22 @@ pub fn shell(
         + title
             .rsplit_once(" / ")
             .map_or(0, |(section, _)| section.len() + " / ".len());
+    let narrow_scope = scope.is_some() && area.width < 78;
+    let scope_width = if scope.is_none() {
+        0
+    } else if narrow_scope {
+        area.width
+    } else {
+        area.width / 2
+    };
+    let title_width = if narrow_scope {
+        area.width
+    } else {
+        area.width.saturating_sub(scope_width)
+    };
     let title = ui::chrome_clip(
         &format!("Dort / {title}"),
-        area.width.saturating_sub(suffix.len() as u16),
+        title_width.saturating_sub(suffix.len() as u16),
     );
     let (brand, location) = title.split_at("Dort".len().min(title.len()));
     let (location, title) = location.split_at((title_start - brand.len()).min(location.len()));
@@ -46,14 +67,23 @@ pub fn shell(
     ]);
     frame.render_widget(
         Paragraph::new(title).style(design::chrome()),
-        Rect::new(area.x, area.y, area.width, 1),
+        Rect::new(area.x, area.y, title_width, 1),
     );
+    if let Some(scope) = scope {
+        let scope_area = Rect::new(
+            area.right() - scope_width,
+            area.y + u16::from(narrow_scope),
+            scope_width,
+            1,
+        );
+        render_scope(frame, scope_area, scope, hits);
+    }
     let footer = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
     let mut body = Rect::new(
         area.x,
-        area.y + 1,
+        area.y + 1 + u16::from(narrow_scope),
         area.width,
-        area.height.saturating_sub(2),
+        area.height.saturating_sub(2 + u16::from(narrow_scope)),
     );
     if area.width >= crate::tui::workspace::SPLIT_MIN_WIDTH + RAIL_WIDTH + RAIL_GAP {
         let rail = Rect::new(body.x, body.y, RAIL_WIDTH, body.height);
@@ -91,4 +121,33 @@ pub fn shell(
         body.width = body.width.saturating_sub(rail.width + RAIL_GAP);
     }
     Areas { body, footer }
+}
+
+fn render_scope(frame: &mut Frame, area: Rect, scope: Scope<'_>, hits: &Hits) {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut segments = vec![(scope.repository, 'p', scope.switch)];
+    if let Some(profiles) = scope.profiles {
+        segments.push((profiles, 't', scope.switch_profiles));
+    }
+    let width = area.width / segments.len() as u16;
+    let mut x = area.x;
+    for (label, key, switch) in segments {
+        let cell = Rect::new(x, area.y, width, 1);
+        let style = if switch {
+            design::secondary_key()
+        } else {
+            design::muted_chrome()
+        };
+        frame.render_widget(
+            Paragraph::new(ui::chrome_clip(label, width.saturating_sub(1))).style(style),
+            cell,
+        );
+        if switch {
+            hits.click(
+                cell,
+                Target::Key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::CONTROL)),
+            );
+        }
+        x += width;
+    }
 }

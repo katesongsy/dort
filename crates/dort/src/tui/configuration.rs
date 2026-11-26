@@ -133,6 +133,7 @@ impl Kind {
 }
 
 pub struct Draft {
+    pub feedback: Option<(String, bool)>,
     pub kind: Kind,
     pub focus: usize,
     fields: Vec<String>,
@@ -179,6 +180,7 @@ impl Draft {
             kind,
             focus: 0,
             fields,
+            feedback: None,
             defaults: [false; 3],
             profile: None,
             profile_field_label: None,
@@ -260,6 +262,7 @@ impl Draft {
                 self.toggle_default();
             }
             _ if !self.is_default_row(self.focus) => {
+                self.feedback = None;
                 super::shell::edit_text(&mut self.fields[self.focus], key)
             }
             _ => (),

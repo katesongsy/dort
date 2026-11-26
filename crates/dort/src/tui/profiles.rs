@@ -46,6 +46,7 @@ impl App {
         self.profiles.selected = match key {
             KeyCode::Esc => {
                 self.profiles.open = false;
+                self.status = "".into();
                 return None;
             }
             KeyCode::Down => selected.saturating_add(1).min(last),

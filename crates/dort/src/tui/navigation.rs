@@ -100,6 +100,11 @@ pub enum Place {
 /// The rail and digit keys share one catalog per section.
 pub fn local_catalog(group: usize) -> &'static [(&'static str, Place)] {
     match group {
+        1 => &[
+            ("1 Repository", Place::Destination(Tab::Overview)),
+            ("2 Profiles", Place::Action(Action::ProfilesPage)),
+            ("3 Environment", Place::Action(Action::EnvironmentPlan)),
+        ],
         2 => &[
             ("1 Managed", Place::Destination(Tab::Files)),
             ("2 Discover", Place::Action(Action::Discover)),
@@ -167,7 +172,7 @@ pub fn location(app: &App) -> &'static str {
 impl App {
     pub(super) fn go_tab(&mut self, tab: Tab) {
         if self.tab != tab {
-            self.return_to_environment = None;
+            self.status = "".into();
             self.form_focus = None;
             self.profiles.open = false;
             self.tools_view.leave_section();
@@ -204,6 +209,8 @@ impl App {
 
 fn current(app: &App, group: usize) -> Place {
     let place = match app.tab {
+        Tab::Overview if app.profiles.open => Place::Action(Action::ProfilesPage),
+        Tab::Overview if app.environment_review_open() => Place::Action(Action::EnvironmentPlan),
         Tab::Files
             if matches!(
                 app.shell.overlay,
@@ -237,15 +244,20 @@ fn current(app: &App, group: usize) -> Place {
 pub fn local_available(app: &App) -> bool {
     use super::shell::Overlay;
     let ignored = matches!(app.shell.overlay, Some(Overlay::Ignored { .. }));
+    let overview = app.tab == Tab::Overview && app.registered_repository();
+    if app.tab == Tab::Overview && !overview {
+        return false;
+    }
     if app.busy
         || app.error.is_some()
-        || app.preview.is_some()
+        || app.preview.is_some() && !(overview && app.environment_review_open())
         || app.show_result
         || app.batch_editor.as_ref().is_some_and(|editor| editor.open)
         || app.shell.overlay.is_some() && !ignored
         || app.tab == Tab::Git && app.git_view.editing_root
         || app.page_title().is_some()
             && !ignored
+            && !(overview && (app.profiles.open || app.environment_review_open()))
             && !matches!(app.tab, Tab::Files | Tab::Git)
             && !(app.tab == Tab::Tools && app.tools_view.workspace_visible())
     {

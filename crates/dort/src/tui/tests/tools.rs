@@ -14,12 +14,9 @@ pub(super) fn key(app: &mut App, code: KeyCode) -> Option<Task> {
 }
 pub(super) fn run(f: &Fixture, app: &mut App, task: Task) {
     app.retry = task.retry_intent();
-    app.start(matches!(
-        task,
-        Task::ToolsInstallMissing(_) | Task::Execute(_)
-    ));
+    app.start(super::writes(&task));
     let output = actions::perform_scoped(task, &f.host, app.repository.clone(), &[], |_| Ok(()));
-    if let Some(refresh) = app.complete(output.map_err(|e| actions::diagnostic(&e))) {
+    if let Some(refresh) = app.complete_task(output) {
         run(f, app, refresh);
     }
 }
@@ -81,6 +78,26 @@ fn list_enter_is_always_details_before_and_after_checks_and_installs() {
     assert_eq!(f.calls().chars().filter(|c| *c == 'A').count(), 1);
 }
 #[test]
+fn bad_package_manager_path_stays_in_settings_without_write_warning() {
+    let f = Fixture::new();
+    let mut app = app(&f, false);
+    let config = f.host.local_config_path();
+    let before = fs::read(&config).unwrap();
+    settings(&f, &mut app);
+    app.tools_view.settings.fields[0] = f.bin.join("not-installed").display().to_string();
+    let task = key(&mut app, KeyCode::Enter).unwrap();
+    run(&f, &mut app, task);
+    let screen = render(&app, 48, 14);
+    assert!(
+        screen.contains("Enter the full path to an executable") && screen.contains("Invalid input"),
+        "{screen}"
+    );
+    assert!(!screen.contains("Write failed") && !app.write_warning);
+    assert_eq!(fs::read(config).unwrap(), before);
+    assert!(f.calls().is_empty());
+}
+
+#[test]
 fn saved_paths_survive_restart_and_are_scoped_to_one_manifest_and_tool() {
     let f = Fixture::new();
     f.program(
@@ -96,7 +113,8 @@ fn saved_paths_survive_restart_and_are_scoped_to_one_manifest_and_tool() {
     assert!(render(&first, 100, 30).contains("Save on this host"));
     first.tools_view.settings.fields[0] = "relative-program".into();
     let task = key(&mut first, KeyCode::Enter).unwrap();
-    assert!(actions::perform_scoped(task, &f.host, Some(f.repo.clone()), &[], |_| Ok(())).is_err());
+    run(&f, &mut first, task);
+    assert!(first.tools_view.settings.error.is_some() && first.error.is_none());
     assert_eq!(fs::read(&config).unwrap(), before);
     first.tools_view.settings.fields[0] = custom.display().to_string();
     let task = key(&mut first, KeyCode::Enter).unwrap();
@@ -200,7 +218,7 @@ fn standalone_check_rejects_relative_and_symlink_paths_without_running_a_manager
         let mut ui = app(&f, false);
         let task = standalone(&f, &mut ui, path);
         run(&f, &mut ui, task);
-        assert!(ui.error.is_some());
+        assert!(ui.tools_view.manifest_error.is_some() && ui.error.is_none());
         assert!(ui.tools_view.declared.check_preview.is_none());
     }
     assert!(f.calls().is_empty());

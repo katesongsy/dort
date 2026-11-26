@@ -119,9 +119,20 @@ pub fn installed(current: &super::installed_tools::Current) -> String {
     text
 }
 pub fn check_review(review: &super::declared_tools::CheckReview<'_>) -> String {
+    format!("Check installed\n{}", check_scope(review))
+}
+
+pub fn check_scope(review: &super::declared_tools::CheckReview<'_>) -> String {
     let mut text = format!(
-        "Check installed\nManifest: {}\n{}\n",
+        "Manifest: {}\nProfiles: {}\n{}\n",
         inline(&review.scope.manifest.display().to_string()),
+        review
+            .scope
+            .active_profiles
+            .iter()
+            .map(|name| inline(name))
+            .collect::<Vec<_>>()
+            .join(", "),
         review.warning
     );
     for scope in &review.inspections {

@@ -20,6 +20,7 @@ pub struct Editor {
     pub item: usize,
     pub focused: usize,
     pub open: bool,
+    pub problem: Option<String>,
     pub item_form: bool,
     pub details: bool,
     pub scroll: u16,
@@ -45,6 +46,7 @@ impl Editor {
             drafts,
             item: 0,
             open: true,
+            problem: None,
             item_form: false,
             details: false,
             scroll: 0,
@@ -77,6 +79,7 @@ impl Editor {
         self.focused = self.drafts.len() * AdoptionDraft::FIELDS;
         self.scroll = 0;
         self.open = true;
+        self.problem = None;
         self.item_form = false;
         self.details = false;
     }
@@ -126,7 +129,10 @@ impl Editor {
                     self.focused =
                         start + (field + AdoptionDraft::FIELDS - 1) % AdoptionDraft::FIELDS
                 }
-                _ => super::shell::edit_text(self.drafts[self.item].field(field), key),
+                _ => {
+                    self.problem = None;
+                    super::shell::edit_text(self.drafts[self.item].field(field), key);
+                }
             }
             return None;
         }
@@ -259,7 +265,10 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
                     target: Target::BatchDetails,
                 },
             ],
-            feedback: None,
+            feedback: editor.problem.as_deref().map(|text| ui::Feedback {
+                text,
+                tone: ui::design::Tone::Attention,
+            }),
         },
     );
     let sections = Layout::vertical([
