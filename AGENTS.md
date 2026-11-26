@@ -7,6 +7,10 @@
 - Write `docs/user` for end users, not developers: user-friendly language, no internal implementation details.
 - Put design and implementation contracts in ignored `specs/` only. They are obsolete once implemented; do not maintain them as documentation.
 
+## Releases
+
+- Follow [the release runbook](docs/releases.md). An approved version release covers GitHub Releases, Homebrew, and crates.io unless the request limits the channels.
+
 ## TUI design
 
 - Use `design-system/index.html` and `design-system/reference/` for new designs. They define the target standard; migrate existing screens separately.

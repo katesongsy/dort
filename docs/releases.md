@@ -1,6 +1,6 @@
 # Release mechanics
 
-Releases are manual and explicit. Commit, tag, push, publish or upload only when asked. Registry publication needs separate approval.
+An approved version release includes GitHub Releases, Homebrew, and crates.io. Follow any channel limits in the request. Preparing a release does not authorize publication.
 
 ## Requirements
 
@@ -29,10 +29,10 @@ Tag-triggered publication uses only successful exact-commit CI artifacts. It ver
 
 ## Distribution
 
-- Homebrew: the separate [tap](https://github.com/katesongsy/homebrew-tap) installs release archives and keeps its own validation.
-- Cargo: `dort` and `dort-core` are published separately after approval.
-
-These channels own packaging. They do not change Dort behavior or supported hosts.
+1. Push the version tag after CI passes on the exact commit. Verify the published GitHub release and all four archives against `SHA256SUMS`.
+2. Update the [Homebrew tap](https://github.com/katesongsy/homebrew-tap) formula, receipts, and README with the release URLs, checksums, and commit. Run `ruby scripts/test-formula.rb`. Wait for all four tap CI installs to pass before updating its default branch.
+3. From the clean tagged commit, run `cargo publish --locked -p dort-core --dry-run`, then rerun without `--dry-run`. Wait for that version to appear in the crates.io index. Repeat for `dort`.
+4. Check that the public tap shows the new version. Install the exact version of `dort` from crates.io into a scratch directory and run `dort --version`.
 
 ## Changelog
 
