@@ -506,7 +506,7 @@ def run():
             session.send(b"?")
             session.wait(b"Start with a repository")
             session.send(b"\x1b[6~" * 30)
-            session.settle()
+            session.wait(b"Use a repository you already have")
             assert b"Start with a repository" not in session.screen.text()
             session.send(b"\x1b[H")
             session.wait(b"Start with a repository")
@@ -566,7 +566,8 @@ def run():
                 session.settle()
                 session.focused_field('ID')
                 session.send(b'\x1bOP')  # Help opens without disturbing the retained draft.
-                session.wait(b'Keys in this context')
+                session.wait(b'Adopt a file')
+                session.wait(b'Close Help')
                 session.settle()
                 assert not session.screen.cursor_visible, 'Help retained the background field caret'
                 assert session.screen.text().isascii() == ascii_only, "Unexpected decoration capability"
@@ -655,14 +656,14 @@ def run():
             session.wait(b'Ignore discovery path')
             assert not ignore_store.exists(), 'Ignore preview wrote preferences'
             session.send(b'\x1bOP')
-            session.wait(b'Keys in this context')
+            session.wait(b'Review proposed changes')
             session.send(b'\r')
             session.settle()
             assert not ignore_store.exists(), 'Help approved a preview'
             session.send(b'\x1b')
             session.wait(b'Ignore discovery path')
             session.send(b'\r\r\x1bOP')
-            session.wait(b'Keys in this context')
+            session.wait(b'Review proposed changes')
             session.send(b'y\r')
             session.settle()
             assert not ignore_store.exists(), 'Help submitted confirmation input'
@@ -670,11 +671,11 @@ def run():
             session.wait(b'Ignore discovery path')
             session.send(b'Y')  # Only lowercase y can approve.
             session.send(b'\x1bOP')
-            session.wait(b'Keys in this context')
+            session.wait(b'Review proposed changes')
             session.resize((13,47))
             session.settle()
             session.resize((14,48))
-            session.wait(b'Keys in this context')
+            session.wait(b'Review proposed changes')
             session.send(b'\x1b')  # Help closes to preview; fresh confirmation required
             session.wait(b'Ignore discovery path')
             session.ready_review()
@@ -1165,16 +1166,18 @@ def run():
             session.send(b"\t ")  # Tab to the first default, then toggle it.
             session.wait(b"[x] On")
             session.send(b"\x1bOP")  # VT100 PF1.
-            session.wait(b"Profile name: enter a new name")
-            session.wait(b"press Space")
+            session.wait(b"Enter a new name such as work")
+            session.wait(b"Press Space on a row to toggle it")
             session.send(b"\x1bOP")
+            session.wait(b"Esc Stop editing")
             session.wait(b"Default on Linux")
             screen = session.screen.text()
             assert b"work" in screen and b"[x] On" in screen
             assert b"Existing name" not in screen
             session.send(b"\x1b[11~")  # CSI PF1.
-            session.wait(b"Profile name: enter a new name")
+            session.wait(b"Enter a new name such as work")
             session.send(b"\x1b[11~")
+            session.wait(b"Esc Stop editing")
             session.wait(b"Default on Linux")
             session.send(b"\x1b")
             session.send(b"\x1b")

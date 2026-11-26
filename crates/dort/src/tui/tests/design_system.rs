@@ -126,11 +126,15 @@ fn workflow_gallery(kind: &str, width: u16, height: u16, ascii: bool, mono: bool
                 let dialog = design::choice_dialog(frame, "Help", &hits);
                 let area = dialog.body;
                 footer = dialog.footer;
-                ui::report(frame, area, "", ui::help::document(
-                    area.width, "Tools", "Inspect metadata before choosing a change.",
-                    &[("Enter", "Current primary action"), ("Esc", "Return with drafts retained")],
-                    &[("Privacy", "No provider runs merely by opening this dialog.".into())],
-                ), 0, false);
+                static GUIDE: ui::help::Guide = ui::help::Guide {
+                    title: "Tools",
+                    intro: "Inspect metadata before choosing a change.",
+                    sections: &[ui::help::Section {
+                        label: "Package checks",
+                        text: "Choose Check installed to review the package managers before running a check.",
+                    }],
+                };
+                ui::help::draw(frame, area, &GUIDE, 0);
             }
             "Choices" => {
                 let dialog = design::choice_dialog(frame, "Choose package manager", &hits);
@@ -206,8 +210,8 @@ fn workflow_components_render_at_every_supported_gallery_size() {
                 );
                 if kind == "Help" {
                     assert!(
-                        rendered.contains("Keys in this context")
-                            && rendered.contains("Current primary action")
+                        rendered.contains("Package checks")
+                            && rendered.contains("Choose Check installed")
                     );
                     let has_style = |label: &str, emphasis: Modifier| {
                         buffer.content.windows(label.len()).any(|cells| {
@@ -221,14 +225,8 @@ fn workflow_components_render_at_every_supported_gallery_size() {
                         Modifier::BOLD
                     };
                     assert!(has_style("Tools", title));
-                    assert!(has_style("Keys in this context", Modifier::BOLD));
+                    assert!(has_style("Package checks", Modifier::BOLD));
                     assert!(has_style("Inspect metadata", Modifier::empty()));
-                    assert!(has_style("Enter", Modifier::BOLD));
-                    assert!(rendered.contains(if ascii {
-                        "Keys in this context  ----"
-                    } else {
-                        "Keys in this context  ────"
-                    }));
                 }
                 if kind == "Result" {
                     for fact in [

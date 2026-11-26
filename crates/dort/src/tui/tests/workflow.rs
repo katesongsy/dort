@@ -2045,7 +2045,7 @@ fn create_profile_and_map_existing_repository_file_without_deploying() {
     key(&mut app, KeyCode::Char(' '));
     assert!(key(&mut app, KeyCode::F(1)).is_none());
     let help = super::tests::render(&app, 80, 24);
-    assert!(help.contains("Profile name: enter a new name"));
+    assert!(help.contains("Create profile") && help.contains("Enter a new name such as work"));
     assert!(help.contains("optional profile"));
     assert!(key(&mut app, KeyCode::F(1)).is_none());
     save(&mut app);

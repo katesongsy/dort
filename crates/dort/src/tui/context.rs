@@ -1,4 +1,3 @@
-//! Presentation catalog for scopes and effects.
 use super::{
     app::{App, Tab},
     shell::Action,
@@ -10,37 +9,10 @@ pub enum Scope {
     Marked,
     View,
 }
-impl Scope {
-    pub fn short(self) -> &'static str {
-        match self {
-            Self::Item => "Item",
-            Self::Marked => "Marked",
-            Self::View => "View",
-        }
-    }
-}
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Effect {
-    View,
-    Read,
-    Draft,
-    Preview,
-}
-impl Effect {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::View => "View / selection",
-            Self::Read => "Read-only",
-            Self::Draft => "Editable draft",
-            Self::Preview => "Mutation preview",
-        }
-    }
-}
 #[derive(Clone, Copy)]
 pub struct Entry {
     pub action: Action,
     pub scope: Scope,
-    pub effect: Effect,
     pub primary: Option<usize>,
 }
 pub(super) fn entry(action: Action, primary: Option<usize>) -> Entry {
@@ -51,20 +23,9 @@ pub(super) fn entry(action: Action, primary: Option<usize>) -> Entry {
         BatchAdopt | ApplyMarked | KeepMarked | RemoveMarked | ClearMarks => Scope::Marked,
         _ => Scope::View,
     };
-    let effect = match action {
-        Apply | Keep | Remove | IgnoreSelected | Rollback | Resume | Abandon | ApplyMarked
-        | KeepMarked | RemoveMarked => Effect::Preview,
-        Adopt | AdoptSelected | BatchAdopt | KeepId | RemoveId | Init | CheckStandalone
-        | Profiles | StandaloneProfiles | ToolDeclaration | ToolsConfigure | ToolsCheck
-        | ToolsStandaloneCheck | ToolsInstallMissing | ToolsInstalled => Effect::Draft,
-        Discover | Refresh | CheckCurrent | Diagnostics | GitStatus | GitUnstaged | GitStaged
-        | GitRefresh | ToolAttempts => Effect::Read,
-        _ => Effect::View,
-    };
     Entry {
         action,
         scope,
-        effect,
         primary,
     }
 }

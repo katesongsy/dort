@@ -80,7 +80,7 @@ fn short(action: Action) -> &'static str {
 pub fn actions(app: &App) -> Vec<ui::ActionButton> {
     if app.help.is_some() {
         return vec![ui::ActionButton {
-            label: "Back",
+            label: "Close Help",
             key: "Esc",
             target: Target::Back,
         }];

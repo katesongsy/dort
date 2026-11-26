@@ -13,7 +13,7 @@ use ratatui::{
 use std::{collections::BTreeMap, path::PathBuf};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Page {
+pub(super) enum Page {
     List,
     Details,
     Declaration,
@@ -84,7 +84,7 @@ pub struct State {
     pub installed: super::installed_tools::State,
 }
 impl State {
-    fn page(&self) -> Page {
+    pub(super) fn page(&self) -> Page {
         if self.declaration_open {
             Page::Declaration
         } else if self.settings_open {
