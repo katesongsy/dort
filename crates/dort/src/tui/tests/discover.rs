@@ -90,13 +90,10 @@ fn contextual_content_help_withholds_payload_rejects_late_read_and_restores_focu
     app.content.scroll = 2;
     let selected = app.candidate_selected;
     key(&mut app, KeyCode::F(1));
-    assert!(matches!(
-        app.help.as_ref().unwrap().topic,
-        super::help::Topic::Content
-    ));
     for (w, h) in [(48, 14), (80, 24), (140, 40)] {
         super::files::FORMATTED_ROWS.with(|r| r.set(0));
         let screen = render(&app, w, h);
+        assert!(screen.contains("Selected file contents"));
         assert!(!screen.contains("synthetic-preview-A")); // Dimmed location metadata is not private content.
         assert_eq!(super::files::FORMATTED_ROWS.with(|r| r.get()), 0);
     }

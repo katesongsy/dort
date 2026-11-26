@@ -3,7 +3,7 @@ use super::{
     actions::{Data, Output, Task},
     app::{App, Tab},
     batch_ui::Editor,
-    help::Topic,
+    configuration::{Draft, Kind},
     shell::{Form, Overlay},
     tests::render,
 };
@@ -28,28 +28,29 @@ fn inert(app: &mut App) {
 }
 #[test]
 fn every_view_has_its_own_help_and_preserves_navigation_state() {
-    for (tab, title) in [
-        (Tab::Overview, "Overview"),
-        (Tab::Files, "Managed files"),
-        (Tab::Recovery, "Recovery"),
-        (Tab::Checks, "Manifest checks"),
-        (Tab::Git, "Git inspection"),
+    for (tab, title, first_move) in [
+        (Tab::Overview, "Overview", "Start with a repository"),
+        (Tab::Files, "Managed files", "A mapping tells Dort"),
+        (Tab::Recovery, "Recovery", "Select an operation record"),
+        (Tab::Checks, "Manifest checks", "Choose Check repository"),
+        (Tab::Git, "Git status", "See which paths changed"),
+        (
+            Tab::Tools,
+            "Declared tools",
+            "Review tools your repository lists",
+        ),
     ] {
         let mut app = App::new(false);
         app.tab = tab;
         app.details_scroll = 7;
         key(&mut app, KeyCode::F(1));
-        assert_eq!(app.help.as_ref().unwrap().topic.title(), title);
         for (w, h) in [(48, 14), (80, 24), (140, 40)] {
             let s = render(&app, w, h);
-            assert!(s.contains(title));
-            assert!(!s.contains("[p Scope]")); // no underlying destination body or controls
+            assert!(s.contains(title) && s.contains(first_move), "{s}");
+            assert!(s.contains("Esc Close Help") && !s.contains("[p Scope]"));
+            assert!(!s.contains("Related tasks") && !s.contains("Keys in this context"));
         }
         inert(&mut app);
-        key(&mut app, KeyCode::PageDown);
-        assert_eq!(app.help.as_ref().unwrap().scroll, 2);
-        key(&mut app, KeyCode::Home);
-        assert_eq!(app.help.as_ref().unwrap().scroll, 0);
         key(&mut app, KeyCode::F(1));
         assert!(app.help.is_none() && app.tab == tab && app.details_scroll == 7);
         key(&mut app, KeyCode::Char('?'));
@@ -59,13 +60,14 @@ fn every_view_has_its_own_help_and_preserves_navigation_state() {
 }
 #[test]
 fn forms_actions_and_search_keep_exact_drafts_scroll_and_focus() {
-    for form in [
-        Form::Choose,
-        Form::Init,
-        Form::Adopt,
-        Form::KeepId,
-        Form::RemoveId,
-        Form::Check,
+    for (form, guidance) in [
+        (Form::Choose, "root folder that contains dort.toml"),
+        (Form::Init, "give an unused path"),
+        (Form::Adopt, "repository file available at the old path"),
+        (Form::KeepId, "leaves a regular copy"),
+        (Form::RemoveId, "repository source stays"),
+        (Form::Check, "Base is always active"),
+        (Form::Clone, "HTTPS Git URL or absolute local Git path"),
     ] {
         let mut app = App::new(false);
         app.shell.overlay = Some(Overlay::Form(form));
@@ -78,8 +80,11 @@ fn forms_actions_and_search_keep_exact_drafts_scroll_and_focus() {
         let target = app.shell.adoption.target.clone();
         app.shell.scroll = 3;
         key(&mut app, KeyCode::F(1));
-        assert!(matches!(app.help.as_ref().unwrap().topic, Topic::Form(f) if f == form));
-        assert!(!render(&app, 140, 40).contains("private-draft"));
+        let screen = render(&app, 140, 40);
+        assert!(
+            screen.contains(guidance) && !screen.contains("private-draft"),
+            "{screen}"
+        );
         inert(&mut app);
         key(&mut app, KeyCode::Esc);
         assert!(matches!(app.shell.overlay, Some(Overlay::Form(f)) if f == form));
@@ -106,6 +111,118 @@ fn forms_actions_and_search_keep_exact_drafts_scroll_and_focus() {
     }
 }
 #[test]
+fn configuration_help_explains_what_each_form_changes() {
+    for (kind, title, guidance) in [
+        (
+            Kind::File,
+            "Add file mapping",
+            "Saving does not create the link",
+        ),
+        (
+            Kind::EditFile,
+            "Edit file mapping",
+            "The Mapping ID stays fixed",
+        ),
+        (Kind::CreateProfile, "Create profile", "optional profile"),
+        (
+            Kind::EditProfileDefaults,
+            "Edit profile defaults",
+            "Local choice",
+        ),
+        (Kind::RenameProfile, "Rename profile", "instead of work"),
+        (Kind::Startup, "Set startup repository", "future launches"),
+        (Kind::Forget, "Forget repository", "keeps the repository"),
+        (
+            Kind::Reconnect,
+            "Reconnect moved repository",
+            "Previous registered path",
+        ),
+        (
+            Kind::Repair,
+            "Open a manifest repair draft",
+            "Open repair draft loads editable lines",
+        ),
+    ] {
+        let mut app = App::new(false);
+        app.shell.overlay = Some(Overlay::Form(Form::Configure));
+        app.shell.configuration = Some(Draft::new(
+            kind,
+            None,
+            Some(std::path::Path::new("/private-path")),
+        ));
+        key(&mut app, KeyCode::F(1));
+        let screen = render(&app, 140, 40);
+        assert!(
+            screen.contains(title) && screen.contains(guidance),
+            "{screen}"
+        );
+        assert!(!screen.contains("/private-path"));
+    }
+}
+
+#[test]
+fn tool_help_follows_the_form_picker_and_package_details() {
+    let mut app = App::new(false);
+    app.tab = Tab::Tools;
+    app.tools_view.declare();
+    super::tests::focus_form(&mut app);
+    key(&mut app, KeyCode::F(1));
+    let screen = render(&app, 80, 24);
+    assert!(screen.contains("Add tool declaration") && screen.contains("Tool ID"));
+    key(&mut app, KeyCode::F(1));
+    for _ in 0..3 {
+        key(&mut app, KeyCode::Tab);
+    }
+    key(&mut app, KeyCode::Char('?'));
+    assert!(render(&app, 80, 24).contains("Add tool declaration"));
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Char(' '));
+    key(&mut app, KeyCode::F(1));
+    assert!(render(&app, 80, 24).contains("Choose a package manager"));
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.tools_view.declaration.fields[4], "brew");
+
+    let mut app = App::new(false);
+    app.tab = Tab::Tools;
+    app.tools_view.installed_open = true;
+    for (details, title) in [(false, "Installed packages"), (true, "Package details")] {
+        app.tools_view.installed.details = details;
+        key(&mut app, KeyCode::F(1));
+        let screen = render(&app, 80, 24);
+        assert!(screen.contains(title), "{screen}");
+        key(&mut app, KeyCode::Esc);
+    }
+}
+
+#[test]
+fn compact_help_pages_keep_context_and_stop_at_the_end() {
+    let mut app = App::new(false);
+    app.shell.overlay = Some(Overlay::Form(Form::Configure));
+    app.shell.configuration = Some(Draft::new(Kind::File, None, None));
+    let key = |app: &mut App, code| app.key(KeyEvent::new(code, KeyModifiers::NONE), 48, 14);
+    let screen = |app: &App| render(app, 48, 14);
+    key(&mut app, KeyCode::F(1));
+    let first = screen(&app);
+    assert!(first.contains("Repository source") && !first.contains("Platform sources"));
+    key(&mut app, KeyCode::PageDown);
+    let second = screen(&app);
+    assert!(second.contains("Home destination") && !second.contains("Declare a link"));
+    key(&mut app, KeyCode::PageUp);
+    assert_eq!(screen(&app), first);
+    key(&mut app, KeyCode::End);
+    let last = screen(&app);
+    assert!(last.contains("What happens next") && last.contains("Esc Close Help"));
+    for _ in 0..10 {
+        key(&mut app, KeyCode::Down);
+        key(&mut app, KeyCode::PageDown);
+    }
+    assert_eq!(screen(&app), last);
+    key(&mut app, KeyCode::Home);
+    assert_eq!(screen(&app), first);
+}
+
+#[test]
 fn batch_item_help_does_not_edit_submit_or_render_private_drafts() {
     let mut app = App::new(false);
     app.tab = Tab::Files;
@@ -116,7 +233,7 @@ fn batch_item_help_does_not_edit_submit_or_render_private_drafts() {
     .collect();
     app.batch_editor = Some(Editor::new(&paths, std::path::Path::new("/synthetic/home")));
     key(&mut app, KeyCode::Char('?')); // Review all is not text
-    assert!(matches!(app.help.as_ref().unwrap().topic, Topic::Batch));
+    assert!(render(&app, 80, 24).contains("Review all"));
     inert(&mut app);
     key(&mut app, KeyCode::Esc);
     key(&mut app, KeyCode::Char('e'));
@@ -126,8 +243,8 @@ fn batch_item_help_does_not_edit_submit_or_render_private_drafts() {
     let (target, focused) = (e.drafts[0].target.clone(), e.focused);
     assert!(target.ends_with('?') && app.help.is_none());
     key(&mut app, KeyCode::F(1));
-    assert!(matches!(app.help.as_ref().unwrap().topic, Topic::BatchItem));
-    assert!(!render(&app, 140, 40).contains("private-draft"));
+    let screen = render(&app, 140, 40);
+    assert!(screen.contains("Done editing") && !screen.contains("private-draft"));
     inert(&mut app);
     key(&mut app, KeyCode::Esc);
     let e = app.batch_editor.as_ref().unwrap();
@@ -143,7 +260,7 @@ fn help_task_error_completion_and_picker_return_without_scope_changes() {
     app.shell.init_draft = "private-draft".into();
     app.start(true);
     key(&mut app, KeyCode::Char('?')); // background form is not the active text surface
-    assert!(matches!(app.help.as_ref().unwrap().topic, Topic::Task));
+    assert!(render(&app, 80, 24).contains("Work in progress"));
     inert(&mut app);
     assert!(app.busy && app.writing);
     app.complete(Ok(Output::Data(Data::default())));
@@ -152,15 +269,15 @@ fn help_task_error_completion_and_picker_return_without_scope_changes() {
     assert_eq!(app.shell.init_draft, "private-draft");
     app.error = Some("private-cause".into());
     key(&mut app, KeyCode::F(1));
-    assert!(matches!(app.help.as_ref().unwrap().topic, Topic::Error));
-    assert!(!render(&app, 80, 24).contains("private-cause"));
+    let screen = render(&app, 80, 24);
+    assert!(screen.contains("Retry read") && !screen.contains("private-cause"));
     inert(&mut app);
     key(&mut app, KeyCode::Esc);
     assert_eq!(app.error.as_deref(), Some("private-cause"));
     app.error = None;
     app.show_result = true;
     key(&mut app, KeyCode::F(1));
-    assert!(matches!(app.help.as_ref().unwrap().topic, Topic::Result));
+    assert!(render(&app, 80, 24).contains("Check the outcome"));
     key(&mut app, KeyCode::Esc);
     assert!(app.show_result);
     app.show_result = false;
@@ -169,10 +286,9 @@ fn help_task_error_completion_and_picker_return_without_scope_changes() {
         selected: 0,
     });
     key(&mut app, KeyCode::F(1));
-    assert!(matches!(app.help.as_ref().unwrap().topic, Topic::Ignored));
     inert(&mut app);
     let s = render(&app, 80, 24);
-    assert!(!s.contains("private-path"));
+    assert!(s.contains("Unignore") && !s.contains("private-path"));
     // Only the explicit foreground Close control dismisses Help.
     let (column, row) = (0..24)
         .flat_map(|y| (0..80).map(move |x| (x, y)))

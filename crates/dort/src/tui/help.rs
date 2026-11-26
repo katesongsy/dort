@@ -1,404 +1,311 @@
-//! Read-only Help layer. Drafts and approvals stay in App.
 use super::{
+    actions::Pending,
     app::{App, Tab},
     components as ui,
     configuration::Kind,
+    git::Comparison,
     shell::{Form, Overlay},
+    tools_install::Mode,
 };
-use ratatui::Frame;
+use ratatui::{Frame, crossterm::event::KeyCode, layout::Rect};
+use std::cell::Cell;
 
 #[derive(Clone, Copy)]
-pub enum Topic {
+pub(super) enum Topic {
     Overview,
+    OverviewDetails,
     Discover,
+    DiscoverDetails,
     Content,
+    ManagedContent,
     Managed,
+    ManagedDetails,
     Recovery,
+    RecoveryDetails,
     Checks,
+    CheckResults,
     Diagnostics,
-    Git,
-    Tools,
+    Git(Comparison),
+    GitRoot,
+    GitPatch,
+    GitMetadata,
+    Declared,
+    DeclaredDetails,
+    ToolAdd,
+    ToolEdit,
+    ToolRemove,
+    BrewSettings,
+    NpmSettings,
+    ToolManifest,
+    ToolCheck,
+    StandaloneToolCheck,
+    StandaloneToolResults,
+    InstallReview,
+    InstallBlocked,
+    InstallResults,
+    InstalledReview,
+    Installed,
+    InstalledDetails,
+    InstallHistory,
+    InstallRecord,
+    CloseBrewRecord,
+    CloseNpmRecord,
+    CloseRecordReview,
     More,
-    Choice,
-    Form(Form),
-    ProfileForm(Kind),
+    ProfileChoice,
+    DeclarationProvider,
+    CloseRecordProvider,
+    Adopt,
+    AddMapping,
+    EditMapping,
+    Startup,
+    Forget,
+    Reconnect,
+    OpenRepair,
+    Repair,
+    CheckForm,
+    ChoosePath,
+    Clone,
+    Init,
+    KeepId,
+    RemoveId,
+    CreateProfile,
+    EditProfileDefaults,
+    RenameProfile,
+    DeleteProfile,
     Profiles,
-    Picker,
+    Repositories,
+    TemporaryProfiles,
+    StandaloneProfiles,
     Ignored,
     About,
     Batch,
     BatchItem,
     Preview,
+    Environment,
+    EnvironmentCheck,
     Task,
     Error,
     Result,
 }
+
 impl Topic {
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::Overview => "Overview",
-            Self::Discover => "Discover files",
-            Self::Content => "Discover content pane",
-            Self::Managed => "Managed files",
-            Self::Recovery => "Recovery",
-            Self::Checks => "Manifest checks",
-            Self::Diagnostics => "Diagnostics",
-            Self::Git => "Git inspection",
-            Self::Tools => "Tools",
-            Self::More => "More actions",
-            Self::Choice => "Choose a value",
-            Self::Form(_) => "Form",
-            Self::ProfileForm(kind) => kind.label(),
-            Self::Profiles => "Profiles",
-            Self::Picker => "Session picker",
-            Self::Ignored => "Ignored paths / Unignore",
-            Self::About => "About",
-            Self::Batch => "Marked adoption",
-            Self::BatchItem => "Edit batch item",
-            Self::Preview => "Review preview",
-            Self::Task => "Active task",
-            Self::Error => "Error",
-            Self::Result => "Completion",
+    fn form(form: Form, configuration: Option<Kind>) -> Option<Self> {
+        Some(match form {
+            Form::Adopt => Self::Adopt,
+            Form::Configure => match configuration? {
+                Kind::CreateProfile => Self::CreateProfile,
+                Kind::EditProfileDefaults => Self::EditProfileDefaults,
+                Kind::RenameProfile => Self::RenameProfile,
+                Kind::DeleteProfile => Self::DeleteProfile,
+                Kind::File => Self::AddMapping,
+                Kind::EditFile => Self::EditMapping,
+                Kind::Startup => Self::Startup,
+                Kind::Forget => Self::Forget,
+                Kind::Reconnect => Self::Reconnect,
+                Kind::Repair => Self::OpenRepair,
+            },
+            Form::Repair => Self::Repair,
+            Form::Check => Self::CheckForm,
+            Form::Choose => Self::ChoosePath,
+            Form::Clone => Self::Clone,
+            Form::Init => Self::Init,
+            Form::KeepId => Self::KeepId,
+            Form::RemoveId => Self::RemoveId,
+        })
+    }
+
+    fn tools(app: &App) -> Self {
+        use super::tools::Page;
+        use dort_core::tools::{declaration::Change, inspection::Query};
+        let tools = &app.tools_view;
+        match tools.page() {
+            Page::Installed => {
+                return if tools.installed.preview.is_some() {
+                    Self::InstalledReview
+                } else if tools.installed.waiting {
+                    Self::Task
+                } else if tools.installed.error.is_some() {
+                    Self::Error
+                } else if tools.installed.details {
+                    Self::InstalledDetails
+                } else {
+                    Self::Installed
+                };
+            }
+            Page::Declaration => {
+                return match tools.declaration.change {
+                    Some(Change::Remove) => Self::ToolRemove,
+                    Some(Change::Edit) => Self::ToolEdit,
+                    None => Self::ToolAdd,
+                };
+            }
+            Page::History => {
+                return match tools.installation.mode {
+                    Mode::Attempts if tools.installation.details => Self::InstallRecord,
+                    Mode::Attempts => Self::InstallHistory,
+                    Mode::CloseInputs if tools.installation.close_npm => Self::CloseNpmRecord,
+                    Mode::CloseInputs => Self::CloseBrewRecord,
+                    Mode::LoadingClose => Self::Task,
+                    Mode::CloseReview => Self::CloseRecordReview,
+                };
+            }
+            Page::Manifest => return Self::ToolManifest,
+            Page::Settings => {
+                return match tools
+                    .settings
+                    .editor
+                    .as_ref()
+                    .map(|editor| editor.request.query)
+                {
+                    Some(Query::NpmGlobals) => Self::NpmSettings,
+                    Some(Query::BrewFormulae) | None => Self::BrewSettings,
+                };
+            }
+            Page::List | Page::Details => {}
+        }
+        let declared = &tools.declared;
+        if declared.standalone_result.is_some() {
+            Self::StandaloneToolResults
+        } else if declared.result_open {
+            Self::InstallResults
+        } else if let Some(preview) = &declared.check_preview {
+            if preview.saves_environment_check() {
+                Self::EnvironmentCheck
+            } else if preview.standalone() {
+                Self::StandaloneToolCheck
+            } else {
+                Self::ToolCheck
+            }
+        } else if let Some(preview) = &declared.install_preview {
+            if preview.is_empty() {
+                Self::InstallBlocked
+            } else {
+                Self::InstallReview
+            }
+        } else if tools.declared_details {
+            Self::DeclaredDetails
+        } else {
+            Self::Declared
         }
     }
-    fn instructions(self) -> &'static str {
-        match self {
-            Self::Overview => {
-                "Start with a repository. Review what Dort found, then approve exact changes."
-            }
-            Self::Discover => "Select a file first. Adoption is a separate, reviewed action.",
-            Self::Content => "Only the selected regular file is read. The preview is temporary.",
-            Self::Managed => "Inspect managed links. Filters do not narrow a later apply.",
-            Self::Recovery => "Review operation records across repositories before recovery.",
-            Self::Checks => {
-                "Checks validate declarations. They do not read files or check installed tools."
-            }
-            Self::Diagnostics => "Host, path, repository and history details. No file contents.",
-            Self::Git => {
-                "Read-only status and diff details. Git previews only the selected file. Enter opens or focuses the patch. F3 opens metadata."
-            }
-            Self::Tools => {
-                "Enter opens the selected tool or package. Check and Install are named actions. Installed keeps only the current result. Add declaration fills known package fields for a separate review."
-            }
-            Self::More => "Choose a contextual action. This menu does not approve work.",
-            Self::Choice => "Choose a value for the form. Selecting a value runs nothing.",
-            Self::Form(Form::Adopt) => "Describe one regular-file link, then review its effects.",
-            Self::Form(Form::Configure) => "Enter the declaration, then review before saving.",
-            Self::ProfileForm(Kind::CreateProfile) => concat!(
-                "Profile name: enter a new name, such as work. ",
-                "Defaults: focus a row and press Space to turn it on or off. ",
-                "All hosts turns the profile on everywhere, macOS and Linux on that platform. ",
-                "Leave all three off for an optional profile. ",
-                "Assign files and tools to the profile separately."
-            ),
-            Self::ProfileForm(Kind::EditProfileDefaults) => concat!(
-                "The rows show the current defaults. Focus a row and press Space to turn it on or off. ",
-                "All hosts turns the profile on everywhere, macOS and Linux on that platform. ",
-                "Leave all three off for an optional profile. ",
-                "Use Local choice on the Profiles page for this machine."
-            ),
-            Self::ProfileForm(Kind::RenameProfile) => concat!(
-                "Enter a new name for the selected profile. Dort updates files, tools and defaults ",
-                "that use the old name. Set the local choice for the new name on the Profiles page."
-            ),
-            Self::ProfileForm(_) => unreachable!("only profile forms have profile field help"),
-            Self::Profiles => {
-                "Select a profile, then choose an action. Base stays on. Only unused profiles can be deleted."
-            }
-            Self::Form(Form::Repair) => {
-                "Edit one line at a time, then review the manifest diff before saving."
-            }
-            Self::Form(Form::Check) => {
-                "Check an independent manifest with extra profiles for this run."
-            }
-            Self::Form(Form::Choose) => {
-                "Select a repository root for this session. The choice is not saved."
-            }
-            Self::Form(Form::Clone) => {
-                "Enter an HTTPS Git URL or absolute local Git path and a new folder. Review clone and registration."
-            }
-            Self::Form(Form::Init) => {
-                "Prepare a local repository. The next review saves the change."
-            }
-            Self::Form(Form::KeepId | Form::RemoveId) => {
-                "Use the exact mapping ID. The repository source is kept."
-            }
-            Self::Picker => "Choose a repository or extra profiles. Selection is not approval.",
-            Self::Ignored => "Inspect an ignored path, then remove its discovery preference.",
-            Self::About => "What works here, tool effects, safety and limits.",
-            Self::Batch => "Review the marked files. Editing one item does not adopt it.",
-            Self::BatchItem => "Edit target, ID and source. Done returns to the draft.",
-            Self::Preview => {
-                "Approval appears when the end of the full effects is visible. Blocked and preview-only reviews cannot approve."
-            }
-            Self::Task => "Progress uses reported steps. It does not estimate a percentage.",
-            Self::Error => {
-                "Retry repeats the read or asks for a new preview. A failed write may leave partial effects."
-            }
-            Self::Result => "Review the result. Another attempt needs a new review.",
+
+    fn for_app(app: &App) -> Self {
+        if let Some(choice) = &app.choice {
+            return choice.topic;
         }
-    }
-    fn keys(self, app: &App) -> &'static [(&'static str, &'static str)] {
-        match self {
-            Self::More | Self::Choice => &[
-                ("Up/Down", "Move between choices"),
-                ("Enter", "Choose"),
-                ("F3", "Inspect choice details"),
-                ("Esc", "Return without choosing"),
-            ],
-            Self::Profiles => &[
-                ("Up/Down", "Select a profile"),
-                ("F2", "More actions when space is limited"),
-                ("Esc", "Return to Overview"),
-            ],
-            Self::ProfileForm(_) => &[
-                ("Tab / Shift-Tab", "Move between fields"),
-                ("Space", "Turn the focused default on or off"),
-                ("Ctrl-U", "Clear the name field"),
-                ("Enter", "Review manifest change"),
-                ("Esc", "Back"),
-            ],
-            Self::Form(_) | Self::BatchItem => &[
-                ("Tab / Shift-Tab", "Traverse fields only"),
-                ("Enter", "Validate/review, or Done for a batch item"),
-                ("F3", "Full draft details"),
-                ("Ctrl-U", "Clear current field"),
-                ("Esc", "Back, retaining draft"),
-            ],
-            Self::Tools if app.tools_view.installed_open => &[
-                ("Tab / Shift-Tab", "Switch panes when both are visible"),
-                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
-                (
-                    "Enter",
-                    "Open the selected package; Run inspection on its explicit review",
-                ),
-                ("a", "Add a declaration with inspected fields prefilled"),
-                ("R", "Review a new installed-package inspection"),
-                ("/", "Filter current installed packages"),
-                ("Esc", "Back, retaining only the current inspection"),
-            ],
-            Self::Tools if app.tools_view.declaration_open => &[
-                ("Tab / Shift-Tab", "Edit declaration fields"),
-                ("Enter/Space", "Open Package manager when focused"),
-                (
-                    "Enter",
-                    "Review from another field, or click Review declaration",
-                ),
-                ("F4", "Show/hide dependencies"),
-                ("Esc", "Stop editing, then Back"),
-            ],
-            Self::Tools if app.tools_view.settings_open => &[
-                ("Tab / Shift-Tab", "Edit the necessary tool settings"),
-                (
-                    "Enter",
-                    "Validate and save session settings; runs no programs",
-                ),
-                ("Esc", "Stop editing, then Back"),
-            ],
-            Self::Tools if app.tools_view.landing() && app.tools_view.declared.result_open => &[
-                ("Enter/Esc", "Done; return to tool statuses"),
-                ("Up/Down/PgUp/PgDn", "Read per-tool install outcomes"),
-            ],
-            Self::Tools
-                if app.tools_view.declared.check_preview.is_some()
-                    || app.tools_view.declared.install_preview.is_some() =>
-            {
-                &[
-                    ("Up/Down/PgUp/PgDn", "Read scope, reasons and risks"),
-                    ("Enter", "Use the shown review action"),
-                    ("Esc", "Cancel"),
-                ]
+        if app.more.is_some() {
+            return Self::More;
+        }
+        if app.error.is_some() {
+            return Self::Error;
+        }
+        if app.busy {
+            return Self::Task;
+        }
+        if let Some(preview) = &app.preview {
+            use super::full_check::Destination;
+            return match &preview.pending {
+                Pending::Environment(_) => Self::Environment,
+                Pending::FullCheck(check) => match check.destination {
+                    Destination::Environment { .. } => Self::EnvironmentCheck,
+                    Destination::Manifest(_, true) => Self::StandaloneToolCheck,
+                    Destination::Manifest(_, false) => Self::ToolCheck,
+                },
+                _ => Self::Preview,
+            };
+        }
+        if app.show_result {
+            return Self::Result;
+        }
+        if let Some(editor) = app.batch_editor.as_ref().filter(|e| e.open) {
+            return if editor.item_form {
+                Self::BatchItem
+            } else {
+                Self::Batch
+            };
+        }
+        if let Some(overlay) = &app.shell.overlay {
+            let topic = match overlay {
+                Overlay::Form(form) => {
+                    Self::form(*form, app.shell.configuration.as_ref().map(|d| d.kind))
+                }
+                Overlay::Ignored { .. } => Some(Self::Ignored),
+                Overlay::About => Some(Self::About),
+                Overlay::Repositories { .. } => Some(Self::Repositories),
+                Overlay::Profiles(picker) if picker.standalone => Some(Self::StandaloneProfiles),
+                Overlay::Profiles(_) => Some(Self::TemporaryProfiles),
+            };
+            if let Some(topic) = topic {
+                return topic;
             }
-            Self::Tools
-                if app.tools_view.install_open
-                    && app.tools_view.installation.mode
-                        == super::tools_install::Mode::CloseInputs =>
-            {
-                &[
-                    ("Tab / Shift-Tab", "Traverse package manager settings"),
-                    ("F4", "Choose the package manager"),
-                    ("Enter", "Review close"),
-                    ("Esc", "Stop editing, then Back"),
-                ]
+        }
+        match app.tab {
+            Tab::Overview if app.profiles.open => Self::Profiles,
+            Tab::Overview if app.overview_details => Self::OverviewDetails,
+            Tab::Overview => Self::Overview,
+            Tab::Files if app.discovering && app.content.focused => Self::Content,
+            Tab::Files if app.discovering && app.inventory.details => Self::DiscoverDetails,
+            Tab::Files if app.discovering => Self::Discover,
+            Tab::Files if app.content.focused => Self::ManagedContent,
+            Tab::Files if app.inventory.details => Self::ManagedDetails,
+            Tab::Files => Self::Managed,
+            Tab::Recovery if app.history_region == super::workspace::Region::Details => {
+                Self::RecoveryDetails
             }
-            Self::Tools if app.tools_view.install_open => &[
-                ("Tab / Shift-Tab", "Switch panes when both are visible"),
-                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
-                ("Enter", "Open the selected installation record"),
-                ("x", "Close an unresolved record"),
-                ("R", "Refresh installation history"),
-                ("Esc", "Back"),
-            ],
-            Self::Tools => &[
-                ("Tab / Shift-Tab", "Switch panes when both are visible"),
-                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
-                ("Enter", "Open the selected tool"),
-                ("C", "Check installed"),
-                ("m", "Check a standalone manifest file"),
-                ("i", "Install missing tools"),
-                ("e / d", "Edit / remove the selected declaration"),
-                ("a", "Add a declaration"),
-                ("s", "Tool settings when configuration needs attention"),
-                ("2 / 3", "Open Installed / History"),
-                ("Esc", "Back"),
-            ],
-            Self::Picker => &[
-                ("Tab / Shift-Tab", "Switch panes when both are visible"),
-                ("Up/Down", "Traverse choices"),
-                ("Space", "Toggle optional profile membership"),
-                ("Enter", "Validate/apply selection"),
-                ("F3", "Full selection details"),
-                ("Ctrl-N", "Create/attach from repository picker"),
-            ],
-            Self::Preview => &[
-                ("PgUp/PgDown", "Read all review rows"),
-                ("F3", "Switch between summary and full effects"),
-                ("Home/End", "First/last effects"),
-                ("Esc", "Back without execution"),
-            ],
-            Self::Task => &[
-                ("q / Ctrl-C", "Request exit; wait joined for owned work"),
-                ("F1", "Help"),
-            ],
-            Self::Error => &[
-                (
-                    "Enter",
-                    "Retry a read, or open Recovery after a failed write",
-                ),
-                ("F2", "More recovery or refresh"),
-                ("Esc", "Back; retained failure warning remains"),
-            ],
-            Self::Result => &[
-                ("Enter", "Done, or fresh-review navigation for Tools"),
-                ("PgUp/PgDown", "Read the result"),
-                ("F2", "Recovery or refresh"),
-            ],
-            Self::Content => &[
-                ("Tab / Shift-Tab", "Switch panes when both are visible"),
-                ("Up/Down", "Scroll selected content"),
-                ("PgUp/PgDown", "Page selected content"),
-                ("Alt-PgUp/PgDown", "Read selected details"),
-                ("Esc", "Return to list"),
-            ],
-            Self::Discover => &[
-                ("Tab / Shift-Tab", "Switch panes when both are visible"),
-                ("Up/Down, Home/End", "Move selection"),
-                ("Left/Right", "Fold or unfold a group"),
-                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
-                ("a / A", "Adopt selected / marked files"),
-                ("Space", "Mark/unmark"),
-                ("i", "Ignore the selected path"),
-                ("g", "Open Git"),
-                ("Enter", "Read the selected file"),
-            ],
-            Self::Managed => &[
-                ("Tab / Shift-Tab", "Switch panes when both are visible"),
-                ("Up/Down, Home/End", "Move selection"),
-                ("Left/Right", "Fold or unfold a group"),
-                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
-                (
-                    "u / U",
-                    "Unmanage selected / marked files; keep local copies",
-                ),
-                ("Space", "Mark/unmark"),
-                ("m", "Manual adopt"),
-                ("a / A", "Apply all active / marked files"),
-                ("Enter", "Read file details"),
-            ],
-            Self::Ignored => &[
-                ("Tab / Shift-Tab", "Switch panes when both are visible"),
-                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
-                ("Home/End", "Select first / last path"),
-                ("F3", "Read the full path"),
-                ("Enter", "Review unignore"),
-            ],
-            Self::Recovery | Self::Git => &[
-                ("Tab / Shift-Tab", "Switch panes when both are visible"),
-                ("Up/Down", "Move selection"),
-                ("Ctrl-F / Ctrl-B", "Page forward / back in the list"),
-                ("Enter", "Read selected details"),
-                ("F2", "More actions"),
-            ],
-            Self::Batch => &[
-                ("Up/Down", "Traverse displayed rows"),
-                ("Enter", "Inspect, or the named primary action"),
-                ("Space", "Toggle optional membership where offered"),
-                ("F2", "Contextual actions with scope/reasons"),
-                ("F3", "Details when offered"),
-            ],
-            _ => &[
-                ("Enter", "Contextual primary shown in the action strip"),
-                ("F2", "More actions"),
-                ("F3", "Full details when offered"),
-                ("PgUp/PgDown", "Read the visible document"),
-            ],
+            Tab::Recovery => Self::Recovery,
+            Tab::Checks if app.showing_diagnostics => Self::Diagnostics,
+            Tab::Checks if app.check.is_some() => Self::CheckResults,
+            Tab::Checks => Self::Checks,
+            Tab::Git if app.git_view.editing_root => Self::GitRoot,
+            Tab::Git if app.git_view.reading_patch() => Self::GitPatch,
+            Tab::Git if app.git_view.browsing_details() => Self::GitMetadata,
+            Tab::Git => Self::Git(app.git_view.comparison),
+            Tab::Tools => Self::tools(app),
         }
     }
 }
+
+#[derive(Default, Clone, Copy)]
+struct Reader {
+    offset: usize,
+    end: usize,
+    page: usize,
+}
+
 pub struct State {
-    pub topic: Topic,
-    pub scroll: u16,
+    topic: Topic,
+    reader: Cell<Reader>,
     pub content_focus: bool,
     pub content_scroll: u16,
 }
-pub fn topic(app: &App) -> Topic {
-    if app.choice.is_some() {
-        return Topic::Choice;
+
+impl State {
+    pub fn open(app: &App) -> Self {
+        Self {
+            topic: Topic::for_app(app),
+            reader: Cell::default(),
+            content_focus: app.content.focused,
+            content_scroll: app.content.scroll,
+        }
     }
-    if app.more.is_some() {
-        return Topic::More;
-    }
-    if app.error.is_some() {
-        return Topic::Error;
-    }
-    if app.busy {
-        return Topic::Task;
-    }
-    if app.preview.is_some() {
-        return Topic::Preview;
-    }
-    if app.show_result {
-        return Topic::Result;
-    }
-    if let Some(e) = app.batch_editor.as_ref().filter(|e| e.open) {
-        return if e.item_form {
-            Topic::BatchItem
-        } else {
-            Topic::Batch
-        };
-    }
-    if let Some(o) = &app.shell.overlay {
-        return match o {
-            Overlay::Form(Form::Configure) => {
-                match app.shell.configuration.as_ref().map(|d| d.kind) {
-                    Some(
-                        kind @ (Kind::CreateProfile
-                        | Kind::EditProfileDefaults
-                        | Kind::RenameProfile),
-                    ) => Topic::ProfileForm(kind),
-                    _ => Topic::Form(Form::Configure),
-                }
-            }
-            Overlay::Form(f) => Topic::Form(*f),
-            Overlay::Ignored { .. } => Topic::Ignored,
-            Overlay::About => Topic::About,
-            _ => Topic::Picker,
-        };
-    }
-    match app.tab {
-        Tab::Overview if app.profiles.open => Topic::Profiles,
-        Tab::Overview => Topic::Overview,
-        Tab::Files if app.discovering && app.content.focused => Topic::Content,
-        Tab::Files if app.discovering => Topic::Discover,
-        Tab::Files => Topic::Managed,
-        Tab::Recovery => Topic::Recovery,
-        Tab::Checks if app.showing_diagnostics => Topic::Diagnostics,
-        Tab::Checks => Topic::Checks,
-        Tab::Git => Topic::Git,
-        Tab::Tools => Topic::Tools,
+
+    pub fn scroll(&self, key: KeyCode) {
+        let mut reader = self.reader.get();
+        reader.offset = match key {
+            KeyCode::Home => 0,
+            KeyCode::End => reader.end,
+            KeyCode::Down | KeyCode::Char('j') => reader.offset.saturating_add(1),
+            KeyCode::Up | KeyCode::Char('k') => reader.offset.saturating_sub(1),
+            KeyCode::PageDown => reader.offset.saturating_add(reader.page),
+            KeyCode::PageUp => reader.offset.saturating_sub(reader.page),
+            _ => return,
+        }
+        .min(reader.end);
+        self.reader.set(reader);
     }
 }
-/// Text focus is surface-specific; background retained forms do not steal task/error Help.
+
 pub fn text_input(app: &App) -> bool {
     if app.more.is_some() || app.choice.is_some() {
         return false;
@@ -406,81 +313,36 @@ pub fn text_input(app: &App) -> bool {
     if app.busy || app.error.is_some() || app.show_result || app.preview.is_some() {
         return false;
     }
-    if let Some(e) = app.batch_editor.as_ref().filter(|e| e.open) {
-        return if e.item_form {
-            e.focused < e.item * 3 + 3
-        } else {
-            e.focused < e.drafts.len() * 3
-        };
+    if app.form_page() == Some("declaration")
+        && app.tools_view.declaration.focus == super::tool_declaration::PROVIDER_FIELD
+    {
+        return false;
     }
     app.text_entry()
 }
-pub fn draw(frame: &mut Frame, mut area: ratatui::layout::Rect, app: &App, help: &State) {
+
+pub fn draw(frame: &mut Frame, mut area: Rect, app: &App, help: &State) {
     if let Some(notice) = app.interaction_notice {
         let height = (1 + notice.len().div_ceil(usize::from(area.width).max(1)) as u16)
             .min(3)
             .min(area.height);
         ui::design::notice(
             frame,
-            ratatui::layout::Rect::new(area.x, area.y, area.width, height),
+            Rect::new(area.x, area.y, area.width, height),
             "Navigation paused",
             notice,
             ui::design::Tone::Attention,
         );
         area.y += height;
-        area.height = area.height.saturating_sub(height);
+        area.height -= height;
     }
-    area.x += u16::from(area.width > 2);
-    area.width = area.width.saturating_sub(2);
-    let mut sections = vec![("Switch pages", "o Overview   f Files   t Tools\nr Recovery   c Checks   g Git\nUse the number on a tab to open it. While editing, keys type into the field or filter.".to_owned())];
-    sections.push(("Switch working scope", "On browsing pages, click the repository or profiles in the header. Ctrl-P chooses a repository. Ctrl-T opens its profiles. Leave a review before switching scope.".to_owned()));
-    if matches!(help.topic, Topic::Tools) {
-        sections.insert(0, ("Tools guide", "Tools opens declarations. Check installed asks which package managers to query, then shows each result for approval. Installed means the package manager reports the package, not that the command works. Install missing reviews eligible tools once, installs in order and stops on failure. Earlier installs stay; there is no rollback. Settings and history live under Tools.".to_owned()));
-    }
-    if matches!(
-        help.topic,
-        Topic::Overview
-            | Topic::Discover
-            | Topic::Managed
-            | Topic::Recovery
-            | Topic::Checks
-            | Topic::Diagnostics
-            | Topic::Git
-    ) {
-        let related = super::context::entries(app)
-            .into_iter()
-            .map(|e| {
-                format!(
-                    "{}: {} [{}]{}",
-                    e.scope.short(),
-                    e.action.label(),
-                    e.effect.label(),
-                    app.action_reason(e.action)
-                        .map(|r| format!(" — {r}"))
-                        .unwrap_or_default()
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        sections.push(("Related tasks", related));
-    }
-    sections.push((
-        "Reading Help",
-        "Use the arrows or Page Up and Page Down to scroll. Home jumps to the top. Press Esc or F1 to close Help."
-            .to_owned(),
-    ));
-    sections.push(("Approval and privacy", "Writes need a fresh review. Click outside a dialog to close it. q/Ctrl-C waits for active work. Backups are private, not encrypted. Selected-file and Git content stays out of Help and reports.".to_owned()));
-    ui::text_view(
-        frame,
-        area,
-        ui::help::document(
-            area.width,
-            help.topic.title(),
-            help.topic.instructions(),
-            help.topic.keys(app),
-            &sections,
-        ),
-        help.scroll,
-    );
-    app.hits.wheel(area, super::input::Wheel::Overlay);
+    let rows = ui::help::draw(frame, area, help.topic.guide(), help.reader.get().offset);
+    help.reader.set(Reader {
+        offset: rows.start,
+        end: rows.end,
+        page: usize::from(rows.area.height).saturating_sub(1).max(1),
+    });
 }
+
+#[path = "help/guides.rs"]
+mod guides;

@@ -495,8 +495,8 @@ impl App {
             use ratatui::crossterm::event::MouseEventKind;
             self.resize(width, height);
             let code = match event.kind {
-                MouseEventKind::ScrollDown => Some(KeyCode::PageDown),
-                MouseEventKind::ScrollUp => Some(KeyCode::PageUp),
+                MouseEventKind::ScrollDown => Some(KeyCode::Down),
+                MouseEventKind::ScrollUp => Some(KeyCode::Up),
                 MouseEventKind::Down(ratatui::crossterm::event::MouseButton::Left)
                     if self.hits.size() == (width, height)
                         && matches!(
@@ -1300,17 +1300,10 @@ impl App {
             return None;
         }
         self.interaction_notice = None;
-        if let Some(help) = &mut self.help {
+        if let Some(help) = &self.help {
             match key.code {
                 KeyCode::Esc | KeyCode::F(1) | KeyCode::Char('?') => self.help = None,
-                KeyCode::Home => help.scroll = 0,
-                KeyCode::PageDown | KeyCode::Down | KeyCode::Char('j') => {
-                    help.scroll = help.scroll.saturating_add(2)
-                }
-                KeyCode::PageUp | KeyCode::Up | KeyCode::Char('k') => {
-                    help.scroll = help.scroll.saturating_sub(2)
-                }
-                _ => (),
+                code => help.scroll(code),
             }
             return None;
         }
@@ -2156,12 +2149,7 @@ impl App {
         }
     }
     fn open_help(&mut self) {
-        self.help = Some(super::help::State {
-            topic: super::help::topic(self),
-            scroll: 0,
-            content_focus: self.content.focused,
-            content_scroll: self.content.scroll,
-        });
+        self.help = Some(super::help::State::open(self));
         super::discover_content::sync(self, self.viewport.0, self.viewport.1);
     }
     pub(super) fn result_action(&self, code: KeyCode) -> Option<Action> {

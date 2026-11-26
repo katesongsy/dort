@@ -118,21 +118,18 @@ fn help_footer_precedes_retained_forms_overlays_errors_and_running_work() {
         }
         key(&mut app, KeyCode::F(1));
         assert!(app.help.is_some());
-        assert_eq!(hints::keys(&app), [("Esc", "Back")]);
+        assert_eq!(hints::keys(&app), [("Esc", "Close Help")]);
         for (w, h) in [(48, 14), (80, 24), (140, 40)] {
             let screen = render(&app, w, h);
-            let footer = screen.lines().find(|row| row.contains("Esc Back")).unwrap();
+            let footer = screen
+                .lines()
+                .find(|row| row.contains("Esc Close Help"))
+                .unwrap();
             assert_ne!(Some(footer), screen.lines().last());
             assert!(
-                footer.contains("Back") && !footer.contains("More"),
-                "{screen}"
+                !footer.contains("More") && !footer.contains("Review") && !footer.contains("Retry")
             );
-            assert!(!footer.contains("Review") && !footer.contains("Retry"));
         }
-        key(&mut app, KeyCode::PageDown);
-        assert!(app.help.as_ref().unwrap().scroll > 0);
-        key(&mut app, KeyCode::Home);
-        assert_eq!(app.help.as_ref().unwrap().scroll, 0);
         key(&mut app, KeyCode::Enter);
         assert_eq!(app.tools_view.declaration.fields[0], "retained draft");
         assert!(app.help.is_some());

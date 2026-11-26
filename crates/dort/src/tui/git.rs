@@ -351,6 +351,9 @@ impl State {
     pub fn browsing_details(&self) -> bool {
         self.region == Region::Details
     }
+    pub(super) fn reading_patch(&self) -> bool {
+        self.browsing_details() && self.reader == Reader::Auto && self.preview.available()
+    }
     pub fn browsing_entries(&self) -> bool {
         self.region == Region::Queue && !self.editing_root
     }

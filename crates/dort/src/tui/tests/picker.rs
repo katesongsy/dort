@@ -395,14 +395,18 @@ fn ordinary_compact_details_have_overlapping_keyboard_pages_including_busy_help_
     app.tab = Tab::Files;
     key(&mut app, KeyCode::Enter);
     assert!(paged_cells(&mut app, false).contains(&super::components::inline(&path)));
-    key(&mut app, KeyCode::Char('?'));
-    key(&mut app, KeyCode::PageDown);
-    assert_eq!(app.help.as_ref().unwrap().scroll, 2);
+    app.key(
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+        48,
+        14,
+    );
+    let first = render(&app, 48, 14);
+    assert!(first.contains("Managed file details"));
+    app.key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), 48, 14);
+    assert_ne!(render(&app, 48, 14), first);
     app.busy = true;
-    key(&mut app, KeyCode::PageDown);
-    assert_eq!(app.help.as_ref().unwrap().scroll, 4);
-    key(&mut app, KeyCode::Home);
-    assert_eq!(app.help.as_ref().unwrap().scroll, 0);
+    app.key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE), 48, 14);
+    assert!(render(&app, 48, 14).contains("Managed file details"));
     app.busy = false;
     key(&mut app, KeyCode::Esc);
     app.complete(Err(format!("metadata error {path}")));

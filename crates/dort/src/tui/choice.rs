@@ -22,6 +22,7 @@ struct Item {
 }
 pub(super) struct Choice {
     pub title: &'static str,
+    pub topic: super::help::Topic,
     pub selected: usize,
     pub details: bool,
     scroll: u16,
@@ -29,9 +30,15 @@ pub(super) struct Choice {
     items: Vec<Item>,
 }
 impl Choice {
-    fn new(title: &'static str, items: Vec<Item>, selected: usize) -> Self {
+    fn new(
+        title: &'static str,
+        topic: super::help::Topic,
+        items: Vec<Item>,
+        selected: usize,
+    ) -> Self {
         Self {
             title,
+            topic,
             selected,
             details: false,
             scroll: 0,
@@ -74,6 +81,7 @@ impl App {
         let values = [P::Defaults, P::On, P::Off];
         self.choice = Some(Choice::new(
             "Choose saved profile setting",
+            super::help::Topic::ProfileChoice,
             values
                 .into_iter()
                 .map(|value| Item {
@@ -101,6 +109,7 @@ impl App {
         {
             Some(Choice::new(
                 "Choose package manager",
+                super::help::Topic::CloseRecordProvider,
                 ["npm", "Homebrew"]
                     .iter()
                     .enumerate()
@@ -125,6 +134,7 @@ impl App {
                 .unwrap_or(0);
             Some(Choice::new(
                 "Package manager",
+                super::help::Topic::DeclarationProvider,
                 options
                     .into_iter()
                     .map(|(label, provider)| Item {
