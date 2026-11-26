@@ -1168,20 +1168,25 @@ def run():
             session.send(b"\x1bOP")  # VT100 PF1.
             session.wait(b"Enter a new name such as work")
             session.wait(b"Press Space on a row to toggle it")
+            session.settle()
             session.send(b"\x1bOP")
+            session.settle()
             session.wait(b"Esc Stop editing")
             session.wait(b"Default on Linux")
             screen = session.screen.text()
-            assert b"work" in screen and b"[x] On" in screen
+            assert b"work" in screen and b"[x] On" in screen, screen.decode()
             assert b"Existing name" not in screen
             session.send(b"\x1b[11~")  # CSI PF1.
             session.wait(b"Enter a new name such as work")
+            session.settle()
             session.send(b"\x1b[11~")
+            session.settle()
             session.wait(b"Esc Stop editing")
             session.wait(b"Default on Linux")
             session.send(b"\x1b")
+            session.wait(b"Esc Back")
             session.send(b"\x1b")
-            session.wait(b"F2 More")
+            session.wait(b"Overview / Profiles")
             session.send(b"q")
             session.finish()
         assert (repo / "dort.toml").read_bytes() == manifest_before
