@@ -131,7 +131,7 @@ fn declaration_draft_focus_caret_and_buttons_survive_compact_wide_navigation() {
             app.tools_view.declaration.focus = focus;
             let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
             terminal.draw(|frame| views::draw(frame, &app)).unwrap();
-            if focus != 4 {
+            if !matches!(focus, 2 | 4) {
                 let cursor = terminal.get_cursor_position().unwrap();
                 super::tests::assert_text_focus(&terminal, (w, h), cursor);
             } else {

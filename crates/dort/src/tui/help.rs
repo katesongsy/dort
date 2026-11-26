@@ -54,6 +54,7 @@ pub(super) enum Topic {
     More,
     ProfileChoice,
     DeclarationProvider,
+    DraftReferences,
     CloseRecordProvider,
     Adopt,
     AddMapping,
@@ -313,8 +314,9 @@ pub fn text_input(app: &App) -> bool {
     if app.busy || app.error.is_some() || app.show_result || app.preview.is_some() {
         return false;
     }
-    if app.form_page() == Some("declaration")
-        && app.tools_view.declaration.focus == super::tool_declaration::PROVIDER_FIELD
+    if app.focused_reference().is_some()
+        || (app.form_page() == Some("declaration")
+            && app.tools_view.declaration.focus == super::tool_declaration::PROVIDER_FIELD)
     {
         return false;
     }

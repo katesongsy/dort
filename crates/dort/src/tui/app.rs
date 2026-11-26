@@ -683,7 +683,7 @@ impl App {
             Target::Key(key) => self.action_key(key, width, height),
             Target::ChoiceRow(index) => {
                 if let Some(choice) = &mut self.choice {
-                    choice.select(index);
+                    choice.click_row(index);
                 }
                 None
             }
@@ -826,13 +826,13 @@ impl App {
                 None
             }
             Target::ToolDeclarationField(index) => {
-                if self.tab != Tab::Tools || !self.tools_view.declaration_open {
+                if self.form_page() != Some("declaration")
+                    || !self.tools_view.declaration.controls().contains(&index)
+                {
                     return None;
                 }
                 self.tools_view.declaration.focus = index;
-                if index == super::tool_declaration::PROVIDER_FIELD {
-                    self.open_control_choice(KeyCode::Enter);
-                }
+                self.open_control_choice(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
                 None
             }
             Target::ToolDeclarationReview => {
@@ -916,6 +916,7 @@ impl App {
                 .form_action(command)
                 .and_then(|intent| self.intent(intent)),
             Target::FormControl(index, activate) => {
+                self.form_page()?;
                 match self.shell.overlay {
                     Some(Overlay::Form(Form::Adopt)) => {
                         self.shell.adoption.focused =
@@ -940,12 +941,11 @@ impl App {
                     Some(Overlay::Form(Form::Choose | Form::Init)) => self.shell.path_focused = 0,
                     _ => return None,
                 }
-                if activate {
-                    self.key(
-                        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-                        width,
-                        height,
-                    )
+                let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+                if self.open_control_choice(enter) {
+                    None
+                } else if activate {
+                    self.key(enter, width, height)
                 } else {
                     None
                 }
@@ -1600,6 +1600,9 @@ impl App {
             self.focus_workspace(workspace.scope, active.other());
             return None;
         }
+        if self.open_control_choice(key) {
+            return None;
+        }
         if self.shell.overlay.is_some() {
             let report_scroll = !self.shell.form_details
                 && !self.shell.picker_details
@@ -1619,9 +1622,6 @@ impl App {
             if let Some(intent) = self.shell.key(key, count) {
                 return self.intent(intent);
             }
-            return None;
-        }
-        if self.open_control_choice(key.code) {
             return None;
         }
         if self.tab == Tab::Tools

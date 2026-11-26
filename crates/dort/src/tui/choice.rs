@@ -2,10 +2,190 @@
 use super::{
     app::{App, Tab},
     components as ui,
-    tool_declaration::PROVIDER_FIELD,
+    help::Topic,
+    shell::{AdoptionDraft, Form, Overlay},
+    tool_declaration::{self, PROVIDER_FIELD},
     tools_install,
 };
-use ratatui::{Frame, crossterm::event::KeyCode};
+use ratatui::{
+    Frame,
+    crossterm::event::{KeyCode, KeyEvent, KeyModifiers},
+};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReferenceField {
+    AdoptionProfiles,
+    MappingProfiles,
+    MappingTools,
+    DeclarationProfiles,
+    DeclarationTools,
+    DeclarationRuntime,
+}
+impl ReferenceField {
+    fn profiles(self) -> bool {
+        matches!(
+            self,
+            Self::AdoptionProfiles | Self::MappingProfiles | Self::DeclarationProfiles
+        )
+    }
+    fn multiple(self) -> bool {
+        self != Self::DeclarationRuntime
+    }
+    pub(super) fn action(self) -> &'static str {
+        if self.profiles() {
+            "Choose profiles"
+        } else if self.multiple() {
+            "Choose tools"
+        } else {
+            "Choose runtime"
+        }
+    }
+    fn ids(self, draft: &str) -> Vec<String> {
+        if self.multiple() {
+            super::configuration::list(draft)
+        } else {
+            (!draft.is_empty())
+                .then(|| draft.to_owned())
+                .into_iter()
+                .collect()
+        }
+    }
+    fn draft(self, app: &App) -> Option<&String> {
+        match self {
+            Self::AdoptionProfiles => Some(&app.shell.adoption.profiles),
+            Self::MappingProfiles | Self::MappingTools => {
+                app.shell.configuration.as_ref()?.reference_value(self)
+            }
+            _ => app.tools_view.declaration.reference_value(self),
+        }
+    }
+    fn apply(self, app: &mut App, value: String) {
+        match self {
+            Self::AdoptionProfiles
+                if matches!(app.shell.overlay, Some(Overlay::Form(Form::Adopt))) =>
+            {
+                if app.shell.adoption.profiles != value {
+                    app.shell.adoption.profiles = value;
+                    app.shell.form_feedback = None;
+                }
+            }
+            Self::MappingProfiles | Self::MappingTools
+                if matches!(app.shell.overlay, Some(Overlay::Form(Form::Configure))) =>
+            {
+                if let Some(draft) = &mut app.shell.configuration {
+                    draft.set_reference(self, value);
+                }
+            }
+            Self::DeclarationProfiles | Self::DeclarationTools | Self::DeclarationRuntime
+                if app.tab == Tab::Tools && app.tools_view.declaration_open =>
+            {
+                app.tools_view.declaration.set_reference(self, value);
+            }
+            _ => (),
+        }
+    }
+    fn options(self, app: &App) -> Option<Vec<String>> {
+        let data = app.data.as_ref()?;
+        if self.profiles() {
+            return Some(
+                data.profile_declarations
+                    .as_ref()?
+                    .known()
+                    .into_iter()
+                    .collect(),
+            );
+        }
+        let mut ids: Vec<_> = data
+            .tools
+            .as_ref()?
+            .as_ref()
+            .ok()?
+            .iter()
+            .map(|tool| tool.id.clone())
+            .filter(|id| !self.is_self(app, id))
+            .collect();
+        ids.sort();
+        Some(ids)
+    }
+    fn is_self(self, app: &App, id: &str) -> bool {
+        matches!(self, Self::DeclarationTools | Self::DeclarationRuntime)
+            && id == app.tools_view.declaration.fields[0]
+    }
+}
+struct References {
+    field: ReferenceField,
+    options: Vec<String>,
+    missing_start: usize,
+    pending: Vec<String>,
+    note: Option<&'static str>,
+}
+impl References {
+    fn new(field: ReferenceField, app: &App) -> Option<Self> {
+        let pending = field.ids(field.draft(app)?);
+        let options = field.options(app);
+        let note = match options.as_deref() {
+            None if field.profiles() => Some("Profiles unavailable. Blank uses base."),
+            None => Some("Tools unavailable. Open a repository with a readable manifest."),
+            Some([]) if field == ReferenceField::MappingTools => {
+                Some("No tools declared in this repository.")
+            }
+            Some([]) => Some("No other tools declared in this repository."),
+            Some(_) if field.profiles() => Some("Blank uses base. Space toggles a profile."),
+            Some(_) if field.multiple() => Some("Space toggles a tool."),
+            _ => None,
+        };
+        let mut options = options.unwrap_or_default();
+        let missing_start = options.len();
+        for id in &pending {
+            if !field.is_self(app, id) && !options.contains(id) {
+                options.push(id.clone());
+            }
+        }
+        Some(Self {
+            field,
+            options,
+            missing_start,
+            pending,
+            note,
+        })
+    }
+    fn toggle(&mut self, index: usize) {
+        if let Some(id) = self.options.get(index) {
+            if self.pending.contains(id) {
+                self.pending.retain(|selected| selected != id);
+            } else {
+                self.pending.push(id.clone());
+            }
+        }
+    }
+    fn value(&self, index: usize) -> String {
+        if !self.field.multiple()
+            && let Some(id) = self.options.get(index)
+        {
+            id.clone()
+        } else {
+            self.pending.join(", ")
+        }
+    }
+    fn rows(&self) -> Vec<(&str, &str)> {
+        self.options
+            .iter()
+            .enumerate()
+            .map(|(index, id)| {
+                let selected = self.pending.contains(id);
+                let missing = index >= self.missing_start;
+                let status = match (selected, missing) {
+                    (true, true) => "Kept: missing",
+                    (true, false) if !self.field.multiple() => "Current",
+                    (true, false) => "Selected",
+                    (false, true) => "Missing",
+                    (false, false) => "",
+                };
+                (id.as_str(), status)
+            })
+            .collect()
+    }
+}
 #[derive(Clone)]
 enum Value {
     ClosureProvider(usize),
@@ -20,22 +200,21 @@ struct Item {
     scope: String,
     value: Value,
 }
+enum Choices {
+    Commands(Vec<Item>),
+    References(References),
+}
 pub(super) struct Choice {
     pub title: &'static str,
-    pub topic: super::help::Topic,
-    pub selected: usize,
+    pub topic: Topic,
+    selected: usize,
     pub details: bool,
     scroll: u16,
     feedback: Option<&'static str>,
-    items: Vec<Item>,
+    choices: Choices,
 }
 impl Choice {
-    fn new(
-        title: &'static str,
-        topic: super::help::Topic,
-        items: Vec<Item>,
-        selected: usize,
-    ) -> Self {
+    fn new(title: &'static str, topic: Topic, choices: Choices, selected: usize) -> Self {
         Self {
             title,
             topic,
@@ -43,11 +222,33 @@ impl Choice {
             details: false,
             scroll: 0,
             feedback: None,
-            items,
+            choices,
         }
     }
-    pub fn select(&mut self, index: usize) {
-        self.selected = index.min(self.items.len().saturating_sub(1));
+    fn count(&self) -> usize {
+        match &self.choices {
+            Choices::Commands(items) => items.len(),
+            Choices::References(references) => references.options.len(),
+        }
+    }
+    pub(super) fn edits_draft(&self) -> bool {
+        matches!(self.choices, Choices::References(_))
+    }
+    pub(super) fn can_toggle(&self) -> bool {
+        matches!(&self.choices, Choices::References(r) if r.field.multiple() && !r.options.is_empty())
+    }
+    fn toggle(&mut self) {
+        if let Choices::References(references) = &mut self.choices
+            && references.field.multiple()
+        {
+            references.toggle(self.selected);
+        }
+    }
+    pub(super) fn click_row(&mut self, index: usize) {
+        if !self.details && index < self.count() {
+            self.selected = index;
+            self.toggle();
+        }
     }
     pub fn draw(
         &self,
@@ -56,20 +257,28 @@ impl Choice {
         hits: &super::input::Hits,
         feedback: Option<&'static str>,
     ) {
-        let rows: Vec<_> = self
-            .items
-            .iter()
-            .map(|item| (item.label.as_str(), item.scope.as_str()))
-            .collect();
+        let (rows, column, note) = match &self.choices {
+            Choices::Commands(items) => (
+                items
+                    .iter()
+                    .map(|item| (item.label.as_str(), item.scope.as_str()))
+                    .collect(),
+                "SCOPE",
+                None,
+            ),
+            Choices::References(references) => (references.rows(), "STATUS", references.note),
+        };
         ui::choice::draw(
             frame,
             area,
             hits,
             ui::choice::View {
                 rows: &rows,
+                column,
                 selected: self.selected,
                 details: self.details,
                 scroll: self.scroll,
+                note,
                 feedback: self.feedback.or(feedback),
             },
         );
@@ -82,20 +291,75 @@ impl App {
         self.choice = Some(Choice::new(
             "Choose saved profile setting",
             super::help::Topic::ProfileChoice,
-            values
-                .into_iter()
-                .map(|value| Item {
-                    label: value.label().into(),
-                    scope: row.name.clone(),
-                    value: Value::SaveProfile(row.name.clone(), value),
-                })
-                .collect(),
+            Choices::Commands(
+                values
+                    .into_iter()
+                    .map(|value| Item {
+                        label: value.label().into(),
+                        scope: row.name.clone(),
+                        value: Value::SaveProfile(row.name.clone(), value),
+                    })
+                    .collect(),
+            ),
             values.iter().position(|v| *v == row.choice).unwrap_or(0),
         ));
     }
 
-    pub(super) fn open_control_choice(&mut self, code: KeyCode) -> bool {
-        if self.tab != Tab::Tools || self.busy || self.shell.overlay.is_some() {
+    pub(super) fn focused_reference(&self) -> Option<ReferenceField> {
+        if !self.form_has_focus() {
+            return None;
+        }
+        match self.form_page()? {
+            "adopt" if self.shell.adoption.focused == AdoptionDraft::PROFILES_FIELD => {
+                Some(ReferenceField::AdoptionProfiles)
+            }
+            "configuration" => self
+                .shell
+                .configuration
+                .as_ref()
+                .and_then(|d| d.reference_field(d.focus)),
+            "declaration" => {
+                let draft = &self.tools_view.declaration;
+                if !draft.controls().contains(&draft.focus) {
+                    return None;
+                }
+                tool_declaration::State::reference_field(draft.focus)
+            }
+            _ => None,
+        }
+    }
+    pub(super) fn open_control_choice(&mut self, key: KeyEvent) -> bool {
+        if key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+            || self.busy
+            || self.help.is_some()
+            || self.more.is_some()
+            || self.choice.is_some()
+        {
+            return false;
+        }
+        let code = key.code;
+        if matches!(code, KeyCode::Enter | KeyCode::Char(' '))
+            && let Some(field) = self.focused_reference()
+        {
+            if let Some(references) = References::new(field, self) {
+                let selected = references
+                    .pending
+                    .first()
+                    .and_then(|id| references.options.iter().position(|option| option == id))
+                    .unwrap_or(0);
+                self.choice = Some(Choice::new(
+                    field.action(),
+                    Topic::DraftReferences,
+                    Choices::References(references),
+                    selected,
+                ));
+                self.hits.clear();
+            }
+            return true;
+        }
+        if self.tab != Tab::Tools || self.shell.overlay.is_some() {
             return false;
         }
         let tools = &self.tools_view;
@@ -110,15 +374,17 @@ impl App {
             Some(Choice::new(
                 "Choose package manager",
                 super::help::Topic::CloseRecordProvider,
-                ["npm", "Homebrew"]
-                    .iter()
-                    .enumerate()
-                    .map(|(index, label)| Item {
-                        label: (*label).into(),
-                        scope: "Saved inputs; nothing is retried.".into(),
-                        value: Value::ClosureProvider(index),
-                    })
-                    .collect(),
+                Choices::Commands(
+                    ["npm", "Homebrew"]
+                        .iter()
+                        .enumerate()
+                        .map(|(index, label)| Item {
+                            label: (*label).into(),
+                            scope: "Saved inputs; nothing is retried.".into(),
+                            value: Value::ClosureProvider(index),
+                        })
+                        .collect(),
+                ),
                 tools.installation.closure_provider(),
             ))
         } else if self.form_page() == Some("declaration")
@@ -135,14 +401,16 @@ impl App {
             Some(Choice::new(
                 "Package manager",
                 super::help::Topic::DeclarationProvider,
-                options
-                    .into_iter()
-                    .map(|(label, provider)| Item {
-                        label: label.into(),
-                        scope: "Declaration only; no install".into(),
-                        value: Value::DeclarationProvider { field, provider },
-                    })
-                    .collect(),
+                Choices::Commands(
+                    options
+                        .into_iter()
+                        .map(|(label, provider)| Item {
+                            label: label.into(),
+                            scope: "Declaration only; no install".into(),
+                            value: Value::DeclarationProvider { field, provider },
+                        })
+                        .collect(),
+                ),
                 selected,
             ))
         } else {
@@ -177,28 +445,35 @@ impl App {
             }
             return None;
         }
+        let count = choice.count();
         match code {
             KeyCode::Esc => self.choice = None,
-            KeyCode::Down | KeyCode::Tab => {
-                choice.selected = (choice.selected + 1) % choice.items.len().max(1)
-            }
+            KeyCode::Char(' ') => choice.toggle(),
+            KeyCode::Down | KeyCode::Tab => choice.selected = (choice.selected + 1) % count.max(1),
             KeyCode::Up | KeyCode::BackTab => {
-                choice.selected = (choice.selected + choice.items.len().saturating_sub(1))
-                    % choice.items.len().max(1)
+                choice.selected = (choice.selected + count.saturating_sub(1)) % count.max(1)
             }
             KeyCode::Home => choice.selected = 0,
-            KeyCode::End => choice.selected = choice.items.len().saturating_sub(1),
+            KeyCode::End => choice.selected = count.saturating_sub(1),
             KeyCode::PageDown => {
-                choice.selected = (choice.selected + 3).min(choice.items.len().saturating_sub(1))
+                choice.selected = (choice.selected + 3).min(count.saturating_sub(1))
             }
             KeyCode::PageUp => choice.selected = choice.selected.saturating_sub(3),
             KeyCode::F(2) | KeyCode::Char('k') => {
                 choice.feedback = Some("Choose a value or cancel before opening another menu.")
             }
             KeyCode::Enter => {
-                let value = choice.items.get(choice.selected)?.value.clone();
-                self.choice = None;
+                let choice = self.choice.take()?;
                 self.hits.clear();
+                let value = match choice.choices {
+                    Choices::Commands(items) => items.get(choice.selected)?.value.clone(),
+                    Choices::References(references) => {
+                        references
+                            .field
+                            .apply(self, references.value(choice.selected));
+                        return None;
+                    }
+                };
                 match value {
                     Value::SaveProfile(name, value) => {
                         let root = self.data.as_ref()?.repository.clone()?;

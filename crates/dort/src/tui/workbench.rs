@@ -95,11 +95,22 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
             actions.insert(
                 0,
                 ui::ActionButton {
-                    label: "Choose",
+                    label: if choice.edits_draft() {
+                        "Apply to draft"
+                    } else {
+                        "Choose"
+                    },
                     key: "Enter",
                     target: Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
                 },
             );
+        }
+        if !choice.details && choice.can_toggle() {
+            actions.push(ui::ActionButton {
+                label: "Toggle",
+                key: "Space",
+                target: Target::Key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE)),
+            });
         }
         actions.push(ui::ActionButton {
             label: if choice.details { "Choices" } else { "Details" },
@@ -144,6 +155,24 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
         return actions;
     }
     let mut result = app.hits.actions();
+    if let Some(field) = app.focused_reference() {
+        for action in &mut result {
+            if matches!(
+                action.target,
+                Target::FormAction(super::forms::Command::Submit) | Target::ToolDeclarationReview
+            ) {
+                action.key = "";
+            }
+        }
+        result.insert(
+            0,
+            ui::ActionButton {
+                label: field.action(),
+                key: "Enter",
+                target: Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            },
+        );
+    }
     if app.preview.is_some() {
         return result;
     }
@@ -246,6 +275,8 @@ fn compact(label: &'static str) -> &'static str {
         "Rename"
     } else if label == "Delete profile" {
         "Delete"
+    } else if matches!(label, "Choose profiles" | "Choose tools" | "Choose runtime") {
+        "Choose"
     } else if label.starts_with("Review") {
         "Review"
     } else if label.starts_with("Install") {

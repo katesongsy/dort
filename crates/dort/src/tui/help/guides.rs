@@ -10,13 +10,13 @@ macro_rules! guide {
 const DEFAULTS: &str = "Press Space on a row to toggle it. Default for all hosts enables the profile everywhere. Default on macOS and Default on Linux enable it on that platform. Leave all three off for an optional profile.";
 const MAPPING_SOURCE: &str = "Enter a path inside the repository, such as files/editor.conf. Leave off the leading slash. Avoid .git, manifest files and .. path segments.";
 const MAPPING_TARGET: &str = "Enter the path where the link should appear in your home folder, such as ~/.config/editor.conf. Use ~/ or the full path under your home folder.";
-const MAPPING_PROFILES: &str = "Enter existing profile names separated by commas, such as work, shell. A profile is a named group of files and tools. Blank uses base, which is always active.";
-const MAPPING_TOOLS: &str = "Enter declared tool IDs separated by commas, such as node, rg. Leave blank if the file needs no tools. Otherwise review the environment to check the tools before applying the link.";
+const MAPPING_PROFILES: &str = "Open Profiles with Enter or Space. Toggle profile names with Space or a click, then press Enter. Blank uses base.";
+const MAPPING_TOOLS: &str = "Open Required tools to select declared tools. Leave it blank if the file needs no tools. Review the environment before applying the link.";
 const MAPPING_OVERRIDES: &str = "macOS source and Linux source can each name a different path inside the repository. Leave either blank to use Repository source on that platform.";
 const ADOPT_EFFECTS: &str = "Dort copies the file into the repository, adds a mapping to the manifest and replaces the original with a link to the copy. Review those paths and the backup before confirming. A link makes the repository file available at the old path.";
 const CHECK_EFFECTS: &str = "Package managers can run their configuration and plugins and change caches. The check does not install packages.";
 const TOOL_COMMAND: &str = "Enter the executable name, such as rg. Use a name without folders or arguments. It can differ from Package.";
-const TOOL_DEPENDENCIES: &str = "Press F4 for Dependencies. Enter other declared tool IDs separated by commas, or leave Required tools blank. For npm, name the declared Node tool in npm runtime tool.";
+const TOOL_DEPENDENCIES: &str = "Press F4 for Dependencies. Open Required tools to select other declared tools. For npm, open npm runtime tool and choose the declared Node tool.";
 const TOOL_PACKAGE: &str = "Choose Homebrew or npm. Package is the formula name, such as ripgrep, or npm package name, such as @scope/name. Leave Version blank for the package manager's default. Both accept latest. Only npm accepts an exact version such as 1.2.3.";
 const SEARCH_FOLDERS: &str = "Enter absolute folder paths separated by colons, such as /opt/homebrew/bin:/usr/bin. Dort searches them for commands.";
 const TEMP_PROFILES: &str = "Base and other mandatory profiles stay on. Use Space to add or remove optional profiles, then Enter to validate the selection. Esc keeps the old choices.";
@@ -271,9 +271,15 @@ impl Topic {
                     "Before saving" => "Enter opens a review of the local setting. It does not edit dort.toml. Esc returns with the current setting unchanged.",
                 )
             }
+            Self::DraftReferences => {
+                guide!("Choose profiles or tools", "Use the arrows to move. For a list with multiple selections, press Space or click a row to toggle it.";
+                    "Apply to the draft" => "Enter applies the selection to the draft. Esc keeps the draft unchanged. Review the form separately before saving.",
+                    "Blank profiles" => "No selected profiles means base.",
+                )
+            }
             Self::DeclarationProvider => {
                 guide!("Choose a package manager", "Choose Homebrew for a formula or npm for a global package. Press Enter to return to the declaration and fill in Package and Version.";
-                    "What changes" => "The selection changes the draft only. For npm, also specify the declared Node tool in npm runtime tool.",
+                    "What changes" => "The selection changes the draft only. For npm, also choose the declared Node tool in npm runtime tool.",
                 )
             }
             Self::CloseRecordProvider => {
@@ -431,7 +437,7 @@ impl Topic {
                     "Target" => MAPPING_TARGET,
                     "Mapping ID" => "Use a unique name such as editor-config. Do not reuse another item's ID.",
                     "Repository source" => MAPPING_SOURCE,
-                    "Profiles" => MAPPING_PROFILES,
+                    "Profiles" => "Enter existing profile names separated by commas. Blank uses base.",
                 )
             }
             Self::Preview => {

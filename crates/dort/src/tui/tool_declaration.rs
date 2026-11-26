@@ -1,5 +1,7 @@
 //! Retained declaration form. The saved manifest is the source of truth.
-use super::{actions::Task, components as ui, input::Target, shell::edit_text};
+use super::{
+    actions::Task, choice::ReferenceField, components as ui, input::Target, shell::edit_text,
+};
 use crate::services::declaration::Request;
 use ratatui::{
     Frame,
@@ -95,6 +97,32 @@ impl State {
         }
         controls
     }
+    const REFERENCES: [(usize, ReferenceField); 3] = [
+        (2, ReferenceField::DeclarationProfiles),
+        (3, ReferenceField::DeclarationTools),
+        (7, ReferenceField::DeclarationRuntime),
+    ];
+    pub(super) fn reference_field(index: usize) -> Option<ReferenceField> {
+        Self::REFERENCES
+            .iter()
+            .find_map(|&(row, field)| (row == index).then_some(field))
+    }
+    fn reference_index(field: ReferenceField) -> Option<usize> {
+        Self::REFERENCES
+            .iter()
+            .find_map(|&(row, candidate)| (candidate == field).then_some(row))
+    }
+    pub(super) fn reference_value(&self, field: ReferenceField) -> Option<&String> {
+        self.fields.get(Self::reference_index(field)?)
+    }
+    pub(super) fn set_reference(&mut self, field: ReferenceField, value: String) {
+        if let Some(row) = Self::reference_index(field)
+            && self.fields[row] != value
+        {
+            self.fields[row] = value;
+            self.failure = None;
+        }
+    }
     pub(super) fn choose_provider(&mut self, field: usize, value: &'static str) {
         if field != PROVIDER_FIELD || self.fields[field] == value {
             return;
@@ -178,6 +206,7 @@ impl State {
             KeyCode::Enter => return self.prepare(),
             _ if self.focus < 8
                 && self.focus != PROVIDER_FIELD
+                && Self::reference_field(self.focus).is_none()
                 && !(self.focus == 0 && self.change.is_some()) =>
             {
                 edit_text(&mut self.fields[self.focus], key);
@@ -235,7 +264,9 @@ impl State {
         let choices: Vec<_> = controls
             .iter()
             .enumerate()
-            .filter_map(|(position, i)| (*i == PROVIDER_FIELD).then_some(position))
+            .filter_map(|(position, &i)| {
+                (i == PROVIDER_FIELD || Self::reference_field(i).is_some()).then_some(position)
+            })
             .collect();
         let editing = self.change.map(|_| {
             format!(

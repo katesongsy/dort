@@ -566,3 +566,5 @@ fn completion_keeps_noop_result_visible_through_refresh_and_read_failure() {
     );
     assert!(!app.error.as_ref().unwrap().contains("partial effects"));
 }
+
+mod draft_references;

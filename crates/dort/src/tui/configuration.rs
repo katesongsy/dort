@@ -222,6 +222,38 @@ impl Draft {
             .collect()
     }
 
+    const fn reference_rows(&self) -> &'static [(usize, super::choice::ReferenceField)] {
+        use super::choice::ReferenceField::{MappingProfiles, MappingTools};
+        match self.kind {
+            Kind::File => &[(3, MappingProfiles), (4, MappingTools)],
+            Kind::EditFile => &[(2, MappingProfiles), (3, MappingTools)],
+            _ => &[],
+        }
+    }
+    pub(super) fn reference_field(&self, index: usize) -> Option<super::choice::ReferenceField> {
+        self.reference_rows()
+            .iter()
+            .find_map(|&(row, field)| (row == index).then_some(field))
+    }
+    pub(super) fn choice_rows(&self) -> Vec<usize> {
+        self.reference_rows().iter().map(|&(row, _)| row).collect()
+    }
+    fn reference_index(&self, field: super::choice::ReferenceField) -> Option<usize> {
+        self.reference_rows()
+            .iter()
+            .find_map(|&(row, candidate)| (candidate == field).then_some(row))
+    }
+    pub(super) fn reference_value(&self, field: super::choice::ReferenceField) -> Option<&String> {
+        self.fields.get(self.reference_index(field)?)
+    }
+    pub(super) fn set_reference(&mut self, field: super::choice::ReferenceField, value: String) {
+        if let Some(row) = self.reference_index(field)
+            && self.fields[row] != value
+        {
+            self.fields[row] = value;
+            self.feedback = None;
+        }
+    }
     pub fn is_default_row(&self, index: usize) -> bool {
         self.kind.default_rows().contains(&index)
     }
@@ -261,7 +293,7 @@ impl Draft {
             KeyCode::Char(' ') if self.is_default_row(self.focus) => {
                 self.toggle_default();
             }
-            _ if !self.is_default_row(self.focus) => {
+            _ if !self.is_default_row(self.focus) && self.reference_field(self.focus).is_none() => {
                 self.feedback = None;
                 super::shell::edit_text(&mut self.fields[self.focus], key)
             }

@@ -2052,15 +2052,16 @@ fn create_profile_and_map_existing_repository_file_without_deploying() {
     assert_ne!(fs::read(&manifest_path).unwrap(), original);
     key(&mut app, KeyCode::Char('f'));
     assert!(click_label(&mut app, 100, 24, "n Add file mapping").is_none());
-    for (i, text) in ["work-file", "source", "~/.work", "work"]
-        .into_iter()
-        .enumerate()
-    {
+    for (i, text) in ["work-file", "source", "~/.work"].into_iter().enumerate() {
         if i > 0 {
             key(&mut app, KeyCode::Tab);
         }
         type_text(&mut app, text);
     }
+    click_label(&mut app, 80, 24, "Profiles (blank uses base)");
+    click_label(&mut app, 80, 24, "work");
+    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Esc);
     save(&mut app);
     let manifest =
         dort_core::Manifest::parse(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
@@ -2205,23 +2206,27 @@ fn managed_edit_keeps_unchanged_files_and_away_from_generic_retry() {
 }
 
 #[test]
-fn managed_edit_shows_specific_profile_and_tool_errors_in_a_compact_form() {
+fn managed_edit_shows_stale_profile_and_tool_errors_in_a_compact_form() {
     use super::tests::{click_label, render};
     let f = Fixture::new(true);
     let path = f.root.join("dort.toml");
     let original = "schema=1\n[[files]]\nid='editor'\nsource='source'\ntarget='~/.editor'\nmode='link'\n[profiles]\navailable=['work']\n";
-    fs::write(&path, original).unwrap();
+    let initial = original.replace("available=['work']", "available=['work', 'typo']")
+        + "[[tools]]\nid='missing'\nbinary='missing'\n[tools.install]\nprovider='brew'\npackage='missing'\n";
+    fs::write(&path, initial).unwrap();
     let mut app = onboarding_app(&f, false);
     key(&mut app, KeyCode::Char('f'));
     click_label(&mut app, 80, 24, "Enter Details");
     click_label(&mut app, 80, 24, "e Edit file mapping");
     click_label(&mut app, 80, 24, "Profiles (blank uses base)");
-    for _ in 0..4 {
-        key(&mut app, KeyCode::Backspace);
-    }
-    type_text(&mut app, "typo");
-    key(&mut app, KeyCode::Tab);
-    type_text(&mut app, "missing");
+    click_label(&mut app, 80, 24, "base");
+    click_label(&mut app, 80, 24, "typo");
+    key(&mut app, KeyCode::Enter);
+    click_label(&mut app, 80, 24, "Required tools");
+    click_label(&mut app, 80, 24, "missing");
+    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Esc);
+    fs::write(&path, original).unwrap();
     let task = key(&mut app, KeyCode::Enter).unwrap();
     run_task(&mut app, &f, task);
 
@@ -2243,14 +2248,14 @@ fn managed_edit_shows_specific_profile_and_tool_errors_in_a_compact_form() {
     key(&mut app, KeyCode::F(3));
     click_label(&mut app, 48, 14, "Required tools");
 
-    for _ in 0..7 {
-        key(&mut app, KeyCode::Backspace);
-    }
+    click_label(&mut app, 48, 14, "missing");
+    key(&mut app, KeyCode::Enter);
     key(&mut app, KeyCode::BackTab);
-    for _ in 0..4 {
-        key(&mut app, KeyCode::Backspace);
-    }
-    type_text(&mut app, "work");
+    key(&mut app, KeyCode::Enter);
+    click_label(&mut app, 48, 14, "typo");
+    click_label(&mut app, 48, 14, "work");
+    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Esc);
     let task = key(&mut app, KeyCode::Enter).unwrap();
     run_task(&mut app, &f, task);
     assert!(app.preview.is_some());

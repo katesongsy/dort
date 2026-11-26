@@ -141,7 +141,7 @@ fn workflow_gallery(kind: &str, width: u16, height: u16, ascii: bool, mono: bool
                 footer = dialog.footer;
                 ui::choice::draw(frame, dialog.body, &hits, ui::choice::View {
                     rows: &[("Homebrew", "available"), ("npm", "unavailable")],
-                    selected: 1, details: false, scroll: 0, feedback: None,
+                    column: "SCOPE", selected: 1, details: false, scroll: 0, note: None, feedback: None,
                 });
             }
             "More" => {
