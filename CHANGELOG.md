@@ -3,6 +3,57 @@
 Generated with git-cliff from committed Git history. Do not edit entries by hand.
 Uncommitted changes are not included. Untagged history appears under Unreleased.
 
+## v0.3.0 — 2026-11-26
+
+### Documentation
+
+- **verify:** cover form reference pickers ([e688e39](https://github.com/katesongsy/dort/commit/e688e39810f1f87fe5c4f1137cb67ebac6234444))
+
+- **verify:** map the PF1 help journey ([37223c8](https://github.com/katesongsy/dort/commit/37223c877497aefb0525cf634013d444f2ed894e))
+
+- **manifest:** state repair scope without negation ([246e4c2](https://github.com/katesongsy/dort/commit/246e4c256aa86fc8804111596ec66eb04f08c024))
+
+### Features
+
+- **tui:** pick declared profiles and tools in forms ([8fff2ff](https://github.com/katesongsy/dort/commit/8fff2ff5a95c8a51c17adb83e1ddddd25b678f80))
+
+- **tui:** teach Dort workflows in PF1 help ([f7ce623](https://github.com/katesongsy/dort/commit/f7ce6233f47ccb232e434b80dfa5cd51d6c5283b))
+
+- **tui:** clarify scope and validation feedback ([40813b3](https://github.com/katesongsy/dort/commit/40813b3660271003d80bb5b57b1fe6c6c52b5fcf))
+
+- **tui:** put environment actions where users need them ([5994491](https://github.com/katesongsy/dort/commit/5994491094140f4e5b86404c3db5000441b2b56b))
+
+- **tui:** choose profile defaults with toggle rows ([b679d09](https://github.com/katesongsy/dort/commit/b679d090b04d3051dd66f3b4e4bda9f7fd7e07b7))
+
+- **tui:** split profile actions into named forms with field help ([d9420ca](https://github.com/katesongsy/dort/commit/d9420cab5a6c9be43cddd37fd4832379633edea9))
+
+- **tui:** repair unregistered manifests with a reviewed diff ([1501348](https://github.com/katesongsy/dort/commit/1501348daaf0e27e52cf71b81af65351145f7f77))
+
+- **tui:** check standalone tools and remember tool settings ([9508abb](https://github.com/katesongsy/dort/commit/9508abb4194b342d55fd6b4aa5c9c7404626801c))
+
+- **tui:** manage registered repositories ([294cfed](https://github.com/katesongsy/dort/commit/294cfedf83fc2eaeafdfe1cfa6b9327607ad1782))
+
+- **tui:** define profiles and edit file mappings ([5748766](https://github.com/katesongsy/dort/commit/574876608eab8ea235e8235c964507f9625e4ae3))
+
+- **environment:** add saved profiles, clone, and resumable plans ([eff286a](https://github.com/katesongsy/dort/commit/eff286a3aa04420ae092529478eb537941c1d7b7))
+
+### Fixes
+
+- **environment:** review and preserve abandoned runs ([77bc998](https://github.com/katesongsy/dort/commit/77bc99861527f8af4c537b649d158c439c0f4c25))
+
+- **tui:** let temporary profiles resolve inactive dependencies ([412a2fd](https://github.com/katesongsy/dort/commit/412a2fd352c685de73c5bde67912cb3a3be254f1))
+
+### Maintenance
+
+- Merge pull request #9 from katesongsy/feat/form-reference-pickers ([3e866f9](https://github.com/katesongsy/dort/commit/3e866f969d9126560481459c8f1fc08bfa12f86a))
+
+- Merge pull request #8 from katesongsy/feat/pf1-help ([4ede805](https://github.com/katesongsy/dort/commit/4ede80526892bc94267b79fa2623f3e4a1b4dcd6))
+
+### Tests
+
+- **tui:** follow visible tool review and help text ([8895d80](https://github.com/katesongsy/dort/commit/8895d800ee3a78d88ec2739313886a555636f639))
+
+- **tui:** wait for the profile form after closing PF1 help ([0a1dd9b](https://github.com/katesongsy/dort/commit/0a1dd9ba85adf0df4cfe88678ae1a242f56368f2))
 ## v0.2.0 — 2026-11-24
 
 ### Documentation
