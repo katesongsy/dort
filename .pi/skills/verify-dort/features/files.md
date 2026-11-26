@@ -82,5 +82,5 @@ An adoption worked when all four hold:
 - **Preview follows links.** A selected link shows its target's content and names the followed path. Managed files preview their content too.
 - **Discover names managed targets.** An already-managed target shows `Managed` with its ID and refuses adoption.
 - **Groups cannot be adopted directly.** `.config` shows as Group; open it or mark its children.
-- **Templates and secrets are blocked**, not silently allowed.
+- **Template and secret deployment is blocked.** See [Generated configuration](generated.md) for template previews.
 - **Content preview reads the file.** A changed or oversized file withholds its content; the preview lists no bytes in reports.
