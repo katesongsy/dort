@@ -15,7 +15,7 @@ include = ["/src/**", "/tests/**", "/examples/dort.toml", "/Cargo.toml", "/Cargo
 [dependencies]
 clap.workspace = true
 ratatui.workspace = true
-dort-core = { path = "../dort-core", version = "0.2.0" }
+dort-core = { path = "../dort-core", version = "0.3.0" }
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
