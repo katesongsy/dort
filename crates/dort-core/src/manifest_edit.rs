@@ -206,10 +206,17 @@ fn edit_file(doc: &mut DocumentMut, manifest: &Manifest, file: &ManagedFile) -> 
         if !doc.contains_key("files") {
             doc["files"] = Item::ArrayOfTables(toml_edit::ArrayOfTables::new());
         }
+        let mut mapping = Table::new();
+        for (key, field) in fields.into_table() {
+            let field = field
+                .into_value()
+                .map_err(|_| invalid("Could not prepare the file mapping."))?;
+            mapping.insert(&key, Item::Value(field));
+        }
         doc["files"]
             .as_array_of_tables_mut()
             .ok_or_else(|| invalid("Use an array of file tables to add a mapping."))?
-            .push(fields.into_table());
+            .push(mapping);
     }
     Ok(())
 }
@@ -421,7 +428,9 @@ impl Preview {
             doc.to_string()
         };
         let parsed = Manifest::parse(&replacement).map_err(|error| match error {
-            Error::Parse(_) => invalid("Cannot save an invalid manifest."),
+            Error::Parse(_) => invalid(
+                "Dort could not prepare this change to dort.toml. No changes were made. If it happens again, report it as a Dort bug.",
+            ),
             error => error,
         })?;
         parsed.validate_file_targets(host, &parsed.profiles.known(), Some(repository), None)?;

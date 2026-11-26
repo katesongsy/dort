@@ -356,6 +356,65 @@ fn inline_recipe_and_repository_source_are_distinct_persisted_forms() {
 }
 
 #[test]
+fn add_generated_recipe_after_existing_file_mappings() {
+    use dort_core::{
+        local::RepositoryRegistry,
+        manifest_edit::{Change, FileChange, Preview as EditPreview},
+        state::WriterLock,
+    };
+    let f = Fixture::new();
+    RepositoryRegistry::register(
+        &f.home.host,
+        &WriterLock::acquire(&f.home.host).unwrap(),
+        &f.repo,
+    )
+    .unwrap();
+    let path = f.repo.join("dort.toml");
+    let original = r#"schema = 1
+
+[profiles]
+available = ["work"]
+
+[[files]]
+id = "shell"
+mode = "link"
+source = "files/shell"
+target = "~/.shell"
+overrides = { linux = "files/shell-linux" }
+
+[[files]]
+id = "editor"
+mode = "link"
+source = "files/editor"
+target = "~/.editor"
+"#;
+    fs::write(&path, original).unwrap();
+    let mapping = Manifest::parse(&inline("theme={{ theme }}", "inputs = { theme = 'dark' }"))
+        .unwrap()
+        .files
+        .remove(0);
+    let edit = EditPreview::prepare(
+        &f.home.host,
+        &f.repo,
+        &Change::File(Box::new(FileChange {
+            before: None,
+            mapping: mapping.clone(),
+        })),
+    )
+    .unwrap();
+    assert_eq!(edit.generated().unwrap().rendered, "theme=dark");
+    edit.approve().execute(&f.home.host).unwrap();
+    let mut expected = Manifest::parse(original).unwrap().files;
+    expected.push(mapping);
+    assert_eq!(
+        Manifest::parse(&fs::read_to_string(path).unwrap())
+            .unwrap()
+            .files,
+        expected
+    );
+}
+
+#[test]
 fn generated_edit_previews_the_replacement_and_preserves_other_declarations() {
     use dort_core::{
         local::RepositoryRegistry,
