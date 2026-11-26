@@ -225,6 +225,7 @@ impl RepairDraft {
             original: self.original.clone(),
             replacement,
             description: diff,
+            generated: None,
         }))
     }
 }

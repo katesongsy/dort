@@ -411,10 +411,9 @@ fn same_named_files_adopt_into_preserved_subtrees_without_moving_existing_mappin
         dort_core::Manifest::parse(&fs::read_to_string(f.repo.join("dort.toml")).unwrap()).unwrap();
     assert_eq!(manifest.files.len(), 5);
     assert!(
-        manifest
-            .files
-            .iter()
-            .any(|m| m.id == "only-a" && m.source.as_path() == std::path::Path::new("only-a"))
+        manifest.files.iter().any(
+            |m| m.id == "only-a" && m.source.as_deref() == Some(std::path::Path::new("only-a"))
+        )
     );
     assert!(f.repo.join("only-a").is_file());
 }

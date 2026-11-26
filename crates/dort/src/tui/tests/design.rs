@@ -96,7 +96,7 @@ fn files_app() -> App {
         files: vec![("editor".into(), "fallback must not be parsed".into())],
         managed: vec![ManagedRow {
             id: "editor".into(),
-            source: "/synthetic/repository/files/editor".into(),
+            source: Some("/synthetic/repository/files/editor".into()),
             target: "/synthetic/home/.editor".into(),
             state: "Blocked",
             source_kind: "Regular file",

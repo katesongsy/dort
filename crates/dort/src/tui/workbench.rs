@@ -185,7 +185,11 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
         && !result.iter().any(|a| a.key == "Esc")
     {
         result.push(ui::ActionButton {
-            label: if app.form_page().is_some() && app.form_has_focus() {
+            label: if app
+                .form_page()
+                .is_some_and(|owner| owner != "generated file")
+                && app.form_has_focus()
+            {
                 "Stop editing"
             } else {
                 "Back"
@@ -194,7 +198,11 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
             target: Target::Back,
         });
     }
-    if app.form_page().is_some() && app.form_has_focus() {
+    if app
+        .form_page()
+        .is_some_and(|owner| owner != "generated file")
+        && app.form_has_focus()
+    {
         for action in &mut result {
             if action.key == "Esc" {
                 action.label = "Stop editing";
@@ -263,6 +271,10 @@ fn compact(label: &'static str) -> &'static str {
         "Env plan"
     } else if label == Action::PreviewGenerated.label() {
         "Preview generated"
+    } else if label == Action::NewGenerated.label() {
+        "New generated"
+    } else if label == Action::EditGenerated.label() {
+        "Edit generated"
     } else if label == "Add file mapping" {
         "Add"
     } else if label == "Edit file mapping" {

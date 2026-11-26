@@ -395,7 +395,12 @@ impl App {
             }
             Ok(Output::Preview(pending)) => self.accept_preview(pending),
             Ok(Output::MappingUnchanged) => {
-                if let Some(draft) = &mut self.shell.configuration {
+                if matches!(self.shell.overlay, Some(Overlay::Form(Form::Generated))) {
+                    self.shell.form_feedback = Some((
+                        Form::Generated,
+                        "No changes. Press Esc to return, or edit the recipe or its inputs.".into(),
+                    ));
+                } else if let Some(draft) = &mut self.shell.configuration {
                     draft.feedback = Some(("No changes to this mapping.".into(), false));
                 }
                 self.status = "".into();
@@ -936,6 +941,9 @@ impl App {
                     Some(Overlay::Form(Form::Clone)) => self.shell.path_focused = index.min(1),
                     Some(Overlay::Form(Form::Repair)) => {
                         self.shell.repair.as_mut()?.focus_at(index)
+                    }
+                    Some(Overlay::Form(Form::Generated)) => {
+                        self.shell.generated.as_mut()?.focus_at(index)
                     }
                     Some(Overlay::Form(Form::Configure)) => {
                         let draft = self.shell.configuration.as_mut()?;
@@ -1568,7 +1576,7 @@ impl App {
                 self.form_focus = Some(owner);
                 return None;
             }
-            if key.code == KeyCode::Esc && self.form_has_focus() {
+            if key.code == KeyCode::Esc && self.form_has_focus() && owner != "generated file" {
                 self.form_focus = None;
                 return None;
             }
@@ -2107,6 +2115,20 @@ impl App {
             Intent::Submit(Form::Repair) => Some(Task::Configuration(Box::new(
                 self.shell.repair.as_ref()?.change(),
             ))),
+            Intent::Submit(Form::Generated) => {
+                use super::configuration::Request;
+                self.shell.form_feedback = None;
+                match self.shell.generated.as_mut()?.submit() {
+                    Ok(Some(change)) => {
+                        Some(Task::Configuration(Box::new(Request::Manifest(change))))
+                    }
+                    Ok(None) => None,
+                    Err(error) => {
+                        self.show_input_problem(super::actions::diagnostic(&error));
+                        None
+                    }
+                }
+            }
             Intent::Submit(Form::Configure) => match self
                 .shell
                 .configuration
@@ -2132,6 +2154,7 @@ impl App {
                 );
                 match form {
                     Form::Configure
+                    | Form::Generated
                     | Form::Repair
                     | Form::Adopt
                     | Form::Check
@@ -2215,6 +2238,17 @@ impl App {
         match action {
             Action::PreviewGenerated => {
                 return Some(Task::PreviewGenerated(self.selected_mapping()?.id.clone()));
+            }
+            Action::NewGenerated | Action::EditGenerated => {
+                let before = if action == Action::EditGenerated {
+                    Some(self.selected_mapping()?.clone())
+                } else {
+                    None
+                };
+                self.shell.generated = Some(super::generated::Draft::new(before));
+                self.shell.form_feedback = None;
+                self.shell.overlay = Some(Overlay::Form(Form::Generated));
+                self.form_focus = self.form_page();
             }
             Action::ProfilesPage => {
                 self.go_tab(Tab::Overview);
@@ -2572,6 +2606,21 @@ impl App {
             && self.text_entry()
     }
     /// Stable identity of the foreground form, independent of its selected field.
+    pub(super) fn paste_generated(&mut self, text: &str, width: u16, height: u16) {
+        self.resize(width, height);
+        if width >= 48
+            && height >= 14
+            && self.form_page() == Some("generated file")
+            && self.form_has_focus()
+            && let Some(draft) = &mut self.shell.generated
+        {
+            self.shell.form_feedback = draft
+                .paste(text)
+                .err()
+                .map(|error| (Form::Generated, error.to_string()));
+        }
+    }
+
     pub(super) fn form_page(&self) -> Option<&'static str> {
         if self.help.is_some()
             || self.more.is_some()
@@ -2595,6 +2644,7 @@ impl App {
                 Form::Clone => "clone",
                 Form::Configure => "configuration",
                 Form::Repair => "manifest repair",
+                Form::Generated => "generated file",
                 Form::KeepId => "keep",
                 Form::RemoveId => "remove",
             });
@@ -2637,7 +2687,7 @@ impl App {
     }
     pub(super) fn form_has_focus(&self) -> bool {
         self.form_page()
-            .is_none_or(|owner| self.form_focus == Some(owner))
+            .is_none_or(|owner| owner == "generated file" || self.form_focus == Some(owner))
     }
     fn focus_first_field(&mut self) {
         self.shell.scroll = 0;
@@ -3034,6 +3084,8 @@ impl App {
                 | super::configuration::Kind::File
                 | super::configuration::Kind::EditFile,
             )
+            | Action::NewGenerated
+            | Action::EditGenerated
             | Action::EnvironmentPlan
             | Action::EnvironmentCheck
             | Action::EnvironmentResume
@@ -3057,6 +3109,21 @@ impl App {
             }
             Action::Configure(kind) if kind.edits_profile() => self.profile_action_reason(),
             Action::SaveProfileChoice => self.profile_action_reason(),
+            Action::NewGenerated
+                if self
+                    .data
+                    .as_ref()
+                    .is_none_or(|data| data.profile_declarations.is_none()) =>
+            {
+                Some("Choose a repository with a readable manifest.")
+            }
+            Action::EditGenerated
+                if !self.selected_mapping().is_some_and(|file| {
+                    file.mode == dort_core::model::FileMode::Template && file.recipe.is_some()
+                }) =>
+            {
+                Some("Select a generated file with a recipe in dort.toml.")
+            }
             Action::PreviewGenerated if !self.template_selected() => {
                 Some("Select a generated file in Files / Managed.")
             }

@@ -71,7 +71,7 @@ overrides = { linux = "recipes/linux" }
     let template = "theme={{ theme }}\r\nformat=[{{ format }}]{{ empty }}\n{\"raw\":{}}\n";
     fs::write(&source, template).unwrap();
     let preview = f.preview().unwrap();
-    assert_eq!(preview.source, source);
+    assert_eq!(preview.source.as_ref(), Some(&source));
     assert_eq!(
         preview.destination,
         f.home.host.home.join(".config/editor/settings")
@@ -270,4 +270,156 @@ target = "~/private-settings"
 "#,
     );
     f.error("Cannot rule out a secret source alias");
+}
+
+fn inline(recipe: &str, extra: &str) -> String {
+    let declaration = DECLARATION.replace(
+        "source = \"recipes/settings\"",
+        &format!("recipe = {}", toml::Value::String(recipe.into())),
+    );
+    format!("{declaration}{extra}")
+}
+
+#[test]
+fn inline_recipe_needs_no_source_and_uses_the_same_render_rules() {
+    let f = Fixture::new();
+    let save = |recipe: &str, extra: &str| {
+        fs::write(f.repo.join("dort.toml"), inline(recipe, extra)).unwrap()
+    };
+    save(
+        "[{{ z }}]\n{{ a }}{{\tz }}\n",
+        "inputs = { a = '', z = ' x ' }",
+    );
+    let preview = f.preview().unwrap();
+    assert_eq!(preview.source, None);
+    assert_eq!(preview.rendered, "[ x ]\n x \n");
+    let plan = planner::plan(planner::observe(&f.home.host, &f.repo, &[], Request::Apply).unwrap());
+    assert!(plan.has_blockers() && plan.files[0].effects.is_empty());
+    assert!(plan.inputs.files[0].source.is_none());
+
+    for (recipe, extra, error) in [
+        ("{{ env.HOME }}", "", "Use {{ name }}"),
+        ("{{ missing }}", "", "Missing input missing"),
+        ("password=never-show", "", "may contain secrets"),
+        (
+            "{{ v }}",
+            "inputs = { v = 'Bearer never-show' }",
+            "may contain secrets",
+        ),
+        (
+            "{{ key }} = never-show",
+            "inputs = { key = 'password' }",
+            "may contain secrets",
+        ),
+    ] {
+        save(recipe, extra);
+        assert!(!f.error(error).contains("never-show"));
+    }
+    let large_value = "é".repeat(8 * 1024);
+    save(&"é".repeat(32 * 1024), "");
+    assert_eq!(f.preview().unwrap().rendered.len(), 64 * 1024);
+    save(&"é".repeat(32 * 1024 + 1), "");
+    f.error("exceeds 64 KiB");
+    save("{{ v }}", &format!("inputs = {{ v = '{large_value}x' }}"));
+    f.error("exceeds 16 KiB");
+    save(
+        &"{{ v }}".repeat(8),
+        &format!("inputs = {{ v = '{large_value}' }}"),
+    );
+    assert_eq!(f.preview().unwrap().rendered.len(), 128 * 1024);
+    save(
+        &"{{ v }}".repeat(9),
+        &format!("inputs = {{ v = '{large_value}' }}"),
+    );
+    f.error("exceeds 128 KiB");
+}
+
+#[test]
+fn inline_recipe_and_repository_source_are_distinct_persisted_forms() {
+    for invalid in [
+        inline("hello", "source = 'file'"),
+        inline("hello", "overrides = { linux = 'file' }"),
+        inline("hello", "").replace("template", "link"),
+        inline("hello", "").replace("template", "secret"),
+        DECLARATION.replace("source = \"recipes/settings\"", ""),
+        DECLARATION.replace("recipes/settings", ""),
+    ] {
+        assert!(Manifest::parse(&invalid).is_err(), "{invalid}");
+    }
+    for mode in ["link", "secret", "template"] {
+        let parsed = Manifest::parse(&DECLARATION.replace("template", mode)).unwrap();
+        let encoded = toml::to_string(&parsed).unwrap();
+        assert!(encoded.contains("source = \"recipes/settings\""));
+        assert!(!encoded.contains("recipe ="));
+        assert_eq!(Manifest::parse(&encoded).unwrap().files, parsed.files);
+    }
+}
+
+#[test]
+fn generated_edit_previews_the_replacement_and_preserves_other_declarations() {
+    use dort_core::{
+        local::RepositoryRegistry,
+        manifest_edit::{Change, FileChange, Preview as EditPreview},
+        state::WriterLock,
+    };
+    let f = Fixture::new();
+    RepositoryRegistry::register(
+        &f.home.host,
+        &WriterLock::acquire(&f.home.host).unwrap(),
+        &f.repo,
+    )
+    .unwrap();
+    let path = f.repo.join("dort.toml");
+    let original = inline(
+        "theme={{ theme }}",
+        r#"
+profiles = ["work"]
+requires = ["editor"]
+permissions = "0600"
+[files.inputs]
+theme = "dark"
+
+[profiles]
+available = ["work"]
+
+# Keep this note.
+[[tools]]
+id = "editor"
+binary = "editor"
+install = { provider = "brew", package = "editor" }
+"#,
+    );
+    fs::write(&path, &original).unwrap();
+    let destination = f.preview().unwrap().destination;
+    fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    fs::write(&destination, "existing HOME file").unwrap();
+    let before = Manifest::parse(&original).unwrap().files.remove(0);
+    let mut mapping = before.clone();
+    mapping.recipe = Some("new text\r\n  ".into());
+    mapping.inputs.clear();
+    let edit = EditPreview::prepare(
+        &f.home.host,
+        &f.repo,
+        &Change::File(Box::new(FileChange {
+            before: Some(before),
+            mapping: mapping.clone(),
+        })),
+    )
+    .unwrap();
+    let reviewed = edit.generated().unwrap().rendered.clone();
+    assert_eq!(reviewed, "new text\r\n  ");
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    let backup = edit.approve().execute(&f.home.host).unwrap().unwrap();
+    assert_eq!(fs::read_to_string(backup).unwrap(), original);
+    let stored = fs::read_to_string(path).unwrap();
+    assert!(stored.contains("# Keep this note."));
+    let manifest = Manifest::parse(&stored).unwrap();
+    assert_eq!(manifest.files, [mapping]);
+    assert_eq!(manifest.tools[0].id, "editor");
+    assert!(!stored.contains("[files.inputs]"));
+    assert_eq!(f.preview().unwrap().rendered, reviewed);
+    assert_eq!(
+        fs::read_to_string(destination).unwrap(),
+        "existing HOME file"
+    );
 }

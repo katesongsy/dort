@@ -23,7 +23,8 @@ const CONTENT: &[u8] = b"set editor-mode safe\n";
 fn mapping() -> ManagedFile {
     ManagedFile {
         id: "editor".into(),
-        source: "files/common/editorrc".into(),
+        source: Some("files/common/editorrc".into()),
+        recipe: None,
         target: "~/.editorrc".into(),
         mode: FileMode::Link,
         profiles: vec!["base".into()],

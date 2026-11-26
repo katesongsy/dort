@@ -28,7 +28,7 @@ fn fixture() -> App {
         files: vec![("é".into(), "synthetic metadata".into())],
         managed: vec![ManagedRow {
             id: "é".into(),
-            source: "/synthetic/source".into(),
+            source: Some("/synthetic/source".into()),
             target: "/synthetic/target".into(),
             state: "Blocked",
             source_kind: "Regular",

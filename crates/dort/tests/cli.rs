@@ -638,3 +638,67 @@ inputs = { name = "\u202efriendly", color = "blue" }
     assert_eq!(fs::read_dir(&sandbox.home).unwrap().count(), 1);
     assert_eq!(fs::read_dir(repo).unwrap().count(), 2);
 }
+
+#[test]
+fn inline_generated_preview_uses_manifest_recipe_in_human_and_json_output() {
+    let sandbox = Sandbox::new();
+    sandbox.manifest(
+        r#"schema = 1
+[[files]]
+id = "settings"
+mode = "template"
+recipe = "theme=[{{ theme }}]\n"
+target = "~/settings"
+inputs = { theme = " dark " }
+"#,
+    );
+    let preview = |json| {
+        let mut command = sandbox.command();
+        command.args(["--repo", "repository"]);
+        if json {
+            command.arg("--json");
+        }
+        command
+            .args(["files", "preview-generated", "settings"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone()
+    };
+    let human = String::from_utf8(preview(false)).unwrap();
+    assert!(human.contains("Source: Inline recipe in dort.toml"));
+    assert!(human.contains("Rendered output\ntheme=[ dark ]\n"));
+    let json: serde_json::Value = serde_json::from_slice(&preview(true)).unwrap();
+    assert_eq!(json["source"], serde_json::Value::Null);
+    assert_eq!(json["rendered"], "theme=[ dark ]\n");
+    assert!(!sandbox.home.join("settings").exists());
+    sandbox.assert_readonly();
+}
+
+#[test]
+fn malformed_generated_declarations_do_not_echo_manifest_text() {
+    let sandbox = Sandbox::new();
+    let path = sandbox.manifest(
+        r#"schema = 1
+[[files]]
+id = "settings"
+mode = "template"
+recipe = ["password=do-not-print-this"]
+target = "~/settings"
+"#,
+    );
+    let error = sandbox
+        .command()
+        .args(["manifest", "check", "--manifest"])
+        .arg(path)
+        .assert()
+        .code(2)
+        .get_output()
+        .stderr
+        .clone();
+    let error = String::from_utf8(error).unwrap();
+    assert!(error.contains("Invalid TOML"));
+    assert!(!error.contains("do-not-print-this"));
+    sandbox.assert_readonly();
+}

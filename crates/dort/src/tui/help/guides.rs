@@ -64,7 +64,7 @@ impl Topic {
             Self::Managed => {
                 guide!("Managed files", "A mapping tells Dort which repository file to link into your home folder. Select a mapping and press Enter to inspect its source, destination and status.";
                     "Read status" => "Linked means the destination points to the expected source. Needs apply means it is not in place yet. Blocked means Dort found a conflict. Read the reason in Details before applying.",
-                    "Generated files" => "Select a generated file and choose Preview generated file (Enter or v) to read its output. No files are written.",
+                    "Generated files" => "Press s for New generated file. Select a generated file and press v to preview it, or e to edit a recipe saved in dort.toml.",
                     "Choose which files to apply" => "Apply reviews the active profiles, even with a filter on screen. To review a subset, press Space to mark the mappings and use Apply marked. Marks can be hidden by the filter.",
                     "Change what Dort manages" => "Add file mapping or Edit file mapping saves a declaration for later apply. Unmanage leaves a regular copy at the destination. Delete link removes the link at the destination. Both keep the repository source.",
                 )
@@ -73,6 +73,12 @@ impl Topic {
                 guide!("Managed file details", "Compare Source in the repository with Destination in your home folder. Linked means the destination points to the expected source. If Blocked, read Reason and check the two file types.";
                     "Choose a change" => "Edit file mapping changes the declaration. Review environment checks required tools before you apply. Unmanage leaves a regular copy at the destination. Delete link removes the link. Both keep the source.",
                     "Return to the list" => "Press Esc to choose a different mapping or mark a group. Apply marked uses the marks. Filtering alone never limits Apply.",
+                )
+            }
+            Self::GeneratedDraft => {
+                guide!("Generated file draft", "Set the Home destination and recipe. Use {{ name }} for inputs. Tab moves between fields. F4 adds a line; Del removes the selected recipe line.";
+                    "Enter inputs" => "Choose Continue to enter only the values the recipe uses. Empty values and spaces are kept. Esc goes back without losing values. Never enter secrets.",
+                    "Review before saving" => "Review generated file shows the rendered text. Save generated file only updates dort.toml. Your Home files stay in place.",
                 )
             }
             Self::Generated => {

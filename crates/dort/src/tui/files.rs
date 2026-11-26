@@ -150,7 +150,13 @@ fn details(app: &App) -> Text<'static> {
             if app.template_selected() {
                 lines.extend([
                     field("Type", "Generated configuration", Tone::Neutral),
-                    ui::metadata("Source", row.source.to_str().unwrap_or("unavailable")),
+                    ui::metadata(
+                        "Source",
+                        row.source
+                            .as_ref()
+                            .and_then(|p| p.to_str())
+                            .unwrap_or("Inline recipe in dort.toml"),
+                    ),
                     ui::metadata("Destination", row.target.to_str().unwrap_or("unavailable")),
                     Line::raw("Preview the output from inputs in dort.toml. No files are written."),
                 ]);
@@ -171,7 +177,10 @@ fn details(app: &App) -> Text<'static> {
             }
             lines.push(ui::metadata(
                 "Source",
-                row.source.to_str().unwrap_or("unavailable"),
+                row.source
+                    .as_ref()
+                    .and_then(|p| p.to_str())
+                    .unwrap_or("unavailable"),
             ));
             lines.push(ui::metadata(
                 "Destination",
@@ -226,6 +235,8 @@ pub(super) fn managed_controls(app: &App) -> impl Iterator<Item = ui::ActionButt
     use super::{configuration::Kind, shell::Action};
     let mapping = app.selected_mapping();
     let template = mapping.is_some_and(|file| file.mode == FileMode::Template);
+    let inline =
+        mapping.is_some_and(|file| file.mode == FileMode::Template && file.recipe.is_some());
     let environment = app.registered_repository()
         && mapping.is_some_and(|file| file.mode != FileMode::Template && !file.requires.is_empty());
     let preview = (
@@ -233,6 +244,18 @@ pub(super) fn managed_controls(app: &App) -> impl Iterator<Item = ui::ActionButt
         "v",
         Action::PreviewGenerated,
         template,
+    );
+    let new_generated = (
+        Action::NewGenerated.label(),
+        "s",
+        Action::NewGenerated,
+        app.registered_repository(),
+    );
+    let edit_generated = (
+        Action::EditGenerated.label(),
+        "e",
+        Action::EditGenerated,
+        inline && app.registered_repository(),
     );
     let add = ("Add file mapping", "n", Action::Configure(Kind::File), true);
     let edit = (
@@ -248,9 +271,11 @@ pub(super) fn managed_controls(app: &App) -> impl Iterator<Item = ui::ActionButt
         environment,
     );
     if app.inventory.details {
-        [preview, review, edit, add]
+        [preview, review, edit_generated, edit, add, new_generated]
+    } else if mapping.is_none() {
+        [new_generated, add, preview, review, edit_generated, edit]
     } else {
-        [preview, review, add, edit]
+        [preview, review, edit_generated, add, edit, new_generated]
     }
     .into_iter()
     .filter(|&(_, _, _, visible)| visible)

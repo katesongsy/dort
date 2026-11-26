@@ -198,7 +198,8 @@ impl Fixture {
             Action::Adopt => Request::Adopt {
                 mapping: ManagedFile {
                     id: "editor".into(),
-                    source: "files/editor".into(),
+                    source: Some("files/editor".into()),
+                    recipe: None,
                     target: "~/.editor".into(),
                     mode: FileMode::Link,
                     profiles: vec!["base".into()],
@@ -274,7 +275,8 @@ impl Fixture {
 fn mapping(id: &str) -> ManagedFile {
     ManagedFile {
         id: id.into(),
-        source: format!("files/{id}").into(),
+        source: Some(format!("files/{id}").into()),
+        recipe: None,
         target: format!("~/.{id}").into(),
         mode: FileMode::Link,
         profiles: vec!["base".into()],

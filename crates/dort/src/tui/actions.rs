@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 pub struct ManagedRow {
     pub id: String,
-    pub source: PathBuf,
+    pub source: Option<PathBuf>,
     pub target: PathBuf,
     pub state: &'static str,
     pub source_kind: &'static str,
@@ -219,7 +219,7 @@ pub fn load_scoped(
                             for link in &plan.inputs.inactive_links {
                                 managed.push(ManagedRow {
                                     id: link.id.clone(),
-                                    source: link.source.clone(),
+                                    source: Some(link.source.clone()),
                                     target: link.target.clone(),
                                     state: "No longer selected",
                                     source_kind: "Repository source",
@@ -274,12 +274,7 @@ pub fn load_scoped(
                         if files.iter().any(|(id, _)| id == &mapping.id) {
                             continue;
                         }
-                        let source = root.join(
-                            mapping
-                                .overrides
-                                .get(&host.platform)
-                                .unwrap_or(&mapping.source),
-                        );
+                        let source = mapping.source_for(host.platform).map(|p| root.join(p));
                         let Ok(target) = host.target_path(&mapping.target, Some(&root)) else {
                             continue;
                         };

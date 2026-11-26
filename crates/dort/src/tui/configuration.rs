@@ -43,7 +43,16 @@ pub enum Approval {
 impl Preview {
     pub fn human(&self) -> String {
         match self {
-            Self::Manifest(p) => p.human(),
+            Self::Manifest(p) => p.generated().map_or_else(
+                || p.human(),
+                |generated| {
+                    format!(
+                        "{}\n\n{}",
+                        p.human(),
+                        crate::services::presentation::generated_details(generated)
+                    )
+                },
+            ),
             Self::Registry(p) => p.human(),
             Self::Repair(p) => p.human(),
         }
@@ -51,6 +60,7 @@ impl Preview {
 
     pub fn label(&self) -> &'static str {
         match self {
+            Self::Manifest(p) if p.generated().is_some() => "Save generated file",
             Self::Manifest(_) => "Save manifest change",
             Self::Registry(_) => "Save repository change",
             Self::Repair(_) => "Save repaired manifest",
@@ -157,7 +167,9 @@ impl Draft {
         let mut fields = vec![String::new(); kind.fields().len()];
         if let Some(file) = &mapping {
             fields = vec![
-                file.source.display().to_string(),
+                file.source
+                    .as_ref()
+                    .map_or_else(String::new, |p| p.display().to_string()),
                 file.target.display().to_string(),
                 file.profiles.join(", "),
                 file.requires.join(", "),
@@ -384,7 +396,8 @@ impl Draft {
                     before: self.mapping.clone(),
                     mapping: ManagedFile {
                         id,
-                        source: required(i)?.into(),
+                        source: Some(required(i)?.into()),
+                        recipe: None,
                         target: required(i + 1)?.into(),
                         mode: FileMode::Link,
                         profiles,

@@ -399,8 +399,8 @@ pub fn execute(
         }
     }
     let mut directories = vec![];
-    let mut parent = file
-        .source_path
+    let mut parent = source
+        .path
         .parent()
         .ok_or_else(|| Error::Invalid("missing source parent directory".into()))?;
     while observation::inspect(parent, false)?.kind == Kind::Missing {
@@ -415,7 +415,7 @@ pub fn execute(
         .map(|path| (Role::Directory, path))
         .collect();
     roles.extend([
-        (Role::Source, file.source_path.clone()),
+        (Role::Source, source.path.clone()),
         (Role::Manifest, inputs.manifest.path.clone()),
         (Role::Destination, file.target_path.clone()),
     ]);
@@ -465,7 +465,7 @@ pub fn execute(
                 manifest_fingerprint.gid,
             )?,
             Role::Destination => {
-                fs::symlinkat(&file.source_path, &journal.directory.file, name.as_str())
+                fs::symlinkat(&source.path, &journal.directory.file, name.as_str())
                     .map_err(|e| io_error("prepare destination link", &journal.directory.path, e))?
             }
         }
@@ -751,7 +751,10 @@ fn validate_record(host: &HostContext, journal: &Journal) -> Result<()> {
     let h = &journal.record.header;
     journal::registered_root(host, &h.repository_id, &h.repository)?;
     observation::validate_output_path(&h.repository)?;
-    if h.source.path != h.repository.join(&h.mapping.source)
+    if h.mapping
+        .source
+        .as_ref()
+        .is_none_or(|source| h.source.path != h.repository.join(source))
         || h.destination.path != host.target_path(&h.mapping.target, Some(&h.repository))?
         || h.manifest.path != h.repository.join("dort.toml")
         || h.local_config.path != host.local_config_path()

@@ -20,6 +20,8 @@ pub enum Command {
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
     let s = &app.shell;
     let line_labels;
+    let generated_fields;
+    let mut area = area;
     let (fields, focus, primary): (Vec<(&str, &str)>, usize, &'static str) = match form {
         Form::Adopt => (
             vec![
@@ -36,6 +38,45 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                 return;
             };
             (draft.fields(), draft.focus, draft.primary())
+        }
+        Form::Generated => {
+            let Some(draft) = &s.generated else {
+                return;
+            };
+            let heading = Rect::new(area.x, area.y, area.width, 1);
+            ui::prose(frame, heading, &draft.title(), ui::heading());
+            let instructions = draft.instructions();
+            let height = if usize::from(area.width) < instructions.len() {
+                2
+            } else {
+                1
+            };
+            ui::prose(
+                frame,
+                Rect::new(area.x, area.y + 1, area.width, height),
+                instructions,
+                ui::muted(),
+            );
+            area = Rect::new(
+                area.x,
+                area.y + 1 + height,
+                area.width,
+                area.height.saturating_sub(1 + height),
+            );
+            generated_fields = draft.fields();
+            let primary = if draft.entering_inputs() {
+                "Review generated file"
+            } else {
+                "Continue"
+            };
+            (
+                generated_fields
+                    .iter()
+                    .map(|(label, value)| (label.as_str(), *value))
+                    .collect(),
+                draft.focus(),
+                primary,
+            )
         }
         Form::Repair => {
             let Some(editor) = &s.repair else {
@@ -114,6 +155,17 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                 target: Target::FormAction(Command::Discard),
             });
         }
+        Form::Generated
+            if s.generated
+                .as_ref()
+                .is_some_and(|draft| !draft.entering_inputs()) =>
+        {
+            actions.push(ui::ActionButton {
+                label: "Add line",
+                key: "F4",
+                target: Target::FormAction(Command::InsertLine),
+            })
+        }
         Form::Repair => actions.push(ui::ActionButton {
             label: "Insert line",
             key: "F4",
@@ -143,11 +195,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
         }),
         _ => (),
     }
-    actions.push(ui::ActionButton {
-        label: "Details",
-        key: "F3",
-        target: Target::FormAction(Command::Details),
-    });
+    if form != Form::Generated {
+        actions.push(ui::ActionButton {
+            label: "Details",
+            key: "F3",
+            target: Target::FormAction(Command::Details),
+        });
+    }
     let choices = match form {
         Form::Adopt => vec![AdoptionDraft::PROFILES_FIELD],
         Form::Configure => s

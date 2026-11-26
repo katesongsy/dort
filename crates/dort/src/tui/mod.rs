@@ -147,7 +147,11 @@ use std::{
 struct TerminalGuard;
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        let _ = ratatui::crossterm::execute!(std::io::stdout(), event::DisableMouseCapture);
+        let _ = ratatui::crossterm::execute!(
+            std::io::stdout(),
+            event::DisableMouseCapture,
+            event::DisableBracketedPaste
+        );
         ratatui::restore();
     }
 }
@@ -205,6 +209,7 @@ fn run_loop(
     let mut dirty = true;
     let animation_clock = Instant::now();
     let mut last_size = None;
+    let mut bracketed_paste = false;
     loop {
         let size = terminal.size().map_err(terminal_error)?;
         if last_size != Some(size) {
@@ -280,6 +285,19 @@ fn run_loop(
         }
         // Coalesce a bounded burst before preparing the next passive view/read.
         for index in 0..64 {
+            let generated_flow = matches!(
+                app.shell.overlay,
+                Some(shell::Overlay::Form(shell::Form::Generated))
+            );
+            if generated_flow != bracketed_paste {
+                if generated_flow {
+                    ratatui::crossterm::execute!(std::io::stdout(), event::EnableBracketedPaste)
+                } else {
+                    ratatui::crossterm::execute!(std::io::stdout(), event::DisableBracketedPaste)
+                }
+                .map_err(terminal_error)?;
+                bracketed_paste = generated_flow;
+            }
             let timeout = if index == 0 {
                 Duration::from_millis(50)
             } else {
@@ -316,6 +334,10 @@ fn run_loop(
                     if let Some(task) = app.mouse(mouse, size.width, size.height) {
                         dispatch(task, host, &mut app, worker, &mut queued)?;
                     }
+                }
+                Event::Paste(text) if bracketed_paste => {
+                    let size = terminal.size().map_err(terminal_error)?;
+                    app.paste_generated(&text, size.width, size.height);
                 }
                 Event::Resize(width, height) => app.resize(width, height),
                 _ => (),

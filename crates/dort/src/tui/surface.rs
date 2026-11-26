@@ -72,6 +72,7 @@ impl App {
                     Form::Choose => "Session / Exact repository path",
                     Form::Clone => "Session / Clone repository",
                     Form::Repair => "Manifest repair draft",
+                    Form::Generated => "Files / Generated file draft",
                     Form::Configure => self
                         .shell
                         .configuration

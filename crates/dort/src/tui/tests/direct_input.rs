@@ -34,7 +34,7 @@ fn fixture(tab: Tab) -> App {
             .into_iter()
             .map(|id| ManagedRow {
                 id: id.into(),
-                source: format!("/synthetic/{}/source-end", long_path("source")).into(),
+                source: Some(format!("/synthetic/{}/source-end", long_path("source")).into()),
                 target: format!("/synthetic/{id}").into(),
                 state: "Blocked",
                 source_kind: "Regular",

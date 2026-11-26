@@ -1,25 +1,25 @@
 //! Read-only previews of repository-declared generated files.
 use crate::{
-    Error, Result,
+    Error, Manifest, Result,
     context::HostContext,
     manifest::paths_overlap,
-    model::{FileMode, ManagedFile},
+    model::{FileContent, FileMode, ManagedFile},
     observation::{self, Entry, Kind},
 };
 use serde::Serialize;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
 };
 
-const RECIPE_LIMIT: u64 = 64 * 1024;
-const VALUE_LIMIT: usize = 16 * 1024;
+pub const RECIPE_LIMIT: usize = 64 * 1024;
+pub const VALUE_LIMIT: usize = 16 * 1024;
 const OUTPUT_LIMIT: usize = 128 * 1024;
 
 #[derive(Debug, Serialize)]
 pub struct Preview {
     pub id: String,
-    pub source: PathBuf,
+    pub source: Option<PathBuf>,
     pub destination: PathBuf,
     pub inputs: BTreeMap<String, String>,
     pub rendered: String,
@@ -56,6 +56,15 @@ impl Preview {
                 other => other,
             },
         )?;
+        Self::from_manifest(host, repository, &manifest, id)
+    }
+
+    pub(crate) fn from_manifest(
+        host: &HostContext,
+        repository: &Path,
+        manifest: &Manifest,
+        id: &str,
+    ) -> Result<Self> {
         let file = manifest
             .files
             .iter()
@@ -66,44 +75,21 @@ impl Preview {
                 "Preview requires a file with mode = \"template\".".into(),
             ));
         }
-        let source = repository.join(file.source_for(host.platform));
-        let destination = host.target_path(&file.target, Some(repository))?;
-        let recipe = inspect_recipe(&source)?;
-        check_secret_sources(&recipe, repository, &manifest.files)?;
-        let expected = recipe
-            .fingerprint
-            .as_ref()
-            .expect("validated recipe fingerprint");
-        let unavailable = || {
-            Error::Invalid(
-                "Template source changed or could not be read safely. Check the source and retry."
-                    .into(),
-            )
+        let (source, rendered) = match file.content_for(host.platform) {
+            Some(FileContent::Source(path)) => {
+                let source = repository.join(path);
+                let text = read_recipe(&source, repository, &manifest.files)?;
+                let rendered = render(&text, &file.inputs)?;
+                (Some(source), rendered)
+            }
+            Some(FileContent::Recipe(text)) => (None, render(text, &file.inputs)?),
+            None => {
+                return Err(Error::Invalid(
+                    "Template needs a source or an inline recipe.".into(),
+                ));
+            }
         };
-        let handle = observation::parent_handle(&source).map_err(|_| unavailable())?;
-        if !observation::same_parent_identity_and_access(&handle.parents, &recipe.parents) {
-            return Err(unavailable());
-        }
-        let bytes = observation::read_checked_bounded(&handle, &source, expected, RECIPE_LIMIT)
-            .map_err(|_| unavailable())?;
-        if observation::inspect(&source, false)
-            .ok()
-            .is_none_or(|after| {
-                after.fingerprint.as_ref() != Some(expected)
-                    || !observation::same_parent_identity_and_access(
-                        &after.parents,
-                        &recipe.parents,
-                    )
-            })
-        {
-            return Err(unavailable());
-        }
-        let text = std::str::from_utf8(&bytes)
-            .map_err(|_| Error::Invalid("Template source must be UTF-8 text.".into()))?;
-        if observation::sensitive_content(&bytes) {
-            return Err(Error::Invalid("Template source may contain secrets. Use a source with no credentials or private keys.".into()));
-        }
-        let rendered = render(text, &file.inputs)?;
+        let destination = host.target_path(&file.target, Some(repository))?;
         Ok(Self {
             id: file.id.clone(),
             source,
@@ -116,6 +102,38 @@ impl Preview {
     }
 }
 
+fn read_recipe(source: &Path, repository: &Path, files: &[ManagedFile]) -> Result<String> {
+    let recipe = inspect_recipe(source)?;
+    check_secret_sources(&recipe, repository, files)?;
+    let expected = recipe
+        .fingerprint
+        .as_ref()
+        .expect("validated recipe fingerprint");
+    let unavailable = || {
+        Error::Invalid(
+            "Template source changed or could not be read safely. Check the source and retry."
+                .into(),
+        )
+    };
+    let handle = observation::parent_handle(source).map_err(|_| unavailable())?;
+    if !observation::same_parent_identity_and_access(&handle.parents, &recipe.parents) {
+        return Err(unavailable());
+    }
+    let bytes = observation::read_checked_bounded(&handle, source, expected, RECIPE_LIMIT as u64)
+        .map_err(|_| unavailable())?;
+    if observation::inspect(source, false)
+        .ok()
+        .is_none_or(|after| {
+            after.fingerprint.as_ref() != Some(expected)
+                || !observation::same_parent_identity_and_access(&after.parents, &recipe.parents)
+        })
+    {
+        return Err(unavailable());
+    }
+    String::from_utf8(bytes)
+        .map_err(|_| Error::Invalid("Template source must be UTF-8 text.".into()))
+}
+
 pub(crate) fn input_issues(file: &ManagedFile) -> impl Iterator<Item = String> {
     let mut issues = Vec::new();
     if file.mode == FileMode::Template {
@@ -125,6 +143,12 @@ pub(crate) fn input_issues(file: &ManagedFile) -> impl Iterator<Item = String> {
             } else if value.len() > VALUE_LIMIT {
                 issues.push(format!("{}: input {name} exceeds 16 KiB", file.id));
             }
+        }
+        if issues.is_empty()
+            && let Some(text) = &file.recipe
+            && let Err(error) = render(text, &file.inputs)
+        {
+            issues.push(format!("{}: {error}", file.id));
         }
     } else if !file.inputs.is_empty() {
         issues.push(format!("{}: inputs require template mode", file.id));
@@ -171,7 +195,7 @@ fn inspect_recipe(path: &Path) -> Result<Entry> {
             "Template source has special permission bits. Use an ordinary file.".into(),
         ));
     }
-    if expected.size < 0 || expected.size as u64 > RECIPE_LIMIT {
+    if expected.size < 0 || expected.size as u64 > RECIPE_LIMIT as u64 {
         return Err(Error::Invalid("Template source exceeds 64 KiB.".into()));
     }
     Ok(entry)
@@ -181,7 +205,7 @@ fn check_secret_sources(recipe: &Entry, repository: &Path, files: &[ManagedFile]
     let paths = files
         .iter()
         .filter(|file| file.mode == FileMode::Secret)
-        .flat_map(|file| std::iter::once(&file.source).chain(file.overrides.values()));
+        .flat_map(ManagedFile::source_paths);
     for path in paths {
         let path = repository.join(path);
         let overlaps = || {
@@ -239,35 +263,79 @@ fn destination_status(path: &Path) -> DestinationStatus {
     }
 }
 
-fn render(mut text: &str, inputs: &BTreeMap<String, String>) -> Result<String> {
-    let mut rendered = String::new();
-    let mut append = |part: &str| {
-        if rendered.len() + part.len() > OUTPUT_LIMIT {
-            return Err(Error::Invalid("Rendered text exceeds 128 KiB.".into()));
-        }
-        rendered.push_str(part);
-        Ok(())
-    };
+enum Part<'a> {
+    Literal(&'a str),
+    Input(&'a str),
+}
+
+fn parse_recipe(mut text: &str) -> Result<Vec<Part<'_>>> {
+    if text.len() > RECIPE_LIMIT {
+        return Err(Error::Invalid("Template recipe exceeds 64 KiB.".into()));
+    }
+    if observation::sensitive_content(text.as_bytes()) {
+        return Err(Error::Invalid(
+            "Template recipe may contain secrets. Use text without credentials or private keys."
+                .into(),
+        ));
+    }
     let invalid = || {
         Error::Invalid(
             "Invalid template expression. Use {{ name }} with a single input name.".into(),
         )
     };
+    let mut parts = Vec::new();
     while let Some((literal, rest)) = text.split_once("{{") {
         let (expression, remaining) = rest.split_once("}}").ok_or_else(invalid)?;
         let name = expression.trim_matches([' ', '\t']);
         if !input_name(name) {
             return Err(invalid());
         }
-        let value = inputs.get(name).ok_or_else(|| {
-            Error::Invalid(format!(
-                "Missing input {name}. Add a literal string for it in inputs in dort.toml."
-            ))
-        })?;
-        append(literal)?;
-        append(value)?;
+        parts.extend([Part::Literal(literal), Part::Input(name)]);
         text = remaining;
     }
-    append(text)?;
+    parts.push(Part::Literal(text));
+    Ok(parts)
+}
+
+pub fn input_names(text: &str) -> Result<BTreeSet<&str>> {
+    Ok(parse_recipe(text)?
+        .into_iter()
+        .filter_map(|part| match part {
+            Part::Input(name) => Some(name),
+            Part::Literal(_) => None,
+        })
+        .collect())
+}
+
+fn render(text: &str, inputs: &BTreeMap<String, String>) -> Result<String> {
+    let parts = parse_recipe(text)?;
+    if inputs
+        .values()
+        .any(|value| observation::sensitive_content(value.as_bytes()))
+    {
+        return Err(Error::Invalid(
+            "An input may contain secrets. Use only non-secret values.".into(),
+        ));
+    }
+    let mut rendered = String::new();
+    for part in parts {
+        let text = match part {
+            Part::Literal(text) => text,
+            Part::Input(name) => inputs.get(name).ok_or_else(|| {
+                Error::Invalid(format!(
+                    "Missing input {name}. Add a literal string for it in inputs in dort.toml."
+                ))
+            })?,
+        };
+        if rendered.len() + text.len() > OUTPUT_LIMIT {
+            return Err(Error::Invalid("Rendered text exceeds 128 KiB.".into()));
+        }
+        rendered.push_str(text);
+    }
+    if observation::sensitive_content(rendered.as_bytes()) {
+        return Err(Error::Invalid(
+            "Rendered text may contain secrets. Use only non-secret content.".into(),
+        ));
+    }
     Ok(rendered)
 }

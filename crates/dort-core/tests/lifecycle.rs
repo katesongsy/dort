@@ -637,7 +637,7 @@ fn schema1_adoption_history_and_rollback_remain_compatible() {
     let f = Fixture::new(None);
     let mut mapping = Manifest::parse(ORIGINAL).unwrap().files[0].clone();
     mapping.id = "new".into();
-    mapping.source = "files/new".into();
+    mapping.source = Some("files/new".into());
     mapping.target = "~/.new".into();
     fs::write(f.home.host.home.join(".new"), "ordinary adopted content").unwrap();
     let p = adoption::Approval::from_plan(planner::plan(

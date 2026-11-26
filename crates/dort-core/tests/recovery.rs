@@ -82,7 +82,8 @@ fn schema_one_preview_revalidates_source_edits_without_mutations() {
     let id = RepositoryRegistry::register(&t.host, &lock, &root).unwrap();
     let mapping = dort_core::model::ManagedFile {
         id: "a".into(),
-        source: "source".into(),
+        source: Some("source".into()),
+        recipe: None,
         target: "~/.a".into(),
         mode: dort_core::model::FileMode::Link,
         profiles: vec!["base".into()],

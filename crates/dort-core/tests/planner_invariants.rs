@@ -313,7 +313,8 @@ impl Case {
         };
         let mapping = ManagedFile {
             id: "demorc".into(),
-            source: PathBuf::from("files/demorc"),
+            source: Some(PathBuf::from("files/demorc")),
+            recipe: None,
             target: PathBuf::from(TARGET),
             mode: self.mode,
             profiles: vec!["base".into()],
@@ -356,7 +357,7 @@ impl Case {
             request: request_of(self.request, mapping.clone()),
             files: vec![planner::FileSnapshot {
                 mapping,
-                source_path: PathBuf::from(source_path),
+                source_path: Some(PathBuf::from(source_path)),
                 target_path: PathBuf::from(TARGET),
                 source: self
                     .source
