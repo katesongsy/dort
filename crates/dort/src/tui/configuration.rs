@@ -403,6 +403,8 @@ impl Draft {
                         profiles,
                         requires: list(value(i + 3)),
                         inputs: Default::default(),
+                        syntax: None,
+                        host_inputs: None,
                         permissions: None,
                         overrides: [
                             (Platform::Macos, value(i + 4)),

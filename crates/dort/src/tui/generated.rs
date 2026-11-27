@@ -254,6 +254,8 @@ impl Draft {
             requires: vec![],
             overrides: Default::default(),
             inputs: BTreeMap::new(),
+            syntax: None,
+            host_inputs: None,
             permissions: None,
         });
         mapping.target = self.target.trim().into();
