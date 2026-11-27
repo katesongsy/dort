@@ -3,6 +3,7 @@ use super::{
     components as ui,
     forms::Command,
     input::{Target, Wheel},
+    navigation::ListViewport,
 };
 use crate::services::presentation::local_input_value;
 use dort_core::{
@@ -14,12 +15,16 @@ use ratatui::{
     crossterm::event::{KeyCode, KeyEvent, KeyModifiers},
     layout::{Constraint, Layout, Rect},
     text::Text,
+    widgets::Row as TableRow,
 };
+
+use ui::collection::{Collection, Header, RowTargets};
 
 pub(super) struct Panel {
     id: String,
     rows: Vec<Row>,
     selected: usize,
+    viewport: ListViewport,
     scroll: u16,
     edit: Option<String>,
 }
@@ -36,6 +41,7 @@ impl Panel {
             id,
             rows,
             selected: 0,
+            viewport: ListViewport::default(),
             scroll: 0,
             edit: None,
         }
@@ -187,42 +193,32 @@ impl Panel {
                 (self.rows.len().saturating_add(1)).min(usize::from(body.height / 2).max(2)) as u16;
             let [list, details] =
                 Layout::vertical([Constraint::Length(list_height), Constraint::Min(0)]).areas(body);
-            let capacity = ui::design::pair_capacity(list);
-            let start = (self.selected + 1).saturating_sub(capacity);
-            let names: Vec<_> = self
-                .rows
-                .iter()
-                .skip(start)
-                .take(capacity)
-                .map(|row| format!("local.{}", row.name))
-                .collect();
-            let rows: Vec<_> = names
-                .iter()
-                .enumerate()
-                .map(|(index, name)| {
-                    let i = start + index;
-                    let status = match self.rows[i].value.as_deref() {
-                        None => "Unset",
-                        Some("") => "Empty",
-                        Some(_) => "Set",
-                    };
-                    ui::design::PairRow {
-                        identity: i,
-                        values: [name, status],
-                    }
-                })
-                .collect();
-            app.hits.wheel(list, Wheel::Choices);
-            ui::design::pairs(
+            let collection = Collection::new(
+                [Constraint::Min(1), Constraint::Length(8)],
+                Header::Heading(["Declared name", "Value"]),
+            );
+            let window =
+                collection.window(list, &self.viewport, self.rows.len(), Some(self.selected));
+            let rows = window.range.map(|i| {
+                let row = &self.rows[i];
+                let status = match row.value.as_deref() {
+                    None => "Unset",
+                    Some("") => "Empty",
+                    Some(_) => "Set",
+                };
+                let name = ui::inline(&format!("local.{}", row.name));
+                (i, TableRow::new([name, status.into()]))
+            });
+            collection.draw(
                 frame,
                 list,
-                ui::design::PairTable {
-                    headers: ["Declared name", "Value"],
-                    rows: &rows,
-                    selected: self.selected,
+                rows,
+                window.selection,
+                RowTargets {
+                    hits: &app.hits,
+                    wheel: Some(Wheel::Choices),
+                    target: |i| Target::FormControl(i, false),
                 },
-                &app.hits,
-                |i| Target::FormControl(i, false),
             );
             let value = local_input_value(row.value.as_deref());
             let lines = Text::from(vec![

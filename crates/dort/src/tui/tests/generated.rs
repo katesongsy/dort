@@ -558,8 +558,36 @@ fn generated_local_inputs_from_empty_repository_to_deploy_and_update() {
         };
         let task = click_label(&mut w.app, width, height, label).expect("Local inputs click");
         w.run(task);
-        assert!(w.screen().contains("local.editor"));
-        assert!(w.screen().contains("Unset"));
+        let screen = w.screen();
+        assert!(screen.contains("local.editor"));
+        assert!(screen.contains("Unset"));
+        assert!(screen.contains("Esc Back"));
+        let (row, column) = screen
+            .lines()
+            .enumerate()
+            .find_map(|(y, line)| {
+                line.find("Declared name")
+                    .map(|x| (y as u16 + 1, line[..x].chars().count() as u16))
+            })
+            .unwrap();
+        assert!(
+            w.app
+                .mouse(
+                    MouseEvent {
+                        kind: MouseEventKind::ScrollDown,
+                        column,
+                        row,
+                        modifiers: KeyModifiers::NONE,
+                    },
+                    width,
+                    height
+                )
+                .is_none()
+        );
+        let screen = w.screen();
+        assert!(screen.contains("local.later on this machine"), "{screen}");
+        assert!(click_label(&mut w.app, width, height, "local.editor").is_none());
+        assert!(w.screen().contains("local.editor on this machine"));
         assert!(click_label(&mut w.app, width, height, "Enter Set value").is_none());
         w.press(KeyCode::Enter);
         assert!(

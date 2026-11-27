@@ -187,7 +187,7 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
         result.push(ui::ActionButton {
             label: if app
                 .form_page()
-                .is_some_and(|owner| owner != "generated file")
+                .is_some_and(|owner| !matches!(owner, "generated file" | "local inputs"))
                 && app.form_has_focus()
             {
                 "Stop editing"
@@ -200,7 +200,7 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
     }
     if app
         .form_page()
-        .is_some_and(|owner| owner != "generated file")
+        .is_some_and(|owner| !matches!(owner, "generated file" | "local inputs"))
         && app.form_has_focus()
     {
         for action in &mut result {
