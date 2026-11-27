@@ -199,6 +199,14 @@ Tab from Template to **Syntax**. Open the picker with Enter, select **Jinja**, a
 
 Open the saved preview and choose **Review deployment**. Confirm that `inputs.theme` comes from `dort.toml` and the two host values come from **this host**. Approve and compare the file to `theme=[dark]\n<os>;<arch>;\n`, using the exact values from the review. Confirm the same output and value sources with `dort --json files preview-generated prefs`. Clean up the run.
 
+## Use a machine-local input
+
+In a blank disposable repository, create a generated file named `prefs` with destination `~/settings` and template `editor=[{{ local.editor }}]`. Select **Jinja** and press F4. Press Space to declare `local.editor`, then open the review. Press End and choose **Save declaration only**. Keep a copy of `dort.toml`; the destination should be absent.
+
+Open **Local inputs** (`l`). Set `editor` to `vim`. Cancel the first review and check `dort --json files local-inputs prefs` still reports a null value. Reopen and save the value. Preview and deploy. Check the destination contains `editor=[vim]` and the preview lists **local settings on this machine** as the source.
+
+Use **Clear** (`F6`) and confirm the value is unset. Set it to `nano` and check **Update available** in the preview. Compare `dort.toml` against the saved copy and check the deployed file still contains `editor=[vim]`. Clean up the run.
+
 ## Gotchas
 
 - Exit the draft with Esc before the harness sends `q`. A focused field treats `q` as text.
