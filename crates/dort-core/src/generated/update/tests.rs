@@ -253,7 +253,18 @@ fn a_failed_receipt_commit_can_be_retried_without_exchange() {
     ));
     let inode = fs::metadata(&f.dest).unwrap().ino();
     f.assert_prior_receipt();
-    let Some(UpdateOutcome::Updated { location }) = recover_update(&f.host).unwrap() else {
+    let reviewed = pending_update(&f.host).unwrap().unwrap();
+    let previous = UpdateLocation {
+        artifact: reviewed.artifact.with_file_name("different-private-file"),
+        ..reviewed
+    };
+    assert!(recover_reviewed_update(&f.host, &previous).is_err());
+    assert!(pending_update(&f.host).unwrap().is_some());
+    f.assert_prior_receipt();
+    let reviewed = pending_update(&f.host).unwrap().unwrap();
+    let Some(UpdateOutcome::Updated { location }) =
+        recover_reviewed_update(&f.host, &reviewed).unwrap()
+    else {
         panic!("expected recovery to finalize receipt");
     };
     assert_eq!(fs::read_to_string(&f.dest).unwrap(), NEXT);

@@ -20,7 +20,7 @@ use std::{
 pub(crate) use update::ensure_no_pending_update;
 pub use update::{
     ExchangeStatus, Update, UpdateApproval, UpdateLocation, UpdateOutcome, UpdateReview,
-    pending_update, recover_update,
+    pending_update, recover_reviewed_update, recover_update,
 };
 
 pub const TEMPLATE_LIMIT: usize = 64 * 1024;

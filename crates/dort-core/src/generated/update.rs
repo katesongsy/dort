@@ -716,11 +716,28 @@ fn open_locked_state(host: &HostContext) -> Result<PrivateDir> {
 }
 
 pub fn recover_update(host: &HostContext) -> Result<Option<UpdateOutcome>> {
+    recover_pending(host, None)
+}
+pub fn recover_reviewed_update(
+    host: &HostContext,
+    reviewed: &UpdateLocation,
+) -> Result<Option<UpdateOutcome>> {
+    recover_pending(host, Some(reviewed))
+}
+fn recover_pending(
+    host: &HostContext,
+    reviewed: Option<&UpdateLocation>,
+) -> Result<Option<UpdateOutcome>> {
     let _lock = WriterLock::acquire(host)?;
     let state = open_locked_state(host)?;
     let Some((intent, slot)) = load_pending(&state, host)? else {
         return Ok(None);
     };
+    if reviewed.is_some_and(|location| *location != intent.location()) {
+        return Err(Error::Invalid(
+            "A different generated update now needs recovery. Open a new recovery review.".into(),
+        ));
+    }
     let outcome = (|| {
         let receipt = slot.load()?;
         if receipt.as_ref() == Some(&intent.terminal_receipt()) {
