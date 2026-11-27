@@ -762,7 +762,7 @@ fn template_options_are_strictly_scoped() {
         "syntax = 'jinja'\ninputs = { value = ['a'] }",
     ] {
         f.manifest(options);
-        f.error("Check syntax and host_inputs");
+        f.error("Check syntax, host_inputs and local_inputs");
     }
 }
 

@@ -1,6 +1,7 @@
 //! Previews and deployment of repository-declared generated files.
 mod deploy;
 mod inputs;
+pub mod local_inputs;
 mod record;
 mod update;
 pub use crate::model::{HostInput, HostInputs};
@@ -11,7 +12,7 @@ use crate::{
     manifest::paths_overlap,
     model::{FileContent, FileMode, ManagedFile},
     observation::{self, Entry, Kind},
-    template::{self, Context, Dialect, Issue, Template, TemplateError},
+    template::{self, Context, Dialect, Input, Issue, Template, TemplateError},
 };
 pub use deploy::{Approval, Deployment, DeploymentReview, Published};
 pub use inputs::{InputProvenance, ResolvedInput, ResolvedInputs};
@@ -69,6 +70,22 @@ pub struct Preview {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drift_status: Option<DriftStatus>,
 }
+
+/// An unrendered declaration with machine-local values still unset.
+#[derive(Debug)]
+pub struct LocalInputSetup {
+    /// Declared but unset names referenced by the template. Some branches may not use them.
+    pub names: Vec<String>,
+    guidance: String,
+}
+
+impl LocalInputSetup {
+    pub fn guidance(&self) -> &str {
+        &self.guidance
+    }
+}
+
+pub(crate) type DeclarationPreview = std::result::Result<Preview, LocalInputSetup>;
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -162,13 +179,22 @@ impl Preview {
         let (manifest, _) = observation::read_manifest(&repository.join("dort.toml")).map_err(
             |error| match error {
                 Error::Parse(_) => Error::Invalid(
-                    "Invalid dort.toml. Use literal strings for generated inputs. Check syntax and host_inputs.".into(),
+                    "Invalid dort.toml. Use literal strings for generated inputs. Check syntax, host_inputs and local_inputs.".into(),
                 ),
                 other => other,
             },
         )?;
-        let mut preview = Self::from_manifest(host, repository, &manifest, id)?;
         let local = LocalConfig::load(host)?;
+        let repository_id = local.repository_id(repository);
+        let mut preview = Self::from_manifest(host, repository, repository_id, &manifest, id)?
+            .map_err(|setup| {
+                let guidance = setup.guidance();
+                Error::Invalid(if repository_id.is_some() {
+                    guidance.to_owned()
+                } else {
+                    format!("Register this repository first. {guidance}")
+                })
+            })?;
         preview.drift_status = Some(preview.drift_status(host, &local, repository, &manifest));
         Ok(preview)
     }
@@ -176,21 +202,24 @@ impl Preview {
     pub(crate) fn from_manifest(
         host: &HostContext,
         repository: &Path,
+        repository_id: Option<&str>,
         manifest: &Manifest,
         id: &str,
-    ) -> Result<Self> {
+    ) -> Result<DeclarationPreview> {
         let file = find_file(manifest, id)?;
         let destination = host.target_path(&file.target, Some(repository))?;
-        Self::render_file(host, repository, manifest, file, destination).map(|(preview, _)| preview)
+        Self::render_file(host, repository, repository_id, manifest, file, destination)
+            .map(|(preview, _)| preview)
     }
 
     fn render_file(
         host: &HostContext,
         repository: &Path,
+        repository_id: Option<&str>,
         manifest: &Manifest,
         file: &ManagedFile,
         destination: PathBuf,
-    ) -> Result<(Self, Option<Entry>)> {
+    ) -> Result<(DeclarationPreview, Option<Entry>)> {
         if file.mode != FileMode::Template {
             return Err(Error::Invalid(
                 "Preview requires a file with mode = \"template\".".into(),
@@ -211,10 +240,22 @@ impl Preview {
         };
         let syntax = file.syntax.unwrap_or_default();
         let template = compile(&file.id, syntax, &text)?;
-        let (context, resolved_inputs) = inputs::resolve(file, host)?;
-        let rendered = render(&template, syntax, &context)?;
+        let local = local_inputs::load(host, repository_id, file)?;
+        let (context, resolved_inputs) = inputs::resolve(file, host, &local)?;
+        let rendered = if syntax == Dialect::Jinja {
+            match template.render(&context) {
+                Ok(rendered) => rendered,
+                Err(error) if error.issue == Issue::MissingInput => {
+                    let setup = missing_jinja_inputs(file, &template, &resolved_inputs, error)?;
+                    return Ok((Err(setup), source));
+                }
+                Err(error) => return Err(renderer_error(syntax, error, None)),
+            }
+        } else {
+            render(&template, syntax, &context)?
+        };
         Ok((
-            Self {
+            Ok(Self {
                 id: file.id.clone(),
                 source: source.as_ref().map(|entry| entry.path.clone()),
                 destination_status: destination_status(&destination),
@@ -225,7 +266,7 @@ impl Preview {
                 rendered,
                 permissions: file.permissions.clone(),
                 drift_status: None,
-            },
+            }),
             source,
         ))
     }
@@ -390,6 +431,10 @@ pub(crate) fn input_issues(file: &ManagedFile) -> impl Iterator<Item = String> {
                 file.host_inputs.is_some(),
                 "host_inputs requires template mode",
             ),
+            (
+                file.local_inputs.is_some(),
+                "local_inputs requires template mode",
+            ),
         ] {
             if present {
                 issues.push(format!("{}: {message}", file.id));
@@ -403,6 +448,20 @@ pub(crate) fn input_issues(file: &ManagedFile) -> impl Iterator<Item = String> {
             "{}: host_inputs requires syntax = \"jinja\"",
             file.id
         ));
+    }
+    if let Some(names) = &file.local_inputs {
+        if syntax != Dialect::Jinja {
+            issues.push(format!(
+                "{}: local_inputs requires syntax = \"jinja\"",
+                file.id
+            ));
+        }
+        if names.iter().any(|name| !template::is_input_name(name)) {
+            issues.push(format!("{}: invalid local input name; use letters, digits and underscores, starting with a letter or underscore", file.id));
+        }
+        if names.iter().collect::<BTreeSet<_>>().len() != names.len() {
+            issues.push(format!("{}: list each local input once", file.id));
+        }
     }
     for (name, value) in &file.inputs {
         if !template::is_input_name(name) {
@@ -435,7 +494,15 @@ fn validate_declaration(file: &ManagedFile, syntax: Dialect) -> Result<()> {
             if let Some(text) = text {
                 compile(&file.id, syntax, text)?;
             }
-            template::validate_context(&file.id, syntax, &inputs::manifest_context(file))
+            let mut context = inputs::manifest_context(file);
+            if let Some(names) = &file.local_inputs {
+                let declarations = names
+                    .iter()
+                    .map(|name| (name.clone(), Input::Text(String::new())))
+                    .collect();
+                context.insert("local".into(), Input::Map(declarations));
+            }
+            template::validate_context(&file.id, syntax, &context)
                 .map_err(|error| renderer_error(syntax, error, None))
         }
     }
@@ -547,7 +614,7 @@ pub fn input_names(text: &str) -> Result<BTreeSet<&str>> {
 }
 
 /// Discover possible input references without resolving any values or reading the host.
-/// Jinja names are qualified, such as `inputs.theme` and `host.os`.
+/// Jinja names are qualified, such as `inputs.theme`, `host.os` and `local.editor`.
 pub fn input_names_for(id: &str, syntax: Dialect, text: &str) -> Result<BTreeSet<String>> {
     Ok(compile(id, syntax, text)?.input_names().clone())
 }
@@ -566,6 +633,57 @@ fn render(template: &Template<'_>, syntax: Dialect, context: &Context) -> Result
             })
             .flatten();
         renderer_error(syntax, error, missing)
+    })
+}
+
+fn missing_jinja_inputs(
+    file: &ManagedFile,
+    template: &Template<'_>,
+    resolved: &ResolvedInputs,
+    error: TemplateError,
+) -> Result<LocalInputSetup> {
+    let declared: BTreeSet<_> = file
+        .local_inputs
+        .iter()
+        .flatten()
+        .map(String::as_str)
+        .collect();
+    let mut unset = Vec::new();
+    let mut undeclared = Vec::new();
+    let mut other = false;
+    for name in template
+        .input_names()
+        .iter()
+        .filter(|name| !resolved.contains_key(*name))
+    {
+        match name.strip_prefix("local.") {
+            Some(key) if declared.contains(key) => {
+                unset.push(key.to_owned());
+            }
+            Some(key) => undeclared.push(key),
+            None => other = true,
+        }
+    }
+    let mut message = error.to_string();
+    if other || (unset.is_empty() && undeclared.is_empty()) {
+        message.push_str(" Declare manifest inputs in inputs and host inputs in host_inputs.");
+    }
+    if !undeclared.is_empty() {
+        message.push_str(&format!(
+            " Add these names to local_inputs in dort.toml, then set their machine-local values: {}.",
+            undeclared.join(", ")
+        ));
+    }
+    if unset.is_empty() {
+        return Err(Error::Invalid(message));
+    }
+    message.push_str(&format!(
+        " Set the machine-local inputs the template uses, then preview again: {}.",
+        unset.join(", ")
+    ));
+    Ok(LocalInputSetup {
+        names: unset,
+        guidance: message,
     })
 }
 

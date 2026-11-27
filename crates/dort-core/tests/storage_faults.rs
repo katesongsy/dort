@@ -208,6 +208,7 @@ impl Fixture {
                     inputs: Default::default(),
                     syntax: None,
                     host_inputs: None,
+                    local_inputs: None,
                     permissions: None,
                 },
             },
@@ -287,6 +288,7 @@ fn mapping(id: &str) -> ManagedFile {
         inputs: Default::default(),
         syntax: None,
         host_inputs: None,
+        local_inputs: None,
         permissions: None,
     }
 }

@@ -92,6 +92,7 @@ fn schema_one_preview_revalidates_source_edits_without_mutations() {
         inputs: Default::default(),
         syntax: None,
         host_inputs: None,
+        local_inputs: None,
         permissions: None,
     };
     let plan =

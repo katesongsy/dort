@@ -138,6 +138,15 @@ impl PrivateDir {
     }
 
     pub(crate) fn replace(&self, name: &str, content: &str) -> Result<()> {
+        self.replace_checked(name, content, || Ok(()))
+    }
+
+    pub(crate) fn replace_checked(
+        &self,
+        name: &str,
+        content: &str,
+        check: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let mut created = None;
         for _ in 0..100 {
@@ -173,6 +182,7 @@ impl PrivateDir {
                 .map_err(|e| io_error("write state replacement", self.path.join(name), e))?;
             file.sync_all()
                 .map_err(|e| io_error("sync state replacement", self.path.join(name), e))?;
+            check()?;
             fs::renameat(&self.file, temporary.as_str(), &self.file, name)
                 .map_err(|e| io_error("replace state file", self.path.join(name), e))?;
             self.file

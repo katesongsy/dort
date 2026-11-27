@@ -1,3 +1,4 @@
+use super::local_inputs::Values;
 use crate::{
     Error, Result,
     context::HostContext,
@@ -12,6 +13,7 @@ use std::{collections::BTreeMap, ffi::CStr, mem::MaybeUninit, ptr};
 pub enum InputProvenance {
     Manifest,
     Host(HostInput),
+    MachineLocal,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -20,8 +22,7 @@ pub struct ResolvedInput {
     pub provenance: InputProvenance,
 }
 
-/// Jinja uses `inputs.*` for manifest values and `host.*` for allowed host values.
-/// `local.*` is reserved for a separate local input provider.
+/// Jinja qualifies manifest, host and machine-local values as `inputs.*`, `host.*` and `local.*`.
 pub type ResolvedInputs = BTreeMap<String, ResolvedInput>;
 
 impl HostInput {
@@ -105,19 +106,26 @@ fn hostname() -> Option<String> {
         .map(str::to_owned)
 }
 
-pub(super) fn manifest_context(file: &ManagedFile) -> Context {
-    let values = file
-        .inputs
-        .iter()
+pub(super) fn text_map<'a>(items: impl IntoIterator<Item = (&'a String, &'a String)>) -> Context {
+    items
+        .into_iter()
         .map(|(key, value)| (key.clone(), Input::Text(value.clone())))
-        .collect();
+        .collect()
+}
+
+pub(super) fn manifest_context(file: &ManagedFile) -> Context {
+    let values = text_map(&file.inputs);
     match file.syntax.unwrap_or_default() {
         Dialect::Literal => values,
         Dialect::Jinja => Context::from([("inputs".into(), Input::Map(values))]),
     }
 }
 
-pub(super) fn resolve(file: &ManagedFile, host: &HostContext) -> Result<(Context, ResolvedInputs)> {
+pub(super) fn resolve(
+    file: &ManagedFile,
+    host: &HostContext,
+    local: &Values,
+) -> Result<(Context, ResolvedInputs)> {
     let prefix = match file.syntax.unwrap_or_default() {
         Dialect::Literal => "",
         Dialect::Jinja => "inputs.",
@@ -150,6 +158,22 @@ pub(super) fn resolve(file: &ManagedFile, host: &HostContext) -> Result<(Context
             );
         }
         context.insert("host".into(), Input::Map(values));
+    }
+    if let Some(keys) = &file.local_inputs {
+        let mut values = Context::new();
+        for key in keys {
+            if let Some(value) = local.get(key) {
+                values.insert(key.clone(), Input::Text(value.clone()));
+                resolved.insert(
+                    format!("local.{key}"),
+                    ResolvedInput {
+                        value: value.clone(),
+                        provenance: InputProvenance::MachineLocal,
+                    },
+                );
+            }
+        }
+        context.insert("local".into(), Input::Map(values));
     }
     Ok((context, resolved))
 }

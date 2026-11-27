@@ -298,13 +298,15 @@ impl Declaration {
                 "Generated permissions must not allow group or other users to write the file.",
             ));
         }
-        let (mut preview, source) = Preview::render_file(
+        let (preview, source) = Preview::render_file(
             host,
             self.repository(),
+            Some(&self.scope.repository_id),
             &self.manifest,
             &self.file,
             self.destination.clone(),
         )?;
+        let mut preview = preview.map_err(|setup| invalid(setup.guidance()))?;
         if let Some(source) = &source {
             trusted_parents(&source.parents)?;
         }
