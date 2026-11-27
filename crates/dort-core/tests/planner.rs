@@ -25,7 +25,7 @@ fn adopt() -> Request {
         mapping: ManagedFile {
             id: "zshrc".into(),
             source: Some(PathBuf::from("files/zshrc")),
-            recipe: None,
+            template: None,
             target: PathBuf::from("~/.zshrc"),
             mode: FileMode::Link,
             profiles: vec!["base".into()],

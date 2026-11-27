@@ -397,7 +397,7 @@ impl Draft {
                     mapping: ManagedFile {
                         id,
                         source: Some(required(i)?.into()),
-                        recipe: None,
+                        template: None,
                         target: required(i + 1)?.into(),
                         mode: FileMode::Link,
                         profiles,

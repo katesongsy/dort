@@ -231,7 +231,7 @@ pub fn adopt_request(target: &Path, id: &str, source: &Path) -> Request {
         mapping: ManagedFile {
             id: id.into(),
             source: Some(source.into()),
-            recipe: None,
+            template: None,
             target: target.into(),
             mode: FileMode::Link,
             profiles: vec!["base".into()],

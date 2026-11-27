@@ -103,7 +103,7 @@ impl Manifest {
             check_profiles(&file.id, &file.profiles, &known, true, &mut issues);
             check_references(&file.id, &file.requires, &tool_ids, &mut issues);
             if file.content_for(Platform::Linux).is_none() {
-                issues.push(format!("{}: use a source path, or an inline recipe in template mode without source overrides", file.id));
+                issues.push(format!("{}: use a source path, or an inline template in template mode without source overrides", file.id));
             }
             for source in file.source_paths() {
                 if !valid_source(source) {

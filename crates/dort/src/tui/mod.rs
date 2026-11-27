@@ -102,6 +102,8 @@ mod surface;
 #[path = "tests/task_surface.rs"]
 mod task_surface_tests;
 mod task_surfaces;
+mod template_buffer;
+mod template_editor;
 #[cfg(test)]
 mod tests;
 mod tool_declaration;
@@ -196,6 +198,66 @@ fn terminal_session(
     drop(guard);
     drop(worker);
     result
+}
+fn edit_template(terminal: &mut DefaultTerminal, paste_enabled: bool, app: &mut App) -> Result<()> {
+    use ratatui::crossterm::{cursor, execute, terminal as tty};
+    let Some(draft) = app.shell.generated.as_ref() else {
+        return Ok(());
+    };
+    let prepare = || {
+        let mut edit = template_editor::Edit::prepare(draft.template.text())?;
+        let terminal = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/tty")
+            .and_then(|file| edit.attach_tty(&file).map(|()| file))
+            .map_err(|_| {
+                Error::Invalid(
+                    "Could not open the terminal for the editor. Use the Template field instead."
+                        .into(),
+                )
+            })?;
+        Ok((edit, terminal))
+    };
+    let (edit, editor_tty) = match prepare() {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            app.shell.finish_template_edit(Err(error));
+            return Ok(());
+        }
+    };
+    let _signals = template_editor::ForegroundSignals::retain_parent().map_err(terminal_error)?;
+    let suspend = execute!(
+        std::io::stdout(),
+        event::DisableMouseCapture,
+        event::DisableBracketedPaste,
+        cursor::Show
+    )
+    .and_then(|()| ratatui::try_restore())
+    .and_then(|()| rustix::termios::tcgetattr(&editor_tty).map_err(Into::into));
+    let result = match suspend {
+        Ok(cooked) => {
+            let result = edit.run();
+            rustix::termios::tcsetattr(&editor_tty, rustix::termios::OptionalActions::Now, &cooked)
+                .map_err(|error| terminal_error(error.into()))?;
+            result
+        }
+        Err(error) => Err(terminal_error(error)),
+    };
+    tty::enable_raw_mode().map_err(terminal_error)?;
+    execute!(
+        std::io::stdout(),
+        tty::LeaveAlternateScreen,
+        tty::EnterAlternateScreen,
+        event::EnableMouseCapture
+    )
+    .map_err(terminal_error)?;
+    if paste_enabled {
+        execute!(std::io::stdout(), event::EnableBracketedPaste).map_err(terminal_error)?;
+    }
+    terminal.clear().map_err(terminal_error)?;
+    app.shell.finish_template_edit(result);
+    Ok(())
 }
 fn run_loop(
     terminal: &mut DefaultTerminal,
@@ -341,6 +403,10 @@ fn run_loop(
                 }
                 Event::Resize(width, height) => app.resize(width, height),
                 _ => (),
+            }
+            if std::mem::take(&mut app.shell.open_template_editor) {
+                edit_template(terminal, bracketed_paste, &mut app)?;
+                break;
             }
             if app.quit {
                 break;

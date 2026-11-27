@@ -12,7 +12,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const RECIPE_LIMIT: usize = 64 * 1024;
+pub const TEMPLATE_LIMIT: usize = 64 * 1024;
 pub const VALUE_LIMIT: usize = 16 * 1024;
 const OUTPUT_LIMIT: usize = 128 * 1024;
 
@@ -78,14 +78,14 @@ impl Preview {
         let (source, rendered) = match file.content_for(host.platform) {
             Some(FileContent::Source(path)) => {
                 let source = repository.join(path);
-                let text = read_recipe(&source, repository, &manifest.files)?;
+                let text = read_template(&source, repository, &manifest.files)?;
                 let rendered = render(&text, &file.inputs)?;
                 (Some(source), rendered)
             }
-            Some(FileContent::Recipe(text)) => (None, render(text, &file.inputs)?),
+            Some(FileContent::Template(text)) => (None, render(text, &file.inputs)?),
             None => {
                 return Err(Error::Invalid(
-                    "Template needs a source or an inline recipe.".into(),
+                    "Template needs a source or an inline template.".into(),
                 ));
             }
         };
@@ -102,13 +102,13 @@ impl Preview {
     }
 }
 
-fn read_recipe(source: &Path, repository: &Path, files: &[ManagedFile]) -> Result<String> {
-    let recipe = inspect_recipe(source)?;
-    check_secret_sources(&recipe, repository, files)?;
-    let expected = recipe
+fn read_template(source: &Path, repository: &Path, files: &[ManagedFile]) -> Result<String> {
+    let template = inspect_template(source)?;
+    check_secret_sources(&template, repository, files)?;
+    let expected = template
         .fingerprint
         .as_ref()
-        .expect("validated recipe fingerprint");
+        .expect("validated template fingerprint");
     let unavailable = || {
         Error::Invalid(
             "Template source changed or could not be read safely. Check the source and retry."
@@ -116,16 +116,16 @@ fn read_recipe(source: &Path, repository: &Path, files: &[ManagedFile]) -> Resul
         )
     };
     let handle = observation::parent_handle(source).map_err(|_| unavailable())?;
-    if !observation::same_parent_identity_and_access(&handle.parents, &recipe.parents) {
+    if !observation::same_parent_identity_and_access(&handle.parents, &template.parents) {
         return Err(unavailable());
     }
-    let bytes = observation::read_checked_bounded(&handle, source, expected, RECIPE_LIMIT as u64)
+    let bytes = observation::read_checked_bounded(&handle, source, expected, TEMPLATE_LIMIT as u64)
         .map_err(|_| unavailable())?;
     if observation::inspect(source, false)
         .ok()
         .is_none_or(|after| {
             after.fingerprint.as_ref() != Some(expected)
-                || !observation::same_parent_identity_and_access(&after.parents, &recipe.parents)
+                || !observation::same_parent_identity_and_access(&after.parents, &template.parents)
         })
     {
         return Err(unavailable());
@@ -145,7 +145,7 @@ pub(crate) fn input_issues(file: &ManagedFile) -> impl Iterator<Item = String> {
             }
         }
         if issues.is_empty()
-            && let Some(text) = &file.recipe
+            && let Some(text) = &file.template
             && let Err(error) = render(text, &file.inputs)
         {
             issues.push(format!("{}: {error}", file.id));
@@ -164,7 +164,7 @@ fn input_name(name: &str) -> bool {
         && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
-fn inspect_recipe(path: &Path) -> Result<Entry> {
+fn inspect_template(path: &Path) -> Result<Entry> {
     if observation::sensitive_path(path) {
         return Err(Error::Invalid(
             "Template source is in a sensitive path. Use a non-sensitive source in the repository."
@@ -195,13 +195,13 @@ fn inspect_recipe(path: &Path) -> Result<Entry> {
             "Template source has special permission bits. Use an ordinary file.".into(),
         ));
     }
-    if expected.size < 0 || expected.size as u64 > RECIPE_LIMIT as u64 {
+    if expected.size < 0 || expected.size as u64 > TEMPLATE_LIMIT as u64 {
         return Err(Error::Invalid("Template source exceeds 64 KiB.".into()));
     }
     Ok(entry)
 }
 
-fn check_secret_sources(recipe: &Entry, repository: &Path, files: &[ManagedFile]) -> Result<()> {
+fn check_secret_sources(template: &Entry, repository: &Path, files: &[ManagedFile]) -> Result<()> {
     let paths = files
         .iter()
         .filter(|file| file.mode == FileMode::Secret)
@@ -214,7 +214,7 @@ fn check_secret_sources(recipe: &Entry, repository: &Path, files: &[ManagedFile]
                     .into(),
             )
         };
-        if paths_overlap(&path, &recipe.path) {
+        if paths_overlap(&path, &template.path) {
             return Err(overlaps());
         }
         let cannot_rule_out_alias = || {
@@ -231,8 +231,8 @@ fn check_secret_sources(recipe: &Entry, repository: &Path, files: &[ManagedFile]
             let same_file = |other: &observation::Fingerprint| {
                 other.device == secret.device && other.inode == secret.inode
             };
-            if recipe.fingerprint.as_ref().is_some_and(same_file)
-                || recipe
+            if template.fingerprint.as_ref().is_some_and(same_file)
+                || template
                     .parents
                     .iter()
                     .any(|parent| same_file(&parent.fingerprint))
@@ -268,14 +268,13 @@ enum Part<'a> {
     Input(&'a str),
 }
 
-fn parse_recipe(mut text: &str) -> Result<Vec<Part<'_>>> {
-    if text.len() > RECIPE_LIMIT {
-        return Err(Error::Invalid("Template recipe exceeds 64 KiB.".into()));
+fn parse_template(mut text: &str) -> Result<Vec<Part<'_>>> {
+    if text.len() > TEMPLATE_LIMIT {
+        return Err(Error::Invalid("Template exceeds 64 KiB.".into()));
     }
     if observation::sensitive_content(text.as_bytes()) {
         return Err(Error::Invalid(
-            "Template recipe may contain secrets. Use text without credentials or private keys."
-                .into(),
+            "Template may contain secrets. Use text without credentials or private keys.".into(),
         ));
     }
     let invalid = || {
@@ -298,7 +297,7 @@ fn parse_recipe(mut text: &str) -> Result<Vec<Part<'_>>> {
 }
 
 pub fn input_names(text: &str) -> Result<BTreeSet<&str>> {
-    Ok(parse_recipe(text)?
+    Ok(parse_template(text)?
         .into_iter()
         .filter_map(|part| match part {
             Part::Input(name) => Some(name),
@@ -308,7 +307,7 @@ pub fn input_names(text: &str) -> Result<BTreeSet<&str>> {
 }
 
 fn render(text: &str, inputs: &BTreeMap<String, String>) -> Result<String> {
-    let parts = parse_recipe(text)?;
+    let parts = parse_template(text)?;
     if inputs
         .values()
         .any(|value| observation::sensitive_content(value.as_bytes()))

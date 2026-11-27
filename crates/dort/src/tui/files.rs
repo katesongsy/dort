@@ -155,7 +155,7 @@ fn details(app: &App) -> Text<'static> {
                         row.source
                             .as_ref()
                             .and_then(|p| p.to_str())
-                            .unwrap_or("Inline recipe in dort.toml"),
+                            .unwrap_or("Inline template in dort.toml"),
                     ),
                     ui::metadata("Destination", row.target.to_str().unwrap_or("unavailable")),
                     Line::raw("Preview the output from inputs in dort.toml. No files are written."),
@@ -236,7 +236,7 @@ pub(super) fn managed_controls(app: &App) -> impl Iterator<Item = ui::ActionButt
     let mapping = app.selected_mapping();
     let template = mapping.is_some_and(|file| file.mode == FileMode::Template);
     let inline =
-        mapping.is_some_and(|file| file.mode == FileMode::Template && file.recipe.is_some());
+        mapping.is_some_and(|file| file.mode == FileMode::Template && file.template.is_some());
     let environment = app.registered_repository()
         && mapping.is_some_and(|file| file.mode != FileMode::Template && !file.requires.is_empty());
     let preview = (
@@ -270,12 +270,12 @@ pub(super) fn managed_controls(app: &App) -> impl Iterator<Item = ui::ActionButt
         Action::EnvironmentPlan,
         environment,
     );
-    if app.inventory.details {
-        [preview, review, edit_generated, edit, add, new_generated]
-    } else if mapping.is_none() {
-        [new_generated, add, preview, review, edit_generated, edit]
+    if template {
+        [preview, edit_generated, new_generated, review, add, edit]
+    } else if app.inventory.details {
+        [new_generated, review, edit, add, preview, edit_generated]
     } else {
-        [preview, review, edit_generated, add, edit, new_generated]
+        [new_generated, review, add, edit, preview, edit_generated]
     }
     .into_iter()
     .filter(|&(_, _, _, visible)| visible)

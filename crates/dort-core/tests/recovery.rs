@@ -83,7 +83,7 @@ fn schema_one_preview_revalidates_source_edits_without_mutations() {
     let mapping = dort_core::model::ManagedFile {
         id: "a".into(),
         source: Some("source".into()),
-        recipe: None,
+        template: None,
         target: "~/.a".into(),
         mode: dort_core::model::FileMode::Link,
         profiles: vec!["base".into()],

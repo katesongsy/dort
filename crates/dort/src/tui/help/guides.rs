@@ -64,7 +64,7 @@ impl Topic {
             Self::Managed => {
                 guide!("Managed files", "A mapping tells Dort which repository file to link into your home folder. Select a mapping and press Enter to inspect its source, destination and status.";
                     "Read status" => "Linked means the destination points to the expected source. Needs apply means it is not in place yet. Blocked means Dort found a conflict. Read the reason in Details before applying.",
-                    "Generated files" => "Press s for New generated file. Select a generated file and press v to preview it, or e to edit a recipe saved in dort.toml.",
+                    "Generated files" => "Press s for New generated file. Select a generated file and press v to preview it, or e to edit a template saved in dort.toml.",
                     "Choose which files to apply" => "Apply reviews the active profiles, even with a filter on screen. To review a subset, press Space to mark the mappings and use Apply marked. Marks can be hidden by the filter.",
                     "Change what Dort manages" => "Add file mapping or Edit file mapping saves a declaration for later apply. Unmanage leaves a regular copy at the destination. Delete link removes the link at the destination. Both keep the repository source.",
                 )
@@ -76,8 +76,9 @@ impl Topic {
                 )
             }
             Self::GeneratedDraft => {
-                guide!("Generated file draft", "Set the Home destination and recipe. Use {{ name }} for inputs. Tab moves between fields. F4 adds a line; Del removes the selected recipe line.";
-                    "Enter inputs" => "Choose Continue to enter only the values the recipe uses. Empty values and spaces are kept. Esc goes back without losing values. Never enter secrets.",
+                guide!("Generated file draft", "Set the Home destination and template. Use {{ name }} for inputs. Tab moves between fields. In Template, Enter adds a line. Paste several lines at once.";
+                    "Open in editor" => "Press F5 to use VISUAL or EDITOR. Save and exit the editor to return to the draft.",
+                    "Enter inputs" => "Press F4 to continue. Empty values and spaces are kept. Esc goes back without losing values. Never enter secrets.",
                     "Review before saving" => "Review generated file shows the rendered text. Save generated file only updates dort.toml. Your Home files stay in place.",
                 )
             }

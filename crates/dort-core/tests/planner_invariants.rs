@@ -314,7 +314,7 @@ impl Case {
         let mapping = ManagedFile {
             id: "demorc".into(),
             source: Some(PathBuf::from("files/demorc")),
-            recipe: None,
+            template: None,
             target: PathBuf::from(TARGET),
             mode: self.mode,
             profiles: vec!["base".into()],

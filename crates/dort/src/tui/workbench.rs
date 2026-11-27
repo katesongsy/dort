@@ -275,6 +275,8 @@ fn compact(label: &'static str) -> &'static str {
         "New generated"
     } else if label == Action::EditGenerated.label() {
         "Edit generated"
+    } else if label == "Open in editor" {
+        "Editor"
     } else if label == "Add file mapping" {
         "Add"
     } else if label == "Edit file mapping" {

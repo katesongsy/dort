@@ -29,7 +29,7 @@ pub fn generated_inputs(preview: &dort_core::generated::Preview) -> String {
 
 pub fn generated_source(preview: &dort_core::generated::Preview) -> String {
     preview.source.as_ref().map_or_else(
-        || "Inline recipe in dort.toml".into(),
+        || "Inline template in dort.toml".into(),
         |source| source.display().to_string(),
     )
 }

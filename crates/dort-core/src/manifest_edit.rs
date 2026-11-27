@@ -183,9 +183,14 @@ fn edit_file(doc: &mut DocumentMut, manifest: &Manifest, file: &ManagedFile) -> 
             .as_array_of_tables_mut()
             .and_then(|files| files.get_mut(index))
             .ok_or_else(|| invalid("Use an array of file tables to edit this mapping."))?;
+        if let Some((legacy, template)) = existing.remove_entry("recipe") {
+            let mut key = toml_edit::Key::new("template");
+            *key.leaf_decor_mut() = legacy.leaf_decor().clone();
+            existing.insert_formatted(&key, template);
+        }
         for (key, changed) in [
             ("source", before.source != file.source),
-            ("recipe", before.recipe != file.recipe),
+            ("template", before.template != file.template),
             ("inputs", before.inputs != file.inputs),
             ("target", before.target != file.target),
             ("profiles", before.profiles != file.profiles),
@@ -193,11 +198,18 @@ fn edit_file(doc: &mut DocumentMut, manifest: &Manifest, file: &ManagedFile) -> 
             ("overrides", before.overrides != file.overrides),
         ] {
             if changed && let Some(field) = fields.get(key) {
-                let field = field
+                let mut field = field
                     .clone()
                     .into_value()
                     .map_err(|_| invalid("Could not prepare the file mapping."))?;
-                existing.insert(key, Item::Value(field));
+                if key == "template"
+                    && let Some(previous) = existing.get_mut(key).and_then(Item::as_value_mut)
+                {
+                    *field.decor_mut() = previous.decor().clone();
+                    *previous = field;
+                } else {
+                    existing.insert(key, Item::Value(field));
+                }
             } else if changed {
                 existing.remove(key);
             }
@@ -333,9 +345,9 @@ impl Preview {
                     before,
                 } = change.as_ref();
                 let inline =
-                    |file: &ManagedFile| file.mode == FileMode::Template && file.recipe.is_some();
+                    |file: &ManagedFile| file.mode == FileMode::Template && file.template.is_some();
                 if file.mode != FileMode::Link && !inline(file) {
-                    return Err(invalid("Choose a link mapping or an inline recipe."));
+                    return Err(invalid("Choose a link mapping or an inline template."));
                 }
                 let previous = manifest
                     .files

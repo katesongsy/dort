@@ -44,11 +44,13 @@ Use `1` for Managed, `2` for Discover and `3` for Ignored paths. `g` opens Git.
 - **Delete link** and **Delete marked** are separate actions. Review the paths and confirm the exact mapping IDs before deleting links.
 #### Generated files
 
-In **Files**, open **Managed**. Press `s` or choose **New generated file**. Enter a file ID, a Home destination, and the recipe. Use `{{ name }}` for an input. Add a line with `F4` or paste plain text into a recipe row. `Tab` moves between fields.
+In **Files**, open **Managed**. Press `s` or choose **New generated file**. Enter a file ID and a Home destination. Press `Tab` or `Shift+Tab` to move between fields. In **Template**, `Enter` adds a newline. Use the arrows, `Home`, and `End` to edit, or paste several lines at once. Use `{{ name }}` for an input. Keep secrets out of templates and inputs.
 
-Choose **Continue**. If the recipe uses inputs, enter the named values. Leave a value blank to render nothing. Choose **Review generated file** after entering inputs. Read the output. Press `y` when **Save generated file** is ready. `Esc` goes back without saving. Saving changes only `dort.toml`.
+Choose **Open in editor** (`F5`) to edit the template in an external editor. Set `VISUAL` or `EDITOR` before starting Dort, for example `VISUAL='code --wait'`. Dort tries `VISUAL` first. Choose an editor command that waits until you close the file. The editor gets a temporary copy of the template. Save and exit the editor to return to the draft.
 
-To revisit a saved recipe, select it in Managed. Press `v` to preview it or `e` to choose **Edit generated file**. File-backed recipes can be previewed; edit their source in the repository.
+Choose **Continue** (`F4`). If the template uses inputs, enter the named values. Leave a value blank to render nothing. Choose **Review generated file** after entering inputs. Read the output. Press `y` when **Save generated file** is ready. `Esc` from the review or inputs returns to the draft. Saving changes only `dort.toml`.
+
+To revisit a saved template, select it in Managed. Press `v` to preview it or `e` to choose **Edit generated file**. File-backed templates can be previewed; edit their source in the repository.
 
 ## Tools
 

@@ -24,7 +24,7 @@ fn mapping() -> ManagedFile {
     ManagedFile {
         id: "editor".into(),
         source: Some("files/common/editorrc".into()),
-        recipe: None,
+        template: None,
         target: "~/.editorrc".into(),
         mode: FileMode::Link,
         profiles: vec!["base".into()],

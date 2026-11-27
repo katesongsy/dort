@@ -1277,7 +1277,7 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                             file.mapping.id,
                             file.target_path.display(),
                             file.source_path.as_ref().map_or_else(
-                                || "Inline recipe in dort.toml".into(),
+                                || "Inline template in dort.toml".into(),
                                 |path| path.display().to_string()
                             )
                         );

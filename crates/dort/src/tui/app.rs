@@ -398,7 +398,8 @@ impl App {
                 if matches!(self.shell.overlay, Some(Overlay::Form(Form::Generated))) {
                     self.shell.form_feedback = Some((
                         Form::Generated,
-                        "No changes. Press Esc to return, or edit the recipe or its inputs.".into(),
+                        "No changes. Press Esc to return, or edit the template or its inputs."
+                            .into(),
                     ));
                 } else if let Some(draft) = &mut self.shell.configuration {
                     draft.feedback = Some(("No changes to this mapping.".into(), false));
@@ -3119,10 +3120,10 @@ impl App {
             }
             Action::EditGenerated
                 if !self.selected_mapping().is_some_and(|file| {
-                    file.mode == dort_core::model::FileMode::Template && file.recipe.is_some()
+                    file.mode == dort_core::model::FileMode::Template && file.template.is_some()
                 }) =>
             {
-                Some("Select a generated file with a recipe in dort.toml.")
+                Some("Select a generated file with a template in dort.toml.")
             }
             Action::PreviewGenerated if !self.template_selected() => {
                 Some("Select a generated file in Files / Managed.")

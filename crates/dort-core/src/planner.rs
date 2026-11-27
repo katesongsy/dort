@@ -539,7 +539,7 @@ impl Plan {
                             .map_or("absent/unknown".into(), permissions)
                     );
                 } else {
-                    let _ = writeln!(text, "  Recipe: Inline in dort.toml");
+                    let _ = writeln!(text, "  Template: Inline in dort.toml");
                 }
                 let _ = writeln!(
                     text,

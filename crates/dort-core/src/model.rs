@@ -48,8 +48,8 @@ pub struct ManagedFile {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub recipe: Option<String>,
+    #[serde(alias = "recipe", skip_serializing_if = "Option::is_none")]
+    pub template: Option<String>,
     pub target: PathBuf,
     pub mode: FileMode,
     #[serde(default = "base_profiles")]
@@ -65,7 +65,7 @@ pub struct ManagedFile {
 
 pub(crate) enum FileContent<'a> {
     Source(&'a std::path::Path),
-    Recipe(&'a str),
+    Template(&'a str),
 }
 
 impl ManagedFile {
@@ -80,10 +80,10 @@ impl ManagedFile {
     }
 
     pub(crate) fn content_for(&self, platform: Platform) -> Option<FileContent<'_>> {
-        match (self.source_for(platform), self.recipe.as_deref()) {
+        match (self.source_for(platform), self.template.as_deref()) {
             (Some(path), None) => Some(FileContent::Source(path)),
             (None, Some(text)) if self.mode == FileMode::Template && self.overrides.is_empty() => {
-                Some(FileContent::Recipe(text))
+                Some(FileContent::Template(text))
             }
             _ => None,
         }

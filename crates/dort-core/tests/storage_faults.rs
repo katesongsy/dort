@@ -199,7 +199,7 @@ impl Fixture {
                 mapping: ManagedFile {
                     id: "editor".into(),
                     source: Some("files/editor".into()),
-                    recipe: None,
+                    template: None,
                     target: "~/.editor".into(),
                     mode: FileMode::Link,
                     profiles: vec!["base".into()],
@@ -276,7 +276,7 @@ fn mapping(id: &str) -> ManagedFile {
     ManagedFile {
         id: id.into(),
         source: Some(format!("files/{id}").into()),
-        recipe: None,
+        template: None,
         target: format!("~/.{id}").into(),
         mode: FileMode::Link,
         profiles: vec!["base".into()],

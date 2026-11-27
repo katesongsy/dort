@@ -257,6 +257,7 @@ pub struct Shell {
     pub init_draft: String,
     pub clone_fields: [String; 2],
     pub generated: Option<super::generated::Draft>,
+    pub open_template_editor: bool,
     pub repair: Option<super::configuration::RepairEditor>,
     pub configuration: Option<super::configuration::Draft>,
     pub path_focused: usize,
@@ -293,6 +294,7 @@ impl Shell {
             init_draft: String::new(),
             clone_fields: Default::default(),
             generated: None,
+            open_template_editor: false,
             repair: None,
             configuration: None,
             path_focused: 0,
@@ -353,6 +355,19 @@ impl Shell {
             None
         };
     }
+    pub fn finish_template_edit(&mut self, result: dort_core::Result<String>) {
+        let Some(draft) = self.generated.as_mut() else {
+            return;
+        };
+        self.form_feedback = match result {
+            Ok(text) => {
+                draft.template.replace(text);
+                draft.focus_template();
+                None
+            }
+            Err(error) => Some((Form::Generated, error.to_string())),
+        };
+    }
     pub fn draft(&self, form: Form) -> &str {
         match form {
             Form::Choose => &self.choose_draft,
@@ -372,16 +387,17 @@ impl Shell {
         match command {
             Command::Submit => Some(Intent::Submit(form)),
             Command::InsertLine => {
-                if form == Form::Generated {
-                    self.form_feedback = self
-                        .generated
-                        .as_mut()?
-                        .insert_line()
-                        .err()
-                        .map(|e| (form, e.to_string()));
-                } else if form == Form::Repair {
+                if form == Form::Repair {
                     self.repair.as_mut()?.insert();
                 }
+                None
+            }
+            Command::OpenTemplateEditor => {
+                self.open_template_editor = form == Form::Generated
+                    && self
+                        .generated
+                        .as_ref()
+                        .is_some_and(|draft| !draft.entering_inputs());
                 None
             }
             Command::Toggle => {
@@ -601,9 +617,14 @@ impl Shell {
                         self.back();
                     }
                     KeyCode::Esc => self.form_feedback = None,
-                    KeyCode::Enter => return Some(Intent::Submit(Form::Generated)),
+                    KeyCode::Enter if !draft.template_focused() => {
+                        return Some(Intent::Submit(Form::Generated));
+                    }
                     KeyCode::F(4) if !draft.entering_inputs() => {
-                        return self.form_action(super::forms::Command::InsertLine);
+                        return Some(Intent::Submit(Form::Generated));
+                    }
+                    KeyCode::F(5) if !draft.entering_inputs() => {
+                        return self.form_action(super::forms::Command::OpenTemplateEditor);
                     }
                     _ => {
                         if let Err(error) = draft.key(key) {

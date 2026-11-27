@@ -90,9 +90,10 @@ impl Report {
     }
 }
 
+use super::template_buffer::TemplateBuffer;
 use dort_core::{
     Error, Result,
-    generated::{RECIPE_LIMIT, VALUE_LIMIT, input_names},
+    generated::{VALUE_LIMIT, input_names},
     manifest_edit::{Change, FileChange},
     model::{FileMode, ManagedFile, base_profiles},
 };
@@ -103,14 +104,14 @@ pub(super) struct Draft {
     before: Option<ManagedFile>,
     id: String,
     target: String,
-    lines: Vec<String>,
+    pub template: TemplateBuffer,
     values: BTreeMap<String, String>,
     step: Step,
-    recipe_focus: usize,
+    template_focus: usize,
 }
 
 enum Step {
-    Recipe,
+    Template,
     Inputs { names: Vec<String>, focus: usize },
 }
 
@@ -121,19 +122,18 @@ impl Draft {
             target: before
                 .as_ref()
                 .map_or_else(String::new, |f| f.target.display().to_string()),
-            lines: before
-                .as_ref()
-                .and_then(|f| f.recipe.as_deref())
-                .unwrap_or_default()
-                .split('\n')
-                .map(str::to_owned)
-                .collect(),
+            template: TemplateBuffer::new(
+                before
+                    .as_ref()
+                    .and_then(|f| f.template.clone())
+                    .unwrap_or_default(),
+            ),
             values: before
                 .as_ref()
                 .map_or_else(BTreeMap::new, |f| f.inputs.clone()),
+            step: Step::Template,
+            template_focus: if before.is_some() { 1 } else { 0 },
             before,
-            step: Step::Recipe,
-            recipe_focus: 0,
         }
     }
 
@@ -149,11 +149,11 @@ impl Draft {
         if self.entering_inputs() {
             "Enter literal values. Blanks and spaces are kept. Never enter secrets."
         } else {
-            "Use {{ name }} for inputs. Add lines with F4. Del removes a line. Never enter secrets."
+            "Use {{ name }} for inputs. Enter adds a line. Tab moves fields. Never enter secrets."
         }
     }
 
-    fn first_line(&self) -> usize {
+    pub fn template_field(&self) -> usize {
         if self.before.is_some() { 1 } else { 2 }
     }
 
@@ -161,52 +161,39 @@ impl Draft {
         matches!(self.step, Step::Inputs { .. })
     }
 
-    pub fn fields(&self) -> Vec<(String, &str)> {
-        match &self.step {
-            Step::Recipe => {
-                let mut fields = Vec::new();
-                if self.before.is_none() {
-                    fields.push(("File ID".into(), self.id.as_str()));
-                }
-                fields.push(("Home destination (~/path)".into(), self.target.as_str()));
-                fields.extend(
-                    self.lines
-                        .iter()
-                        .enumerate()
-                        .map(|(i, line)| (format!("Recipe line {}", i + 1), line.as_str())),
-                );
-                fields
-            }
-            Step::Inputs { names, .. } => names
-                .iter()
-                .map(|name| {
-                    (
-                        format!("Input: {name}"),
-                        self.values.get(name).map_or("", String::as_str),
-                    )
-                })
-                .collect(),
-        }
+    pub fn input_fields(&self) -> Vec<(String, &str)> {
+        let Step::Inputs { names, .. } = &self.step else {
+            return Vec::new();
+        };
+        names
+            .iter()
+            .map(|name| {
+                (
+                    format!("Input: {name}"),
+                    self.values.get(name).map_or("", String::as_str),
+                )
+            })
+            .collect()
     }
 
     pub fn focus(&self) -> usize {
         match &self.step {
-            Step::Recipe => self.recipe_focus,
+            Step::Template => self.template_focus,
             Step::Inputs { focus, .. } => *focus,
         }
     }
 
     pub fn focus_at(&mut self, index: usize) {
-        let last = self.first_line() + self.lines.len() - 1;
+        let last = self.template_field();
         match &mut self.step {
-            Step::Recipe => self.recipe_focus = index.min(last),
+            Step::Template => self.template_focus = index.min(last),
             Step::Inputs { names, focus } => *focus = index.min(names.len() - 1),
         }
     }
 
     pub fn back(&mut self) -> bool {
         if self.entering_inputs() {
-            self.step = Step::Recipe;
+            self.step = Step::Template;
             true
         } else {
             false
@@ -214,7 +201,7 @@ impl Draft {
     }
 
     pub fn submit(&mut self) -> Result<Option<Change>> {
-        let recipe = self.lines.join("\n");
+        let template = self.template.text();
         let names = if let Step::Inputs { names, .. } = &self.step {
             names.clone()
         } else {
@@ -223,7 +210,7 @@ impl Draft {
                     "Enter a file ID and Home destination.".into(),
                 ));
             }
-            let names = input_names(&recipe)?
+            let names = input_names(template)?
                 .into_iter()
                 .map(str::to_owned)
                 .collect::<Vec<_>>();
@@ -238,7 +225,7 @@ impl Draft {
             mode: FileMode::Template,
             target: Default::default(),
             source: None,
-            recipe: None,
+            template: None,
             profiles: base_profiles(),
             requires: vec![],
             overrides: Default::default(),
@@ -246,7 +233,7 @@ impl Draft {
             permissions: None,
         });
         mapping.target = self.target.trim().into();
-        mapping.recipe = Some(recipe);
+        mapping.template = Some(template.into());
         mapping.inputs = names
             .into_iter()
             .map(|name| {
@@ -260,43 +247,78 @@ impl Draft {
         }))))
     }
 
-    fn recipe_size(&self) -> usize {
-        self.lines.iter().map(String::len).sum::<usize>() + self.lines.len() - 1
-    }
-
-    fn recipe_line(&self) -> Option<usize> {
-        if self.entering_inputs() {
-            None
+    pub fn draw_template(&self, frame: &mut Frame, area: Rect, hits: &super::input::Hits) {
+        use super::input::Target;
+        let fields: &[(&str, &str)] = if self.before.is_some() {
+            &[("Home destination (~/path)", &self.target)]
         } else {
-            self.recipe_focus.checked_sub(self.first_line())
+            &[
+                ("File ID", &self.id),
+                ("Home destination (~/path)", &self.target),
+            ]
+        };
+        let focus = hits.input_focus_allowed();
+        let mut y = area.y;
+        let limit = usize::from(area.height.saturating_sub(2));
+        for (index, &(label, value)) in fields.iter().enumerate() {
+            if index != self.focus() && limit < fields.len() {
+                continue;
+            }
+            if y == area.bottom() {
+                break;
+            }
+            let rect = Rect::new(area.x, y, area.width, 1);
+            ui::design::filter(frame, rect, label, value, focus && index == self.focus());
+            hits.click(rect, Target::FormControl(index, false));
+            y += 1;
         }
+        let outer = Rect::new(area.x, y, area.width, area.bottom().saturating_sub(y));
+        if outer.is_empty() {
+            return;
+        }
+        let active = focus && self.template_focused();
+        let inner = if outer.height >= 3 {
+            let block = ui::design::pane("Template", active);
+            let inner = block.inner(outer);
+            frame.render_widget(block, outer);
+            inner
+        } else {
+            ui::prose(
+                frame,
+                Rect::new(outer.x, outer.y, outer.width, 1),
+                "Template",
+                ui::heading(),
+            );
+            Rect::new(outer.x, outer.y + 1, outer.width, outer.height - 1)
+        };
+        self.template.draw(frame, inner, active);
+        hits.click(outer, Target::FormControl(self.template_field(), false));
     }
 
-    pub fn insert_line(&mut self) -> Result<()> {
-        if self.entering_inputs() {
-            return Ok(());
-        }
-        if self.recipe_size() >= RECIPE_LIMIT {
-            return Err(Error::Invalid("Template recipe exceeds 64 KiB.".into()));
-        }
-        let index = self.recipe_line().map_or(0, |line| line + 1);
-        self.lines.insert(index, String::new());
-        self.recipe_focus = self.first_line() + index;
-        Ok(())
+    pub fn template_focused(&self) -> bool {
+        !self.entering_inputs() && self.template_focus == self.template_field()
+    }
+
+    pub fn focus_template(&mut self) {
+        self.focus_at(self.template_field());
+    }
+
+    fn step_focus(&mut self, backwards: bool) {
+        let count = match &self.step {
+            Step::Template => self.template_field() + 1,
+            Step::Inputs { names, .. } => names.len(),
+        };
+        self.focus_at((self.focus() + if backwards { count - 1 } else { 1 }) % count);
     }
 
     fn field(&mut self) -> (&mut String, usize) {
-        if let Some(line) = self.recipe_line() {
-            let limit = RECIPE_LIMIT.saturating_sub(self.recipe_size() - self.lines[line].len());
-            return (&mut self.lines[line], limit);
-        }
         if let Step::Inputs { names, focus } = &self.step {
             return (
                 self.values.entry(names[*focus].clone()).or_default(),
                 VALUE_LIMIT,
             );
         }
-        if self.before.is_none() && self.recipe_focus == 0 {
+        if self.before.is_none() && self.template_focus == 0 {
             (&mut self.id, 4096)
         } else {
             (&mut self.target, 4096)
@@ -304,22 +326,22 @@ impl Draft {
     }
 
     pub fn key(&mut self, key: KeyEvent) -> Result<()> {
+        if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+            self.step_focus(
+                key.code == KeyCode::BackTab || key.modifiers.contains(KeyModifiers::SHIFT),
+            );
+            return Ok(());
+        }
+        if self.template_focused() {
+            return self.template.key(key);
+        }
         match key.code {
-            KeyCode::Tab | KeyCode::Down => self.focus_at(self.focus() + 1),
-            KeyCode::BackTab | KeyCode::Up => self.focus_at(self.focus().saturating_sub(1)),
+            KeyCode::Down => self.focus_at(self.focus() + 1),
+            KeyCode::Up => self.focus_at(self.focus().saturating_sub(1)),
             KeyCode::Home => self.focus_at(0),
             KeyCode::End => self.focus_at(usize::MAX),
             KeyCode::PageDown => self.focus_at(self.focus() + 5),
             KeyCode::PageUp => self.focus_at(self.focus().saturating_sub(5)),
-            KeyCode::Delete if self.recipe_line().is_some() => {
-                let line = self.recipe_line().unwrap();
-                if self.lines.len() == 1 {
-                    self.lines[0].clear();
-                } else {
-                    self.lines.remove(line);
-                    self.focus_at(self.recipe_focus);
-                }
-            }
             KeyCode::Backspace => {
                 self.field().0.pop();
             }
@@ -340,8 +362,10 @@ impl Draft {
     }
 
     pub fn paste(&mut self, text: &str) -> Result<()> {
-        let line = self.recipe_line();
-        let multiline = line.is_some() || self.entering_inputs();
+        if self.template_focused() {
+            return self.template.paste(text);
+        }
+        let multiline = self.entering_inputs();
         if text
             .chars()
             .any(|c| c.is_control() && !(multiline && matches!(c, '\n' | '\r' | '\t')))
@@ -351,23 +375,15 @@ impl Draft {
         let (field, limit) = self.field();
         if text.len() > limit.saturating_sub(field.len()) {
             return Err(Error::Invalid(
-                match (line, multiline) {
-                    (Some(_), _) => "Template recipe exceeds 64 KiB.",
-                    (None, true) => "Input exceeds 16 KiB.",
-                    (None, false) => "This field exceeds 4 KiB.",
+                if multiline {
+                    "Input exceeds 16 KiB."
+                } else {
+                    "This field exceeds 4 KiB."
                 }
                 .into(),
             ));
         }
-        if let Some(line) = line {
-            let mut parts = text.split('\n');
-            field.push_str(parts.next().unwrap_or_default());
-            let added = parts.map(str::to_owned).collect::<Vec<_>>();
-            self.recipe_focus += added.len();
-            self.lines.splice(line + 1..line + 1, added);
-        } else {
-            field.push_str(text);
-        }
+        field.push_str(text);
         Ok(())
     }
 }

@@ -574,8 +574,8 @@ inputs = { name = "\u202efriendly", color = "blue" }
 "#;
     let manifest_path = sandbox.manifest(manifest);
     let repo = manifest_path.parent().unwrap();
-    let recipe = "name={{ name }}\ncolor={{ color }}\n\x1b[31m";
-    fs::write(repo.join("editor.tmpl"), recipe).unwrap();
+    let template = "name={{ name }}\ncolor={{ color }}\n\x1b[31m";
+    fs::write(repo.join("editor.tmpl"), template).unwrap();
     let preview = || {
         sandbox
             .command()
@@ -632,7 +632,7 @@ inputs = { name = "\u202efriendly", color = "blue" }
     );
     assert_eq!(
         fs::read_to_string(repo.join("editor.tmpl")).unwrap(),
-        recipe
+        template
     );
     assert_eq!(fs::read_to_string(&manifest_path).unwrap(), manifest);
     assert_eq!(fs::read_dir(&sandbox.home).unwrap().count(), 1);
@@ -640,14 +640,14 @@ inputs = { name = "\u202efriendly", color = "blue" }
 }
 
 #[test]
-fn inline_generated_preview_uses_manifest_recipe_in_human_and_json_output() {
+fn inline_generated_preview_uses_manifest_template_in_human_and_json_output() {
     let sandbox = Sandbox::new();
     sandbox.manifest(
         r#"schema = 1
 [[files]]
 id = "settings"
 mode = "template"
-recipe = "theme=[{{ theme }}]\n"
+template = "theme=[{{ theme }}]\n"
 target = "~/settings"
 inputs = { theme = " dark " }
 "#,
@@ -667,7 +667,7 @@ inputs = { theme = " dark " }
             .clone()
     };
     let human = String::from_utf8(preview(false)).unwrap();
-    assert!(human.contains("Source: Inline recipe in dort.toml"));
+    assert!(human.contains("Source: Inline template in dort.toml"));
     assert!(human.contains("Rendered output\ntheme=[ dark ]\n"));
     let json: serde_json::Value = serde_json::from_slice(&preview(true)).unwrap();
     assert_eq!(json["source"], serde_json::Value::Null);
@@ -684,7 +684,7 @@ fn malformed_generated_declarations_do_not_echo_manifest_text() {
 [[files]]
 id = "settings"
 mode = "template"
-recipe = ["password=do-not-print-this"]
+template = ["password=do-not-print-this"]
 target = "~/settings"
 "#,
     );

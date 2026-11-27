@@ -58,13 +58,15 @@ Symlinks, directories, hard links and special files cannot be adopted as ordinar
 ```toml
 [[files]]
 id = "editor-settings"
-recipe = "theme = {{ theme }}\n"
+template = "theme = {{ theme }}\n"
 target = "~/.config/editor/settings.conf"
 mode = "template"
 inputs = { theme = "dark" }
 ```
 
-Dort renders `theme = dark` followed by a newline. Use `recipe` for text in `dort.toml`, or use `source` to point to a UTF-8 file in the repository. An inline recipe cannot use `source` or platform source overrides. Use a single input name in each `{{ ... }}`. Names use ASCII letters, digits and underscores and start with a letter or underscore. Values are literal strings from `dort.toml`, never expanded again. Keep secrets out of recipes and inputs. Dort refuses content that looks like credentials.
+Dort renders `theme = dark` followed by a newline. Use `template` for text in `dort.toml`, or use `source` to point to a UTF-8 file in the repository. An inline template cannot use `source` or platform source overrides. Use a single input name in each `{{ ... }}`. Names use ASCII letters, digits and underscores and start with a letter or underscore. Values are literal strings from `dort.toml`, never expanded again. Keep secrets out of templates and inputs. Dort refuses content that looks like credentials.
+
+Dort still reads the older `recipe` key. Use only one spelling. Saving an edit writes `template`.
 
 Limits: 64 KiB per UTF-8 template, 16 KiB per input value, and 128 KiB of rendered text.
 
