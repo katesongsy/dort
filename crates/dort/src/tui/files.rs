@@ -272,10 +272,10 @@ pub(super) fn managed_controls(app: &App, width: u16) -> impl Iterator<Item = ui
     );
     if mapping.is_none() {
         [new_generated, add, preview, review, edit_generated, edit]
-    } else if width >= 80 && !template {
-        [new_generated, review, add, edit, preview, edit_generated]
     } else if app.inventory.details {
         [preview, review, edit_generated, edit, add, new_generated]
+    } else if width >= 80 && !template {
+        [new_generated, review, add, edit, preview, edit_generated]
     } else {
         [preview, review, edit_generated, add, edit, new_generated]
     }
