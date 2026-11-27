@@ -39,7 +39,7 @@ TOML
 python3 "$drive" tui generated-preview --label preview \
   "wait:loaded." "send:'f'" "wait:Preview generated file" \
   "click:Preview generated file" "wait:font-size = 18" \
-  "wait:Destination status: Missing" "snap:output"
+  "wait:Status: New file" "snap:output"
 python3 "$drive" cli generated-preview --label cli-preview -- \
   --json --repo @REPO files preview-generated editor
 (
@@ -50,7 +50,7 @@ python3 "$drive" cli generated-preview --label cli-preview -- \
 python3 "$drive" tui generated-preview --label existing \
   "wait:loaded." "send:'f'" "wait:Preview generated file" \
   "send:'v'" "wait:font-size = 18" \
-  "wait:Destination status: Existing file" "snap:existing" \
+  "wait:Unrecorded existing file" "snap:existing" \
   "send:'\x1b'" "wait:Managed"
 (
   eval "$(python3 "$drive" env generated-preview)"
@@ -150,7 +150,7 @@ python3 "$drive" tui generated-preview --label deploy \
 )
 ```
 
-Repeat **Review deployment** with the same destination. Dort refuses the file even if it matches. Check that the contents and permissions stay unchanged. Clean up the run.
+Reopen the preview. It should say **Up to date**. Change `size` to `24` in the manifest. Reopen the preview and check **Update available** while the local file still contains `font-size = 18`. Change the local permission mode to `0600` and check **Local permissions changed**. Restore the mode, change the local contents, and check **Local edits**. Move the local file aside and check **Local file deleted**. Run `dort files preview-generated editor` again with `--json` and check `drift_status`. **Review deployment** is absent and `dort --dry-run files deploy-generated editor` refuses to recreate the file. Confirm the file is still absent and clean up the run.
 
 ## Gotchas
 
