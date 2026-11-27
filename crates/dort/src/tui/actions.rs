@@ -244,7 +244,7 @@ pub fn load_scoped(
                                     state: if input.mapping.mode
                                         == dort_core::model::FileMode::Template
                                     {
-                                        "Preview only"
+                                        "Template"
                                     } else {
                                         match file.outcome {
                                             planner::Outcome::NoOp => "Linked",

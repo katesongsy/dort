@@ -252,7 +252,7 @@ pub fn toggle(app: &mut App) {
         let reason = if app.discovering {
             "Cannot mark: no eligible files. Only owned, single-link regular files can be adopted."
         } else {
-            "No files to mark. Generated files only support preview."
+            "No files to mark. Open a generated file to review deployment."
         };
         app.inventory.mark_refusal = Some(reason.into());
         app.status = reason.into();
