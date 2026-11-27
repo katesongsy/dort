@@ -809,3 +809,129 @@ permissions = "0644"
     );
     assert!(!destination.exists());
 }
+
+#[test]
+fn tracked_generated_update_cli_is_reviewed_scoped_and_single_use() {
+    use dort_core::{
+        context::HostContext,
+        local::RepositoryRegistry,
+        platform::{Architecture, Platform},
+        state::WriterLock,
+    };
+    let sandbox = Sandbox::new();
+    let manifest_text = "schema = 1\n[profiles]\navailable = ['work']\n[[files]]\nid = 'settings'\nmode = 'template'\nsource = 'file.tmpl'\ntarget = '~/settings'\n";
+    let manifest = sandbox.manifest(manifest_text);
+    let root = manifest.parent().unwrap();
+    let template = root.join("file.tmpl");
+    fs::create_dir(root.join(".git")).unwrap();
+    let host = HostContext::new(
+        sandbox.home.clone(),
+        None,
+        None,
+        Platform::Linux,
+        Architecture::X86_64,
+    )
+    .unwrap();
+    RepositoryRegistry::register(&host, &WriterLock::acquire(&host).unwrap(), root).unwrap();
+    fs::write(&template, b"old config\n").unwrap();
+    sandbox
+        .command()
+        .args(["files", "deploy-generated", "settings", "--yes"])
+        .assert()
+        .success();
+    let dest = sandbox.home.join("settings");
+    let update = || {
+        let mut cmd = sandbox.command();
+        cmd.args([
+            "--repo",
+            "repository",
+            "files",
+            "update-generated",
+            "settings",
+        ]);
+        cmd
+    };
+    let changed = "new config\t=\x1b\\  ";
+    fs::write(&template, changed).unwrap();
+    let preview = update()
+        .args(["--profile", "work", "--json", "--dry-run", "--yes"])
+        .assert()
+        .success();
+    let json: serde_json::Value = serde_json::from_slice(&preview.get_output().stdout).unwrap();
+    assert_eq!(json["read_only"], true);
+    assert!(
+        json["active_profiles"]
+            .as_array()
+            .unwrap()
+            .contains(&"work".into())
+    );
+    let text = json["review"].as_str().unwrap();
+    assert!(text.contains("Final newline: Yes -> No"));
+    assert!(text.contains("OLD | old\\x20config\\n"));
+    assert!(text.contains("NEW | new\\x20config\\t=\\x1b\\\\\\x20\\x20"));
+    assert!(!text.contains('\x1b'));
+    update().arg("--json").assert().code(2).stdout("");
+    assert_eq!(fs::read(&dest).unwrap(), b"old config\n");
+    assert_eq!(
+        fs::read_dir(&sandbox.home)
+            .unwrap()
+            .filter(|r| r
+                .as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".dort-generated"))
+            .count(),
+        0
+    );
+
+    fs::write(&template, " ".repeat(20_000)).unwrap();
+    let oversized = update().arg("--yes").assert().code(2);
+    assert!(
+        String::from_utf8_lossy(&oversized.get_output().stderr)
+            .contains("full update review is too large")
+    );
+    assert_eq!(fs::read(&dest).unwrap(), b"old config\n");
+
+    fs::write(&template, changed).unwrap();
+    let receipt = update().args(["--json", "--yes"]).assert().success();
+    let json: serde_json::Value = serde_json::from_slice(&receipt.get_output().stdout).unwrap();
+    assert_eq!(json["outcome"], "updated");
+    let private = json["location"]["artifact"].as_str().unwrap();
+    assert_eq!(fs::read(private).unwrap(), b"old config\n");
+    assert_eq!(fs::read(&dest).unwrap(), changed.as_bytes());
+    update().arg("--yes").assert().code(2);
+
+    fs::write(&manifest, format!("{manifest_text}permissions = '0644'\n")).unwrap();
+    let reviewed = update().arg("--dry-run").assert().success();
+    let text = String::from_utf8_lossy(&reviewed.get_output().stdout);
+    assert!(text.contains("Permissions: 0600 -> 0644"));
+    assert!(text.contains("No content change."));
+    update().arg("--yes").assert().success();
+    assert_eq!(
+        fs::metadata(&dest).unwrap().permissions().mode() & 0o777,
+        0o644
+    );
+    assert_eq!(fs::read(&dest).unwrap(), changed.as_bytes());
+
+    fs::write(&dest, b"local edit").unwrap();
+    let drift = update().arg("--yes").assert().code(2);
+    assert!(String::from_utf8_lossy(&drift.get_output().stderr).contains("Local edits"));
+    assert_eq!(fs::read(&dest).unwrap(), b"local edit");
+}
+
+#[test]
+fn generated_recovery_is_a_read_only_no_op_when_nothing_is_pending() {
+    let sandbox = Sandbox::new();
+    for flags in [["--json", "--dry-run"], ["--json", "--yes"]] {
+        let result = sandbox
+            .command()
+            .args(flags)
+            .args(["recovery", "recover-update"])
+            .assert()
+            .success();
+        let json: serde_json::Value = serde_json::from_slice(&result.get_output().stdout).unwrap();
+        assert_eq!(json["outcome"], "no_pending_update");
+    }
+    sandbox.assert_readonly();
+}

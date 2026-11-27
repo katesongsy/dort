@@ -245,6 +245,7 @@ fn retained_review_viewports_keep_action_rows_aligned_for_recovery_git_and_ignor
             })
             .collect(),
         error: None,
+        generated_recovery: None,
     }));
     assert_review_list_navigation(
         &mut app,

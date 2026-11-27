@@ -119,6 +119,8 @@ impl Activity {
             }
             Task::PreviewGenerated(_) => "Preview generated file",
             Task::ReviewGeneratedDeployment(_) => "Review deployment",
+            Task::ReviewGeneratedUpdate(_) => "Review update",
+            Task::ReviewGeneratedRecovery => "Review generated recovery",
             Task::IgnoredPaths => "Manage ignored paths",
             Task::Ignore(..) => "Preview discovery preferences",
             Task::Refresh => "Refresh data",
@@ -166,6 +168,8 @@ impl Activity {
                     Approved::EnvironmentAbandon(_) => "Abandon environment run",
                     Approved::Profile(_) => "Save profile choice",
                     Approved::GeneratedDeployment(_) => "Deploy generated file",
+                    Approved::GeneratedUpdate(_) => "Update generated file",
+                    Approved::GeneratedRecovery(_) => "Recover generated update",
                     Approved::Configuration(_) => "Save configuration change",
                     Approved::Ignore(_) => "Discovery preferences",
                     Approved::Files(_) => "File operation",
@@ -363,6 +367,14 @@ impl Activity {
             Pending::GeneratedDeployment(p) => (
                 "Deploy generated file",
                 vec![("Destination", p.review().destination.display().to_string())],
+            ),
+            Pending::GeneratedUpdate(p) => (
+                "Update generated file",
+                vec![("Destination", p.review().destination.display().to_string())],
+            ),
+            Pending::GeneratedRecovery(location) => (
+                "Recover generated update",
+                vec![("Destination", location.destination.display().to_string())],
             ),
             Pending::Ignore(_) => (
                 "Discovery preferences",
@@ -660,6 +672,13 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
                     Target::Action(action),
                 );
             }
+        }
+        if app
+            .data
+            .as_ref()
+            .is_some_and(|data| data.generated_recovery.is_some())
+        {
+            app.presented("Recovery", "h", Target::Feedback(Control::Recovery));
         }
         app.presented("Back", "Esc", Target::Back);
     } else if app.busy {

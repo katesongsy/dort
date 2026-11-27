@@ -1,8 +1,9 @@
-use crate::services::adopt_request;
+use crate::services::{adopt_request, generated_update, presentation};
 use clap::{Parser, Subcommand, ValueEnum};
 use dort_core::{
     Error, bootstrap,
     context::HostContext,
+    generated::{UpdateOutcome, pending_update, recover_reviewed_update},
     git, journal,
     local::LocalConfig,
     planner::{self, Request, UnmanageMode},
@@ -174,6 +175,8 @@ enum RecoveryCommand {
         repository_id: String,
         transaction_id: String,
     },
+    /// Resolve an interrupted generated update without replacing either file.
+    RecoverUpdate,
     /// List operation records and write blockers.
     List,
 }
@@ -229,6 +232,12 @@ enum FilesCommand {
     PreviewGenerated { id: String },
     /// Review and create one generated file at a missing Home destination.
     DeployGenerated {
+        id: String,
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
+    /// Review new contents and permissions for an unchanged deployed generated file.
+    UpdateGenerated {
         id: String,
         #[arg(long = "profile")]
         profiles: Vec<String>,
@@ -1086,6 +1095,9 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                 mutation_report("bootstrap_recovery", Some(transaction_id.clone()))?;
             }
         }
+        Command::Recovery {
+            command: RecoveryCommand::RecoverUpdate,
+        } => return recover_generated_update(cli, &host),
         Command::Doctor => {
             let report = crate::services::doctor(&host, &local);
             if cli.json {
@@ -1114,10 +1126,17 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                 ));
             }
             let transactions = journal::diagnose(&host)?;
-            let write_blocked = transactions.iter().any(journal::Diagnosis::blocks_writes);
+            let (generated, generated_error) = match pending_update(&host) {
+                Ok(location) => (location, None),
+                Err(error) => (None, Some(error.to_string())),
+            };
+            let write_blocked = generated.is_some()
+                || generated_error.is_some()
+                || transactions.iter().any(journal::Diagnosis::blocks_writes);
             if cli.json {
-                print_json(
-                    &serde_json::json!({"schema": 1, "read_only": true, "write_blocked": write_blocked, "transactions": transactions}),
+                print_ascii_json(
+                    &serde_json::json!({"schema": 1, "read_only": true, "write_blocked": write_blocked, "transactions": transactions, "generated_update": generated, "generated_update_error": generated_error}),
+                    "could not encode recovery list",
                 )?;
             } else {
                 for transaction in &transactions {
@@ -1132,6 +1151,18 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                     if let Some(problem) = &transaction.problem {
                         println!("  BLOCKED: {problem}");
                     }
+                }
+                if let Some(location) = generated {
+                    println!(
+                        "A generated update needs recovery. Run `dort recovery recover-update --dry-run` to inspect both paths.\n{}",
+                        generated_update::recovery_review(&location)
+                    );
+                }
+                if let Some(error) = generated_error {
+                    println!(
+                        "Generated update status unavailable: {}",
+                        presentation::inline(&error)
+                    );
                 }
                 println!(
                     "Read-only history. Writes blocked: {write_blocked}. Recovery needs a preview and approval."
@@ -1239,6 +1270,34 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                             crate::services::presentation::generated_published(&result)
                         );
                     }
+                }
+            }
+            FilesCommand::UpdateGenerated { id, profiles } => {
+                if cli.confirm_remove.is_some() {
+                    return Err(Error::Invalid(
+                        "Generated updates do not use --confirm-remove.".into(),
+                    ));
+                }
+                let update = crate::services::review_generated_update(
+                    &host,
+                    cli.repo.as_deref(),
+                    id,
+                    profiles,
+                )?;
+                let change = update.review();
+                let review = generated_update::review(change)?;
+                if cli.dry_run && cli.json {
+                    let change = update.review();
+                    print_ascii_json(
+                        &serde_json::json!({"schema": 1, "read_only": true, "id": change.id, "repository": change.repository, "active_profiles": change.active_profiles, "destination": change.destination, "deployed_permissions": change.deployed_permissions, "proposed_permissions": change.proposed_permissions, "review": review}),
+                        "could not encode generated update review",
+                    )?;
+                } else if !cli.json {
+                    print_update_review(&review)?;
+                }
+                if !cli.dry_run {
+                    approve(cli)?;
+                    return generated_update_result(cli, update.approve().execute()?, false);
                 }
             }
             FilesCommand::Add {
@@ -1474,6 +1533,64 @@ fn approve(cli: &Cli) -> dort_core::Result<()> {
         return Err(Error::Invalid("write not approved".into()));
     }
     Ok(())
+}
+fn recover_generated_update(cli: &Cli, host: &HostContext) -> dort_core::Result<ExitCode> {
+    if cli.repo.is_some() || cli.confirm_remove.is_some() {
+        return Err(Error::Invalid(
+            "Generated update recovery is host-wide. Omit --repo and --confirm-remove.".into(),
+        ));
+    }
+    if let Some(location) = pending_update(host)? {
+        let review = generated_update::recovery_review(&location);
+        if cli.dry_run && cli.json {
+            print_ascii_json(
+                &serde_json::json!({"schema": 1, "read_only": true, "pending_update": location, "review": review}),
+                "could not encode generated update recovery review",
+            )?;
+        } else if !cli.json {
+            print_update_review(&review)?;
+        }
+        if cli.dry_run {
+            return Ok(ExitCode::SUCCESS);
+        }
+        approve(cli)?;
+        if let Some(outcome) = recover_reviewed_update(host, &location)? {
+            return generated_update_result(cli, outcome, true);
+        }
+    }
+    if cli.json {
+        print_json(&serde_json::json!({"outcome": "no_pending_update", "read_only": cli.dry_run}))?;
+    } else {
+        println!("No generated update needs recovery.");
+    }
+    Ok(ExitCode::SUCCESS)
+}
+fn print_update_review(review: &str) -> dort_core::Result<()> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    out.write_all(review.as_bytes())
+        .and_then(|()| out.flush())
+        .map_err(|source| Error::Io {
+            operation: "display the full generated update review",
+            path: "stdout".into(),
+            source,
+        })
+}
+fn generated_update_result(
+    cli: &Cli,
+    outcome: UpdateOutcome,
+    recovering: bool,
+) -> dort_core::Result<ExitCode> {
+    if cli.json {
+        print_ascii_json(&outcome, "could not encode generated update result")?;
+    } else {
+        println!("{}", generated_update::outcome(&outcome));
+    }
+    Ok(match outcome {
+        UpdateOutcome::NeedsRecovery { .. } => ExitCode::from(4),
+        UpdateOutcome::NotExchanged { .. } if !recovering => ExitCode::from(4),
+        _ => ExitCode::SUCCESS,
+    })
 }
 fn file_operation(
     cli: &Cli,

@@ -104,6 +104,7 @@ fn recovery_search_preserves_raw_identity_and_never_hides_global_blockers() {
             row(Some(2), Some(Phase::Completed), None, 'a'),
         ],
         error: None,
+        generated_recovery: None,
     }));
     assert_eq!(app.selected, 0);
     assert_eq!(
@@ -165,6 +166,7 @@ fn unavailable_history_is_not_empty_or_an_actionable_stale_selection() {
     app.complete(Ok(Output::History {
         rows: vec![],
         error: Some("unreadable state".into()),
+        generated_recovery: None,
     }));
     let text = render(&app, 100, 24);
     assert!(text.contains("Recovery unavailable"));
@@ -177,6 +179,7 @@ fn unavailable_history_is_not_empty_or_an_actionable_stale_selection() {
     app.complete(Ok(Output::History {
         rows: vec![row(None, None, Some("unsafe\u{1b}[31m tail"), 'a')],
         error: None,
+        generated_recovery: None,
     }));
     key(&mut app, KeyCode::Enter);
     let text = render(&app, 100, 40);
@@ -198,6 +201,7 @@ fn preparing_table_enter_inspects_then_the_visible_action_uses_raw_identity() {
     app.complete(Ok(Output::History {
         rows: vec![row(Some(3), Some(Phase::Preparing), None, 'b')],
         error: None,
+        generated_recovery: None,
     }));
     for code in [KeyCode::PageDown, KeyCode::PageUp, KeyCode::Home] {
         assert!(key(&mut app, code).is_none());
@@ -292,6 +296,7 @@ fn recovery_split_focus_survives_resize_and_compact_return() {
             .map(|id| row(Some(3), Some(Phase::Preparing), None, id))
             .collect(),
         error: None,
+        generated_recovery: None,
     }));
     let press = |app: &mut App, code, size: (u16, u16)| {
         assert!(

@@ -1,10 +1,14 @@
 //! Prepares and dispatches actions over core services.
-use crate::services::{BootstrapApproval, BootstrapPreview, FileApproval};
+use crate::services::{BootstrapApproval, BootstrapPreview, FileApproval, generated_update};
 use dort_core::{
     Error, Result,
     adoption::Event,
     bootstrap,
     context::HostContext,
+    generated::{
+        Update, UpdateApproval, UpdateLocation, UpdateOutcome, pending_update,
+        recover_reviewed_update,
+    },
     journal,
     local::LocalConfig,
     model::FileMode,
@@ -51,6 +55,8 @@ pub struct FileCounts {
     pub blocked: usize,
     pub plan_blocked: bool,
 }
+pub type GeneratedRecovery = Option<std::result::Result<UpdateLocation, String>>;
+
 #[derive(Default)]
 pub struct Data {
     pub overview: Option<Overview>,
@@ -67,6 +73,7 @@ pub struct Data {
     pub files_error: Option<String>,
     pub history: Vec<journal::Diagnosis>,
     pub history_error: Option<String>,
+    pub generated_recovery: GeneratedRecovery,
 }
 impl Data {
     pub fn is_template(&self, index: usize) -> bool {
@@ -328,7 +335,14 @@ pub fn load_scoped(
         files_error,
         history,
         history_error,
+        generated_recovery: generated_recovery(host),
     })
+}
+
+fn generated_recovery(host: &HostContext) -> GeneratedRecovery {
+    pending_update(host)
+        .transpose()
+        .map(|result| result.map_err(|error| diagnostic(&error)))
 }
 
 pub enum Pending {
@@ -341,6 +355,8 @@ pub enum Pending {
     ToolDeclaration(Box<dort_core::tools::declaration::Preview>),
     Ignore(dort_core::discovery_ignore::Preview),
     GeneratedDeployment(Box<dort_core::generated::Deployment>),
+    GeneratedUpdate(Box<Update>),
+    GeneratedRecovery(UpdateLocation),
     Files(Box<Plan>),
     Batch(Box<dort_core::batch::Plan>),
     Init(Box<BootstrapPreview>),
@@ -355,6 +371,8 @@ impl Pending {
             Self::GeneratedDeployment(p) => {
                 crate::services::presentation::generated_deployment(p.review())
             }
+            Self::GeneratedUpdate(p) => generated_update::review(p.review())?,
+            Self::GeneratedRecovery(location) => generated_update::recovery_review(location),
             Self::Profile(p) => p.human(),
             Self::Configuration(p) => p.human(),
             Self::Environment(p) => p.human(),
@@ -415,6 +433,8 @@ impl Pending {
             Self::EnvironmentAbandon(_) => "Abandon environment run",
             Self::Profile(_) => "Save profile choice",
             Self::GeneratedDeployment(_) => "Deploy generated file",
+            Self::GeneratedUpdate(_) => "Update generated file",
+            Self::GeneratedRecovery(_) => "Recover generated update",
             Self::Configuration(p) => p.label(),
             _ if self.adoption() => "Adopt all",
             _ => "Confirm changes",
@@ -462,6 +482,8 @@ impl Pending {
             Self::GeneratedDeployment(p) => {
                 Ok(Approved::GeneratedDeployment(Box::new(p.approve())))
             }
+            Self::GeneratedUpdate(p) => Ok(Approved::GeneratedUpdate(Box::new(p.approve()))),
+            Self::GeneratedRecovery(location) => Ok(Approved::GeneratedRecovery(location)),
             Self::Profile(p) => Ok(Approved::Profile(Box::new(p.approve()))),
             Self::Configuration(p) => Ok(Approved::Configuration(p.approve())),
             Self::Environment(p) => Ok(Approved::Environment(Box::new(p.approve()?))),
@@ -504,6 +526,8 @@ pub enum Approved {
     ToolDeclaration(Box<dort_core::tools::declaration::Approval>),
     Ignore(dort_core::discovery_ignore::Approval),
     GeneratedDeployment(Box<dort_core::generated::Approval>),
+    GeneratedUpdate(Box<UpdateApproval>),
+    GeneratedRecovery(UpdateLocation),
     Files(Box<FileApproval>),
     Batch(Box<dort_core::batch::Approval>),
     Init(Box<BootstrapApproval>, PathBuf),
@@ -571,6 +595,14 @@ impl Approved {
                         result.map_err(|error| diagnostic(&error)),
                     )),
                 };
+            }
+            Self::GeneratedUpdate(approval) => {
+                return approval
+                    .execute()
+                    .map(|outcome| Output::GeneratedUpdated(Some(outcome)));
+            }
+            Self::GeneratedRecovery(location) => {
+                return recover_reviewed_update(host, &location).map(Output::GeneratedUpdated);
             }
             Self::Batch(approval) => {
                 let lock = WriterLock::acquire(host)?;
@@ -721,6 +753,8 @@ pub enum Task {
     Ignore(PathBuf, bool),
     PreviewGenerated(String),
     ReviewGeneratedDeployment(String),
+    ReviewGeneratedUpdate(String),
+    ReviewGeneratedRecovery,
     DiscoveryTree(super::discovery_tree::Read),
     DiscoverContent(super::discover_content::Read),
     History,
@@ -787,11 +821,13 @@ pub enum Output {
     IgnoredPaths(Vec<PathBuf>),
     Generated(Box<dort_core::generated::Preview>),
     GeneratedDeployed(std::result::Result<dort_core::generated::Published, String>),
+    GeneratedUpdated(Option<UpdateOutcome>),
     DiscoveryTree(super::discovery_tree::Report),
     DiscoverContent(super::discover_content::Report),
     History {
         rows: Vec<journal::Diagnosis>,
         error: Option<String>,
+        generated_recovery: GeneratedRecovery,
     },
     Diagnostics(Diagnostics),
     Git(super::git::Metadata),
@@ -1000,15 +1036,27 @@ pub fn perform_scoped_with_install_progress(
             requested,
         )
         .map(|p| Output::Preview(Pending::GeneratedDeployment(Box::new(p)))),
+        Task::ReviewGeneratedUpdate(id) => {
+            crate::services::review_generated_update(host, repository.as_deref(), &id, requested)
+                .map(|p| Output::Preview(Pending::GeneratedUpdate(Box::new(p))))
+        }
+        Task::ReviewGeneratedRecovery => Ok(match pending_update(host)? {
+            Some(location) => Output::Preview(Pending::GeneratedRecovery(location)),
+            None => Output::GeneratedUpdated(None),
+        }),
         Task::DiscoveryTree(read) => Ok(Output::DiscoveryTree(read.perform())),
         Task::DiscoverContent(read) => Ok(Output::DiscoverContent(read.perform(host))),
-        Task::History => Ok(match journal::diagnose(host) {
-            Ok(rows) => Output::History { rows, error: None },
-            Err(error) => Output::History {
-                rows: vec![],
-                error: Some(diagnostic(&error)),
-            },
-        }),
+        Task::History => {
+            let (rows, error) = match journal::diagnose(host) {
+                Ok(rows) => (rows, None),
+                Err(error) => (vec![], Some(diagnostic(&error))),
+            };
+            Ok(Output::History {
+                rows,
+                error,
+                generated_recovery: generated_recovery(host),
+            })
+        }
         Task::Diagnostics => Ok(Output::Diagnostics(Diagnostics {
             host: host.clone(),
             registry: LocalConfig::load(host)

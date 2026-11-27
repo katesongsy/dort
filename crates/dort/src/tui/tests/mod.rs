@@ -410,6 +410,7 @@ fn navigation_and_metadata_escaping() {
         files: vec![],
         history: vec![],
         history_error: None,
+        generated_recovery: None,
     })));
     app.key(key(KeyCode::F(3)), 80, 24);
     let mut screen = String::new();
@@ -511,6 +512,7 @@ fn refresh_preserves_selected_identity_and_clamps_if_it_disappears() {
             .collect(),
         history: vec![],
         history_error: None,
+        generated_recovery: None,
     };
     let mut app = App::new(false);
     app.tab = Tab::Files;
@@ -554,6 +556,7 @@ fn completion_keeps_noop_result_visible_through_refresh_and_read_failure() {
         files: vec![],
         history: vec![],
         history_error: None,
+        generated_recovery: None,
     })));
     assert!(render(&app, 80, 24).contains("Everything is up to date"));
     app.start(false);

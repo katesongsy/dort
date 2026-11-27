@@ -41,7 +41,11 @@ impl Report {
                 _ => Tone::Attention,
             };
             lines.push(field("Status", status.label(), tone));
-            lines.push(Line::raw(status.guidance()));
+            lines.push(Line::raw(if status == DriftStatus::UpdateAvailable {
+                "Review the new contents and permissions. The deployed file stays in place until approval."
+            } else {
+                status.guidance()
+            }));
         }
         lines.extend([
             Line::default(),
@@ -86,6 +90,10 @@ impl Report {
 
     pub fn can_review_deployment(&self) -> bool {
         self.drift_status == Some(DriftStatus::Missing)
+    }
+
+    pub fn can_review_update(&self) -> bool {
+        self.drift_status == Some(DriftStatus::UpdateAvailable)
     }
 
     pub fn draw(&self, frame: &mut Frame, area: Rect, app: &App) {

@@ -47,7 +47,9 @@ A failed or interrupted write keeps a private record. New writes may be blocked 
 - Review the offered action: rollback, resume or abandon.
 - Never delete recovery state to bypass a warning.
 
-Recovery rechecks current files and refuses changed state. It never replays automatically. A completed operation can still be rolled back if its files still match.
+Recovery rechecks current files and refuses changed state. It never replays automatically. A completed link or declaration operation can still be rolled back if its files still match.
+
+For a generated update, the new file may already be visible. Choose **Review generated recovery** in Recovery or run `dort recovery recover-update --dry-run` to find both paths. Keep the destination and private file in place. Recovery does not exchange them again.
 
 File and install history are separate. Closing an install record acknowledges it. Retry, repair and rollback stay manual.
 

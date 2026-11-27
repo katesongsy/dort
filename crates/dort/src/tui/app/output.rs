@@ -106,6 +106,7 @@ impl App {
         &mut self,
         rows: Vec<journal::Diagnosis>,
         error: Option<String>,
+        generated_recovery: super::super::actions::GeneratedRecovery,
     ) -> Option<Task> {
         let identity = self
             .data
@@ -115,6 +116,7 @@ impl App {
         let data = self.data.get_or_insert_with(Default::default);
         data.history = rows;
         data.history_error = error;
+        data.generated_recovery = generated_recovery;
         let position = identity.as_ref().and_then(|(r, t)| {
             data.history
                 .iter()
@@ -442,6 +444,34 @@ impl App {
         None
     }
 
+    pub(super) fn accept_generated_update(
+        &mut self,
+        outcome: Option<dort_core::generated::UpdateOutcome>,
+    ) -> Option<Task> {
+        use dort_core::generated::UpdateOutcome;
+        self.receipt = None;
+        self.failure = None;
+        self.details_scroll = 0;
+        self.status = match &outcome {
+            Some(UpdateOutcome::Updated { .. }) => "Generated update recorded.",
+            Some(UpdateOutcome::NotExchanged { .. }) => "Deployed file was not replaced.",
+            Some(UpdateOutcome::NeedsRecovery { .. }) => "Generated update needs recovery.",
+            None => "No generated update needs recovery.",
+        }
+        .into();
+        self.result = Some(outcome.as_ref().map_or_else(
+            || "No generated update needs recovery.".into(),
+            crate::services::generated_update::outcome,
+        ));
+        self.show_result = true;
+        self.data
+            .get_or_insert_with(Default::default)
+            .generated_recovery = match outcome {
+            Some(UpdateOutcome::NeedsRecovery { location, .. }) => Some(Ok(location)),
+            _ => None,
+        };
+        None
+    }
     pub(super) fn accept_completed(
         &mut self,
         completion: Completion,

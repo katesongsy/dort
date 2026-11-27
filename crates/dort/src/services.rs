@@ -3,6 +3,7 @@ pub mod declaration;
 pub mod declared_tools;
 #[cfg(test)]
 pub(crate) mod declared_tools_tests;
+pub mod generated_update;
 pub mod inspection_defaults;
 #[cfg(test)]
 mod inspection_defaults_tests;
@@ -72,7 +73,20 @@ pub fn review_generated_deployment(
     id: &str,
     profiles: &[String],
 ) -> Result<dort_core::generated::Deployment> {
-    let root = repository
+    let root = absolute_repository(repository)?;
+    dort_core::generated::Deployment::prepare(host, root.as_deref(), id, profiles)
+}
+pub fn review_generated_update(
+    host: &HostContext,
+    repository: Option<&Path>,
+    id: &str,
+    profiles: &[String],
+) -> Result<dort_core::generated::Update> {
+    let root = absolute_repository(repository)?;
+    dort_core::generated::Update::prepare(host, root.as_deref(), id, profiles)
+}
+fn absolute_repository(repository: Option<&Path>) -> Result<Option<PathBuf>> {
+    repository
         .map(|path| {
             std::path::absolute(path).map_err(|source| dort_core::Error::Io {
                 operation: "resolve repository path",
@@ -80,8 +94,7 @@ pub fn review_generated_deployment(
                 source,
             })
         })
-        .transpose()?;
-    dort_core::generated::Deployment::prepare(host, root.as_deref(), id, profiles)
+        .transpose()
 }
 pub struct ProfileChoices {
     pub known: BTreeSet<String>,
