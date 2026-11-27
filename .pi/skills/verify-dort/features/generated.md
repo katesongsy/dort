@@ -178,7 +178,13 @@ python3 "$drive" tui generated-preview --label update \
 )
 ```
 
-Check the retained file named in the result still contains `font-size = 18`. Edit the destination and reopen the preview. Confirm **Local edits** appears and **Review update** is absent. Clean up the run.
+Check the retained file named in the result still contains `font-size = 18`. Edit the destination and reopen the preview. Confirm **Local edits** appears and **Review update** is absent.
+
+## Replace or recreate after local changes
+
+Open the preview of a deployed file after editing its contents and permissions. Choose **Review replacement**. Confirm the review names both changes and shows the exact diff and mode. Press Esc and confirm the local file did not change. Reopen the review, press End, and choose **Replace generated file**. Confirm the result's private path contains the original bytes and mode, and the destination contains the reviewed output and mode.
+
+Move the destination aside in the disposable HOME. Reopen the preview and choose **Review recreation**. Press End and choose **Recreate generated file**. Compare the recreated file's contents and mode with the review. Only the replacement has a retained prior file. Clean up the run.
 
 ## Gotchas
 
