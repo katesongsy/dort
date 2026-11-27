@@ -1,4 +1,4 @@
-use super::template_buffer::plain_template;
+use super::template_buffer::validate_plain_text;
 use dort_core::{Error, Result, generated::TEMPLATE_LIMIT};
 use rustix::fs::{self, AtFlags, FileType, Mode, OFlags};
 use std::{
@@ -133,7 +133,8 @@ impl Edit {
         }
         let text = String::from_utf8(bytes)
             .map_err(|_| problem("Save the template as UTF-8. The draft was kept."))?;
-        Ok(plain_template(&text)?.into_owned())
+        validate_plain_text(&text)?;
+        Ok(text)
     }
 }
 
@@ -213,7 +214,7 @@ mv "$2.new" "$2"
                 0o600
             );
             assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
-            assert_eq!(edit.run().unwrap(), "first\nsecond\n");
+            assert_eq!(edit.run().unwrap(), "first\r\nsecond\n");
             assert!(!dir.exists());
         }
     }

@@ -25,21 +25,14 @@ pub(super) struct TemplateBuffer {
     view: Cell<Viewport>,
 }
 
-pub(super) fn plain_template(text: &str) -> Result<Cow<'_, str>> {
-    if text.len() > TEMPLATE_LIMIT {
-        return Err(Error::Invalid("Template exceeds 64 KiB.".into()));
-    }
+pub(super) fn validate_plain_text(text: &str) -> Result<()> {
     if text
         .chars()
         .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
     {
         return Err(Error::Invalid("Use plain text for the template.".into()));
     }
-    Ok(if text.contains('\r') {
-        Cow::Owned(text.replace("\r\n", "\n").replace('\r', "\n"))
-    } else {
-        Cow::Borrowed(text)
-    })
+    Ok(())
 }
 
 impl TemplateBuffer {
@@ -63,7 +56,15 @@ impl TemplateBuffer {
     }
 
     pub fn paste(&mut self, text: &str) -> Result<()> {
-        let text = plain_template(text)?;
+        if text.len() > TEMPLATE_LIMIT {
+            return Err(Error::Invalid("Template exceeds 64 KiB.".into()));
+        }
+        validate_plain_text(text)?;
+        let text = if text.contains('\r') {
+            Cow::Owned(text.replace("\r\n", "\n").replace('\r', "\n"))
+        } else {
+            Cow::Borrowed(text)
+        };
         if text.len() > TEMPLATE_LIMIT.saturating_sub(self.text.len()) {
             return Err(Error::Invalid("Template exceeds 64 KiB.".into()));
         }
