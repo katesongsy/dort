@@ -224,6 +224,8 @@ def command_tui(args):
 
     data = load(args.name)
     env = iso_env(Path(data["home"]))
+    if args.visual:
+        env["VISUAL"] = args.visual
     steps = parse_steps(args.steps)
     frames = []
     failure = None
@@ -350,6 +352,7 @@ def main():
     tui = sub.add_parser("tui")
     tui.add_argument("name")
     tui.add_argument("--label")
+    tui.add_argument("--visual", help="Editor command for this disposable TUI session")
     tui.add_argument("--size", nargs=2, type=int, default=(24, 80))
     tui.add_argument("steps", nargs="+")
     tui.set_defaults(handler=command_tui)

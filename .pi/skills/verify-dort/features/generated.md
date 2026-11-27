@@ -4,14 +4,14 @@ Preview how a repository template will render for this computer.
 
 ## Sub-features
 
-- Create and edit inline recipes from Files → Managed.
+- Create and edit inline templates from Files → Managed.
 - Substitute named values from `dort.toml`.
 - Check whether the destination exists without opening it.
 - Preview without creating or changing files.
 
 ## How to get to it (user POV)
 
-In **Files → Managed**, choose **New generated file** (`s`). Enter an ID, destination, and recipe. Choose **Continue**, fill in the named inputs, then review and save. Select a saved template and choose **Preview generated file** (`v`). For an inline recipe, choose **Edit generated file** (`e`).
+In **Files → Managed**, choose **New generated file** (`s`). Enter an ID, destination, and template. Enter adds a line in Template. Use **Open in editor** (`F5`) to edit outside Dort. Choose **Continue** (`F4`), fill in the named inputs, then review and save. Select a saved template and choose **Preview generated file** (`v`). For an inline template, choose **Edit generated file** (`e`).
 
 ## Driving it with drive.py
 
@@ -65,7 +65,7 @@ python3 "$drive" cleanup generated-preview
 
 The CLI output should contain the same rendered line. The PTY driver checks that Dort restores the terminal when it exits. If a step fails, run `python3 "$drive" cleanup generated-preview` separately to remove the disposable home and keep the evidence.
 
-## Create and edit a recipe
+## Create and edit a template
 
 Start with a blank repository and an existing local destination. Run from the checkout.
 
@@ -82,10 +82,10 @@ python3 "$drive" new generated-setup-proof
 )
 python3 "$drive" tui generated-setup-proof --label cancel \
   'wait:loaded.' "send:'f'" 'wait:New generated file' 'click:New generated file' \
-  'wait:Recipe line 1' "send:'editor\t~/.editor.conf\tfont-size = {{ size }}'" \
-  'wait:font-size' "send:'\r'" 'wait:Input: size' "send:'18\r'" \
+  'wait:Open in editor' "send:'editor\t~/.editor.conf\tfont-size = {{ size }}'" \
+  'wait:font-size' "send:'\x1b[14~'" 'wait:Input: size' "send:'18\r'" \
   'wait:font-size = 18' 'snap:review' "send:'\x1b'" 'wait:Input: size' \
-  "send:'\x1b'" 'wait:Recipe line 1' "send:'\x1b'" 'wait:No mappings'
+  "send:'\x1b'" 'wait:Open in editor' "send:'\x1b'" 'wait:No mappings'
 (
   eval "$(python3 "$drive" env generated-setup-proof)"
   cmp "$DORT_EVIDENCE/before.toml" "$DORT_REPO/dort.toml"
@@ -93,19 +93,19 @@ python3 "$drive" tui generated-setup-proof --label cancel \
 )
 python3 "$drive" tui generated-setup-proof --label save \
   'wait:loaded.' "send:'f'" 'wait:New generated file' "send:'s'" \
-  'wait:Recipe line 1' "send:'editor\t~/.editor.conf\tfont-size = {{ size }}'" \
-  'wait:font-size' "send:'\x1b[200~\ncolor = dark\n\x1b[201~'" 'wait:Recipe line 3' \
-  "send:'\r'" 'wait:Input: size' "send:'18\r'" 'wait:font-size = 18' \
+  'wait:Open in editor' "send:'editor\t~/.editor.conf\tfont-size = {{ size }}\r'" \
+  'wait:font-size' "send:'\x1b[200~color = dark\n\x1b[201~'" 'wait:color = dark' \
+  "send:'\x1b[14~'" 'wait:Input: size' "send:'18\r'" 'wait:font-size = 18' \
   'wait:color = dark' 'wait:y Save generated file' 'snap:review' "send:'y'" \
-  'wait:Manifest change completed.' 'snap:saved' "send:'\r'" 'wait:Managed'
+  'wait:Manifest change completed.' 'snap:saved' 'click:Enter Done' 'wait:Managed'
 python3 "$drive" tui generated-setup-proof --label reopen \
   'wait:loaded.' "send:'f'" 'wait:Preview generated file' "send:'v'" \
   'wait:font-size = 18' 'wait:color = dark' 'snap:preview' "send:'\x1b'" 'wait:Managed'
 python3 "$drive" tui generated-setup-proof --label edit \
-  'wait:loaded.' "send:'f'" 'wait:Edit generated file' "send:'e'" 'wait:Recipe line 1' \
-  "send:'\r'" 'wait:Input: size' "send:'\x7f\x7f22\r'" 'wait:font-size = 22' \
+  'wait:loaded.' "send:'f'" 'wait:Edit generated file' "send:'e'" 'wait:Open in editor' \
+  "send:'\x1b[14~'" 'wait:Input: size' "send:'\x7f\x7f22\r'" 'wait:font-size = 22' \
   'wait:y Save generated file' "send:'y'" 'wait:Manifest change completed.' \
-  'snap:saved' "send:'\r'" 'wait:Managed'
+  'snap:saved' 'click:Enter Done' 'wait:Managed'
 python3 "$drive" cli generated-setup-proof --label cli -- \
   --json --repo @REPO files preview-generated editor
 (
@@ -117,7 +117,7 @@ with open(sys.argv[1], 'rb') as manifest:
     [file] = tomllib.load(manifest)['files']
 assert file['id'] == 'editor'
 assert file['target'] == '~/.editor.conf'
-assert file['recipe'] == 'font-size = {{ size }}\ncolor = dark\n'
+assert file['template'] == 'font-size = {{ size }}\ncolor = dark\n'
 assert file['inputs'] == {'size': '22'}
 PY
   cp "$DORT_REPO/dort.toml" "$DORT_EVIDENCE/after-edit.toml"
@@ -128,5 +128,6 @@ python3 "$drive" cleanup generated-setup-proof
 ## Gotchas
 
 - Exit the draft with Esc before the harness sends `q`. A focused field treats `q` as text.
-- Save updates the manifest, not the destination. File-backed recipes can be previewed in the TUI; edit their source separately.
+- Save updates the manifest, not the destination. Edit file-backed templates in their source files.
+- To test **Open in editor**, pass `--visual COMMAND` to `drive.py tui`. Use a script that checks its standard streams are terminals, writes template text to the final argument, and exits. Press F5 (`\x1b[15~`). Verify the new text appears in the draft before saving and that the temporary file is gone after the editor closes.
 - Use one mapping in the fixture so Managed starts on the template.

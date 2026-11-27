@@ -249,13 +249,15 @@ fn edit_template(terminal: &mut DefaultTerminal, paste_enabled: bool, app: &mut 
         std::io::stdout(),
         tty::LeaveAlternateScreen,
         tty::EnterAlternateScreen,
+        tty::Clear(tty::ClearType::All),
         event::EnableMouseCapture
     )
     .map_err(terminal_error)?;
     if paste_enabled {
         execute!(std::io::stdout(), event::EnableBracketedPaste).map_err(terminal_error)?;
     }
-    terminal.clear().map_err(terminal_error)?;
+    *terminal = DefaultTerminal::new(ratatui::backend::CrosstermBackend::new(std::io::stdout()))
+        .map_err(terminal_error)?;
     app.shell.finish_template_edit(result);
     Ok(())
 }
