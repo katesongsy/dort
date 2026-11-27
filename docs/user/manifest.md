@@ -38,10 +38,10 @@ mode = "link"
 - `id`: unique name for this mapping.
 - `source`: file inside the repository. No absolute paths, `..`, `.git` or `dort.toml`.
 - `target`: absolute path or `~/...` under your HOME. Dort config, state, the repository and overlapping targets are refused.
-- `mode`: `link`, `template` or `secret`. Only links can be deployed. Use `template` for generated previews.
+- `mode`: `link`, `template` or `secret`. Use `template` to preview generated files and deploy them to missing destinations.
 - `profiles`: defaults to `["base"]`. An empty list is invalid.
 - `requires`: tool IDs this file needs. Missing or unverified prerequisites block the file plan.
-- `permissions`: links do not take one. Templates accept an octal mode; secrets require `"0600"`.
+- `permissions`: links do not take one. Templates default to `"0600"` for first deployment; the mode cannot grant group or other users write access. Secrets require `"0600"`.
 
 Use platform-specific sources when needed:
 
@@ -53,7 +53,7 @@ linux = "files/linux/shellrc"
 
 Symlinks, directories, hard links and special files cannot be adopted as ordinary files.
 
-### Generated preview
+### Generated files
 
 ```toml
 [[files]]

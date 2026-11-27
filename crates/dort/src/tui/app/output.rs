@@ -411,6 +411,35 @@ impl App {
         None
     }
 
+    pub(super) fn accept_generated_deployment(
+        &mut self,
+        result: Result<dort_core::generated::Published, String>,
+    ) -> Option<Task> {
+        self.receipt = None;
+        self.failure = None;
+        self.details_scroll = 0;
+        match result {
+            Ok(published) => {
+                self.shell.back();
+                self.result = Some(crate::services::presentation::generated_published(
+                    &published,
+                ));
+                self.show_result = true;
+                self.status = if published.directory_synced {
+                    "Generated file deployed."
+                } else {
+                    "Generated file deployed. Destination sync failed."
+                }
+                .into();
+            }
+            Err(error) => {
+                self.error = Some(format!("Deployment stopped: {error}"));
+                self.status = "Open a new review to try again.".into();
+            }
+        }
+        None
+    }
+
     pub(super) fn accept_completed(
         &mut self,
         completion: Completion,

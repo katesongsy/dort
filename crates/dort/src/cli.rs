@@ -227,6 +227,12 @@ enum FilesCommand {
     },
     /// Render a template declared in dort.toml without writing files.
     PreviewGenerated { id: String },
+    /// Review and create one generated file at a missing Home destination.
+    DeployGenerated {
+        id: String,
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
     /// Preview only. No writes, approvals, backups or history records.
     Plan {
         #[arg(long = "profile", global = true)]
@@ -1195,6 +1201,44 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                     print_ascii_json(&preview, "could not encode generated preview")?;
                 } else {
                     print!("{}", crate::services::presentation::generated(&preview));
+                }
+            }
+            FilesCommand::DeployGenerated { id, profiles } => {
+                if cli.confirm_remove.is_some() {
+                    return Err(Error::Invalid(
+                        "Generated deployment does not use --confirm-remove.".into(),
+                    ));
+                }
+                let deployment = crate::services::review_generated_deployment(
+                    &host,
+                    cli.repo.as_deref(),
+                    id,
+                    profiles,
+                )?;
+                if !cli.json {
+                    print!(
+                        "{}",
+                        crate::services::presentation::generated_deployment(deployment.review())
+                    );
+                }
+                if cli.dry_run {
+                    if cli.json {
+                        print_ascii_json(
+                            &deployment.review(),
+                            "could not encode generated deployment review",
+                        )?;
+                    }
+                } else {
+                    approve(cli)?;
+                    let result = deployment.approve().execute()?;
+                    if cli.json {
+                        print_ascii_json(&result, "could not encode generated deployment result")?;
+                    } else {
+                        println!(
+                            "{}",
+                            crate::services::presentation::generated_published(&result)
+                        );
+                    }
                 }
             }
             FilesCommand::Add {

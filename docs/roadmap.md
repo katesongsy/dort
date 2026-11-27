@@ -14,7 +14,7 @@ Persistent profile controls with clear semantics, cloning without deployment, on
 
 ### Generated configuration
 
-Rendered files with explicit inputs and limits, deterministic previews, and drift detection before deployment.
+First deployment creates one missing file after review. Next: detect drift and review replacement.
 
 ### Secrets
 

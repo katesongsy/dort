@@ -431,3 +431,98 @@ fn editor_launches_by_key_and_mouse_and_only_updates_the_draft() {
     assert!(w.review().contains("after\ndark\n"));
     assert_eq!(w.manifest(), original);
 }
+
+#[test]
+fn first_deployment_requires_a_ready_review_and_a_separate_approval_at_narrow_widths() {
+    for (width, height) in [(48, 14), (80, 24)] {
+        let mut w = Workshop::new(width, height);
+        let declaration = r#"schema = 1
+[[files]]
+id = "settings"
+mode = "template"
+source = "settings.tmpl"
+target = "~/settings"
+"#;
+        let mut expected = "  text\r\n".repeat(40);
+        expected.push_str(&format!("{}END\t\\\x1b  ", "x".repeat(67)));
+        fs::write(w.repo.join("dort.toml"), declaration).unwrap();
+        fs::write(w.repo.join("settings.tmpl"), &expected).unwrap();
+        w.run(Task::Refresh);
+        let target = w.host.home.join("settings");
+        w.screen();
+        w.press(KeyCode::Enter);
+        let screen = w.screen();
+        assert!(screen.contains("Review deployment"), "{screen}");
+        if width == 80 {
+            let task = click_label(&mut w.app, width, height, "Review deployment").unwrap();
+            w.run(task);
+        } else {
+            w.press(KeyCode::Char('R'));
+        }
+        let screen = w.screen();
+        assert!(
+            screen.contains("Review first deployment: settings"),
+            "{screen}"
+        );
+        assert!(screen.contains("Permissions: 0600"), "{screen}");
+        assert!(!screen.contains("y Deploy generated file"), "{screen}");
+        w.press(KeyCode::Char('y'));
+        w.press(KeyCode::Enter);
+        assert!(!target.exists());
+        w.press(KeyCode::End);
+        w.press(KeyCode::Char('y'));
+        assert!(!target.exists(), "approval before the tail is drawn");
+        let screen = w.screen();
+        let joined = screen.lines().map(str::trim_end).collect::<String>();
+        assert!(joined.contains("END\\t\\\\\\x1b\\x20\\x20"), "{screen}");
+        assert!(screen.contains("End of rendered output"), "{screen}");
+        assert!(screen.contains("Deploy generated file"), "{screen}");
+        w.press(KeyCode::Esc);
+        assert!(!target.exists());
+        assert!(w.screen().contains("Generated file preview"));
+        w.press(KeyCode::Char('R'));
+        w.screen();
+        w.press(KeyCode::End);
+        w.screen();
+        w.press(KeyCode::Char('y'));
+        let screen = w.screen();
+        assert!(screen.contains("Deployed generated file"), "{screen}");
+        assert_eq!(fs::read(&target).unwrap(), expected.as_bytes());
+        w.press(KeyCode::Char('y'));
+        assert_eq!(w.manifest(), declaration);
+        assert_eq!(fs::read_dir(&w.host.home).unwrap().count(), 1);
+    }
+}
+
+#[test]
+fn dry_run_and_blocked_deployment_never_offer_approval() {
+    let mut w = Workshop::new(80, 24);
+    fs::write(
+        w.repo.join("dort.toml"),
+        "schema=1\n[[files]]\nid='settings'\nmode='template'\ntarget='~/settings'\ntemplate='value'\n",
+    )
+    .unwrap();
+    w.run(Task::Refresh);
+    let target = w.host.home.join("settings");
+    w.screen();
+    w.press(KeyCode::Enter);
+    let screen = w.screen();
+    assert!(screen.contains("Generated file preview"), "{screen}");
+    fs::write(&target, b"existing").unwrap();
+    w.press(KeyCode::Char('R'));
+    let screen = w.screen();
+    assert!(screen.contains("already exists"), "{screen}");
+    assert!(!screen.contains("Deploy generated file"), "{screen}");
+    assert_eq!(fs::read(&target).unwrap(), b"existing");
+    w.press(KeyCode::Esc);
+    fs::remove_file(&target).unwrap();
+    w.app.dry_run = true;
+    w.screen();
+    w.press(KeyCode::Char('R'));
+    w.screen();
+    w.press(KeyCode::End);
+    let screen = w.screen();
+    assert!(!screen.contains("y Deploy generated file"), "{screen}");
+    w.press(KeyCode::Char('y'));
+    assert!(!target.exists());
+}

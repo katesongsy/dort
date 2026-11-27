@@ -349,6 +349,7 @@ impl App {
                 self.status = "".into();
                 None
             }
+            Ok(Output::GeneratedDeployed(result)) => self.accept_generated_deployment(result),
             Ok(Output::History { rows, error }) => self.accept_history(rows, error),
             Ok(Output::Diagnostics(report)) => self.accept_diagnostics(report),
             Ok(Output::ToolAttempts(result)) => self.accept_tool_attempts(result),
@@ -1620,6 +1621,13 @@ impl App {
             return None;
         }
         if let Some(Overlay::Generated(report)) = &self.shell.overlay {
+            if key.code == KeyCode::Char('r')
+                && !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            {
+                return Some(Task::ReviewGeneratedDeployment(report.id.clone()));
+            }
             if key.code == KeyCode::Esc {
                 self.shell.back();
             } else {
@@ -3136,7 +3144,7 @@ impl App {
             | Action::Remove
                 if self.template_selected() =>
             {
-                Some("Choose Preview generated file. Generated files are preview-only.")
+                Some("Choose Preview generated file, then Review deployment.")
             }
             Action::Configure(super::configuration::Kind::EditFile)
                 if self.selected_mapping().is_none() =>

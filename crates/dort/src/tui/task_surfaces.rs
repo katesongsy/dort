@@ -118,6 +118,7 @@ impl Activity {
                 unreachable!("private passive reads have no activity surface")
             }
             Task::PreviewGenerated(_) => "Preview generated file",
+            Task::ReviewGeneratedDeployment(_) => "Review deployment",
             Task::IgnoredPaths => "Manage ignored paths",
             Task::Ignore(..) => "Preview discovery preferences",
             Task::Refresh => "Refresh data",
@@ -164,6 +165,7 @@ impl Activity {
                     Approved::FullCheck(_) => "Run checks",
                     Approved::EnvironmentAbandon(_) => "Abandon environment run",
                     Approved::Profile(_) => "Save profile choice",
+                    Approved::GeneratedDeployment(_) => "Deploy generated file",
                     Approved::Configuration(_) => "Save configuration change",
                     Approved::Ignore(_) => "Discovery preferences",
                     Approved::Files(_) => "File operation",
@@ -358,6 +360,10 @@ impl Activity {
             ),
             Pending::Environment(_) => ("Environment", vec![]),
             Pending::Profile(_) => ("Save profile choice", vec![]),
+            Pending::GeneratedDeployment(p) => (
+                "Deploy generated file",
+                vec![("Destination", p.review().destination.display().to_string())],
+            ),
             Pending::Ignore(_) => (
                 "Discovery preferences",
                 vec![("Scope", "Local HOME discovery only".into())],

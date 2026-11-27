@@ -85,6 +85,7 @@ impl Topic {
             Self::Generated => {
                 guide!("Generated file preview", "Read the template output and its destination status. Inputs come from dort.toml. No files are written.";
                     "Read the output" => "Use arrows or page keys to scroll. Home goes to the top; End goes to the last line. Esc returns to Managed.",
+                    "Deploy for the first time" => "Press R to review the exact contents and permissions. Press y when Deploy generated file appears. Esc cancels the review.",
                 )
             }
             Self::Recovery => {
