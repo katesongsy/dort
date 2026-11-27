@@ -96,6 +96,7 @@ fn files_app() -> App {
         files: vec![("editor".into(), "fallback must not be parsed".into())],
         managed: vec![ManagedRow {
             id: "editor".into(),
+            mode: dort_core::model::FileMode::Link,
             source: Some("/synthetic/repository/files/editor".into()),
             target: "/synthetic/home/.editor".into(),
             state: "Blocked",

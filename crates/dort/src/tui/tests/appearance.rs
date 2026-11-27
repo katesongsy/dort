@@ -28,6 +28,7 @@ fn fixture() -> App {
         files: vec![("é".into(), "synthetic metadata".into())],
         managed: vec![ManagedRow {
             id: "é".into(),
+            mode: dort_core::model::FileMode::Link,
             source: Some("/synthetic/source".into()),
             target: "/synthetic/target".into(),
             state: "Blocked",

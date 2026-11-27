@@ -93,7 +93,7 @@ fn select(app: &mut App, name: &str) {
     }
     for _ in 0..30 {
         if app.inventory.group.is_none() {
-            let matches = if app.discovering {
+            let matches = if app.discovering() {
                 app.discovery
                     .as_ref()
                     .and_then(|d| d.report.candidates.get(app.candidate_selected))
@@ -349,7 +349,7 @@ fn tree_folds_marks_hidden_items_and_batch_editor_retains_real_fields_at_floor()
     assert!(f.run(&mut app, discover).is_none());
     assert!(app.status.contains("Discover refreshed"));
     assert!(!app.batch_editor.as_ref().unwrap().open);
-    assert!(app.discovering && app.tab == Tab::Files && !app.show_result);
+    assert!(app.discovering() && app.tab == Tab::Files && !app.show_result);
     assert!(app.receipt.is_some());
     assert!(app.inventory.candidate_marks.is_empty());
     assert!(f.host.home.join(".config/editor/only-a").is_symlink());

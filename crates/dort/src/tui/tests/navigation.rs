@@ -5,6 +5,7 @@ use super::{
     input::Target,
     tests::render,
 };
+use crate::tui::inventory::Page as FilesPage;
 use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -42,7 +43,7 @@ fn ctrl(app: &mut App, c: char) {
 #[test]
 fn vim_pages_use_the_rendered_viewport_and_filters_keep_text() {
     let mut app = app();
-    let page = app.inventory.viewport(false).page();
+    let page = app.inventory.viewport(FilesPage::Managed).page();
     assert!(page > 1);
     key(&mut app, KeyCode::Char('j'));
     assert_eq!(app.selected, 1);
@@ -88,7 +89,7 @@ fn selected_keep_uses_u_while_jk_and_ctrl_u_keep_their_navigation_meaning() {
             assert_eq!(app.selected, want);
             assert!(app.preview.is_none());
         }
-        let page = app.inventory.viewport(false).page();
+        let page = app.inventory.viewport(FilesPage::Managed).page();
         assert!(
             app.key(
                 KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
@@ -356,7 +357,11 @@ fn files_show_the_contextual_actions_that_their_keys_dispatch() {
             ],
         ),
     ] {
-        app.discovering = discovering;
+        app.files_page = if discovering {
+            FilesPage::Discover
+        } else {
+            FilesPage::Managed
+        };
         render(&app, 140, 40);
         let actions = workbench::actions(&app);
         for (action, key, label) in expected {
@@ -370,7 +375,7 @@ fn files_show_the_contextual_actions_that_their_keys_dispatch() {
             );
         }
     }
-    app.discovering = false;
+    app.files_page = FilesPage::Managed;
     let request = app.key(
         KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
         140,

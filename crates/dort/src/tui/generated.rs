@@ -149,6 +149,10 @@ impl Draft {
         }
     }
 
+    pub fn id(&self) -> &str {
+        self.id.trim()
+    }
+
     pub fn title(&self) -> String {
         if self.before.is_some() {
             format!("Edit generated file: {}", self.id)
@@ -233,7 +237,7 @@ impl Draft {
             names
         };
         let mut mapping = self.before.clone().unwrap_or_else(|| ManagedFile {
-            id: self.id.trim().into(),
+            id: self.id().into(),
             mode: FileMode::Template,
             target: Default::default(),
             source: None,

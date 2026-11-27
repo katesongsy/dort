@@ -35,22 +35,21 @@ Reviews show exact effects. Confirm once. Help keeps drafts; choosing another de
 After a failure, `R` retries a read or asks for a fresh preview. It never replays an approval. After a failed write, `R` only refreshes; use `h` for Recovery. A blocked earlier operation names its repository and action; open Recovery.
 
 ### Files
-Use `1` for Managed, `2` for Discover and `3` for Ignored paths. `g` opens Git.
+Press `f` to open **1 Managed**. Use `2` for **Discover**, `3` for **Ignored paths**, and `4` for **Generated**. `g` opens Git.
 - **Managed:** `u` Unmanage keeps the local file; `U` Unmanage marked does the same for marked files. `m` Manual adopt opens an adoption draft. `a` Apply reviews all active files; `A` Apply marked reviews marked files only.
 - **Discover:** `a` Adopt opens a draft for the selected file; `A` Adopt marked opens a batch draft. `i` Ignore reviews excluding the selected path from discovery.
 - In **Managed**, use **Add mapping** for a file already in the repository. Select a mapping and use **Edit file mapping** to change its declaration. Review and save before applying. Adoption also lets you choose active profiles.
-- Select a generated file in **Managed** and choose **Preview generated file** (`Enter` or `v`). Scroll with the arrows or page keys. `End` jumps to the end of the output; `Esc` returns to Managed.
-- In either list, `Space` marks or unmarks, and `Home` / `End` select the first or last row. Hidden marks still count.
+- In **Managed** and **Discover**, `Space` marks or unmarks. Hidden marks still count. In file lists, `Home` and `End` select the first and last rows.
 - **Delete link** and **Delete marked** are separate actions. Review the paths and confirm the exact mapping IDs before deleting links.
 #### Generated files
 
-In **Files**, open **Managed**. Press `s` or choose **New generated file**. Enter a file ID and a Home destination. Press `Tab` or `Shift+Tab` to move between fields. In **Template**, `Enter` adds a newline. Use the arrows, `Home`, and `End` to edit, or paste several lines at once. Use `{{ name }}` for an input. Keep secrets out of templates and inputs.
+In **Files**, press `4` to open **Generated**. Press `s` or choose **New generated file**. Enter a file ID and a Home destination. Press `Tab` or `Shift+Tab` to move between fields. In **Template**, `Enter` adds a newline. Use the arrows, `Home`, and `End` to edit, or paste several lines at once. Use `{{ name }}` for an input. Keep secrets out of templates and inputs.
 
 Choose **Open in editor** (`F5`) to edit the template in an external editor. Set `VISUAL` or `EDITOR` before starting Dort, for example `VISUAL='code --wait'`. Dort tries `VISUAL` first. Choose an editor command that waits until you close the file. The editor gets a temporary copy of the template. Save and exit the editor to return to the draft.
 
 Choose **Continue** (`F4`). If the template uses inputs, enter the named values. Leave a value blank to render nothing. Choose **Review generated file** after entering inputs. Read the output. Press `y` when **Save generated file** is ready. `Esc` from the review or inputs returns to the draft. Saving changes only `dort.toml`.
 
-To revisit a saved template, select it in Managed. Press `v` to preview it or `e` to choose **Edit generated file**. Edit file-backed templates in the repository.
+Select a saved template in **Generated**. Press `Enter` or `v` for **Preview generated file**. Scroll with the arrows or page keys. `End` jumps to the end of the output. `Esc` returns to the selected template. Press `e` for **Edit generated file**. Edit file-backed templates in the repository.
 
 The preview shows the proposed output and the file's status. **Update available** means the template output or permissions changed while the deployed file stayed the same. A local edit, permission change or deletion takes precedence. The preview leaves your local file alone.
 

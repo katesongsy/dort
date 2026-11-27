@@ -1118,7 +1118,7 @@ fn adoption_retains_all_input_through_missing_repository_picker_and_attachment()
     let discover = run_task(&mut app, &fixture, refresh).unwrap();
     assert!(matches!(discover, Task::Discover));
     assert!(run_task(&mut app, &fixture, discover).is_none());
-    assert!(app.discovering && !app.show_result);
+    assert!(app.discovering() && !app.show_result);
     assert!(app.status.contains("Discover refreshed"));
     assert!(fixture.host.home.join(".q?config").is_symlink());
     assert_eq!(

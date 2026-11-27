@@ -1,5 +1,6 @@
 use super::{
     app::{App, Tab},
+    inventory::Page,
     shell::Action,
 };
 
@@ -35,7 +36,7 @@ pub fn entries(app: &App) -> Vec<Entry> {
     use Action::*;
     let (primary, other): (Vec<Action>, Vec<Action>) = match app.tab {
         Tab::Overview => (vec![Apply], vec![Refresh]),
-        Tab::Files if app.discovering => (
+        Tab::Files if app.discovering() => (
             vec![AdoptSelected, IgnoreSelected, ToggleMark, BatchAdopt],
             vec![
                 ClearMarks,
@@ -47,6 +48,7 @@ pub fn entries(app: &App) -> Vec<Entry> {
                 Profiles,
             ],
         ),
+        Tab::Files if app.files_page == Page::Generated => (vec![], vec![ClearFilter, Refresh]),
         Tab::Files => (
             vec![
                 Apply,
@@ -99,11 +101,7 @@ pub fn entries(app: &App) -> Vec<Entry> {
         .collect();
     // Diagnostics is a refresh operation only when already in that subview.
     // Section destinations and session commands stay on keys and the rail.
-    let template = app.template_selected();
     rows.retain(|e| {
-        if template && matches!(e.action, Apply | Keep | Remove | ToggleMark) {
-            return false;
-        }
         !matches!(
             e.action,
             Discover

@@ -6,6 +6,7 @@ use super::{
         reader::{ReviewScroll, ReviewStage},
     },
     input::Target,
+    inventory::Page as FilesPage,
     shell::{Action, Form, Intent, Overlay, ProfilePicker, Shell},
 };
 use dort_core::{
@@ -34,7 +35,7 @@ pub struct Preview {
 struct RowClick {
     at: std::time::Instant,
     key: usize,
-    discovering: bool,
+    page: FilesPage,
     size: (u16, u16),
     row: u16,
 }
@@ -76,7 +77,7 @@ pub struct App {
     pub content: super::discover_content::State,
     return_to_discover: bool,
     rediscovering_after_adoption: bool,
-    pub discovering: bool,
+    pub files_page: FilesPage,
     pub inventory: super::inventory::Inventory,
     pub batch_editor: Option<super::batch_ui::Editor>,
     pub discovery: Option<std::sync::Arc<crate::services::Discovery>>,
@@ -167,7 +168,7 @@ impl App {
             content: Default::default(),
             return_to_discover: false,
             rediscovering_after_adoption: false,
-            discovering: false,
+            files_page: FilesPage::Managed,
             inventory: Default::default(),
             batch_editor: None,
             discovery: None,
@@ -636,7 +637,10 @@ impl App {
             self.content.focused = false;
         }
         let previous = self.last_click.take();
-        let row_click = matches!(target, Target::Row(_)) && self.tab == Tab::Files && !self.busy;
+        let row_click = matches!(target, Target::Row(_))
+            && self.tab == Tab::Files
+            && self.files_page != FilesPage::Generated
+            && !self.busy;
         // Row selection does not alter layout: retain render-owned hits for coalesced clicks.
         // Checkbox/chevron hits remain single-click controls, never double-click marks.
         if row_click {
@@ -647,7 +651,7 @@ impl App {
         if row_click && let Target::Row(index) = target {
             if previous.is_some_and(|click| {
                 click.key == index
-                    && click.discovering == self.discovering
+                    && click.page == self.files_page
                     && click.size == (width, height)
                     && click.row == event.row
                     && now.saturating_duration_since(click.at)
@@ -662,7 +666,7 @@ impl App {
             self.last_click = Some(RowClick {
                 at: now,
                 key: index,
-                discovering: self.discovering,
+                page: self.files_page,
                 size: (width, height),
                 row: event.row,
             });
@@ -771,7 +775,7 @@ impl App {
                 super::tree::select(self, index);
                 if matches!(target, Target::TreeFold(_)) {
                     let close = super::tree::selected(self).is_some_and(|n| {
-                        let folded = if self.discovering {
+                        let folded = if self.discovering() {
                             &self.inventory.candidate_folded
                         } else {
                             &self.inventory.managed_folded
@@ -828,7 +832,7 @@ impl App {
             Target::Filter => {
                 if self.tab == Tab::Files {
                     self.inventory.details = false;
-                    self.inventory.search_mut(self.discovering).editing = true;
+                    self.inventory.search_mut(self.files_page).editing = true;
                 }
                 if self.tab == Tab::Recovery {
                     self.history_region = Region::Queue;
@@ -1067,9 +1071,7 @@ impl App {
         }
         match scope {
             Scope::Recovery if self.tab == Tab::Recovery => Some(self.history_region),
-            Scope::Files { discovering }
-                if self.tab == Tab::Files && self.discovering == discovering =>
-            {
+            Scope::Files(page) if self.tab == Tab::Files && self.files_page == page => {
                 Some(if self.inventory.details || self.content.focused {
                     Region::Details
                 } else {
@@ -1101,10 +1103,11 @@ impl App {
                 Scope::Ignored | Scope::Repositories | Scope::Profiles => {
                     self.shell.picker_details = region == Region::Details
                 }
-                Scope::Files { discovering } => {
+                Scope::Files(page) => {
                     self.inventory.details = region == Region::Details;
-                    self.content.focused =
-                        discovering && self.content.available() && self.inventory.details;
+                    self.content.focused = page == FilesPage::Discover
+                        && self.content.available()
+                        && self.inventory.details;
                 }
                 Scope::Git => self.git_view.region = region,
                 Scope::DeclaredTools => {
@@ -1345,7 +1348,7 @@ impl App {
                 } else if self.shell.overlay.is_some() {
                     self.shell.back();
                 } else {
-                    self.inventory.search_mut(self.discovering).editing = false;
+                    self.inventory.search_mut(self.files_page).editing = false;
                     self.inventory.details = false;
                     self.history_search.editing = false;
                     self.history_region = Region::Queue;
@@ -1676,7 +1679,10 @@ impl App {
         if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) && !self.text_entry() {
             return None;
         }
-        if self.tab == Tab::Files && self.discovering && self.content.focused && !self.text_entry()
+        if self.tab == Tab::Files
+            && self.discovering()
+            && self.content.focused
+            && !self.text_entry()
         {
             if key.code == KeyCode::Esc {
                 self.content.focused = false;
@@ -1731,12 +1737,12 @@ impl App {
                 _ => (),
             }
         }
-        if key.code == KeyCode::Enter
-            && key.modifiers == KeyModifiers::NONE
-            && !self.text_entry()
-            && self.template_selected()
-        {
-            return self.activate(Action::PreviewGenerated);
+        if key.modifiers == KeyModifiers::NONE && !self.text_entry() && self.template_selected() {
+            match key.code {
+                KeyCode::Enter => return self.activate(Action::PreviewGenerated),
+                KeyCode::F(3) => return self.activate(Action::Inspect),
+                _ => (),
+            }
         }
         if self.tab == Tab::Files
             && self.inventory.details
@@ -1777,7 +1783,7 @@ impl App {
                 && !self.inventory.details
                 && !self.content.focused
                 && let Some((backwards, count)) =
-                    movement(self.inventory.viewport(self.discovering).page())
+                    movement(self.inventory.viewport(self.files_page).page())
             {
                 self.move_files(backwards, count);
                 return None;
@@ -1835,18 +1841,18 @@ impl App {
             self.details_scroll = 0;
             return None;
         }
-        if self.tab == Tab::Files && self.inventory.search(self.discovering).editing {
-            self.inventory.search_mut(self.discovering).key(key);
+        if self.tab == Tab::Files && self.inventory.search(self.files_page).editing {
+            self.inventory.search_mut(self.files_page).key(key);
             self.clamp_file_selection();
             self.details_scroll = 0;
             return None;
         }
         if self.tab == Tab::Files
-            && (!self.inventory.details || self.discovering)
+            && (!self.inventory.details || self.discovering())
             && !self.content.focused
         {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
-                let page = self.inventory.viewport(self.discovering).page();
+                let page = self.inventory.viewport(self.files_page).page();
                 let (backwards, count) = match key.code {
                     KeyCode::Char('d') => (false, (page / 2).max(1)),
                     KeyCode::Char('u') => (true, (page / 2).max(1)),
@@ -1869,7 +1875,7 @@ impl App {
                     self.move_files(true, 1);
                     return None;
                 }
-                KeyCode::Char('G') if !self.discovering => {
+                KeyCode::Char('G') if !self.discovering() => {
                     self.move_files(false, usize::MAX);
                     return None;
                 }
@@ -1893,14 +1899,7 @@ impl App {
             self.details_scroll = 0;
         }
         if self.tab == Tab::Files {
-            let action = (!self.discovering)
-                .then(|| {
-                    super::context::control_action(
-                        key.code,
-                        super::files::managed_controls(self, self.viewport.0),
-                    )
-                })
-                .flatten()
+            let action = super::context::control_action(key.code, super::files::controls(self))
                 .or_else(|| super::context::file_action(key.code, self));
             if let Some(action) = action {
                 return self.activate(action);
@@ -1923,7 +1922,7 @@ impl App {
             }
             KeyCode::Char('/') if self.tab == Tab::Files => {
                 self.inventory.details = false;
-                self.inventory.search_mut(self.discovering).editing = true
+                self.inventory.search_mut(self.files_page).editing = true
             }
             KeyCode::Char('/') if self.tab == Tab::Recovery => {
                 self.history_region = Region::Queue;
@@ -1959,7 +1958,10 @@ impl App {
             KeyCode::Delete if self.tab == Tab::Files => return self.activate(Action::ClearFilter),
             KeyCode::Char('p') => return self.activate(Action::Choose),
             KeyCode::Char('c') => return self.activate(Action::CheckCurrent),
-            KeyCode::Char('v') if self.tab != Tab::Tools => {
+            KeyCode::Char('v')
+                if self.tab != Tab::Tools
+                    && !(self.tab == Tab::Files && self.files_page == FilesPage::Generated) =>
+            {
                 return self.activate(Action::CheckStandalone);
             }
             KeyCode::Char('t') => return self.activate(Action::Profiles),
@@ -2017,6 +2019,20 @@ impl App {
         super::discover_content::sync(self, width, height);
     }
     fn replace_data(&mut self, data: Data) {
+        let saved_template = self.inventory.saved_template.take().and_then(|id| {
+            data.files
+                .iter()
+                .position(|row| row.0 == id)
+                .filter(|&i| data.is_template(i))
+        });
+        let previous_template = self.data.as_ref().and_then(|old| {
+            let index = self.inventory.generated_selected;
+            let row = old.files.get(index).filter(|_| old.is_template(index))?;
+            data.files.iter().position(|next| next.0 == row.0)
+        });
+        self.inventory.generated_selected = saved_template
+            .or(previous_template)
+            .unwrap_or(self.inventory.generated_selected);
         let old_id = self.data.as_ref().and_then(|old| match self.tab {
             Tab::Files => old.files.get(self.selected).map(|row| row.0.clone()),
             Tab::Recovery => old
@@ -2040,8 +2056,13 @@ impl App {
         // Only a successful full inventory establishes that a marked ID is gone.
         // Display filters and unavailable observations must preserve valid marks.
         if data.repository.is_some() && data.files_error.is_none() {
-            let ids: std::collections::BTreeSet<_> =
-                data.files.iter().map(|(id, _)| id.as_str()).collect();
+            let ids: std::collections::BTreeSet<_> = data
+                .files
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !data.is_template(*i))
+                .map(|(_, (id, _))| id.as_str())
+                .collect();
             self.inventory
                 .managed_marks
                 .retain(|id| ids.contains(id.as_str()));
@@ -2061,6 +2082,16 @@ impl App {
             .unwrap_or(self.profiles.selected)
             .min(data.profile_rows.len().saturating_sub(1));
         self.data = Some(data);
+        if self.tab == Tab::Files
+            && self.files_page == FilesPage::Generated
+            && let Some(index) = saved_template
+            && !self.visible_file_rows().contains(&index)
+        {
+            self.inventory
+                .search_mut(FilesPage::Generated)
+                .query
+                .clear();
+        }
         self.selected = position
             .unwrap_or(self.selected)
             .min(self.row_count().saturating_sub(1));
@@ -2330,7 +2361,7 @@ impl App {
             }
             Action::ToggleMark => super::tree::toggle(self),
             Action::ClearMarks => {
-                if self.discovering {
+                if self.discovering() {
                     self.inventory.candidate_marks.clear();
                     self.inventory.candidate_mark_revision =
                         self.inventory.candidate_mark_revision.wrapping_add(1);
@@ -2340,7 +2371,7 @@ impl App {
             }
             Action::ExpandAll | Action::CollapseAll => {
                 let folds = super::visibility::Folds::all(action == Action::CollapseAll);
-                let folded = if self.discovering {
+                let folded = if self.discovering() {
                     &mut self.inventory.candidate_folded
                 } else {
                     &mut self.inventory.managed_folded
@@ -2391,9 +2422,10 @@ impl App {
             }
             Action::GitRefresh => return self.git_task(),
             Action::Destination(tab) => {
-                self.go_tab(tab);
                 if tab == Tab::Files {
-                    self.discovering = false;
+                    self.go_files_page(FilesPage::Managed);
+                } else {
+                    self.go_tab(tab);
                 }
                 if tab == Tab::Tools {
                     self.tools_view.leave_section();
@@ -2469,8 +2501,7 @@ impl App {
                 }
             }
             Action::Discover => {
-                self.go_tab(Tab::Files);
-                self.discovering = true;
+                self.go_files_page(FilesPage::Discover);
                 return Some(Task::Discover);
             }
             Action::Adopt => {
@@ -2478,7 +2509,7 @@ impl App {
                 self.shell.overlay = Some(Overlay::Form(Form::Adopt));
             }
             Action::AdoptSelected => {
-                if self.tab == Tab::Files && self.discovering {
+                if self.tab == Tab::Files && self.discovering() {
                     self.adopt_candidate();
                 } else {
                     self.status =
@@ -2486,8 +2517,7 @@ impl App {
                 }
             }
             Action::KeepId | Action::RemoveId => {
-                self.tab = Tab::Files;
-                self.discovering = false;
+                self.go_files_page(FilesPage::Managed);
                 self.shell.unmanage_focused = 0;
                 self.shell.overlay = Some(Overlay::Form(if matches!(action, Action::KeepId) {
                     Form::KeepId
@@ -2503,10 +2533,14 @@ impl App {
             }
             Action::ClearFilter if self.tab == Tab::Git => self.git_view.clear_filter(),
             Action::ClearFilter => {
-                self.inventory.search_mut(self.discovering).query.clear();
+                self.inventory.search_mut(self.files_page).query.clear();
                 self.clamp_file_selection();
-                self.status =
-                    "File display filter cleared; Apply uses the full active scope.".into();
+                self.status = if self.files_page == FilesPage::Managed {
+                    "File display filter cleared; Apply uses the full active scope."
+                } else {
+                    "File display filter cleared."
+                }
+                .into();
             }
             Action::Inspect if self.tab == Tab::Git => self.git_view.inspect_metadata(),
             Action::Inspect if self.tab == Tab::Recovery => {
@@ -2555,7 +2589,9 @@ impl App {
             {
                 return Some(Task::Files(Request::Apply));
             }
-            Action::Keep | Action::Remove if self.tab == Tab::Files && !self.discovering => {
+            Action::Keep | Action::Remove
+                if self.tab == Tab::Files && self.files_page == FilesPage::Managed =>
+            {
                 if !self.visible_file_rows().contains(&self.selected) {
                     self.status =
                         "No displayed mapping selected. Use Enter exact mapping ID in Actions."
@@ -2740,28 +2776,41 @@ impl App {
                 || (self.tab == Tab::Recovery && self.history_search.editing)
                 || (self.shell.overlay.is_none()
                     && self.tab == Tab::Files
-                    && self.inventory.search(self.discovering).editing))
+                    && self.inventory.search(self.files_page).editing))
+    }
+    pub fn discovering(&self) -> bool {
+        self.files_page == FilesPage::Discover
+    }
+    pub(super) fn go_files_page(&mut self, page: FilesPage) {
+        let changed = self.tab != Tab::Files || self.files_page != page;
+        self.go_tab(Tab::Files);
+        if changed {
+            self.files_page = page;
+            self.inventory.group = None;
+            self.inventory.details = false;
+            self.inventory.mark_refusal = None;
+            self.content = Default::default();
+            self.details_scroll = 0;
+        }
+        self.clamp_file_selection();
     }
     pub fn file_selection(&self) -> usize {
-        if let Some(group) = self.inventory.group {
-            return group;
-        }
-        if self.discovering {
-            self.candidate_selected
-        } else {
-            self.selected
-        }
+        self.inventory.group.unwrap_or(match self.files_page {
+            FilesPage::Managed => self.selected,
+            FilesPage::Discover => self.candidate_selected,
+            FilesPage::Generated => self.inventory.generated_selected,
+        })
     }
     pub fn file_rows_empty(&self) -> bool {
-        if self.discovering {
+        if self.discovering() {
             super::discovery_tree::snapshot(self).matching.is_empty()
         } else {
             self.visible_file_rows().is_empty()
         }
     }
     pub fn visible_file_rows(&self) -> Vec<usize> {
-        let search = self.inventory.search(self.discovering);
-        if self.discovering {
+        let search = self.inventory.search(self.files_page);
+        if self.discovering() {
             super::discovery_tree::snapshot(self).matching.to_vec()
         } else {
             self.data
@@ -2770,7 +2819,21 @@ impl App {
                     d.files
                         .iter()
                         .enumerate()
-                        .filter(|(_, row)| search.matches(&row.0) || search.matches(&row.1))
+                        .filter(|(i, row)| {
+                            let generated = self.files_page == FilesPage::Generated;
+                            d.is_template(*i) == generated
+                                && (search.matches(&row.0)
+                                    || if generated {
+                                        d.managed.get(*i).is_some_and(|file| {
+                                            search.matches(&file.target.to_string_lossy())
+                                                || file.source.as_ref().is_some_and(|path| {
+                                                    search.matches(&path.to_string_lossy())
+                                                })
+                                        })
+                                    } else {
+                                        search.matches(&row.1)
+                                    })
+                        })
                         .map(|(i, _)| i)
                         .collect()
                 })
@@ -2911,6 +2974,8 @@ impl App {
         }
         self.inventory.group = None;
         self.inventory.managed_marks.clear();
+        self.inventory.generated_selected = 0;
+        self.inventory.saved_template = None;
         // Adoption paths/drafts are retained; the new root is freshly core-validated.
         if let Some(editor) = &mut self.batch_editor {
             editor.open = false;
@@ -3008,7 +3073,7 @@ impl App {
         }
     }
     fn refresh_task(&self) -> Task {
-        if self.tab == Tab::Files && self.discovering {
+        if self.tab == Tab::Files && self.discovering() {
             Task::Discover
         } else if self.tab == Tab::Recovery {
             Task::History
@@ -3122,6 +3187,11 @@ impl App {
             }
             Action::Configure(kind) if kind.edits_profile() => self.profile_action_reason(),
             Action::SaveProfileChoice => self.profile_action_reason(),
+            Action::NewGenerated | Action::EditGenerated | Action::PreviewGenerated
+                if self.tab != Tab::Files || self.files_page != FilesPage::Generated =>
+            {
+                Some("Open Files / Generated.")
+            }
             Action::NewGenerated
                 if self
                     .data
@@ -3138,17 +3208,10 @@ impl App {
                 Some("Select a generated file with a template in dort.toml.")
             }
             Action::PreviewGenerated if !self.template_selected() => {
-                Some("Select a generated file in Files / Managed.")
+                Some("Select a generated file to preview.")
             }
             Action::Configure(super::configuration::Kind::EditFile)
-            | Action::Keep
-            | Action::Remove
-                if self.template_selected() =>
-            {
-                Some("Choose Preview generated file, then Review deployment.")
-            }
-            Action::Configure(super::configuration::Kind::EditFile)
-                if self.selected_mapping().is_none() =>
+                if self.files_page != FilesPage::Managed || self.selected_mapping().is_none() =>
             {
                 Some("Select a displayed file mapping first.")
             }
@@ -3166,7 +3229,7 @@ impl App {
             }
             Action::IgnoreSelected
                 if self.tab != Tab::Files
-                    || !self.discovering
+                    || !self.discovering()
                     || super::tree::selected(self).is_none() =>
             {
                 Some(
@@ -3174,13 +3237,13 @@ impl App {
                 )
             }
             Action::ToggleMark | Action::ClearMarks | Action::ExpandAll | Action::CollapseAll
-                if self.tab != Tab::Files =>
+                if self.tab != Tab::Files || self.files_page == FilesPage::Generated =>
             {
-                Some("Tree controls are available in Files.")
+                Some("Marks and folder controls are available in Managed and Discover.")
             }
             Action::BatchAdopt
                 if self.tab != Tab::Files
-                    || !self.discovering
+                    || !self.discovering()
                     || self.inventory.candidate_marks.is_empty() =>
             {
                 Some("Mark regular files with Space before starting a batch.")
@@ -3192,7 +3255,7 @@ impl App {
             }
             Action::ApplyMarked | Action::KeepMarked | Action::RemoveMarked
                 if self.tab != Tab::Files
-                    || self.discovering
+                    || self.files_page != FilesPage::Managed
                     || self.inventory.managed_marks.is_empty() =>
             {
                 Some(
@@ -3217,7 +3280,7 @@ impl App {
             }
             Action::Keep | Action::Remove
                 if self.tab != Tab::Files
-                    || self.discovering
+                    || self.files_page != FilesPage::Managed
                     || !self.visible_file_rows().contains(&self.selected) =>
             {
                 Some("Select a managed file, or use the exact-ID form.")
@@ -3240,7 +3303,7 @@ impl App {
             Action::PreviewOnly if self.preview_only_locked => {
                 Some("--dry-run keeps this session preview-only. Approval is off.")
             }
-            Action::AdoptSelected if self.tab != Tab::Files || !self.discovering => {
+            Action::AdoptSelected if self.tab != Tab::Files || !self.discovering() => {
                 Some("Select an eligible regular file first.")
             }
             Action::AdoptSelected
@@ -3248,29 +3311,26 @@ impl App {
             {
                 Some("Pick a file from the current list.")
             }
-            Action::AdoptSelected
-                if self
+            Action::AdoptSelected => {
+                let Some(candidate) = self
                     .discovery
                     .as_ref()
                     .and_then(|d| d.report.candidates.get(self.candidate_selected))
-                    .is_some_and(|c| {
-                        self.data
-                            .as_ref()
-                            .is_some_and(|d| d.managed.iter().any(|row| row.target == c.entry.path))
-                    }) =>
-            {
-                Some("Already managed. Change the existing entry in Managed instead.")
-            }
-            Action::AdoptSelected
-                if self
-                    .discovery
-                    .as_ref()
-                    .and_then(|d| d.report.candidates.get(self.candidate_selected))
-                    .is_none_or(|c| !c.supported_for_adoption) =>
-            {
-                Some(
-                    "Not eligible for adoption. Only owned regular files with one link can be added.",
-                )
+                else {
+                    return Some("Pick a file from the current list.");
+                };
+                match self.managed_destination(&candidate.entry.path) {
+                    Some(row) if row.mode == dort_core::model::FileMode::Template => {
+                        Some("Already declared. Open Files / Generated for this destination.")
+                    }
+                    Some(_) => {
+                        Some("Already managed. Change the existing entry in Managed instead.")
+                    }
+                    None if !candidate.supported_for_adoption => Some(
+                        "Not eligible for adoption. Only owned regular files with one link can be added.",
+                    ),
+                    None => None,
+                }
             }
 
             Action::Rollback

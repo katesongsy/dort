@@ -19,7 +19,7 @@ Upgrading? See [Upgrade from v0.1.0](manifest.md#upgrade-from-v010).
 | --- | --- |
 | Validate a manifest | `manifest check`, Checks in the TUI |
 | Discover and manage dotfiles | `files discover`, `list`, `plan`, `add`, `apply`, `remove` |
-| Deploy a new generated file | Files **Review deployment** (`R` from preview), `files deploy-generated` |
+| Deploy a new generated file | **Files**, **Generated** (`4`), then **Review deployment** (`R` from preview). CLI: `files deploy-generated`. |
 | Create or attach a local repository | `init PATH`, Create/attach |
 | Inspect Git status and diff | Git page shows patch previews; CLI uses `git status` and `git diff --patch` |
 | Check installed tools | Tools **Check installed** (`C`), `tools check` |

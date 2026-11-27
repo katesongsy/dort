@@ -7,6 +7,7 @@ use dort_core::{
     context::HostContext,
     journal,
     local::LocalConfig,
+    model::FileMode,
     planner::{self, Plan, Request, UnmanageMode},
     recovery,
     state::WriterLock,
@@ -15,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 pub struct ManagedRow {
     pub id: String,
+    pub mode: FileMode,
     pub source: Option<PathBuf>,
     pub target: PathBuf,
     pub state: &'static str,
@@ -65,6 +67,13 @@ pub struct Data {
     pub files_error: Option<String>,
     pub history: Vec<journal::Diagnosis>,
     pub history_error: Option<String>,
+}
+impl Data {
+    pub fn is_template(&self, index: usize) -> bool {
+        self.managed
+            .get(index)
+            .is_some_and(|row| row.mode == FileMode::Template)
+    }
 }
 
 // TOML parser Display includes source lines. Ordinary TUI errors are metadata only.
@@ -219,6 +228,7 @@ pub fn load_scoped(
                             for link in &plan.inputs.inactive_links {
                                 managed.push(ManagedRow {
                                     id: link.id.clone(),
+                                    mode: FileMode::Link,
                                     source: Some(link.source.clone()),
                                     target: link.target.clone(),
                                     state: "No longer selected",
@@ -237,6 +247,7 @@ pub fn load_scoped(
                             for (file, input) in plan.files.iter().zip(&plan.inputs.files) {
                                 managed.push(ManagedRow {
                                     id: file.id.clone(),
+                                    mode: input.mapping.mode,
                                     source: input.source_path.clone(),
                                     target: input.target_path.clone(),
                                     source_kind: entry_kind(input.source.as_ref()),
@@ -289,6 +300,7 @@ pub fn load_scoped(
                         ));
                         managed.push(ManagedRow {
                             id: mapping.id.clone(),
+                            mode: mapping.mode,
                             source,
                             target,
                             state,

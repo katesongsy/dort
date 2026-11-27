@@ -6,6 +6,7 @@ use super::{
     tests::render,
     tree,
 };
+use crate::tui::inventory::Page as FilesPage;
 use dort_core::{
     context::HostContext,
     discovery::{Candidate, Discovery},
@@ -31,7 +32,7 @@ impl Fixture {
     fn app(&self, count: usize, nested: bool) -> App {
         let mut app = App::new(false);
         app.tab = Tab::Files;
-        app.discovering = true;
+        app.files_page = FilesPage::Discover;
         let candidates = (0..count)
             .map(|i| Candidate {
                 entry: Entry {
@@ -141,18 +142,18 @@ fn cached_large_navigation_virtualizes_rows_and_preserves_raw_mouse_identity() {
     assert_eq!(tree::visible(&app).len(), 100_000);
     app.candidate_selected = 90_000;
     bounded_render(&app, 140, 40);
-    let offset = app.inventory.viewport(true).first();
+    let offset = app.inventory.viewport(FilesPage::Discover).first();
     assert!(offset > 89_900);
     key(&mut app, KeyCode::Up);
     bounded_render(&app, 140, 40);
-    assert_eq!(app.inventory.viewport(true).first(), offset);
+    assert_eq!(app.inventory.viewport(FilesPage::Discover).first(), offset);
     for _ in 0..3 {
         key(&mut app, KeyCode::Down);
         bounded_render(&app, 140, 40);
         assert!(Arc::ptr_eq(&snapshot, &discovery_tree::snapshot(&app)));
         assert!(Arc::ptr_eq(&snapshot.all, &tree::visible(&app).all));
     }
-    let expected = app.inventory.viewport(true).first();
+    let expected = app.inventory.viewport(FilesPage::Discover).first();
     let (x, y) = (0..40).flat_map(|y| (0..60).map(move |x| (x, y))).find(|&(x,y)| matches!(app.hits.target(x,y), Some(super::input::Target::Row(i)) if i == expected)).unwrap();
     app.mouse(
         ratatui::crossterm::event::MouseEvent {
@@ -179,7 +180,7 @@ fn discovery_rows_name_eligibility_and_style_kinds_distinctly() {
     let f = Fixture::new();
     let mut app = App::new(false);
     app.tab = Tab::Files;
-    app.discovering = true;
+    app.files_page = FilesPage::Discover;
     let candidates = [
         (".link", Kind::Symlink, false),
         (".file", Kind::Regular, true),

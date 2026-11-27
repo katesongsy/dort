@@ -20,6 +20,7 @@ pub(super) enum Topic {
     ManagedContent,
     Managed,
     ManagedDetails,
+    GeneratedFiles,
     Generated,
     GeneratedDraft,
     Recovery,
@@ -249,9 +250,12 @@ impl Topic {
             Tab::Overview if app.profiles.open => Self::Profiles,
             Tab::Overview if app.overview_details => Self::OverviewDetails,
             Tab::Overview => Self::Overview,
-            Tab::Files if app.discovering && app.content.focused => Self::Content,
-            Tab::Files if app.discovering && app.inventory.details => Self::DiscoverDetails,
-            Tab::Files if app.discovering => Self::Discover,
+            Tab::Files if app.files_page == super::inventory::Page::Generated => {
+                Self::GeneratedFiles
+            }
+            Tab::Files if app.discovering() && app.content.focused => Self::Content,
+            Tab::Files if app.discovering() && app.inventory.details => Self::DiscoverDetails,
+            Tab::Files if app.discovering() => Self::Discover,
             Tab::Files if app.content.focused => Self::ManagedContent,
             Tab::Files if app.inventory.details => Self::ManagedDetails,
             Tab::Files => Self::Managed,

@@ -12,7 +12,7 @@ use ratatui::crossterm::event::{KeyCode, KeyModifiers, MouseEvent, MouseEventKin
 use std::fs;
 
 #[test]
-fn managed_template_preview_opens_by_key_and_click_and_scrolls_without_approval() {
+fn generated_template_preview_opens_by_key_and_click_and_scrolls_without_approval() {
     for (width, height) in [(48, 14), (80, 24), (120, 32)] {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().canonicalize().unwrap();
@@ -44,7 +44,7 @@ inputs = {{ theme = "dark", padding = "{}" }}
         fs::write(repo.join("editor.tmpl"), template).unwrap();
         fs::write(home.join("settings"), "destination-bytes-must-stay-private").unwrap();
         let label = if width < 80 {
-            "Preview generated"
+            "Enter Preview"
         } else {
             "Preview generated file"
         };
@@ -56,6 +56,8 @@ inputs = {{ theme = "dark", padding = "{}" }}
         };
         run(&mut app, Task::Refresh);
         destination(&mut app, Tab::Files, width, height);
+        assert!(render(&app, width, height).contains("4 Generated"));
+        assert!(click_label(&mut app, width, height, "4 Generated").is_none());
         let screen = render(&app, width, height);
         assert!(screen.contains(label), "{screen}");
         assert!(
@@ -174,6 +176,7 @@ impl Workshop {
         };
         w.run(Task::Refresh);
         destination(&mut w.app, Tab::Files, width, height);
+        w.press(KeyCode::Char('4'));
         w
     }
 
@@ -222,9 +225,9 @@ fn blank_repository_can_create_cancel_save_preview_and_edit_generated_template()
     for (width, height) in [(48, 14), (120, 32)] {
         let mut w = Workshop::new(width, height);
         let blank = w.manifest();
-        assert!(w.screen().contains("s New generated"));
+        assert!(w.screen().contains("s New"));
         if width > 80 {
-            assert!(click_label(&mut w.app, width, height, "New generated file").is_none());
+            assert!(click_label(&mut w.app, width, height, "s New generated file").is_none());
         } else {
             w.press(KeyCode::Char('s'));
         }
@@ -357,37 +360,135 @@ fn stale_generated_review_cannot_replace_a_new_manifest() {
 }
 
 #[test]
-fn compact_managed_files_keep_new_generated_and_link_actions_reachable() {
-    let mut w = Workshop::new(80, 24);
-    fs::write(w.repo.join("shell"), "existing source").unwrap();
-    let original = r#"schema = 1
+fn generated_save_selects_the_saved_template_even_when_a_filter_hides_it() {
+    let mut w = Workshop::new(100, 26);
+    fs::write(
+        w.repo.join("dort.toml"),
+        "schema = 1\n[[files]]\nid = 'alpha'\nmode = 'template'\ntemplate = 'first output'\ntarget = '~/.alpha'\n",
+    )
+    .unwrap();
+    w.run(Task::Refresh);
+    w.press(KeyCode::Char('/'));
+    for c in "alpha".chars() {
+        w.press(KeyCode::Char(c));
+    }
+    w.press(KeyCode::Enter);
+    w.press(KeyCode::Char('s'));
+    w.paste("zeta");
+    w.press(KeyCode::Tab);
+    w.paste("~/.zeta");
+    w.press(KeyCode::Tab);
+    w.paste("second output");
+    w.press(KeyCode::F(4));
+    w.approve();
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Enter);
+    assert!(w.screen().contains("second output"));
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Char('e'));
+    assert!(w.screen().contains("Edit generated file: zeta"));
+    w.press(KeyCode::End);
+    w.paste(" edited");
+    w.press(KeyCode::F(4));
+    w.press(KeyCode::Esc);
+    assert!(w.screen().contains("Edit generated file: zeta"));
+    w.press(KeyCode::F(4));
+    w.approve();
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Char('v'));
+    assert!(w.screen().contains("second output edited"));
+    assert_eq!(fs::read_dir(&w.host.home).unwrap().count(), 0);
+}
+
+#[test]
+fn managed_and_generated_have_separate_rows_actions_and_filters() {
+    for (width, height) in [(48, 14), (80, 24), (120, 32)] {
+        let mut w = Workshop::new(width, height);
+        fs::write(w.repo.join("shell"), "existing source").unwrap();
+        let original = r#"schema = 1
 [[files]]
 id = "shell"
 mode = "link"
 source = "shell"
 target = "~/shell"
+[[files]]
+id = "settings4"
+mode = "template"
+template = "editor=vim"
+target = "~/config/settings"
 "#;
-    fs::write(w.repo.join("dort.toml"), original).unwrap();
-    w.run(Task::Refresh);
-    let screen = w.screen();
-    assert!(screen.contains("s New generated file"), "{screen}");
-    w.press(KeyCode::F(2));
-    let items = &w.app.more.as_ref().unwrap().items;
-    for label in ["Add file mapping", "Edit file mapping"] {
+        fs::write(w.repo.join("dort.toml"), original).unwrap();
+        w.run(Task::Refresh);
+        let generated = w.screen();
         assert!(
-            screen.contains(label)
-                || items
-                    .iter()
-                    .any(|item| item.action.label == label && item.reason.is_none()),
-            "missing {label}: {screen}"
+            generated.contains("settings4") && generated.contains("s New"),
+            "{generated}"
         );
+        assert!(
+            !generated.contains("shell") && !generated.contains("marked"),
+            "{generated}"
+        );
+        w.press(KeyCode::Char(' '));
+        w.press(KeyCode::Char('a'));
+        assert!(w.app.preview.is_none());
+        w.press(KeyCode::Char('/'));
+        for c in "settings4".chars() {
+            w.press(KeyCode::Char(c));
+        }
+        w.press(KeyCode::Enter);
+        w.press(KeyCode::Char('f'));
+        let managed = w.screen();
+        assert!(
+            managed.contains("shell")
+                && !managed.contains("settings4")
+                && !managed.contains("s New"),
+            "{managed}"
+        );
+        w.press(KeyCode::Home);
+        w.press(KeyCode::Char(' '));
+        w.press(KeyCode::Char('A'));
+        assert!(w.review().contains("shell") && !w.review().contains("settings4"));
+        w.press(KeyCode::Esc);
+        w.press(KeyCode::End);
+        w.press(KeyCode::Char('e'));
+        assert!(w.screen().contains("Edit file mapping"));
+        w.press(KeyCode::Esc);
+        w.press(KeyCode::Esc);
+        assert!(w.screen().contains("4 Generated"));
+        click_label(&mut w.app, width, height, "4 Generated");
+        assert!(w.screen().contains("settings4"));
+        w.press(KeyCode::F(3));
+        let details = w.screen();
+        assert!(
+            details.contains("Selected item")
+                && details.contains("settings4")
+                && !details.contains("editor=vim"),
+            "{details}"
+        );
+        w.press(KeyCode::Esc);
+        w.press(KeyCode::Char('v'));
+        let preview = w.screen();
+        assert!(preview.contains("Generated file preview"), "{preview}");
+        w.press(KeyCode::End);
+        assert!(w.screen().contains("editor=vim"));
+        w.press(KeyCode::Esc);
+        assert!(w.screen().contains("settings4"));
+        click_label(
+            &mut w.app,
+            width,
+            height,
+            if width < 80 {
+                "s New"
+            } else {
+                "s New generated file"
+            },
+        );
+        assert!(w.screen().contains("File ID"));
+        w.press(KeyCode::Esc);
+        assert!(w.screen().contains("settings4"));
+        assert_eq!(w.manifest(), original);
     }
-    w.press(KeyCode::Esc);
-    click_label(&mut w.app, w.width, w.height, "New generated file");
-    assert!(w.screen().contains("File ID"));
-    assert_eq!(w.manifest(), original);
 }
-
 #[test]
 fn editor_launches_by_key_and_mouse_and_only_updates_the_draft() {
     use super::template_editor::Edit;

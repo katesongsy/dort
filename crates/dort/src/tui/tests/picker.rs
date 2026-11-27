@@ -383,6 +383,7 @@ fn ordinary_compact_details_have_overlapping_keyboard_pages_including_busy_help_
         files: vec![("editor".into(), "not parsed".into())],
         managed: vec![ManagedRow {
             id: "editor".into(),
+            mode: dort_core::model::FileMode::Link,
             source: Some(path.clone().into()),
             target: "/synthetic/home/.editor".into(),
             state: "Blocked",

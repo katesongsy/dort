@@ -64,7 +64,7 @@ impl Topic {
             Self::Managed => {
                 guide!("Managed files", "A mapping tells Dort which repository file to link into your home folder. Select a mapping and press Enter to inspect its source, destination and status.";
                     "Read status" => "Linked means the destination points to the expected source. Needs apply means it is not in place yet. Blocked means Dort found a conflict. Read the reason in Details before applying.",
-                    "Generated files" => "Press s for New generated file. Select a generated file and press v to preview it, or e to edit a template saved in dort.toml.",
+                    "Generated files" => "Press 4 to open Generated.",
                     "Choose which files to apply" => "Apply reviews the active profiles, even with a filter on screen. To review a subset, press Space to mark the mappings and use Apply marked. Marks can be hidden by the filter.",
                     "Change what Dort manages" => "Add file mapping or Edit file mapping saves a declaration for later apply. Unmanage leaves a regular copy at the destination. Delete link removes the link at the destination. Both keep the repository source.",
                 )
@@ -73,6 +73,13 @@ impl Topic {
                 guide!("Managed file details", "Compare Source in the repository with Destination in your home folder. Linked means the destination points to the expected source. If Blocked, read Reason and check the two file types.";
                     "Choose a change" => "Edit file mapping changes the declaration. Review environment checks required tools before you apply. Unmanage leaves a regular copy at the destination. Delete link removes the link. Both keep the source.",
                     "Return to the list" => "Press Esc to choose a different mapping or mark a group. Apply marked uses the marks. Filtering alone never limits Apply.",
+                )
+            }
+            Self::GeneratedFiles => {
+                guide!("Generated files", "Press s for New generated file. Select a template to see its destination and source.";
+                    "Preview" => "Press Enter or v for rendered output and current destination status.",
+                    "Edit" => "Press e to edit an inline template or its inputs. Edit file-backed templates in the repository.",
+                    "Inspect" => "Press F3 for details. Esc returns to the selected row.",
                 )
             }
             Self::GeneratedDraft => {
@@ -84,7 +91,7 @@ impl Topic {
             }
             Self::Generated => {
                 guide!("Generated file preview", "Read the template output and its destination status. Inputs come from dort.toml. No files are written.";
-                    "Read the output" => "Use arrows or page keys to scroll. Home goes to the top; End goes to the last line. Esc returns to Managed.",
+                    "Read the output" => "Use arrows or page keys to scroll. Home goes to the top; End goes to the last line. Esc returns to Generated.",
                     "Check the status" => "Dort shows template updates and local changes separately. The preview leaves the deployed file alone.",
                     "Deploy for the first time" => "For a new file, choose Review deployment (R). Press y when Deploy generated file appears. Esc cancels the review.",
                 )
