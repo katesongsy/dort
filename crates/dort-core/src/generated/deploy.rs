@@ -1,18 +1,18 @@
 use super::{DestinationStatus, DriftStatus, Mode, Preview, find_file, record};
 use crate::{
-    Error, Result, adoption,
+    Error, Manifest, Result, adoption,
     context::HostContext,
     error::io_error,
     journal,
     local::LocalConfig,
     manifest::paths_overlap,
-    model::FileMode,
+    model::{FileMode, ManagedFile},
     observation::{self, Entry, Parent, ParentHandle},
     profiles,
     state::WriterLock,
 };
 use rustix::{fs, io::Errno, process};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
     fs::File,
@@ -20,7 +20,7 @@ use std::{
     path::{Path, PathBuf},
 };
 #[cfg(target_os = "macos")]
-mod acl;
+pub(super) mod acl;
 
 pub struct Deployment {
     host: HostContext,
@@ -32,14 +32,24 @@ pub struct Deployment {
     mode: Mode,
 }
 
-#[derive(PartialEq, Eq)]
-struct Scope {
-    repository_id: String,
-    profiles: BTreeSet<String>,
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Scope {
+    pub(super) repository_id: String,
+    pub(super) profiles: BTreeSet<String>,
     local: Entry,
-    manifest: Entry,
+    pub(super) manifest: Entry,
     source: Option<Entry>,
-    missing_destination: Vec<Parent>,
+    pub(super) destination_parents: Vec<Parent>,
+}
+pub(super) struct Declaration {
+    scope: Scope,
+    pub(super) record: record::Slot,
+    pub(super) destination: PathBuf,
+    pub(super) handle: ParentHandle,
+    pub(super) manifest: Manifest,
+    pub(super) mode: Mode,
+    file: ManagedFile,
 }
 
 #[derive(Serialize)]
@@ -130,10 +140,11 @@ impl Approval {
         journal::ensure_writable(&p.host)?;
         let path = &p.preview.destination;
         let reviewed_parent = || {
-            let handle = require_missing(path, checked_parent(path)?, false)?;
+            let handle = checked_parent(path)?;
+            require_missing(path, &handle, false)?;
             if !observation::same_parent_identity_and_access(
                 &handle.parents,
-                &p.scope.missing_destination,
+                &p.scope.destination_parents,
             ) {
                 return Err(stale());
             }
@@ -184,6 +195,25 @@ fn read_scope(
     id: &str,
     temporary_profiles: &[String],
 ) -> Result<(Scope, record::Slot, Preview, Mode)> {
+    let declaration = read_declaration(host, explicit, id, temporary_profiles)?;
+    let recorded = declaration
+        .record
+        .load()
+        .map_err(|_| record::invalid())?
+        .is_some();
+    require_missing(&declaration.destination, &declaration.handle, recorded)?;
+    let (scope, record, preview, mode) = declaration.render(host)?;
+    if preview.destination_status != DestinationStatus::Missing {
+        return Err(stale());
+    }
+    Ok((scope, record, preview, mode))
+}
+pub(super) fn read_declaration(
+    host: &HostContext,
+    explicit: Option<&Path>,
+    id: &str,
+    temporary_profiles: &[String],
+) -> Result<Declaration> {
     let (local, config) = LocalConfig::load_bound(host)?;
     let (repository_id, repository) = match explicit {
         Some(root) => {
@@ -222,45 +252,61 @@ fn read_scope(
     }
     if !file.requires.is_empty() {
         return Err(invalid(
-            "This file requires declared tools. First deployment cannot verify tool requirements.",
+            "This file requires declared tools. Dort cannot verify those requirements for generated files.",
         ));
     }
     manifest.validate_selection(host, &profiles, Some(repository))?;
     let destination = host.target_path(&file.target, Some(repository))?;
     let handle = destination_handle(host, &local, &destination)?;
     let record = record::Slot::new(host, repository_id, &file.id, &destination)?;
-    let recorded = record.load().map_err(|_| record::invalid())?.is_some();
-    let handle = require_missing(&destination, handle, recorded)?;
     let mode = Mode::declared(file.permissions.as_deref());
-    if !mode.permits_deployment() {
-        return Err(invalid(
-            "Generated permissions must not allow group or other users to write the file.",
-        ));
-    }
-    let (mut preview, source) =
-        Preview::render_file(host, repository, &manifest, file, destination)?;
-    if let Some(source) = &source {
-        trusted_parents(&source.parents)?;
-    }
-    if preview.destination_status != DestinationStatus::Missing {
-        return Err(stale());
-    }
-    preview.permissions = Some(mode.label());
-    let mut missing_destination = handle.parents;
-    observation::stabilize_parents(&mut missing_destination);
-    Ok((
-        Scope {
+    let mut destination_parents = handle.parents.clone();
+    observation::stabilize_parents(&mut destination_parents);
+    Ok(Declaration {
+        scope: Scope {
             repository_id: repository_id.clone(),
             profiles,
             local: config.stable_parents(),
             manifest: entry.stable_parents(),
-            source: source.map(Entry::stable_parents),
-            missing_destination,
+            source: None,
+            destination_parents,
         },
         record,
-        preview,
+        destination,
+        handle,
         mode,
-    ))
+        file: file.clone(),
+        manifest,
+    })
+}
+impl Declaration {
+    pub(super) fn repository(&self) -> &Path {
+        self.scope.manifest.path.parent().expect("manifest parent")
+    }
+
+    pub(super) fn render(
+        mut self,
+        host: &HostContext,
+    ) -> Result<(Scope, record::Slot, Preview, Mode)> {
+        if !self.mode.permits_deployment() {
+            return Err(invalid(
+                "Generated permissions must not allow group or other users to write the file.",
+            ));
+        }
+        let (mut preview, source) = Preview::render_file(
+            host,
+            self.repository(),
+            &self.manifest,
+            &self.file,
+            self.destination.clone(),
+        )?;
+        if let Some(source) = &source {
+            trusted_parents(&source.parents)?;
+        }
+        self.scope.source = source.map(Entry::stable_parents);
+        preview.permissions = Some(self.mode.label());
+        Ok((self.scope, self.record, preview, self.mode))
+    }
 }
 
 pub(super) fn destination_handle(
@@ -269,6 +315,12 @@ pub(super) fn destination_handle(
     destination: &Path,
 ) -> Result<ParentHandle> {
     if observation::sensitive_path(destination)
+        || destination.components().any(|part| {
+            part.as_os_str().to_str().is_some_and(|name| {
+                name.to_ascii_lowercase()
+                    .starts_with(super::update::STAGE_PREFIX)
+            })
+        })
         || destination
             .components()
             .any(|part| part.as_os_str().eq_ignore_ascii_case(".git"))
@@ -300,7 +352,7 @@ pub(super) fn destination_handle(
     Ok(handle)
 }
 
-fn checked_parent(path: &Path) -> Result<ParentHandle> {
+pub(super) fn checked_parent(path: &Path) -> Result<ParentHandle> {
     #[cfg(target_os = "macos")]
     let handle = observation::parent_handle_with(path, acl::require_no_write_grants)?;
     #[cfg(not(target_os = "macos"))]
@@ -309,7 +361,7 @@ fn checked_parent(path: &Path) -> Result<ParentHandle> {
     Ok(handle)
 }
 
-fn require_missing(path: &Path, handle: ParentHandle, recorded: bool) -> Result<ParentHandle> {
+fn require_missing(path: &Path, handle: &ParentHandle, recorded: bool) -> Result<()> {
     let stat = if handle.missing {
         Err(Errno::NOENT)
     } else {
@@ -329,7 +381,7 @@ fn require_missing(path: &Path, handle: ParentHandle, recorded: bool) -> Result<
             "Destination folder {} is missing. Create it, then review again.",
             path.parent().expect("destination parent").display()
         ))),
-        Err(Errno::NOENT) => Ok(handle),
+        Err(Errno::NOENT) => Ok(()),
         Ok(_) => Err(invalid(
             "Destination already exists. Choose a missing destination; Dort will not replace it.",
         )),
@@ -433,7 +485,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let root = root.path().canonicalize().unwrap();
         let path = root.join("generated");
-        let handle = require_missing(&path, checked_parent(&path).unwrap(), false).unwrap();
+        let handle = checked_parent(&path).unwrap();
+        require_missing(&path, &handle, false).unwrap();
         let result = publish(&handle, &path, Mode(0o600), b"reviewed", || {
             std::fs::write(&path, b"existing").unwrap();
             Ok(())

@@ -665,6 +665,7 @@ pub fn diagnose(host: &HostContext) -> Result<Vec<Diagnosis>> {
 
 /// Registry and executor writes fail closed on every incomplete/malformed transaction.
 pub(crate) fn ensure_writable(host: &HostContext) -> Result<()> {
+    crate::generated::ensure_no_pending_update(host)?;
     if let Some(transaction) = diagnose(host)?.into_iter().find(Diagnosis::blocks_writes) {
         let repository_root = crate::local::LocalConfig::load(host)
             .ok()

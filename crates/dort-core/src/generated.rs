@@ -1,6 +1,7 @@
-//! Previews and first deployment of repository-declared generated files.
+//! Previews and deployment of repository-declared generated files.
 mod deploy;
 mod record;
+mod update;
 use crate::{
     Error, Manifest, Result,
     context::HostContext,
@@ -15,6 +16,11 @@ use serde::Serialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
+};
+pub(crate) use update::ensure_no_pending_update;
+pub use update::{
+    ExchangeStatus, Update, UpdateApproval, UpdateLocation, UpdateOutcome, UpdateReview,
+    pending_update, recover_update,
 };
 
 pub const TEMPLATE_LIMIT: usize = 64 * 1024;
@@ -33,6 +39,10 @@ impl Mode {
 
     fn permits_deployment(self) -> bool {
         self.0 & 0o022 == 0
+    }
+
+    fn permits_update(self) -> bool {
+        self.permits_deployment() && self.0 & 0o400 != 0
     }
 
     fn label(self) -> String {
@@ -210,6 +220,9 @@ impl Preview {
         repository: &Path,
         manifest: &Manifest,
     ) -> DriftStatus {
+        if !matches!(pending_update(host), Ok(None)) {
+            return DriftStatus::Unverifiable;
+        }
         let path = &self.destination;
         let Ok(handle) = deploy::destination_handle(host, local, path) else {
             return DriftStatus::Unsafe;
@@ -245,13 +258,20 @@ impl Preview {
                 None => DriftStatus::Missing,
             },
             Ok(stat) => match stamp {
-                Some(stamp) if !overlaps_secret_target(host, repository, manifest, path, &stat) => {
-                    stamp.observe(
+                Some(record)
+                    if !overlaps_secret_target(host, repository, manifest, path, &stat) =>
+                {
+                    let drift = record.deployed.observe(
                         path,
                         &handle,
                         &stat,
                         &record::Stamp::new(self.rendered.as_bytes(), mode),
-                    )
+                    );
+                    if drift == DriftStatus::UpdateAvailable && !mode.permits_update() {
+                        DriftStatus::Unsafe
+                    } else {
+                        drift
+                    }
                 }
                 None if record::owned_regular(
                     &stat,

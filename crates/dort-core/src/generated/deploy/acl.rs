@@ -46,7 +46,7 @@ pub(super) fn require_no_write_grants(directory: &File, path: &Path) -> Result<(
     Ok(())
 }
 
-pub(super) fn require_private_stage(file: &File, path: &Path) -> Result<()> {
+pub(in crate::generated) fn require_private_stage(file: &File, path: &Path) -> Result<()> {
     if grants_access(file, u64::MAX)
         .map_err(|error| io_error("check staged file access rules", path, error))?
     {
