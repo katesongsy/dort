@@ -196,6 +196,12 @@ pub struct WriterLock {
 
 impl WriterLock {
     pub fn acquire(host: &HostContext) -> Result<Self> {
+        let lock = Self::acquire_for_generated_recovery(host)?;
+        crate::generated::ensure_no_pending_update(host)?;
+        Ok(lock)
+    }
+
+    pub(crate) fn acquire_for_generated_recovery(host: &HostContext) -> Result<Self> {
         let directory = PrivateDir::open(&host.state_dir, true)?.expect("created state directory");
         let file = fs::openat(
             &directory.file,

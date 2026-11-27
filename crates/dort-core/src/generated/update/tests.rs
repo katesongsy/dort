@@ -369,6 +369,7 @@ fn recovery_after_process_exit_observes_names_and_never_exchanges_again() {
             f.assert_prior_receipt();
         }
         assert!(journal::ensure_writable(&f.host).is_err());
+        assert!(WriterLock::acquire(&f.host).is_err());
         match recover_update(&f.host).unwrap().unwrap() {
             UpdateOutcome::NotExchanged { location, .. } if before => assert_eq!(location, where_),
             UpdateOutcome::Updated { location } if !before => assert_eq!(location, where_),
@@ -386,5 +387,6 @@ fn recovery_after_process_exit_observes_names_and_never_exchanges_again() {
         assert_eq!(fs::metadata(&f.dest).unwrap().ino(), live_inode);
         assert_eq!(fs::metadata(&where_.artifact).unwrap().ino(), private_inode);
         journal::ensure_writable(&f.host).unwrap();
+        assert!(WriterLock::acquire(&f.host).is_ok());
     }
 }

@@ -698,7 +698,7 @@ pub fn pending_update(host: &HostContext) -> Result<Option<UpdateLocation>> {
 pub(crate) fn ensure_no_pending_update(host: &HostContext) -> Result<()> {
     if let Some(location) = pending_update(host)? {
         return Err(Error::Invalid(format!(
-            "A generated update for {} needs recovery before Dort can write again. Its private file is at {} if the folder has not moved.",
+            "A generated update for {} needs recovery before Dort can write again. Its private file is at {} if the folder has not moved. Open Recovery or run `dort recovery recover-update --dry-run`.",
             location.destination.display(),
             location.artifact.display(),
         )));
@@ -728,7 +728,7 @@ fn recover_pending(
     host: &HostContext,
     reviewed: Option<&UpdateLocation>,
 ) -> Result<Option<UpdateOutcome>> {
-    let _lock = WriterLock::acquire(host)?;
+    let _lock = WriterLock::acquire_for_generated_recovery(host)?;
     let state = open_locked_state(host)?;
     let Some((intent, slot)) = load_pending(&state, host)? else {
         return Ok(None);
