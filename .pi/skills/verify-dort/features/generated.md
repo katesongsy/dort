@@ -152,6 +152,34 @@ python3 "$drive" tui generated-preview --label deploy \
 
 Reopen the preview. It should say **Up to date**. Change `size` to `24` in the manifest. Reopen the preview and check **Update available** while the local file still contains `font-size = 18`. Change the local permission mode to `0600` and check **Local permissions changed**. Restore the mode, change the local contents, and check **Local edits**. Move the local file aside and check **Local file deleted**. Run `dort files preview-generated editor` again with `--json` and check `drift_status`. **Review deployment** is absent and `dort --dry-run files deploy-generated editor` refuses to recreate the file. Confirm the file is still absent and clean up the run.
 
+## Update a deployed file
+
+Deploy the fixture above before changing it locally. Change `size` to `24` and `permissions` to `"0600"` in `dort.toml`. In Files → Generated, open the preview and wait for **Update available**.
+
+```sh
+python3 "$drive" tui generated-preview --label update-cancel \
+  'wait:loaded.' "send:'f'" 'wait:Managed' "send:'4'" 'wait:Files / Generated' \
+  "send:'v'" 'wait:Update available' "send:'R'" 'wait:Review generated update' \
+  'snap:review' "send:'\x1b'" 'wait:Files / Generated'
+(
+  eval "$(python3 "$drive" env generated-preview)"
+  printf 'font-size = 18\n' | cmp - "$HOME/.editor.conf"
+  python3 -c 'import os, stat, sys; assert stat.S_IMODE(os.stat(sys.argv[1]).st_mode) == 0o640' "$HOME/.editor.conf"
+)
+python3 "$drive" tui generated-preview --label update \
+  'wait:loaded.' "send:'f'" 'wait:Managed' "send:'4'" 'wait:Files / Generated' \
+  "send:'v'" 'wait:Update available' 'click:Review update' 'wait:Review generated update' \
+  "send:'\x1b[F'" 'wait:y Update generated file' 'snap:approved' \
+  'click:y Update generated file' 'wait:Generated update recorded.' 'snap:updated'
+(
+  eval "$(python3 "$drive" env generated-preview)"
+  printf 'font-size = 24\n' | cmp - "$HOME/.editor.conf"
+  python3 -c 'import os, stat, sys; assert stat.S_IMODE(os.stat(sys.argv[1]).st_mode) == 0o600' "$HOME/.editor.conf"
+)
+```
+
+Check the retained file named in the result still contains `font-size = 18`. Edit the destination and reopen the preview. Confirm **Local edits** appears and **Review update** is absent. Clean up the run.
+
 ## Gotchas
 
 - Exit the draft with Esc before the harness sends `q`. A focused field treats `q` as text.
