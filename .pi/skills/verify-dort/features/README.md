@@ -15,7 +15,7 @@ A service change usually reaches the CLI and TUI. State which surface you proved
 | [Repository create and attach](repository.md) | `o` Overview, `F2` More → Create or attach | `dort init PATH` |
 | [Profiles, clone and environment](environment.md) | `F2` More | `dort profiles`, `dort clone`, `dort environment` |
 | [Files: discover, adopt, apply, keep, remove](files.md) | `f` Files | `dort files ...` |
-| [Generated configuration](generated.md) | Files → Managed → New generated file | `dort files preview-generated ID` |
+| [Generated configuration](generated.md) | Files → Generated → New generated file | `dort files preview-generated ID` |
 | [Tools: declared, installed, history](tools.md) | `t` Tools | `dort tools ...` |
 | [Checks: manifest and diagnostics](checks.md) | `c` Checks | `dort manifest check`, `dort doctor` |
 | [Git: read-only status and diff](git.md) | `g` Git | `dort git status`, `dort git diff` |
