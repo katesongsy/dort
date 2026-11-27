@@ -425,10 +425,12 @@ impl App {
                     &published,
                 ));
                 self.show_result = true;
-                self.status = if published.directory_synced {
-                    "Generated file deployed."
-                } else {
+                self.status = if !published.directory_synced {
                     "Generated file deployed. Destination sync failed."
+                } else if published.record_warning.is_some() {
+                    "Generated file deployed. Deployment record could not be confirmed."
+                } else {
+                    "Generated file deployed."
                 }
                 .into();
             }

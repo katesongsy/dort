@@ -1,5 +1,5 @@
 use super::{app::App, components as ui, input::Wheel};
-use dort_core::generated::{DestinationStatus, Preview};
+use dort_core::generated::{DriftStatus, Preview};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -12,26 +12,16 @@ use ui::{
 
 pub struct Report {
     pub id: String,
+    drift_status: Option<DriftStatus>,
     document: Text<'static>,
     pub scroll: ReviewScroll,
 }
 
 impl Report {
     pub fn new(preview: &Preview) -> Self {
-        let tone = match preview.destination_status {
-            DestinationStatus::Blocked => Tone::Error,
-            DestinationStatus::Existing => Tone::Attention,
-            DestinationStatus::Missing => Tone::Neutral,
-        };
         let mut lines = vec![
             section(&preview.id),
             Line::raw("Read-only preview. No files written."),
-            field(
-                "Inputs from dort.toml",
-                &crate::services::presentation::generated_inputs(preview),
-                Tone::Neutral,
-            ),
-            Line::default(),
             field(
                 "Source",
                 &crate::services::presentation::generated_source(preview),
@@ -42,24 +32,39 @@ impl Report {
                 &preview.destination.display().to_string(),
                 Tone::Neutral,
             ),
-            field(
-                "Destination status",
-                preview.destination_status.label(),
-                tone,
-            ),
         ];
-        if let Some(mode) = &preview.permissions {
-            lines.push(field("Declared permissions", mode, Tone::Neutral));
+        if let Some(status) = preview.drift_status {
+            let tone = match status {
+                DriftStatus::Unsafe | DriftStatus::Unverifiable => Tone::Error,
+                DriftStatus::UpToDate => Tone::Success,
+                DriftStatus::Missing => Tone::Neutral,
+                _ => Tone::Attention,
+            };
+            lines.push(field("Status", status.label(), tone));
+            lines.push(Line::raw(status.guidance()));
         }
-        lines.push(field(
-            "Final newline",
-            if preview.rendered.ends_with('\n') {
-                "Yes"
-            } else {
-                "No"
-            },
-            Tone::Neutral,
-        ));
+        lines.extend([
+            Line::default(),
+            field(
+                "Inputs from dort.toml",
+                &crate::services::presentation::generated_inputs(preview),
+                Tone::Neutral,
+            ),
+            field(
+                "Proposed permissions",
+                &preview.proposed_permissions(),
+                Tone::Neutral,
+            ),
+            field(
+                "Final newline",
+                if preview.rendered.ends_with('\n') {
+                    "Yes"
+                } else {
+                    "No"
+                },
+                Tone::Neutral,
+            ),
+        ]);
         lines.extend([Line::default(), section("Rendered output")]);
         if preview.rendered.is_empty() {
             lines.push(Line::styled("Empty output", ui::muted()));
@@ -73,9 +78,14 @@ impl Report {
         lines.push(Line::styled("End of rendered output", ui::muted()));
         Self {
             id: preview.id.clone(),
+            drift_status: preview.drift_status,
             document: Text::from(lines),
             scroll: ReviewScroll::default(),
         }
+    }
+
+    pub fn can_review_deployment(&self) -> bool {
+        self.drift_status == Some(DriftStatus::Missing)
     }
 
     pub fn draw(&self, frame: &mut Frame, area: Rect, app: &App) {

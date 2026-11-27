@@ -598,6 +598,7 @@ inputs = { name = "\u202efriendly", color = "blue" }
         sandbox.home.join("settings").to_str().unwrap()
     );
     assert_eq!(parsed["destination_status"], "missing");
+    assert_eq!(parsed["drift_status"], "missing");
     assert_eq!(parsed["inputs"]["color"], "blue");
     assert_eq!(
         parsed["rendered"],
@@ -617,7 +618,7 @@ inputs = { name = "\u202efriendly", color = "blue" }
         .clone();
     let result = String::from_utf8(result).unwrap();
     for expected in [
-        "Existing file. Do not overwrite.",
+        "Status: Unrecorded existing file",
         "No files written.",
         "Inputs from dort.toml: color, name",
         "name=\\u{202e}friendly",
@@ -769,6 +770,24 @@ permissions = "0644"
     let receipt: serde_json::Value = serde_json::from_slice(&receipt.get_output().stdout).unwrap();
     assert_eq!(receipt["destination"], destination.to_str().unwrap());
     assert_eq!(receipt["directory_synced"], true);
+    assert!(receipt["record_warning"].is_null());
+    let status = || {
+        let result = sandbox
+            .command()
+            .args([
+                "--repo",
+                "repository",
+                "--json",
+                "files",
+                "preview-generated",
+                "settings",
+            ])
+            .assert()
+            .success();
+        let json: serde_json::Value = serde_json::from_slice(&result.get_output().stdout).unwrap();
+        json["drift_status"].as_str().unwrap().to_owned()
+    };
+    assert_eq!(status(), "up_to_date");
     assert_eq!(fs::read(&destination).unwrap(), expected.as_bytes());
     assert_eq!(
         fs::metadata(&destination).unwrap().permissions().mode() & 0o777,
@@ -777,4 +796,16 @@ permissions = "0644"
     let blocked = command().arg("--yes").assert().code(2);
     assert!(String::from_utf8_lossy(&blocked.get_output().stderr).contains("already exists"));
     assert_eq!(fs::read(&destination).unwrap(), expected.as_bytes());
+    fs::write(root.join("file.tmpl"), "changed").unwrap();
+    assert_eq!(status(), "update_available");
+    fs::write(&destination, "changed").unwrap();
+    assert_eq!(status(), "locally_edited");
+    fs::remove_file(&destination).unwrap();
+    assert_eq!(status(), "locally_deleted");
+    let blocked = command().arg("--yes").assert().code(2);
+    assert!(
+        String::from_utf8_lossy(&blocked.get_output().stderr)
+            .contains("First deployment cannot recreate it")
+    );
+    assert!(!destination.exists());
 }

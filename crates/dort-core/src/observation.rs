@@ -265,15 +265,25 @@ pub(crate) fn read_checked_bounded(
     expected: &Fingerprint,
     limit: u64,
 ) -> Result<Vec<u8>> {
+    read_at_checked(&handle.directory, &handle.name, path, expected, limit)
+}
+
+pub(crate) fn read_at_checked(
+    directory: &File,
+    name: &std::ffi::OsStr,
+    path: &Path,
+    expected: &Fingerprint,
+    limit: u64,
+) -> Result<Vec<u8>> {
     if expected.size < 0 || expected.size as u64 > limit {
         return Err(Error::Invalid(
-            "file exceeds the 16 MiB observation limit".into(),
+            "file exceeds the observation size limit".into(),
         ));
     }
     let mut file = File::from(
         fs::openat(
-            &handle.directory,
-            &handle.name,
+            directory,
+            name,
             OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
             Mode::empty(),
         )
@@ -289,7 +299,7 @@ pub(crate) fn read_checked_bounded(
         .read_to_end(&mut bytes)
         .map_err(|e| io_error("read regular file", path, e))?;
     let after = fs::fstat(&file).map_err(|e| io_error("recheck open file", path, e))?;
-    let named = fs::statat(&handle.directory, &handle.name, AtFlags::SYMLINK_NOFOLLOW)
+    let named = fs::statat(directory, name, AtFlags::SYMLINK_NOFOLLOW)
         .map_err(|e| io_error("recheck named file", path, e))?;
     if bytes.len() as u64 > limit
         || Fingerprint::from_stat(&after) != *expected

@@ -1621,7 +1621,8 @@ impl App {
             return None;
         }
         if let Some(Overlay::Generated(report)) = &self.shell.overlay {
-            if key.code == KeyCode::Char('r')
+            if report.can_review_deployment()
+                && matches!(key.code, KeyCode::Char('r' | 'R'))
                 && !key
                     .modifiers
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)

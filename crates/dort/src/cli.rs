@@ -225,7 +225,7 @@ enum FilesCommand {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
-    /// Render a template declared in dort.toml without writing files.
+    /// Show rendered output and deployment status without writing files.
     PreviewGenerated { id: String },
     /// Review and create one generated file at a missing Home destination.
     DeployGenerated {

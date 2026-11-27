@@ -43,15 +43,19 @@ pub fn generated(preview: &dort_core::generated::Preview) -> String {
 pub fn generated_details(preview: &dort_core::generated::Preview) -> String {
     use std::fmt::Write;
     let mut text = format!(
-        "Source: {}\nDestination: {}\nDestination status: {}\nInputs from dort.toml: {}\n",
+        "Source: {}\nDestination: {}\n",
         inline(&generated_source(preview)),
         inline(&preview.destination.display().to_string()),
-        preview.destination_status.label(),
-        generated_inputs(preview),
     );
-    if let Some(mode) = &preview.permissions {
-        let _ = writeln!(text, "Declared permissions: {mode}");
+    if let Some(status) = preview.drift_status {
+        let _ = writeln!(text, "Status: {}\n{}", status.label(), status.guidance());
     }
+    let _ = writeln!(
+        text,
+        "Inputs from dort.toml: {}\nProposed permissions: {}",
+        generated_inputs(preview),
+        preview.proposed_permissions(),
+    );
     let _ = writeln!(
         text,
         "Final newline: {}",
@@ -110,18 +114,19 @@ pub fn generated_deployment(review: dort_core::generated::DeploymentReview<'_>) 
     report
 }
 pub fn generated_published(result: &dort_core::generated::Published) -> String {
-    let written = format!(
+    use std::fmt::Write;
+    let mut written = format!(
         "Deployed generated file: {}\nPermissions: {}",
         inline(&result.destination.display().to_string()),
         result.permissions,
     );
-    if result.directory_synced {
-        written
-    } else {
-        format!(
-            "{written}\nWarning: Dort could not sync the destination folder. The file was created, but may not survive a restart."
-        )
+    if !result.directory_synced {
+        written.push_str("\nWarning: Dort could not sync the destination folder. The file was created, but may not survive a restart.");
     }
+    if let Some(warning) = result.record_warning {
+        let _ = write!(written, "\nWarning: {warning}");
+    }
+    written
 }
 fn paths(paths: &[std::path::PathBuf]) -> String {
     paths
