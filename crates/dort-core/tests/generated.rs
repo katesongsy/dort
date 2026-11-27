@@ -536,10 +536,338 @@ fn editing_legacy_recipe_writes_only_template_and_preserves_comments() {
         assert!(saved.contains("# Template note\ntemplate ="), "{saved}");
         assert!(saved.contains(" # Keep inline"), "{saved}");
         assert!(!saved.contains("\nrecipe ="), "{saved}");
+        assert!(!saved.contains("\nsyntax ="), "{saved}");
         assert_eq!(Manifest::parse(&saved).unwrap().files, [mapping]);
         assert_eq!(
             f.preview().unwrap().rendered,
             content.replace("{{ theme }}", "light")
         );
     }
+}
+
+#[test]
+fn jinja_uses_explicit_namespaces_and_reports_values_and_provenance() {
+    use dort_core::{
+        generated::{HostInput, InputProvenance, ResolvedInput, input_names_for},
+        template::Dialect,
+    };
+    let f = Fixture::new();
+    f.manifest(
+        r#"
+syntax = "jinja"
+host_inputs = ["os", "arch"]
+inputs = { title = "míxed <&>", host = "manifest host", spare = "unused" }
+"#,
+    );
+    let text = concat!(
+        "{% if host.os == 'linux' and host.user is not defined %}",
+        "{% for item in [inputs.title, host.arch, inputs.host] %}",
+        "{{ loop.index }}={{ item }};{% endfor %}",
+        "{% endif %}\n",
+    );
+    f.template(text);
+    let p = f.preview().unwrap();
+    assert_eq!(p.syntax, Dialect::Jinja);
+    assert_eq!(p.rendered, "1=míxed <&>;2=x86_64;3=manifest host;\n");
+    assert_eq!(p.resolved_inputs.len(), 5);
+    assert_eq!(
+        p.resolved_inputs["host.os"],
+        ResolvedInput {
+            value: "linux".into(),
+            provenance: InputProvenance::Host(HostInput::Os),
+        }
+    );
+    assert_eq!(
+        p.resolved_inputs["inputs.spare"],
+        ResolvedInput {
+            value: "unused".into(),
+            provenance: InputProvenance::Manifest,
+        }
+    );
+    assert_eq!(
+        input_names_for("settings", Dialect::Jinja, text).unwrap(),
+        [
+            "host.arch",
+            "host.os",
+            "host.user",
+            "inputs.host",
+            "inputs.title"
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect(),
+    );
+    assert_eq!(
+        serde_json::to_value(&p).unwrap()["resolved_inputs"]["host.os"],
+        serde_json::json!({
+            "value": "linux", "provenance": { "host": "os" }
+        })
+    );
+}
+
+#[test]
+fn literal_and_jinja_never_fall_back_or_read_undeclared_values() {
+    let f = Fixture::new();
+    let source = "{% if false %}{{ theme }}{% endif %}\r\n{# literal comment #}";
+    f.manifest("inputs = { theme = 'dark' }\n");
+    f.template(source);
+    let legacy = f.preview().unwrap();
+    assert_eq!(legacy.rendered, source.replace("{{ theme }}", "dark"));
+    assert_eq!(legacy.resolved_inputs["theme"].value, "dark");
+    f.template("{{ host.os }}");
+    f.error("Use {{ name }}");
+
+    f.manifest("syntax = 'jinja'\ninputs = { theme = 'dark' }\n");
+    for text in [
+        "{{ theme }}",
+        "{{ host.os }}",
+        "{{ local.theme }}",
+        "{{ inputs.absent }}",
+    ] {
+        f.template(text);
+        f.error("Supply the missing input");
+    }
+    f.template(
+        "{% if host.os is defined or local.theme is defined %}wrong{% endif %}{{ inputs.theme }}",
+    );
+    let p = f.preview().unwrap();
+    assert_eq!(p.rendered, "dark");
+    assert_eq!(p.resolved_inputs.len(), 1);
+
+    f.template("{% if false %}{% include 'do-not-echo' %}{% endif %}");
+    assert!(
+        !f.error("Use substitutions, conditions")
+            .contains("do-not-echo")
+    );
+    f.template("{{ inputs['theme'] }}");
+    f.error("Use substitutions, conditions");
+}
+
+#[test]
+fn host_identity_uses_the_os_and_paths_use_resolved_dort_directories() {
+    use dort_core::context::HostContext;
+    use std::process::Command;
+    const CHILD: &str = "DORT_HOST_IDENTITY_TEST_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let result = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "host_identity_uses_the_os_and_paths_use_resolved_dort_directories",
+            ])
+            .env(CHILD, "1")
+            .env("USER", "forged-user")
+            .env("LOGNAME", "forged-logname")
+            .env("HOSTNAME", "forged-hostname")
+            .env("ComputerName", "forged-computer-name")
+            .env("HOME", "/never-use-this-home")
+            .env("XDG_CONFIG_HOME", "/never-use-this-config")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stdout)
+        );
+        return;
+    }
+    let f = Fixture::new();
+    f.manifest("syntax = 'jinja'\nhost_inputs = ['user','hostname','home','config_home']\n");
+    f.template("{{ host.user }}\n{{ host.hostname }}\n{{ host.home }}\n{{ host.config_home }}\n");
+    let command = |name, args: &[&str]| {
+        let output = Command::new(name).args(args).output().unwrap();
+        assert!(output.status.success());
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let account = command("id", &["-un"]);
+    let hostname = command("hostname", &[]);
+    for config_home in [None, Some(f.home.host.home.join("xdg-config"))] {
+        let host = HostContext::new(
+            f.home.host.home.clone(),
+            config_home.clone(),
+            None,
+            f.home.host.platform,
+            f.home.host.architecture,
+        )
+        .unwrap();
+        let p = Preview::prepare(&host, &f.repo, "settings").unwrap();
+        let expected_config_home = config_home.unwrap_or_else(|| host.home.join(".config"));
+        assert_eq!(
+            p.rendered,
+            format!(
+                "{account}{hostname}{}\n{}\n",
+                host.home.display(),
+                expected_config_home.display()
+            )
+        );
+    }
+}
+
+#[test]
+fn unavailable_host_input_names_the_field_and_next_action() {
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+    let mut f = Fixture::new();
+    f.home.host.config_dir = f
+        .home
+        .host
+        .home
+        .join(OsStr::from_bytes(b"private-marker\xff"))
+        .join("dort");
+    f.manifest("syntax = 'jinja'\nhost_inputs = ['config_home']\n");
+    f.template("{{ host.config_home }}");
+    assert!(
+        !f.error("Cannot read host.config_home as text. Use a UTF-8 directory path.")
+            .contains("private-marker")
+    );
+    f.manifest("syntax = 'jinja'\n");
+    f.template("literal without host inputs");
+    assert!(f.preview().is_ok());
+}
+
+#[test]
+fn template_options_are_strictly_scoped() {
+    let f = Fixture::new();
+    for (mode, options, expected) in [
+        ("link", "syntax = 'jinja'", "syntax requires template mode"),
+        (
+            "secret",
+            "host_inputs = []",
+            "host_inputs requires template mode",
+        ),
+        (
+            "template",
+            "host_inputs = ['os']",
+            "host_inputs requires syntax",
+        ),
+        (
+            "template",
+            "syntax = 'literal'\nhost_inputs = []",
+            "host_inputs requires syntax",
+        ),
+        (
+            "template",
+            "syntax = 'jinja'\nhost_inputs = ['os','os']",
+            "list each host input once",
+        ),
+    ] {
+        let text = format!(
+            "{}\n{options}\n",
+            DECLARATION.replace("\"template\"", &format!("\"{mode}\""))
+        );
+        let error = Manifest::parse(&text).unwrap_err().to_string();
+        assert!(error.contains(expected), "{error}");
+    }
+    for options in [
+        "syntax = 'other'",
+        "syntax = 'jinja'\nhost_inputs = ['env']",
+        "syntax = 'jinja'\ninputs = { value = ['a'] }",
+    ] {
+        f.manifest(options);
+        f.error("Check syntax and host_inputs");
+    }
+}
+
+#[test]
+fn jinja_uses_the_same_source_value_and_output_limits() {
+    let f = Fixture::new();
+    f.manifest("syntax = 'jinja'\n");
+    f.template("x".repeat(64 * 1024 + 1));
+    f.error("exceeds 64 KiB");
+    let value = "x".repeat(16 * 1024);
+    f.manifest(&format!(
+        "syntax = 'jinja'\ninputs = {{ v = '{value}x' }}\n"
+    ));
+    f.error("exceeds 16 KiB");
+    f.manifest(&format!("syntax = 'jinja'\ninputs = {{ v = '{value}' }}\n"));
+    f.template("{{ inputs.v }}".repeat(8));
+    assert_eq!(f.preview().unwrap().rendered.len(), 128 * 1024);
+    f.template("{{ inputs.v }}".repeat(9));
+    f.error("Keep the rendered text within 128 KiB");
+}
+
+#[test]
+fn pending_jinja_edit_previews_inputs_and_persists_explicit_options() {
+    use dort_core::{
+        generated::{HostInput, InputProvenance},
+        local::RepositoryRegistry,
+        manifest_edit::{Change, FileChange, Preview as EditPreview},
+        state::WriterLock,
+        template::Dialect,
+    };
+    let f = Fixture::new();
+    RepositoryRegistry::register(
+        &f.home.host,
+        &WriterLock::acquire(&f.home.host).unwrap(),
+        &f.repo,
+    )
+    .unwrap();
+    let original = inline("theme={{ theme }}", "inputs = { theme = 'dark' }");
+    let path = f.repo.join("dort.toml");
+    fs::write(&path, &original).unwrap();
+    let before = Manifest::parse(&original).unwrap().files.remove(0);
+    let mut mapping = before.clone();
+    mapping.template = Some("{{ host.os }} theme={{ inputs.theme }}".into());
+    mapping.syntax = Some(Dialect::Jinja);
+    mapping.host_inputs = Some([HostInput::Os].into_iter().collect());
+    mapping.inputs.insert("theme".into(), "light".into());
+    let edit = EditPreview::prepare(
+        &f.home.host,
+        &f.repo,
+        &Change::File(Box::new(FileChange {
+            before: Some(before),
+            mapping: mapping.clone(),
+        })),
+    )
+    .unwrap();
+    let p = edit.generated().unwrap();
+    assert_eq!(p.rendered, "linux theme=light");
+    assert_eq!(
+        p.resolved_inputs["host.os"].provenance,
+        InputProvenance::Host(HostInput::Os)
+    );
+    assert_eq!(p.resolved_inputs["inputs.theme"].value, "light");
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    edit.approve().execute(&f.home.host).unwrap();
+    assert_eq!(
+        Manifest::parse(&fs::read_to_string(&path).unwrap())
+            .unwrap()
+            .files,
+        [mapping]
+    );
+    assert_eq!(f.preview().unwrap().rendered, "linux theme=light");
+
+    let before = Manifest::parse(&fs::read_to_string(&path).unwrap())
+        .unwrap()
+        .files
+        .remove(0);
+    let mut mapping = before.clone();
+    mapping.template = Some("literal theme={{ theme }}".into());
+    mapping.syntax = None;
+    mapping.host_inputs = None;
+    let edit = EditPreview::prepare(
+        &f.home.host,
+        &f.repo,
+        &Change::File(Box::new(FileChange {
+            before: Some(before),
+            mapping,
+        })),
+    )
+    .unwrap();
+    assert_eq!(edit.generated().unwrap().rendered, "literal theme=light");
+    edit.approve().execute(&f.home.host).unwrap();
+    let stored = fs::read_to_string(path).unwrap();
+    assert!(!stored.contains("syntax"));
+    assert!(!stored.contains("host_inputs"));
+}
+
+#[test]
+fn literal_templates_keep_large_unreferenced_manifest_inputs_compatible() {
+    let f = Fixture::new();
+    let value = "x".repeat(16 * 1024);
+    let mut extra = String::from("[files.inputs]\nwinner = 'visible'\n");
+    for i in 0..17 {
+        extra.push_str(&format!("unused_{i} = '{value}'\n"));
+    }
+    f.manifest(&extra);
+    f.template("{{ winner }}");
+    assert_eq!(f.preview().unwrap().rendered, "visible");
 }

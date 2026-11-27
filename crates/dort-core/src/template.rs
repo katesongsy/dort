@@ -2,6 +2,7 @@ use crate::observation::sensitive_content;
 use minijinja::{
     Environment, ErrorKind, State, UndefinedBehavior, Value, syntax::SyntaxConfig, value::ValueKind,
 };
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt, io,
@@ -17,14 +18,15 @@ pub const LIST_LIMIT: usize = 32;
 const CONTEXT_ITEMS: usize = 16 * 1024;
 const PROGRAM: &str = "template";
 const LITERAL_PROGRAM: &str = "{% for part in parts %}{{ part }}{% endfor %}";
-const NAMESPACES: [&str; 2] = ["host", "local"];
+const NAMESPACES: [&str; 3] = ["host", "inputs", "local"];
 type TextTransform = fn(&str) -> String;
 const ASCII_FILTERS: [(&str, TextTransform); 2] = [
     ("upper_ascii", str::to_ascii_uppercase),
     ("lower_ascii", str::to_ascii_lowercase),
 ];
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Dialect {
     #[default]
     Literal,
@@ -155,17 +157,21 @@ impl<'a> Template<'a> {
         &self.names
     }
 
+    pub(crate) fn literal_input_names(&self) -> impl Iterator<Item = &'a str> + '_ {
+        self.literal.iter().flatten().filter_map(|part| match part {
+            Part::Text(_) => None,
+            Part::Input { name, .. } => Some(*name),
+        })
+    }
     /// Return complete text or a diagnostic. No partial output leaves this method.
     pub fn render(&self, context: &Context) -> Result<String, TemplateError> {
         let error = |issue, line| diagnostic(self.id, issue, line);
-        let layer = if self.literal.is_some() {
-            Layer::Literal
+        let dialect = if self.literal.is_some() {
+            Dialect::Literal
         } else {
-            Layer::Root
+            Dialect::Jinja
         };
-        ContextBudget::default()
-            .check_map(context, layer)
-            .map_err(|issue| error(issue, None))?;
+        validate_context(self.id, dialect, context)?;
         let context = match &self.literal {
             Some(parts) => {
                 literal_context(parts, context).map_err(|(issue, line)| error(issue, line))?
@@ -193,6 +199,20 @@ impl<'a> Template<'a> {
         }
         Ok(String::from_utf8(output.0).expect("renderer writes UTF-8"))
     }
+}
+
+pub(crate) fn validate_context(
+    id: &str,
+    dialect: Dialect,
+    context: &Context,
+) -> Result<(), TemplateError> {
+    let layer = match dialect {
+        Dialect::Literal => Layer::Literal,
+        Dialect::Jinja => Layer::Root,
+    };
+    ContextBudget::default()
+        .check_map(context, layer)
+        .map_err(|issue| diagnostic(id, issue, None))
 }
 
 fn diagnostic(id: &str, issue: Issue, line: Option<usize>) -> TemplateError {
@@ -335,22 +355,27 @@ enum Layer {
 
 impl ContextBudget {
     fn check_map(&mut self, context: &Context, layer: Layer) -> Result<(), Issue> {
-        self.add_items(context.len())?;
+        let aggregate = layer != Layer::Literal;
+        if aggregate {
+            self.add_items(context.len())?;
+        }
         for (name, value) in context {
-            self.add_bytes(name.len())?;
+            if aggregate {
+                self.add_bytes(name.len())?;
+            }
             if !is_input_name(name) {
                 return Err(Issue::InvalidContext);
             }
             let namespace = layer == Layer::Root && NAMESPACES.contains(&name.as_str());
             match value {
-                Input::Text(text) if !namespace => self.text(text)?,
+                Input::Text(text) if !namespace => self.text(text, aggregate)?,
                 Input::List(list) if !namespace && layer != Layer::Literal => {
                     if list.len() > LIST_LIMIT {
                         return Err(Issue::ContextLimit);
                     }
                     self.add_items(list.len())?;
                     for item in list {
-                        self.text(item)?;
+                        self.text(item, true)?;
                     }
                 }
                 Input::Map(map) if namespace => self.check_map(map, Layer::Namespace)?,
@@ -360,11 +385,13 @@ impl ContextBudget {
         Ok(())
     }
 
-    fn text(&mut self, value: &str) -> Result<(), Issue> {
+    fn text(&mut self, value: &str, aggregate: bool) -> Result<(), Issue> {
         if value.len() > VALUE_LIMIT {
             return Err(Issue::ContextLimit);
         }
-        self.add_bytes(value.len())?;
+        if aggregate {
+            self.add_bytes(value.len())?;
+        }
         if sensitive_content(value.as_bytes()) {
             return Err(Issue::SensitiveInput);
         }

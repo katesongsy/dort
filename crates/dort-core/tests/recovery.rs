@@ -90,6 +90,8 @@ fn schema_one_preview_revalidates_source_edits_without_mutations() {
         requires: vec![],
         overrides: Default::default(),
         inputs: Default::default(),
+        syntax: None,
+        host_inputs: None,
         permissions: None,
     };
     let plan =

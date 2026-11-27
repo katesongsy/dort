@@ -370,6 +370,7 @@ dependencies = [
 name = "dort-core"
 version = "0.3.0"
 dependencies = [
+ "libc",
  "minijinja",
  "rustix",
  "semver",

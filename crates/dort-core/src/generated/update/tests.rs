@@ -595,3 +595,71 @@ fn recover_after_crash(action: UpdateAction, point: &str) {
     journal::ensure_writable(&f.host).unwrap();
     assert!(WriterLock::acquire(&f.host).is_ok());
 }
+
+#[test]
+fn update_rejects_changed_host_input_with_the_same_output() {
+    let root = tempfile::tempdir().unwrap();
+    let f = Fixture::new(&root.path().canonicalize().unwrap());
+    let manifest = f.repo.join("dort.toml");
+    fs::write(
+        &manifest,
+        format!(
+            "{}syntax = 'jinja'\nhost_inputs = ['arch']\n",
+            fs::read_to_string(&manifest).unwrap()
+        ),
+    )
+    .unwrap();
+    let mut update = Update::prepare(&f.host, None, "settings", &[]).unwrap();
+    assert_eq!(update.review().proposed, NEXT);
+    assert_eq!(update.review().resolved_inputs["host.arch"].value, "x86_64");
+    update.host.architecture = Architecture::Aarch64;
+    let error = update.approve().execute().unwrap_err();
+    assert!(error.to_string().contains("review"));
+    assert_eq!(fs::read_to_string(&f.dest).unwrap(), OLD);
+    assert!(pending_update(&f.host).unwrap().is_none());
+    f.assert_prior_receipt();
+}
+
+#[test]
+fn recovery_keeps_the_approved_render_after_context_and_source_change() {
+    let root = tempfile::tempdir().unwrap();
+    let mut f = Fixture::new(&root.path().canonicalize().unwrap());
+    let manifest = f.repo.join("dort.toml");
+    fs::write(
+        &manifest,
+        format!(
+            "{}syntax = 'jinja'\nhost_inputs = ['arch']\n",
+            fs::read_to_string(&manifest).unwrap()
+        ),
+    )
+    .unwrap();
+    fs::write(f.repo.join("source"), "{{ host.arch }}").unwrap();
+    let approved = Update::prepare(&f.host, None, "settings", &[]).unwrap();
+    assert_eq!(approved.review().proposed, "x86_64");
+    let outcome = approved
+        .approve()
+        .execute_at(|at| {
+            if at == Boundary::Exchanged {
+                Err(Errno::NOSPC)
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap();
+    assert!(matches!(
+        outcome,
+        UpdateOutcome::NeedsRecovery {
+            exchange: ExchangeStatus::Completed,
+            ..
+        }
+    ));
+    f.host.architecture = Architecture::Aarch64;
+    fs::write(f.repo.join("source"), "changed {{ host.arch }}").unwrap();
+    assert!(matches!(
+        recover_update(&f.host).unwrap(),
+        Some(UpdateOutcome::Updated { .. })
+    ));
+    assert_eq!(fs::read_to_string(&f.dest).unwrap(), "x86_64");
+    assert!(f.slot().load().unwrap().unwrap().deployed == Stamp::new(b"x86_64", Mode(0o600)));
+    assert_eq!(f.status(), DriftStatus::UpdateAvailable);
+}

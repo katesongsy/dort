@@ -1,7 +1,9 @@
 //! Previews and deployment of repository-declared generated files.
 mod deploy;
+mod inputs;
 mod record;
 mod update;
+pub use crate::model::{HostInput, HostInputs};
 use crate::{
     Error, Manifest, Result,
     context::HostContext,
@@ -9,11 +11,14 @@ use crate::{
     manifest::paths_overlap,
     model::{FileContent, FileMode, ManagedFile},
     observation::{self, Entry, Kind},
+    template::{self, Context, Dialect, Issue, Template, TemplateError},
 };
 pub use deploy::{Approval, Deployment, DeploymentReview, Published};
+pub use inputs::{InputProvenance, ResolvedInput, ResolvedInputs};
 use rustix::{fs, io::Errno};
 use serde::Serialize;
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
 };
@@ -23,9 +28,8 @@ pub use update::{
     UpdateReview, pending_update, recover_reviewed_update, recover_update,
 };
 
-pub const TEMPLATE_LIMIT: usize = 64 * 1024;
-pub const VALUE_LIMIT: usize = 16 * 1024;
-const OUTPUT_LIMIT: usize = 128 * 1024;
+use template::OUTPUT_LIMIT;
+pub use template::{SOURCE_LIMIT as TEMPLATE_LIMIT, VALUE_LIMIT};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Mode(u32);
@@ -56,6 +60,9 @@ pub struct Preview {
     pub source: Option<PathBuf>,
     pub destination: PathBuf,
     pub inputs: BTreeMap<String, String>,
+    pub syntax: Dialect,
+    /// All resolved declarations, including unused values. Jinja names are qualified.
+    pub resolved_inputs: ResolvedInputs,
     pub rendered: String,
     pub destination_status: DestinationStatus,
     pub permissions: Option<String>,
@@ -140,6 +147,12 @@ impl DriftStatus {
 }
 
 impl Preview {
+    fn same_render(&self, other: &Self) -> bool {
+        self.syntax == other.syntax
+            && self.resolved_inputs == other.resolved_inputs
+            && self.rendered == other.rendered
+    }
+
     pub fn proposed_permissions(&self) -> String {
         Mode::declared(self.permissions.as_deref()).label()
     }
@@ -149,7 +162,7 @@ impl Preview {
         let (manifest, _) = observation::read_manifest(&repository.join("dort.toml")).map_err(
             |error| match error {
                 Error::Parse(_) => Error::Invalid(
-                    "Invalid dort.toml. Use literal strings for generated inputs.".into(),
+                    "Invalid dort.toml. Use literal strings for generated inputs. Check syntax and host_inputs.".into(),
                 ),
                 other => other,
             },
@@ -183,19 +196,23 @@ impl Preview {
                 "Preview requires a file with mode = \"template\".".into(),
             ));
         }
-        let (source, rendered) = match file.content_for(host.platform) {
+        let (source, text) = match file.content_for(host.platform) {
             Some(FileContent::Source(path)) => {
                 let (text, entry) =
                     read_template(&repository.join(path), repository, &manifest.files)?;
-                (Some(entry), render(&text, &file.inputs)?)
+                (Some(entry), Cow::Owned(text))
             }
-            Some(FileContent::Template(text)) => (None, render(text, &file.inputs)?),
+            Some(FileContent::Template(text)) => (None, Cow::Borrowed(text)),
             None => {
                 return Err(Error::Invalid(
                     "Template needs a source or an inline template.".into(),
                 ));
             }
         };
+        let syntax = file.syntax.unwrap_or_default();
+        let template = compile(&file.id, syntax, &text)?;
+        let (context, resolved_inputs) = inputs::resolve(file, host)?;
+        let rendered = render(&template, syntax, &context)?;
         Ok((
             Self {
                 id: file.id.clone(),
@@ -203,6 +220,8 @@ impl Preview {
                 destination_status: destination_status(&destination),
                 destination,
                 inputs: file.inputs.clone(),
+                syntax,
+                resolved_inputs,
                 rendered,
                 permissions: file.permissions.clone(),
                 drift_status: None,
@@ -363,32 +382,63 @@ fn read_template(
 
 pub(crate) fn input_issues(file: &ManagedFile) -> impl Iterator<Item = String> {
     let mut issues = Vec::new();
-    if file.mode == FileMode::Template {
-        for (name, value) in &file.inputs {
-            if !input_name(name) {
-                issues.push(format!("{}: invalid input name; use letters, digits and underscores, starting with a letter or underscore", file.id));
-            } else if value.len() > VALUE_LIMIT {
-                issues.push(format!("{}: input {name} exceeds 16 KiB", file.id));
+    if file.mode != FileMode::Template {
+        for (present, message) in [
+            (!file.inputs.is_empty(), "inputs require template mode"),
+            (file.syntax.is_some(), "syntax requires template mode"),
+            (
+                file.host_inputs.is_some(),
+                "host_inputs requires template mode",
+            ),
+        ] {
+            if present {
+                issues.push(format!("{}: {message}", file.id));
             }
         }
-        if issues.is_empty()
-            && let Some(text) = &file.template
-            && let Err(error) = render(text, &file.inputs)
-        {
-            issues.push(format!("{}: {error}", file.id));
+        return issues.into_iter();
+    }
+    let syntax = file.syntax.unwrap_or_default();
+    if file.host_inputs.is_some() && syntax != Dialect::Jinja {
+        issues.push(format!(
+            "{}: host_inputs requires syntax = \"jinja\"",
+            file.id
+        ));
+    }
+    for (name, value) in &file.inputs {
+        if !template::is_input_name(name) {
+            issues.push(format!("{}: invalid input name; use letters, digits and underscores, starting with a letter or underscore", file.id));
+        } else if value.len() > VALUE_LIMIT {
+            issues.push(format!("{}: input {name} exceeds 16 KiB", file.id));
         }
-    } else if !file.inputs.is_empty() {
-        issues.push(format!("{}: inputs require template mode", file.id));
+    }
+    if issues.is_empty()
+        && let Err(error) = validate_declaration(file, syntax)
+    {
+        issues.push(match syntax {
+            Dialect::Literal => format!("{}: {error}", file.id),
+            Dialect::Jinja => error.to_string(),
+        });
     }
     issues.into_iter()
 }
 
-fn input_name(name: &str) -> bool {
-    let mut bytes = name.bytes();
-    bytes
-        .next()
-        .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
-        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
+fn validate_declaration(file: &ManagedFile, syntax: Dialect) -> Result<()> {
+    match (syntax, &file.template) {
+        (Dialect::Literal, Some(text)) => render(
+            &compile(&file.id, syntax, text)?,
+            syntax,
+            &inputs::manifest_context(file),
+        )
+        .map(|_| ()),
+        (Dialect::Literal, None) => Ok(()),
+        (Dialect::Jinja, text) => {
+            if let Some(text) = text {
+                compile(&file.id, syntax, text)?;
+            }
+            template::validate_context(&file.id, syntax, &inputs::manifest_context(file))
+                .map_err(|error| renderer_error(syntax, error, None))
+        }
+    }
 }
 
 fn inspect_template(path: &Path) -> Result<Entry> {
@@ -490,78 +540,61 @@ fn destination_status(path: &Path) -> DestinationStatus {
     }
 }
 
-enum Part<'a> {
-    Literal(&'a str),
-    Input(&'a str),
-}
-
-fn parse_template(mut text: &str) -> Result<Vec<Part<'_>>> {
-    if text.len() > TEMPLATE_LIMIT {
-        return Err(Error::Invalid("Template exceeds 64 KiB.".into()));
-    }
-    if observation::sensitive_content(text.as_bytes()) {
-        return Err(Error::Invalid(
-            "Template may contain secrets. Use text without credentials or private keys.".into(),
-        ));
-    }
-    let invalid = || {
-        Error::Invalid(
-            "Invalid template expression. Use {{ name }} with a single input name.".into(),
-        )
-    };
-    let mut parts = Vec::new();
-    while let Some((literal, rest)) = text.split_once("{{") {
-        let (expression, remaining) = rest.split_once("}}").ok_or_else(invalid)?;
-        let name = expression.trim_matches([' ', '\t']);
-        if !input_name(name) {
-            return Err(invalid());
-        }
-        parts.extend([Part::Literal(literal), Part::Input(name)]);
-        text = remaining;
-    }
-    parts.push(Part::Literal(text));
-    Ok(parts)
-}
-
 pub fn input_names(text: &str) -> Result<BTreeSet<&str>> {
-    Ok(parse_template(text)?
-        .into_iter()
-        .filter_map(|part| match part {
-            Part::Input(name) => Some(name),
-            Part::Literal(_) => None,
-        })
+    Ok(compile("", Dialect::Literal, text)?
+        .literal_input_names()
         .collect())
 }
 
-fn render(text: &str, inputs: &BTreeMap<String, String>) -> Result<String> {
-    let parts = parse_template(text)?;
-    if inputs
-        .values()
-        .any(|value| observation::sensitive_content(value.as_bytes()))
-    {
-        return Err(Error::Invalid(
-            "An input may contain secrets. Use only non-secret values.".into(),
-        ));
-    }
-    let mut rendered = String::new();
-    for part in parts {
-        let text = match part {
-            Part::Literal(text) => text,
-            Part::Input(name) => inputs.get(name).ok_or_else(|| {
-                Error::Invalid(format!(
-                    "Missing input {name}. Add a literal string for it in inputs in dort.toml."
-                ))
-            })?,
-        };
-        if rendered.len() + text.len() > OUTPUT_LIMIT {
-            return Err(Error::Invalid("Rendered text exceeds 128 KiB.".into()));
+/// Discover possible input references without resolving any values or reading the host.
+/// Jinja names are qualified, such as `inputs.theme` and `host.os`.
+pub fn input_names_for(id: &str, syntax: Dialect, text: &str) -> Result<BTreeSet<String>> {
+    Ok(compile(id, syntax, text)?.input_names().clone())
+}
+
+fn compile<'a>(id: &'a str, syntax: Dialect, text: &'a str) -> Result<Template<'a>> {
+    Template::compile(id, syntax, text).map_err(|error| renderer_error(syntax, error, None))
+}
+
+fn render(template: &Template<'_>, syntax: Dialect, context: &Context) -> Result<String> {
+    template.render(context).map_err(|error| {
+        let missing = (syntax == Dialect::Literal && error.issue == Issue::MissingInput)
+            .then(|| {
+                template
+                    .literal_input_names()
+                    .find(|name| !context.contains_key(*name))
+            })
+            .flatten();
+        renderer_error(syntax, error, missing)
+    })
+}
+
+fn renderer_error(syntax: Dialect, error: TemplateError, missing: Option<&str>) -> Error {
+    if syntax == Dialect::Jinja {
+        let mut message = error.to_string();
+        if error.issue == Issue::MissingInput {
+            message.push_str(" Declare manifest inputs in inputs and host inputs in host_inputs.");
         }
-        rendered.push_str(text);
+        return Error::Invalid(message);
     }
-    if observation::sensitive_content(rendered.as_bytes()) {
-        return Err(Error::Invalid(
-            "Rendered text may contain secrets. Use only non-secret content.".into(),
-        ));
-    }
-    Ok(rendered)
+    let message = match error.issue {
+        Issue::SourceLimit => "Template exceeds 64 KiB.",
+        Issue::SensitiveSource => {
+            "Template may contain secrets. Use text without credentials or private keys."
+        }
+        Issue::LiteralSyntax => {
+            "Invalid template expression. Use {{ name }} with a single input name."
+        }
+        Issue::SensitiveInput => "An input may contain secrets. Use only non-secret values.",
+        Issue::MissingInput => {
+            return Error::Invalid(format!(
+                "Missing input {}. Add a literal string for it in inputs in dort.toml.",
+                missing.expect("literal render identifies a missing input"),
+            ));
+        }
+        Issue::OutputLimit => "Rendered text exceeds 128 KiB.",
+        Issue::SensitiveOutput => "Rendered text may contain secrets. Use only non-secret content.",
+        _ => return Error::Invalid(error.issue.to_string()),
+    };
+    Error::Invalid(message.into())
 }
