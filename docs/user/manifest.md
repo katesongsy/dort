@@ -74,7 +74,7 @@ Limits: 64 KiB per UTF-8 template, 16 KiB per input value, and 128 KiB of render
 
 #### Jinja templates
 
-Set `syntax = "jinja"` for conditions and simple loops. Use `inputs.name` for a value from the manifest. List each host field you want to allow in `host_inputs`.
+Set `syntax = "jinja"` for conditions and simple loops. Use `inputs.name` for a value from the manifest. List each host field you want to allow in `host_inputs`. For a value set on each machine, use `local.name` and list `name` in `local_inputs`. Store only names in the manifest. Set non-secret values in [Files / Generated](commands.md#generated-files).
 
 ```toml
 [[files]]

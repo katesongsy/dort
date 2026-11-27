@@ -670,7 +670,7 @@ fn missing_jinja_inputs(
     }
     if !undeclared.is_empty() {
         message.push_str(&format!(
-            " Add these names to local_inputs in dort.toml, then set their machine-local values: {}.",
+            " Declare these names in the generated file editor or local_inputs in dort.toml: {}.",
             undeclared.join(", ")
         ));
     }
@@ -678,7 +678,8 @@ fn missing_jinja_inputs(
         return Err(Error::Invalid(message));
     }
     message.push_str(&format!(
-        " Set the machine-local inputs the template uses, then preview again: {}.",
+        " Check Local inputs in Files / Generated, or run `dort files local-inputs {:?}`. Set the values the template uses, then preview again: {}.",
+        file.id,
         unset.join(", ")
     ));
     Ok(LocalInputSetup {

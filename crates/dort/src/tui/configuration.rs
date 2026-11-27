@@ -60,6 +60,7 @@ impl Preview {
 
     pub fn label(&self) -> &'static str {
         match self {
+            Self::Manifest(p) if p.local_input_setup().is_some() => "Save declaration only",
             Self::Manifest(p) if p.generated().is_some() => "Save generated file",
             Self::Manifest(_) => "Save manifest change",
             Self::Registry(_) => "Save repository change",
@@ -405,6 +406,7 @@ impl Draft {
                         inputs: Default::default(),
                         syntax: None,
                         host_inputs: None,
+                        local_inputs: None,
                         permissions: None,
                         overrides: [
                             (Platform::Macos, value(i + 4)),

@@ -17,6 +17,7 @@ pub enum Command {
     InsertLine,
     OpenTemplateEditor,
     ToggleGeneratedInput,
+    ClearLocalInput,
     Toggle,
 }
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
@@ -79,6 +80,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                 draft.focus(),
                 primary,
             )
+        }
+        Form::LocalInputs => {
+            if let Some(panel) = &s.local_inputs {
+                panel.draw(frame, area, app);
+            }
+            return;
         }
         Form::Repair => {
             let Some(editor) = &s.repair else {
@@ -232,7 +239,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
     };
     let toggles = match form {
         Form::Configure => s.configuration.as_ref().map(|draft| draft.toggle_rows()),
-        Form::Generated => s.generated.as_ref().map(|draft| draft.host_rows()),
+        Form::Generated => s.generated.as_ref().map(|draft| draft.toggle_rows()),
         _ => None,
     }
     .unwrap_or_default();

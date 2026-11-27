@@ -140,7 +140,10 @@ fn only_declared_names_resolve_in_the_exact_registered_repository_and_mapping() 
     assert_eq!(f.rows(&other, "settings")[0], ("editor".into(), None));
 
     f.write(TEMPLATE, "'optional'");
-    Fixture::error(f.preview(), "Add these names to local_inputs in dort.toml");
+    Fixture::error(
+        f.preview(),
+        "Declare these names in the generated file editor",
+    );
     Fixture::error(f.setting("editor", Some("other")), "Declare the input");
     f.write(TEMPLATE, "'editor'");
     assert_eq!(
@@ -216,7 +219,7 @@ fn manifest_review_can_save_a_new_declaration_before_setting_its_local_value() {
     .unwrap();
     assert!(review.generated().is_none());
     assert_eq!(review.local_input_setup().unwrap().names, ["editor"]);
-    assert!(review.human().contains("Save the declaration first"));
+    assert!(review.human().contains("Save the declaration only"));
     review.approve().execute(&f.home.host).unwrap();
     assert!(!f.state.exists());
     f.set("vim");

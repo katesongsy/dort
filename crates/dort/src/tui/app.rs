@@ -343,6 +343,29 @@ impl App {
                 | Output::GitPreview(_)
                 | Output::RecoveryRequired(_),
             ) => unreachable!(),
+            Ok(Output::LocalInputs(id, rows)) => {
+                self.shell.local_inputs = Some(super::local_inputs::Panel::new(id, rows));
+                self.shell.form_feedback = None;
+                self.shell.overlay = Some(Overlay::Form(Form::LocalInputs));
+                self.status = "".into();
+                None
+            }
+            Ok(Output::LocalInputSaved(changed)) => {
+                self.shell.back();
+                self.receipt = None;
+                self.show_result = true;
+                self.details_scroll = 0;
+                self.result = Some(format!(
+                    "{}\nPreview the generated file to see its output.",
+                    if changed {
+                        "Local settings saved on this machine."
+                    } else {
+                        "Local input unchanged."
+                    },
+                ));
+                self.status = "".into();
+                None
+            }
             Ok(Output::Generated(preview)) => {
                 self.shell.overlay = Some(Overlay::Generated(Box::new(
                     super::generated::Report::new(&preview),
@@ -953,10 +976,16 @@ impl App {
                     Some(Overlay::Form(Form::Repair)) => {
                         self.shell.repair.as_mut()?.focus_at(index)
                     }
+                    Some(Overlay::Form(Form::LocalInputs)) => {
+                        let panel = self.shell.local_inputs.as_mut()?;
+                        if !panel.editing() {
+                            panel.focus_at(index);
+                        }
+                    }
                     Some(Overlay::Form(Form::Generated)) => {
                         let draft = self.shell.generated.as_mut()?;
                         draft.focus_at(index);
-                        if draft.toggle_host() {
+                        if draft.toggle_declaration() {
                             self.shell.form_feedback = None;
                         }
                     }
@@ -1590,7 +1619,10 @@ impl App {
                 self.form_focus = Some(owner);
                 return None;
             }
-            if key.code == KeyCode::Esc && self.form_has_focus() && owner != "generated file" {
+            if key.code == KeyCode::Esc
+                && self.form_has_focus()
+                && !matches!(owner, "generated file" | "local inputs")
+            {
                 self.form_focus = None;
                 return None;
             }
@@ -2184,6 +2216,23 @@ impl App {
             Intent::Submit(Form::Repair) => Some(Task::Configuration(Box::new(
                 self.shell.repair.as_ref()?.change(),
             ))),
+            Intent::Submit(Form::LocalInputs) => {
+                let panel = self.shell.local_inputs.as_mut()?;
+                self.shell.form_feedback = None;
+                if panel.editing() {
+                    panel.change(false).map(Task::ReviewLocalInput)
+                } else {
+                    panel.begin_set();
+                    self.form_focus = self.form_page();
+                    None
+                }
+            }
+            Intent::ClearLocalInput => self
+                .shell
+                .local_inputs
+                .as_ref()?
+                .change(true)
+                .map(Task::ReviewLocalInput),
             Intent::Submit(Form::Generated) => {
                 use super::configuration::Request;
                 self.shell.form_feedback = None;
@@ -2224,6 +2273,7 @@ impl App {
                 match form {
                     Form::Configure
                     | Form::Generated
+                    | Form::LocalInputs
                     | Form::Repair
                     | Form::Adopt
                     | Form::Check
@@ -2304,7 +2354,13 @@ impl App {
             self.shell.return_to_adopt = true;
         }
         self.shell.overlay = None;
+        self.shell.local_inputs = None;
         match action {
+            Action::LocalInputs => {
+                return Some(Task::InspectLocalInputs(
+                    self.selected_mapping()?.id.clone(),
+                ));
+            }
             Action::PreviewGenerated => {
                 return Some(Task::PreviewGenerated(self.selected_mapping()?.id.clone()));
             }
@@ -2682,16 +2738,27 @@ impl App {
     /// Stable identity of the foreground form, independent of its selected field.
     pub(super) fn paste_generated(&mut self, text: &str, width: u16, height: u16) {
         self.resize(width, height);
-        if width >= 48
-            && height >= 14
-            && self.form_page() == Some("generated file")
-            && self.form_has_focus()
-            && let Some(draft) = &mut self.shell.generated
-        {
-            self.shell.form_feedback = draft
-                .paste(text)
-                .err()
-                .map(|error| (Form::Generated, error.to_string()));
+        if width < 48 || height < 14 || !self.form_has_focus() {
+            return;
+        }
+        match self.form_page() {
+            Some("generated file") => {
+                self.shell.form_feedback = self.shell.generated.as_mut().and_then(|draft| {
+                    draft
+                        .paste(text)
+                        .err()
+                        .map(|error| (Form::Generated, error.to_string()))
+                });
+            }
+            Some("local inputs") => {
+                self.shell.form_feedback = self.shell.local_inputs.as_mut().and_then(|panel| {
+                    panel
+                        .paste(text)
+                        .err()
+                        .map(|error| (Form::LocalInputs, error.to_string()))
+                });
+            }
+            _ => (),
         }
     }
 
@@ -2719,6 +2786,7 @@ impl App {
                 Form::Configure => "configuration",
                 Form::Repair => "manifest repair",
                 Form::Generated => "generated file",
+                Form::LocalInputs => "local inputs",
                 Form::KeepId => "keep",
                 Form::RemoveId => "remove",
             });
@@ -2760,8 +2828,9 @@ impl App {
         None
     }
     pub(super) fn form_has_focus(&self) -> bool {
-        self.form_page()
-            .is_none_or(|owner| owner == "generated file" || self.form_focus == Some(owner))
+        self.form_page().is_none_or(|owner| {
+            matches!(owner, "generated file" | "local inputs") || self.form_focus == Some(owner)
+        })
     }
     fn focus_first_field(&mut self) {
         self.shell.scroll = 0;
@@ -3189,6 +3258,7 @@ impl App {
             )
             | Action::NewGenerated
             | Action::EditGenerated
+            | Action::LocalInputs
             | Action::EnvironmentPlan
             | Action::EnvironmentCheck
             | Action::EnvironmentResume
@@ -3212,7 +3282,10 @@ impl App {
             }
             Action::Configure(kind) if kind.edits_profile() => self.profile_action_reason(),
             Action::SaveProfileChoice => self.profile_action_reason(),
-            Action::NewGenerated | Action::EditGenerated | Action::PreviewGenerated
+            Action::NewGenerated
+            | Action::EditGenerated
+            | Action::PreviewGenerated
+            | Action::LocalInputs
                 if self.tab != Tab::Files || self.files_page != FilesPage::Generated =>
             {
                 Some("Open Files / Generated.")
@@ -3231,6 +3304,15 @@ impl App {
                 }) =>
             {
                 Some("Select a generated file with a template in dort.toml.")
+            }
+            Action::LocalInputs
+                if !self.selected_mapping().is_some_and(|file| {
+                    file.local_inputs
+                        .as_ref()
+                        .is_some_and(|names| !names.is_empty())
+                }) =>
+            {
+                Some("Select a generated file with declared local inputs.")
             }
             Action::PreviewGenerated if !self.template_selected() => {
                 Some("Select a generated file to preview.")

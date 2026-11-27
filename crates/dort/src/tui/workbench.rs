@@ -271,10 +271,16 @@ fn compact(label: &'static str) -> &'static str {
         "Env plan"
     } else if label == Action::PreviewGenerated.label() {
         "Preview"
+    } else if label == Action::LocalInputs.label() {
+        "Inputs"
     } else if label == Action::NewGenerated.label() {
         "New"
     } else if label == Action::EditGenerated.label() {
         "Edit"
+    } else if label == "Save local input" {
+        "Save input"
+    } else if label == "Clear local input" {
+        "Clear input"
     } else if label == "Open in editor" {
         "Editor"
     } else if label == "Add file mapping" {

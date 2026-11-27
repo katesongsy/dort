@@ -77,6 +77,7 @@ mod installed_tools_tests;
 #[path = "tests/interaction.rs"]
 mod interaction_tests;
 mod inventory;
+mod local_inputs;
 mod more;
 mod navigation;
 #[cfg(test)]
@@ -351,7 +352,9 @@ fn run_loop(
         for index in 0..64 {
             let generated_flow = matches!(
                 app.shell.overlay,
-                Some(shell::Overlay::Form(shell::Form::Generated))
+                Some(shell::Overlay::Form(
+                    shell::Form::Generated | shell::Form::LocalInputs
+                ))
             );
             if generated_flow != bracketed_paste {
                 if generated_flow {

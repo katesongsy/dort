@@ -407,7 +407,22 @@ impl Preview {
                 }
                 if inline(file) {
                     generated_id = Some(file.id.as_str());
-                    format!("Save generated file {:?}.", file.id)
+                    let mut description = format!("Save generated file {:?}.", file.id);
+                    if file.local_inputs.is_some()
+                        || previous.is_some_and(|mapping| mapping.local_inputs.is_some())
+                    {
+                        let names = file.local_inputs.as_deref().unwrap_or_default();
+                        description.push_str(&format!(
+                            "\nHome destination: {:?}\nDeclared local inputs: {}",
+                            file.target,
+                            if names.is_empty() {
+                                "None".into()
+                            } else {
+                                names.join(", ")
+                            },
+                        ));
+                    }
+                    description
                 } else {
                     let override_path = |p: Platform| {
                         file.overrides
@@ -489,7 +504,7 @@ impl Preview {
             self.repository, self.description
         );
         if let Some(setup) = self.local_input_setup() {
-            review.push_str("\n\nNo rendered preview yet. Save the declaration first. ");
+            review.push_str("\n\nNo rendered preview yet. Save the declaration only, then open Local inputs on this file in Generated.\n");
             review.push_str(setup.guidance());
         }
         review
