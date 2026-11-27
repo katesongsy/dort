@@ -116,6 +116,13 @@ pub(crate) struct ParentHandle {
 }
 
 pub(crate) fn parent_handle(path: &Path) -> Result<ParentHandle> {
+    parent_handle_with(path, |_, _| Ok(()))
+}
+
+pub(crate) fn parent_handle_with(
+    path: &Path,
+    mut check: impl FnMut(&File, &Path) -> Result<()>,
+) -> Result<ParentHandle> {
     validate_output_path(path)?;
     let name = path
         .file_name()
@@ -131,6 +138,7 @@ pub(crate) fn parent_handle(path: &Path) -> Result<ParentHandle> {
         let Component::Normal(name) = component else {
             continue;
         };
+        check(&directory, &walked)?;
         parents.push(parent_record(&directory, &walked)?);
         walked.push(name);
         match fs::openat(&directory, name, DIRECTORY_FLAGS, Mode::empty()) {
@@ -152,6 +160,7 @@ pub(crate) fn parent_handle(path: &Path) -> Result<ParentHandle> {
             }
         }
     }
+    check(&directory, &walked)?;
     parents.push(parent_record(&directory, &walked)?);
     Ok(ParentHandle {
         directory,

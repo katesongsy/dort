@@ -19,6 +19,8 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
 };
+#[cfg(target_os = "macos")]
+mod acl;
 
 pub struct Deployment {
     host: HostContext,
@@ -112,13 +114,17 @@ impl Approval {
         let _lock = WriterLock::acquire(&p.host)?;
         journal::ensure_writable(&p.host)?;
         let path = &p.preview.destination;
-        let handle = missing_parent_handle(path)?;
-        if !observation::same_parent_identity_and_access(
-            &handle.parents,
-            &p.scope.missing_destination,
-        ) {
-            return Err(stale());
-        }
+        let reviewed_parent = || {
+            let handle = missing_parent_handle(path)?;
+            if !observation::same_parent_identity_and_access(
+                &handle.parents,
+                &p.scope.missing_destination,
+            ) {
+                return Err(stale());
+            }
+            Ok(handle)
+        };
+        let handle = reviewed_parent()?;
         let verify_review = || {
             let (scope, preview, mode) = read_scope(
                 &p.host,
@@ -137,13 +143,12 @@ impl Approval {
             Ok(())
         };
         verify_review()?;
-        let directory_synced = publish(
-            &handle,
-            path,
-            p.mode,
-            p.preview.rendered.as_bytes(),
-            verify_review,
-        )?;
+        let directory_synced =
+            publish(&handle, path, p.mode, p.preview.rendered.as_bytes(), || {
+                verify_review()?;
+                reviewed_parent()?;
+                Ok(())
+            })?;
         Ok(Published {
             destination: p.preview.destination,
             permissions: p.mode.label(),
@@ -269,6 +274,9 @@ fn read_scope(
 }
 
 fn missing_parent_handle(path: &Path) -> Result<ParentHandle> {
+    #[cfg(target_os = "macos")]
+    let handle = observation::parent_handle_with(path, acl::require_no_write_grants)?;
+    #[cfg(not(target_os = "macos"))]
     let handle = observation::parent_handle(path)?;
     if handle.missing {
         return Err(invalid(format!(
@@ -329,6 +337,8 @@ fn publish(
         .map_err(|error| io_error("stage generated file", path, error))?,
     );
     let result = (|| {
+        #[cfg(target_os = "macos")]
+        acl::require_private_stage(&file, path)?;
         file.write_all(bytes)
             .map_err(|error| io_error("write staged generated file", path, error))?;
         fs::fchmod(&file, fs::Mode::from_bits_truncate(mode.0 as _))

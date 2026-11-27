@@ -216,3 +216,50 @@ fn held_lock_and_unresolved_recovery_block_approved_deployment() {
     ));
     assert_eq!(fs::read_dir(&f.folder).unwrap().count(), 0);
 }
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_write_acl_is_blocked_even_when_unix_mode_is_private() {
+    let f = Fixture::new();
+    fs::set_permissions(&f.folder, fs::Permissions::from_mode(0o700)).unwrap();
+    let chmod = |args: &[&str]| {
+        assert!(
+            std::process::Command::new("/bin/chmod")
+                .args(args)
+                .arg(&f.folder)
+                .status()
+                .unwrap()
+                .success()
+        );
+    };
+    chmod(&["+a", "group:everyone deny delete"]);
+    let approval = f.prepare().unwrap().approve();
+    chmod(&["+a", "group:everyone allow add_file,delete_child"]);
+    assert_eq!(
+        fs::metadata(&f.folder).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    assert!(f.blocked().contains("extra write permissions"));
+    assert!(matches!(approval.execute(), Err(Error::Invalid(_))));
+    assert_eq!(fs::read_dir(&f.folder).unwrap().count(), 0);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_inherited_file_access_blocks_deployment_and_removes_the_stage() {
+    let f = Fixture::new();
+    assert!(
+        std::process::Command::new("/bin/chmod")
+            .args(["+a", "group:everyone allow read,file_inherit,only_inherit"])
+            .arg(&f.folder)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let result = f.prepare().unwrap().approve().execute();
+    let Err(Error::Invalid(reason)) = result else {
+        panic!("expected inherited file access to block deployment");
+    };
+    assert!(reason.contains("grants extra access"));
+    assert_eq!(fs::read_dir(&f.folder).unwrap().count(), 0);
+}
