@@ -918,6 +918,84 @@ fn tracked_generated_update_cli_is_reviewed_scoped_and_single_use() {
     let drift = update().arg("--yes").assert().code(2);
     assert!(String::from_utf8_lossy(&drift.get_output().stderr).contains("Local edits"));
     assert_eq!(fs::read(&dest).unwrap(), b"local edit");
+
+    let explicit = |action: &str| {
+        let mut cmd = sandbox.command();
+        cmd.args([
+            "--repo",
+            "repository",
+            "files",
+            action,
+            "settings",
+            "--profile",
+            "work",
+        ]);
+        cmd
+    };
+    use std::os::unix::fs::MetadataExt;
+    let replace = "replace-generated";
+    let recreate = "recreate-generated";
+    explicit(recreate).arg("--yes").assert().code(2);
+    fs::set_permissions(&dest, fs::Permissions::from_mode(0o640)).unwrap();
+    let local = fs::metadata(&dest).unwrap();
+    let preview = explicit(replace)
+        .args(["--json", "--dry-run", "--yes"])
+        .assert()
+        .success();
+    let json: serde_json::Value = serde_json::from_slice(&preview.get_output().stdout).unwrap();
+    assert_eq!(json["action"], "replace");
+    assert_eq!(json["deployed_permissions"], "0640");
+    assert_eq!(json["recorded_permissions"], "0644");
+    assert!(
+        json["review"]
+            .as_str()
+            .unwrap()
+            .contains("OLD | local\\x20edit")
+    );
+    explicit(replace).arg("--json").assert().code(2).stdout("");
+    assert_eq!(fs::read(&dest).unwrap(), b"local edit");
+    assert_eq!(fs::metadata(&dest).unwrap().ino(), local.ino());
+    let receipt = explicit(replace)
+        .args(["--json", "--yes"])
+        .assert()
+        .success();
+    let json: serde_json::Value = serde_json::from_slice(&receipt.get_output().stdout).unwrap();
+    assert_eq!(json["location"]["action"], "replace");
+    let private = json["location"]["artifact"].as_str().unwrap();
+    assert_eq!(fs::read(private).unwrap(), b"local edit");
+    assert_eq!(fs::metadata(private).unwrap().ino(), local.ino());
+    assert_eq!(fs::metadata(private).unwrap().mode() & 0o7777, 0o640);
+    assert_eq!(fs::read(&dest).unwrap(), changed.as_bytes());
+    explicit(replace).arg("--yes").assert().code(2);
+
+    fs::remove_file(&dest).unwrap();
+    update().arg("--yes").assert().code(2);
+    explicit(replace).arg("--yes").assert().code(2);
+    explicit(recreate).arg("--json").assert().code(2).stdout("");
+    let preview = explicit(recreate)
+        .args(["--json", "--dry-run", "--yes"])
+        .assert()
+        .success();
+    let json: serde_json::Value = serde_json::from_slice(&preview.get_output().stdout).unwrap();
+    assert_eq!(json["action"], "recreate");
+    assert!(json["deployed_permissions"].is_null());
+    let review = json["review"].as_str().unwrap();
+    assert!(review.contains("Detected: Local file deleted"));
+    assert!(review.contains("NEW | new\\x20config\\t=\\x1b\\\\\\x20\\x20"));
+    assert!(!review.contains("OLD |"));
+    assert!(!dest.exists());
+    let receipt = explicit(recreate)
+        .args(["--json", "--yes"])
+        .assert()
+        .success();
+    let json: serde_json::Value = serde_json::from_slice(&receipt.get_output().stdout).unwrap();
+    assert_eq!(json["location"]["action"], "recreate");
+    assert!(!std::path::Path::new(json["location"]["artifact"].as_str().unwrap()).exists());
+    assert_eq!(fs::read(&dest).unwrap(), changed.as_bytes());
+    let live = fs::metadata(&dest).unwrap();
+    assert_eq!(live.mode() & 0o7777, 0o644);
+    explicit(recreate).arg("--yes").assert().code(2);
+    assert_eq!(fs::metadata(&dest).unwrap().ino(), live.ino());
 }
 
 #[test]

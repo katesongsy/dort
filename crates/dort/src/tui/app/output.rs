@@ -452,13 +452,13 @@ impl App {
         self.receipt = None;
         self.failure = None;
         self.details_scroll = 0;
-        self.status = match &outcome {
-            Some(UpdateOutcome::Updated { .. }) => "Generated update recorded.",
-            Some(UpdateOutcome::NotExchanged { .. }) => "Deployed file was not replaced.",
-            Some(UpdateOutcome::NeedsRecovery { .. }) => "Generated update needs recovery.",
-            None => "No generated update needs recovery.",
-        }
-        .into();
+        self.status = outcome
+            .as_ref()
+            .map_or(
+                "No generated update needs recovery.",
+                crate::services::generated_update::status,
+            )
+            .into();
         self.result = Some(outcome.as_ref().map_or_else(
             || "No generated update needs recovery.".into(),
             crate::services::generated_update::outcome,

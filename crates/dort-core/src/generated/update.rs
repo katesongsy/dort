@@ -35,6 +35,28 @@ pub struct Update {
     explicit: Option<PathBuf>,
     temporary_profiles: Vec<String>,
     prepared: Prepared,
+    transaction: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateAction {
+    Update,
+    Replace,
+    Recreate,
+}
+
+impl UpdateAction {
+    pub fn for_drift(status: DriftStatus) -> Option<Self> {
+        match status {
+            DriftStatus::UpdateAvailable => Some(Self::Update),
+            DriftStatus::LocallyEdited
+            | DriftStatus::LocalPermissionsChanged
+            | DriftStatus::LocallyEditedAndPermissionsChanged => Some(Self::Replace),
+            DriftStatus::LocallyDeleted => Some(Self::Recreate),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -45,9 +67,13 @@ pub struct UpdateReview<'a> {
     pub source: Option<&'a Path>,
     pub destination: &'a Path,
     pub deployed: &'a [u8],
-    pub deployed_permissions: String,
+    pub deployed_permissions: Option<String>,
+    pub recorded_permissions: String,
     pub proposed: &'a str,
     pub proposed_permissions: String,
+    pub action: UpdateAction,
+    pub detected: DriftStatus,
+    pub retained: Option<PathBuf>,
 }
 
 pub struct UpdateApproval(Update);
@@ -58,6 +84,7 @@ pub struct UpdateLocation {
     pub artifact: PathBuf,
     pub stage_device: u64,
     pub stage_inode: u64,
+    pub action: UpdateAction,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -92,8 +119,45 @@ struct Prepared {
     preview: Preview,
     mode: Mode,
     prior: DeploymentRecord,
-    old: Fingerprint,
+    old: Preimage,
     bytes: Vec<u8>,
+    detected: DriftStatus,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+enum Preimage {
+    Local {
+        fingerprint: Fingerprint,
+        stamp: Stamp,
+    },
+    Tracked(Fingerprint),
+    Missing,
+}
+
+impl Preimage {
+    fn action(&self) -> UpdateAction {
+        match self {
+            Self::Tracked(_) => UpdateAction::Update,
+            Self::Local { .. } => UpdateAction::Replace,
+            Self::Missing => UpdateAction::Recreate,
+        }
+    }
+
+    fn schema(&self) -> u32 {
+        match self {
+            Self::Tracked(_) => 1,
+            _ => 2,
+        }
+    }
+
+    fn file<'a>(&'a self, prior: &'a Stamp) -> Option<(&'a Fingerprint, &'a Stamp)> {
+        match self {
+            Self::Tracked(fp) => Some((fp, prior)),
+            Self::Local { fingerprint, stamp } => Some((fingerprint, stamp)),
+            Self::Missing => None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -104,7 +168,7 @@ struct Intent {
     id: String,
     scope: Scope,
     stage: Fingerprint,
-    old: Fingerprint,
+    old: Preimage,
     candidate: Fingerprint,
     prior: DeploymentRecord,
     proposed: Stamp,
@@ -113,7 +177,7 @@ struct Intent {
 #[derive(PartialEq, Eq)]
 enum Placement {
     Before,
-    Exchanged,
+    Published,
     Conflict,
 }
 
@@ -133,13 +197,28 @@ impl Update {
         id: &str,
         temporary_profiles: &[String],
     ) -> Result<Self> {
+        Self::prepare_action(host, explicit, id, temporary_profiles, UpdateAction::Update)
+    }
+
+    pub fn prepare_action(
+        host: &HostContext,
+        explicit: Option<&Path>,
+        id: &str,
+        temporary_profiles: &[String],
+        action: UpdateAction,
+    ) -> Result<Self> {
         ensure_no_pending_update(host)?;
         Ok(Self {
             host: host.clone(),
             explicit: explicit.map(Path::to_owned),
             temporary_profiles: temporary_profiles.to_vec(),
-            prepared: prepare(host, explicit, id, temporary_profiles)?,
+            prepared: prepare(host, explicit, id, temporary_profiles, action)?,
+            transaction: adoption::transaction_id(),
         })
+    }
+
+    pub fn action(&self) -> UpdateAction {
+        self.prepared.old.action()
     }
 
     pub fn review(&self) -> UpdateReview<'_> {
@@ -151,9 +230,17 @@ impl Update {
             source: p.preview.source.as_deref(),
             destination: &p.preview.destination,
             deployed: &p.bytes,
-            deployed_permissions: Mode(p.prior.deployed.mode).label(),
+            deployed_permissions: p
+                .old
+                .file(&p.prior.deployed)
+                .map(|(_, stamp)| Mode(stamp.mode).label()),
+            recorded_permissions: Mode(p.prior.deployed.mode).label(),
             proposed: &p.preview.rendered,
             proposed_permissions: p.mode.label(),
+            action: self.action(),
+            detected: p.detected,
+            retained: (self.action() != UpdateAction::Recreate)
+                .then(|| artifact_path(&p.preview.destination, &self.transaction)),
         }
     }
 
@@ -168,6 +255,7 @@ impl Update {
             self.explicit.as_deref(),
             &p.preview.id,
             &self.temporary_profiles,
+            self.action(),
         )
         .map_err(|_| stale())?;
         if now.scope != p.scope
@@ -185,6 +273,10 @@ impl Update {
 }
 
 impl UpdateApproval {
+    pub fn action(&self) -> UpdateAction {
+        self.0.action()
+    }
+
     pub fn execute(self) -> Result<UpdateOutcome> {
         self.execute_at(|_| Ok(()))
     }
@@ -201,11 +293,11 @@ impl UpdateApproval {
         let state = open_locked_state(&update.host)?;
         let destination = Path::new(&p.slot.identity.destination);
         let handle = open_destination(destination, &p.scope.destination_parents)?;
-        let id = adoption::transaction_id();
+        let id = update.transaction.clone();
         let stage_name = format!("{STAGE_PREFIX}{id}");
         let (stage, stage_fp, candidate) = stage(&handle, &stage_name, destination, p)?;
         let intent = Intent {
-            schema: 1,
+            schema: p.old.schema(),
             identity: p.slot.identity.clone(),
             id,
             scope: p.scope.clone(),
@@ -217,7 +309,7 @@ impl UpdateApproval {
         };
         if let Err(error) = intent.persist(&state) {
             return Err(Error::Invalid(format!(
-                "Could not save the update plan. Dort did not exchange the file. Check {} and {}. {error}",
+                "Could not save the generated file plan. Dort did not change the destination. Check {} and {}. {error}",
                 state.path.join(PENDING).display(),
                 intent.location().artifact.display(),
             )));
@@ -230,29 +322,39 @@ impl UpdateApproval {
                 intent.retire_before(&state, "The review changed. Open a new review.".into())
             );
         }
-        let exchange = at(Boundary::Exchange).and_then(|()| {
-            fs::renameat_with(
-                &stage,
-                ARTIFACT,
-                &handle.directory,
-                &handle.name,
-                fs::RenameFlags::EXCHANGE,
+        let recreate = update.action() == UpdateAction::Recreate;
+        let (flags, operation) = if recreate {
+            (
+                fs::RenameFlags::NOREPLACE,
+                "Publication without replacement",
             )
-        });
-        if let Err(error) = exchange {
+        } else {
+            (fs::RenameFlags::EXCHANGE, "Atomic exchange")
+        };
+        if let Err(error) = at(Boundary::Exchange).and_then(|()| {
+            fs::renameat_with(&stage, ARTIFACT, &handle.directory, &handle.name, flags)
+        }) {
             let reason = format!(
-                "Atomic exchange returned an error ({error}). Check both file locations and whether the filesystem supports atomic exchange."
+                "{operation} failed ({error}). Check both file locations and filesystem support."
             );
             return Ok(match intent.placement(&handle, &stage) {
                 Placement::Before => intent.retire_before(&state, reason),
-                Placement::Exchanged => intent.needs_recovery(ExchangeStatus::Completed, reason),
+                Placement::Published => intent.needs_recovery(ExchangeStatus::Completed, reason),
+                Placement::Conflict
+                    if recreate && error == Errno::EXIST && intent.staged_candidate(&stage) =>
+                {
+                    intent.retire_before(
+                        &state,
+                        "A file appeared at the destination. Dort left it alone.".into(),
+                    )
+                }
                 Placement::Conflict => intent.needs_recovery(ExchangeStatus::Unknown, reason),
             });
         }
         if let Err(error) = at(Boundary::Exchanged) {
             return Ok(intent.needs_recovery(ExchangeStatus::Completed, error.to_string()));
         }
-        Ok(intent.finish_after_exchange(&state, &p.slot, &handle, &stage, at))
+        Ok(intent.finish_publication(&state, &p.slot, &handle, &stage, at))
     }
 }
 
@@ -261,11 +363,12 @@ fn prepare(
     explicit: Option<&Path>,
     id: &str,
     profiles: &[String],
+    action: UpdateAction,
 ) -> Result<Prepared> {
     let declaration = read_declaration(host, explicit, id, profiles)?;
     let Some(prior) = declaration.record.load().map_err(|_| record::invalid())? else {
         return Err(Error::Invalid(
-            "Only files with a deployment record can be updated.".into(),
+            "No deployment record for this generated file.".into(),
         ));
     };
     if !declaration.mode.permits_update() {
@@ -273,40 +376,53 @@ fn prepare(
     }
     let path = &declaration.destination;
     let handle = &declaration.handle;
-    let stat = if handle.missing {
-        Err(Errno::NOENT)
-    } else {
-        fs::statat(
-            &handle.directory,
-            &handle.name,
-            fs::AtFlags::SYMLINK_NOFOLLOW,
-        )
+    if handle.missing {
+        return Err(ineligible(DriftStatus::MissingParent));
+    }
+    let stat = match fs::statat(
+        &handle.directory,
+        &handle.name,
+        fs::AtFlags::SYMLINK_NOFOLLOW,
+    ) {
+        Ok(stat) => Some(stat),
+        Err(Errno::NOENT) => None,
+        Err(error) => return Err(io_error("inspect deployed file", path, error)),
     };
-    let stat = stat.map_err(|error| match error {
-        Errno::NOENT => ineligible(DriftStatus::LocallyDeleted),
-        _ => io_error("inspect deployed file", path, error),
-    })?;
     if overlaps_secret_target(
         host,
         declaration.repository(),
         &declaration.manifest,
         path,
-        &stat,
+        stat.as_ref(),
     ) {
         return Err(ineligible(DriftStatus::Unsafe));
     }
-    let (old, bytes) = record::read_tracked(path, handle, &stat).map_err(ineligible)?;
-    check_file_access(&handle.directory, &handle.name, path, &old)?;
+    let file = if let Some(stat) = stat {
+        let (fingerprint, bytes) = record::read_tracked(path, handle, &stat).map_err(ineligible)?;
+        Some((fingerprint, bytes))
+    } else {
+        None
+    };
     let (scope, slot, preview, mode) = declaration.render(host)?;
-    if preview.destination_status != DestinationStatus::Existing {
-        return Err(stale());
-    }
-    let proposed = Stamp::new(preview.rendered.as_bytes(), mode);
-    let status = prior
-        .deployed
-        .compare(&Stamp::new(&bytes, Mode(old.mode & 0o7777)), &proposed);
-    if status != DriftStatus::UpdateAvailable {
-        return Err(ineligible(status));
+    let (old, bytes, detected) = match file {
+        Some((fingerprint, bytes)) if preview.destination_status == DestinationStatus::Existing => {
+            let stamp = Stamp::new(&bytes, Mode(fingerprint.mode & 0o7777));
+            let proposed = Stamp::new(preview.rendered.as_bytes(), mode);
+            let detected = prior.deployed.compare(&stamp, &proposed);
+            let old = if stamp == prior.deployed {
+                Preimage::Tracked(fingerprint)
+            } else {
+                Preimage::Local { fingerprint, stamp }
+            };
+            (old, bytes, detected)
+        }
+        None if preview.destination_status == DestinationStatus::Missing => {
+            (Preimage::Missing, Vec::new(), DriftStatus::LocallyDeleted)
+        }
+        _ => return Err(stale()),
+    };
+    if UpdateAction::for_drift(detected) != Some(action) {
+        return Err(ineligible(detected));
     }
     Ok(Prepared {
         scope,
@@ -316,6 +432,7 @@ fn prepare(
         prior,
         old,
         bytes,
+        detected,
     })
 }
 
@@ -325,7 +442,7 @@ fn ineligible(status: DriftStatus) -> Error {
 
 fn stale() -> Error {
     Error::Invalid(
-        "Update changed. Open a new review. Dort did not exchange the generated file.".into(),
+        "The review changed. Open a new review. Dort did not change the destination.".into(),
     )
 }
 
@@ -411,25 +528,17 @@ fn sync(file: &File, path: &Path) -> Result<()> {
         .map_err(|error| io_error("sync generated update object", path, error))
 }
 
-fn check_file_access(dir: &File, name: &OsStr, path: &Path, fp: &Fingerprint) -> Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        let file = fs::openat(
-            dir,
-            name,
-            fs::OFlags::RDONLY | fs::OFlags::NOFOLLOW | fs::OFlags::CLOEXEC | fs::OFlags::NONBLOCK,
-            fs::Mode::empty(),
-        )
-        .map(File::from)
-        .map_err(|err| io_error("check generated file access", path, err))?;
-        if &stat_file(&file, path)? != fp {
-            return Err(ineligible(DriftStatus::Unverifiable));
-        }
-        super::deploy::acl::require_private_stage(&file, path)?;
-    }
-    #[cfg(not(target_os = "macos"))]
-    let _ = (dir, name, path, fp);
-    Ok(())
+fn missing(dir: &File, name: &OsStr) -> bool {
+    matches!(
+        fs::statat(dir, name, fs::AtFlags::SYMLINK_NOFOLLOW),
+        Err(Errno::NOENT)
+    )
+}
+
+fn artifact_path(destination: &Path, transaction: &str) -> PathBuf {
+    destination
+        .with_file_name(format!("{STAGE_PREFIX}{transaction}"))
+        .join(ARTIFACT)
 }
 
 fn matches_file(
@@ -451,7 +560,7 @@ fn matches_file(
     if &comparable != expected
         || !record::owned_regular(&stat, &fp)
         || fp.mode & 0o400 == 0
-        || check_file_access(dir, name, path, &fp).is_err()
+        || record::check_file_access(dir, name, path, &fp).is_err()
     {
         return false;
     }
@@ -481,20 +590,56 @@ impl Intent {
     fn location(&self) -> UpdateLocation {
         UpdateLocation {
             destination: self.destination().to_owned(),
-            artifact: self
-                .destination()
-                .with_file_name(self.stage_name())
-                .join(ARTIFACT),
+            artifact: artifact_path(self.destination(), &self.id),
             stage_device: self.stage.device,
             stage_inode: self.stage.inode,
+            action: self.old.action(),
         }
     }
 
     fn terminal_receipt(&self) -> DeploymentRecord {
+        let recreate = self.old.action() == UpdateAction::Recreate;
         DeploymentRecord {
             deployed: self.proposed.clone(),
-            retained: Some(self.location().artifact),
+            retained: (!recreate).then(|| self.location().artifact),
+            recreation: recreate.then(|| self.id.clone()),
         }
+    }
+
+    fn valid_preimage(&self) -> bool {
+        let prior = &self.prior.deployed;
+        match &self.old {
+            Preimage::Tracked(fp) => {
+                fp.mode & 0o7777 == prior.mode
+                    && Mode(prior.mode).permits_update()
+                    && self.proposed != *prior
+            }
+            Preimage::Local { fingerprint, stamp } => {
+                stamp.valid()
+                    && Mode(stamp.mode).permits_update()
+                    && fingerprint.mode & 0o7777 == stamp.mode
+                    && stamp != prior
+            }
+            Preimage::Missing => true,
+        }
+    }
+
+    fn staged_candidate(&self, stage: &File) -> bool {
+        self.stage_reachable()
+            && matches_file(
+                stage,
+                OsStr::new(ARTIFACT),
+                &self.location().artifact,
+                &self.candidate,
+                &self.proposed,
+                false,
+            )
+    }
+
+    fn stage_reachable(&self) -> bool {
+        open_destination(self.destination(), &self.scope.destination_parents)
+            .and_then(|current| self.open_stage(&current))
+            .is_ok()
     }
 
     fn placement(&self, handle: &ParentHandle, stage: &File) -> Placement {
@@ -519,23 +664,21 @@ impl Intent {
                 exchanged,
             )
         };
-        let placement = if live(&self.old, &self.prior.deployed, false)
-            && private(&self.candidate, &self.proposed, false)
-        {
-            Placement::Before
-        } else if private(&self.old, &self.prior.deployed, true)
-            && live(&self.candidate, &self.proposed, true)
-        {
-            Placement::Exchanged
-        } else {
-            return Placement::Conflict;
+        let (before, published) = match self.old.file(&self.prior.deployed) {
+            Some((fp, stamp)) => (live(fp, stamp, false), private(fp, stamp, true)),
+            None => (
+                missing(&handle.directory, &handle.name),
+                missing(stage, OsStr::new(ARTIFACT)),
+            ),
         };
-        let reachable = open_destination(self.destination(), &self.scope.destination_parents)
-            .and_then(|current| self.open_stage(&current));
-        if reachable.is_err() {
-            return Placement::Conflict;
+        if before && private(&self.candidate, &self.proposed, false) && self.stage_reachable() {
+            Placement::Before
+        } else if published && live(&self.candidate, &self.proposed, true) && self.stage_reachable()
+        {
+            Placement::Published
+        } else {
+            Placement::Conflict
         }
-        placement
     }
 
     fn open_stage(&self, handle: &ParentHandle) -> Result<File> {
@@ -580,7 +723,7 @@ impl Intent {
         }
     }
 
-    fn finish_after_exchange(
+    fn finish_publication(
         &self,
         state: &PrivateDir,
         slot: &Slot,
@@ -596,7 +739,7 @@ impl Intent {
             )?;
             sync(stage, location.artifact.parent().expect("artifact parent"))?;
             if slot.load()?.as_ref() != Some(&self.prior)
-                || self.placement(handle, stage) != Placement::Exchanged
+                || self.placement(handle, stage) != Placement::Published
             {
                 return Err(conflict());
             }
@@ -627,7 +770,7 @@ impl Intent {
 }
 
 fn conflict() -> Error {
-    Error::Invalid("The generated file, private update folder, or deployment record changed. Check both file locations and keep their contents. Dort will not exchange them again. If the destination folder moved, find the private folder by its device and inode.".into())
+    Error::Invalid("The generated file, private update folder, or deployment record changed. Check both locations and keep any files. Recovery does not change the destination. If the destination folder moved, find the private folder by its device and inode.".into())
 }
 
 fn clear_pending(state: &PrivateDir) -> Result<()> {
@@ -669,19 +812,14 @@ fn load_pending(state: &PrivateDir, host: &HostContext) -> Result<Option<(Intent
         intent.destination(),
     )
     .map_err(|_| invalid_intent(state))?;
-    if intent.schema != 1
+    if intent.schema != intent.old.schema()
         || intent.identity != slot.identity
         || intent.scope.repository_id != intent.identity.repository_id
-        || intent.id.len() != 64
-        || !intent
-            .id
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        || !record::transaction_id_valid(&intent.id)
         || !intent.proposed.valid()
         || !Mode(intent.proposed.mode).permits_update()
-        || !intent.prior.deployed.valid()
-        || !Mode(intent.prior.deployed.mode).permits_update()
-        || intent.proposed == intent.prior.deployed
+        || !intent.prior.valid()
+        || !intent.valid_preimage()
     {
         return Err(invalid_intent(state));
     }
@@ -698,7 +836,7 @@ pub fn pending_update(host: &HostContext) -> Result<Option<UpdateLocation>> {
 pub(crate) fn ensure_no_pending_update(host: &HostContext) -> Result<()> {
     if let Some(location) = pending_update(host)? {
         return Err(Error::Invalid(format!(
-            "A generated update for {} needs recovery before Dort can write again. Its private file is at {} if the folder has not moved. Open Recovery or run `dort recovery recover-update --dry-run`.",
+            "A generated file change for {} needs recovery before Dort can write again. Check the private path at {}. Open Recovery or run `dort recovery recover-update --dry-run`.",
             location.destination.display(),
             location.artifact.display(),
         )));
@@ -735,12 +873,19 @@ fn recover_pending(
     };
     if reviewed.is_some_and(|location| *location != intent.location()) {
         return Err(Error::Invalid(
-            "A different generated update now needs recovery. Open a new recovery review.".into(),
+            "A different generated file change now needs recovery. Open a new recovery review."
+                .into(),
         ));
     }
     let outcome = (|| {
         let receipt = slot.load()?;
+        let handle = open_destination(intent.destination(), &intent.scope.destination_parents)?;
+        let stage = intent.open_stage(&handle)?;
+        let placement = intent.placement(&handle, &stage);
         if receipt.as_ref() == Some(&intent.terminal_receipt()) {
+            if placement != Placement::Published {
+                return Err(conflict());
+            }
             return Ok(match slot.sync().and_then(|()| clear_pending(&state)) {
                 Ok(()) => UpdateOutcome::Updated {
                     location: intent.location(),
@@ -751,16 +896,19 @@ fn recover_pending(
         if receipt.as_ref() != Some(&intent.prior) {
             return Err(conflict());
         }
-        let handle = open_destination(intent.destination(), &intent.scope.destination_parents)?;
-        let stage = intent.open_stage(&handle)?;
-        match intent.placement(&handle, &stage) {
+        match placement {
             Placement::Before => Ok(intent.retire_before(
                 &state,
-                "The update stopped before exchange. Open a new review to try again.".into(),
+                "The action stopped before changing the destination. Open a new review to try again.".into(),
             )),
-            Placement::Exchanged => {
-                Ok(intent.finish_after_exchange(&state, &slot, &handle, &stage, |_| Ok(())))
+            Placement::Published => {
+                Ok(intent.finish_publication(&state, &slot, &handle, &stage, |_| Ok(())))
             }
+            Placement::Conflict if intent.old.action() == UpdateAction::Recreate
+                && intent.staged_candidate(&stage) => Ok(intent.retire_before(
+                    &state,
+                    "The staged file was not published. Dort left the destination alone.".into(),
+                )),
             Placement::Conflict => Err(conflict()),
         }
     })()

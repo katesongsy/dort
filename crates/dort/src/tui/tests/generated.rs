@@ -603,10 +603,11 @@ target = "~/settings"
         let screen = w.screen();
         assert!(screen.contains("Local file deleted"), "{screen}");
         assert!(!screen.contains("Review deployment"), "{screen}");
+        assert!(screen.contains("Review recreation"), "{screen}");
         w.press(KeyCode::Char('R'));
         w.press(KeyCode::Char('y'));
         assert!(!target.exists());
-        assert!(w.screen().contains("Local file deleted"));
+        assert!(w.review().contains("Detected: Local file deleted"));
     }
 }
 
@@ -775,9 +776,105 @@ fn tracked_update_rejects_stale_input_and_live_edits() {
             let screen = w.screen();
             assert!(screen.contains("Local edits"), "{screen}");
             assert!(!screen.contains("Review update"));
+            assert!(screen.contains("Review replacement"), "{screen}");
             w.press(KeyCode::Char('R'));
-            assert!(w.app.preview.is_none());
+            assert!(w.review().contains("OLD | local\\x20edit"));
         }
+    }
+}
+
+#[test]
+fn local_generated_reviews_keep_by_default_and_apply_only_the_named_action_at_the_end() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    for (width, height, recreate) in [(48, 14, false), (80, 24, true)] {
+        let mut w = Workshop::new(width, height);
+        let (source, dest) = tracked(&mut w);
+        let proposed = "keep\n".to_owned() + &"another line\n".repeat(30) + "proposed\tend";
+        fs::write(&source, &proposed).unwrap();
+        let local = b"keep\nlocal edit\r\n";
+        let (label, confirm, end, status, inode) = if recreate {
+            fs::remove_file(&dest).unwrap();
+            (
+                "Review recreation",
+                "Recreate generated file",
+                "End of recreation review",
+                "Generated recreation recorded",
+                None,
+            )
+        } else {
+            fs::write(&dest, local).unwrap();
+            fs::set_permissions(&dest, fs::Permissions::from_mode(0o640)).unwrap();
+            (
+                "Review replacement",
+                "Replace generated file",
+                "End of replacement review",
+                "Generated replacement recorded",
+                Some(fs::metadata(&dest).unwrap().ino()),
+            )
+        };
+        let old = inode.map(|_| local.to_vec());
+        for cancel in [true, false] {
+            w.screen();
+            w.press(KeyCode::Enter);
+            let screen = w.screen();
+            assert!(screen.contains(label), "{screen}");
+            assert!(!screen.contains("Review update") && !screen.contains("Review deployment"));
+            let task = click_label(&mut w.app, width, height, label).unwrap();
+            w.run(task);
+            let review = w.review();
+            assert!(review.contains("NEW | proposed\\tend"));
+            if recreate {
+                assert!(review.contains("Detected: Local file deleted"));
+                assert!(review.contains("Permissions: Missing -> 0600"));
+                assert!(!review.contains("OLD |"));
+            } else {
+                assert!(review.contains("Detected: Local edits and permissions changed"));
+                assert!(review.contains("Permissions: 0640 -> 0600"));
+                assert!(review.contains("SAME | keep\\n"));
+                assert!(review.contains("OLD | local\\x20edit\\r\\n"));
+            }
+            assert!(!w.screen().contains(confirm));
+            w.press(KeyCode::Enter);
+            w.press(KeyCode::Char('y'));
+            assert_eq!(fs::read(&dest).ok(), old);
+            w.press(KeyCode::End);
+            w.press(KeyCode::Char('y'));
+            assert_eq!(fs::read(&dest).ok(), old);
+            let screen = w.screen();
+            assert!(screen.contains(end) && screen.contains(confirm), "{screen}");
+            if cancel {
+                w.press(KeyCode::Esc);
+                assert_eq!(fs::read(&dest).ok(), old);
+                assert_eq!(
+                    fs::read_dir(&w.host.home).unwrap().count(),
+                    usize::from(inode.is_some())
+                );
+            } else {
+                w.press(KeyCode::Char('y'));
+            }
+        }
+        let screen = w.screen();
+        assert!(screen.contains(status), "{screen}");
+        assert_eq!(fs::read(&dest).unwrap(), proposed.as_bytes());
+        let published = fs::metadata(&dest).unwrap();
+        assert_eq!(published.mode() & 0o7777, 0o600);
+        let artifact = fs::read_dir(&w.host.home)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.is_dir())
+            .unwrap()
+            .join("file");
+        if let Some(inode) = inode {
+            assert_eq!(fs::read(&artifact).unwrap(), local);
+            let retained = fs::metadata(&artifact).unwrap();
+            assert_eq!(retained.ino(), inode);
+            assert_eq!(retained.mode() & 0o7777, 0o640);
+        } else {
+            assert!(!artifact.exists());
+            assert!(!screen.contains("retained"));
+        }
+        w.press(KeyCode::Char('y'));
+        assert_eq!(fs::metadata(&dest).unwrap().ino(), published.ino());
     }
 }
 
@@ -798,7 +895,34 @@ fn update_refuses_when_the_full_review_exceeds_the_display_limit() {
 }
 
 #[test]
-fn interrupted_generated_update_has_explicit_recovery_and_truthful_effects() {
+fn interrupted_generated_actions_have_explicit_recovery_and_truthful_effects() {
+    use dort_core::generated::UpdateAction;
+    for (action, notice, effect) in [
+        (
+            UpdateAction::Update,
+            "Generated update needs recovery",
+            "It does not replace either file.",
+        ),
+        (
+            UpdateAction::Replace,
+            "Generated replacement needs recovery",
+            "It does not replace either file.",
+        ),
+        (
+            UpdateAction::Recreate,
+            "Generated recreation needs recovery",
+            "Recovery never creates the file",
+        ),
+    ] {
+        check_generated_recovery(action, notice, effect);
+    }
+}
+
+fn check_generated_recovery(
+    action: dort_core::generated::UpdateAction,
+    notice: &str,
+    effect: &str,
+) {
     use crate::tui::actions::{Output, Pending};
     use dort_core::generated::{ExchangeStatus, UpdateLocation, UpdateOutcome};
     let mut w = Workshop::new(80, 24);
@@ -807,6 +931,7 @@ fn interrupted_generated_update_has_explicit_recovery_and_truthful_effects() {
         artifact: "/home/.saved/file".into(),
         stage_device: 12,
         stage_inode: 34,
+        action,
     };
     w.app.complete(Ok(Output::GeneratedUpdated(Some(
         UpdateOutcome::NeedsRecovery {
@@ -832,10 +957,7 @@ fn interrupted_generated_update_has_explicit_recovery_and_truthful_effects() {
         generated_recovery: Some(Ok(location())),
     }));
     let screen = w.screen();
-    assert!(
-        screen.contains("Generated update needs recovery"),
-        "{screen}"
-    );
+    assert!(screen.contains(notice), "{screen}");
     assert!(screen.contains("Blocked writes: 1"), "{screen}");
     assert!(matches!(
         click_label(&mut w.app, w.width, w.height, "Review generated recovery"),
@@ -849,10 +971,7 @@ fn interrupted_generated_update_has_explicit_recovery_and_truthful_effects() {
             .is_none()
     );
     let screen = w.screen();
-    assert!(
-        screen.contains("It does not replace either file."),
-        "{screen}"
-    );
+    assert!(screen.contains(effect), "{screen}");
     assert!(matches!(
         super::tests::approve_ready(&mut w.app, w.width, w.height),
         Some(Task::Execute(_)),

@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use dort_core::{
     Error, bootstrap,
     context::HostContext,
-    generated::{UpdateOutcome, pending_update, recover_reviewed_update},
+    generated::{UpdateAction, UpdateOutcome, pending_update, recover_reviewed_update},
     git, journal,
     local::LocalConfig,
     planner::{self, Request, UnmanageMode},
@@ -175,7 +175,7 @@ enum RecoveryCommand {
         repository_id: String,
         transaction_id: String,
     },
-    /// Resolve an interrupted generated update without replacing either file.
+    /// Resolve an interrupted generated file change without writing the destination.
     RecoverUpdate,
     /// List operation records and write blockers.
     List,
@@ -238,6 +238,18 @@ enum FilesCommand {
     },
     /// Review new contents and permissions for an unchanged deployed generated file.
     UpdateGenerated {
+        id: String,
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
+    /// Replace a locally changed tracked generated file and retain the local file.
+    ReplaceGenerated {
+        id: String,
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
+    /// Recreate a tracked generated file that was deleted locally.
+    RecreateGenerated {
         id: String,
         #[arg(long = "profile")]
         profiles: Vec<String>,
@@ -1154,7 +1166,7 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                 }
                 if let Some(location) = generated {
                     println!(
-                        "A generated update needs recovery. Run `dort recovery recover-update --dry-run` to inspect both paths.\n{}",
+                        "Run `dort recovery recover-update --dry-run` to review the interrupted action.\n{}",
                         generated_update::recovery_review(&location)
                     );
                 }
@@ -1272,33 +1284,15 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                     }
                 }
             }
-            FilesCommand::UpdateGenerated { id, profiles } => {
-                if cli.confirm_remove.is_some() {
-                    return Err(Error::Invalid(
-                        "Generated updates do not use --confirm-remove.".into(),
-                    ));
-                }
-                let update = crate::services::review_generated_update(
-                    &host,
-                    cli.repo.as_deref(),
-                    id,
-                    profiles,
-                )?;
-                let change = update.review();
-                let review = generated_update::review(change)?;
-                if cli.dry_run && cli.json {
-                    let change = update.review();
-                    print_ascii_json(
-                        &serde_json::json!({"schema": 1, "read_only": true, "id": change.id, "repository": change.repository, "active_profiles": change.active_profiles, "destination": change.destination, "deployed_permissions": change.deployed_permissions, "proposed_permissions": change.proposed_permissions, "review": review}),
-                        "could not encode generated update review",
-                    )?;
-                } else if !cli.json {
-                    print_update_review(&review)?;
-                }
-                if !cli.dry_run {
-                    approve(cli)?;
-                    return generated_update_result(cli, update.approve().execute()?, false);
-                }
+            FilesCommand::UpdateGenerated { id, profiles }
+            | FilesCommand::ReplaceGenerated { id, profiles }
+            | FilesCommand::RecreateGenerated { id, profiles } => {
+                let action = match command {
+                    FilesCommand::UpdateGenerated { .. } => UpdateAction::Update,
+                    FilesCommand::ReplaceGenerated { .. } => UpdateAction::Replace,
+                    _ => UpdateAction::Recreate,
+                };
+                return change_generated(cli, &host, id, profiles, action);
             }
             FilesCommand::Add {
                 target,
@@ -1534,6 +1528,37 @@ fn approve(cli: &Cli) -> dort_core::Result<()> {
     }
     Ok(())
 }
+fn change_generated(
+    cli: &Cli,
+    host: &HostContext,
+    id: &str,
+    profiles: &[String],
+    action: UpdateAction,
+) -> dort_core::Result<ExitCode> {
+    if cli.confirm_remove.is_some() {
+        return Err(Error::Invalid(
+            "Generated file changes do not use --confirm-remove.".into(),
+        ));
+    }
+    let update =
+        crate::services::review_generated_update(host, cli.repo.as_deref(), id, profiles, action)?;
+    let change = update.review();
+    let review = generated_update::review(&change)?;
+    if cli.dry_run && cli.json {
+        print_ascii_json(
+            &serde_json::json!({"schema": 1, "read_only": true, "action": change.action, "detected": change.detected, "id": change.id, "repository": change.repository, "active_profiles": change.active_profiles, "destination": change.destination, "deployed_permissions": change.deployed_permissions, "recorded_permissions": change.recorded_permissions, "proposed_permissions": change.proposed_permissions, "review": review}),
+            "could not encode generated file review",
+        )?;
+    } else if !cli.json {
+        print_update_review(&review)?;
+    }
+    if cli.dry_run {
+        return Ok(ExitCode::SUCCESS);
+    }
+    approve(cli)?;
+    generated_update_result(cli, update.approve().execute()?, false)
+}
+
 fn recover_generated_update(cli: &Cli, host: &HostContext) -> dort_core::Result<ExitCode> {
     if cli.repo.is_some() || cli.confirm_remove.is_some() {
         return Err(Error::Invalid(

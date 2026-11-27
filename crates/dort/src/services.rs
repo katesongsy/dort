@@ -81,9 +81,10 @@ pub fn review_generated_update(
     repository: Option<&Path>,
     id: &str,
     profiles: &[String],
+    action: dort_core::generated::UpdateAction,
 ) -> Result<dort_core::generated::Update> {
     let root = absolute_repository(repository)?;
-    dort_core::generated::Update::prepare(host, root.as_deref(), id, profiles)
+    dort_core::generated::Update::prepare_action(host, root.as_deref(), id, profiles, action)
 }
 fn absolute_repository(repository: Option<&Path>) -> Result<Option<PathBuf>> {
     repository

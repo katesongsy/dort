@@ -283,7 +283,10 @@ fn compact(label: &'static str) -> &'static str {
         "Edit mapping"
     } else if label == Action::SaveProfileChoice.label() {
         "Local choice"
-    } else if matches!(label, "Review deployment" | "Review update") {
+    } else if matches!(
+        label,
+        "Review deployment" | "Review update" | "Review replacement" | "Review recreation"
+    ) {
         label
     } else if label == "Review generated recovery" {
         "Generated recovery"
@@ -508,7 +511,9 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
     if frame.area().width >= 64
         && matches!(
             preview.pending,
-            super::actions::Pending::GeneratedDeployment(_)
+            Pending::GeneratedDeployment(_)
+                | Pending::GeneratedUpdate(_)
+                | Pending::GeneratedRecovery(_)
         )
     {
         app.presented(
@@ -540,10 +545,10 @@ fn overlay(frame: &mut Frame, inner: Rect, app: &App, overlay: &Overlay) {
             report.draw(frame, inner, app);
             let review = if report.can_review_deployment() {
                 Some("Review deployment")
-            } else if report.can_review_update() {
-                Some("Review update")
             } else {
-                None
+                report
+                    .review_action()
+                    .map(crate::services::generated_update::review_label)
             };
             if let Some(label) = review {
                 app.presented(
