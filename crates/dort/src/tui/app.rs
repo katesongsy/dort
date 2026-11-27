@@ -1886,7 +1886,10 @@ impl App {
         if self.tab == Tab::Files {
             let action = (!self.discovering)
                 .then(|| {
-                    super::context::control_action(key.code, super::files::managed_controls(self))
+                    super::context::control_action(
+                        key.code,
+                        super::files::managed_controls(self, self.viewport.0),
+                    )
                 })
                 .flatten()
                 .or_else(|| super::context::file_action(key.code, self));

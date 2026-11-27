@@ -231,7 +231,7 @@ impl App {
     }
 }
 
-pub(super) fn managed_controls(app: &App) -> impl Iterator<Item = ui::ActionButton> {
+pub(super) fn managed_controls(app: &App, width: u16) -> impl Iterator<Item = ui::ActionButton> {
     use super::{configuration::Kind, shell::Action};
     let mapping = app.selected_mapping();
     let template = mapping.is_some_and(|file| file.mode == FileMode::Template);
@@ -270,12 +270,14 @@ pub(super) fn managed_controls(app: &App) -> impl Iterator<Item = ui::ActionButt
         Action::EnvironmentPlan,
         environment,
     );
-    if template {
-        [preview, edit_generated, new_generated, review, add, edit]
-    } else if app.inventory.details {
-        [new_generated, review, edit, add, preview, edit_generated]
-    } else {
+    if mapping.is_none() {
+        [new_generated, add, preview, review, edit_generated, edit]
+    } else if width >= 80 && !template {
         [new_generated, review, add, edit, preview, edit_generated]
+    } else if app.inventory.details {
+        [preview, review, edit_generated, edit, add, new_generated]
+    } else {
+        [preview, review, edit_generated, add, edit, new_generated]
     }
     .into_iter()
     .filter(|&(_, _, _, visible)| visible)
@@ -288,7 +290,7 @@ pub(super) fn managed_controls(app: &App) -> impl Iterator<Item = ui::ActionButt
 
 pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     if !app.discovering {
-        for control in managed_controls(app) {
+        for control in managed_controls(app, frame.area().width) {
             app.hits.present(control);
         }
     }
