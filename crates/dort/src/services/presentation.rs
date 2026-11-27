@@ -1,5 +1,9 @@
 //! Terminal-safe application reports shared by CLI and TUI.
-use dort_core::tools::{inspection, install};
+use dort_core::{
+    generated::{InputProvenance, ResolvedInputs},
+    template::Dialect,
+    tools::{inspection, install},
+};
 pub fn safe(text: &str) -> String {
     let mut escaped = String::with_capacity(text.len());
     for c in text.chars() {
@@ -14,16 +18,33 @@ pub fn safe(text: &str) -> String {
 pub fn inline(text: &str) -> String {
     safe(text).replace('\n', "\\n")
 }
-pub fn generated_inputs(preview: &dort_core::generated::Preview) -> String {
-    if preview.inputs.is_empty() {
-        "None".into()
-    } else {
-        preview
-            .inputs
-            .keys()
-            .map(String::as_str)
-            .collect::<Vec<_>>()
-            .join(", ")
+pub fn template_syntax(syntax: Dialect) -> &'static str {
+    match syntax {
+        Dialect::Literal => "Literal",
+        Dialect::Jinja => "Jinja",
+    }
+}
+
+pub fn generated_input_lines(inputs: &ResolvedInputs) -> impl Iterator<Item = String> {
+    let empty = inputs.is_empty().then(|| "None".into());
+    empty.into_iter().chain(inputs.iter().map(|(name, input)| {
+        let source = match input.provenance {
+            InputProvenance::Manifest => "dort.toml",
+            InputProvenance::Host(_) => "this host",
+        };
+        format!(
+            "{} = \"{}\" ({source})",
+            inline(name),
+            input.value.escape_default()
+        )
+    }))
+}
+
+pub fn write_generated_inputs(text: &mut String, inputs: &ResolvedInputs) {
+    use std::fmt::Write;
+    text.push_str("Resolved inputs\n");
+    for line in generated_input_lines(inputs) {
+        let _ = writeln!(text, "  {line}");
     }
 }
 
@@ -52,8 +73,8 @@ pub fn generated_details(preview: &dort_core::generated::Preview) -> String {
     }
     let _ = writeln!(
         text,
-        "Inputs from dort.toml: {}\nProposed permissions: {}",
-        generated_inputs(preview),
+        "Syntax: {}\nProposed permissions: {}",
+        template_syntax(preview.syntax),
         preview.proposed_permissions(),
     );
     let _ = writeln!(
@@ -65,6 +86,8 @@ pub fn generated_details(preview: &dort_core::generated::Preview) -> String {
             "No"
         }
     );
+    text.push('\n');
+    write_generated_inputs(&mut text, &preview.resolved_inputs);
     text.push_str("\nRendered output\n");
     text.push_str(&safe(&preview.rendered));
     if !text.ends_with('\n') {
@@ -75,8 +98,8 @@ pub fn generated_details(preview: &dort_core::generated::Preview) -> String {
 pub fn generated_deployment(review: dort_core::generated::DeploymentReview<'_>) -> String {
     use std::fmt::Write;
     let mut report = format!(
-        "Review first deployment: {}\nRepository: {}\nActive profiles: {}\nSource: {}\nCreate: {}\nPermissions: {}\n\nRendered output (spaces as \\x20, newlines as \\n)\n",
-        review.id,
+        "Review first deployment: {}\nRepository: {}\nActive profiles: {}\nSource: {}\nCreate: {}\nSyntax: {}\nPermissions: {}\n\n",
+        inline(review.id),
         inline(&review.repository.display().to_string()),
         review
             .active_profiles
@@ -89,8 +112,11 @@ pub fn generated_deployment(review: dort_core::generated::DeploymentReview<'_>) 
             |path| inline(&path.display().to_string()),
         ),
         inline(&review.destination.display().to_string()),
+        template_syntax(review.syntax),
         review.permissions,
     );
+    write_generated_inputs(&mut report, review.resolved_inputs);
+    report.push_str("\nRendered output (spaces as \\x20, newlines as \\n)\n");
     if review.rendered.is_empty() {
         report.push_str("Empty output\n");
     }
