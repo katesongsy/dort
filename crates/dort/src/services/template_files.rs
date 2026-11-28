@@ -1,10 +1,37 @@
 use super::presentation::inline;
 use dort_core::template_files::{Outcome, Retained, Review, Row, Source};
-use std::fmt::Write;
+use dort_core::{Error, Result, template::SOURCE_LIMIT};
+use std::{
+    fmt::Write,
+    fs::{File, OpenOptions},
+    io::Read,
+    os::unix::fs::OpenOptionsExt,
+    path::Path,
+};
+
+pub fn read_proposed(path: &Path) -> Result<String> {
+    let unreadable = |_| Error::Invalid("Could not read the proposed template file.".into());
+    let file: File = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .map_err(unreadable)?;
+    if !file.metadata().map_err(unreadable)?.is_file() {
+        return Err(Error::Invalid("Use a regular file for --from.".into()));
+    }
+    let mut bytes = Vec::new();
+    file.take(SOURCE_LIMIT as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(unreadable)?;
+    if bytes.len() > SOURCE_LIMIT {
+        return Err(Error::Invalid("Template exceeds 64 KiB.".into()));
+    }
+    String::from_utf8(bytes).map_err(|_| Error::Invalid("Template must be UTF-8.".into()))
+}
 
 pub fn list(rows: &[Row]) -> String {
     if rows.is_empty() {
-        return "No template files. Add a .jinja file under templates/.\n".into();
+        return "No template files found.\n".into();
     }
     let mut text = String::new();
     for row in rows {
