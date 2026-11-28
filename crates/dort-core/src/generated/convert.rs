@@ -381,6 +381,7 @@ fn inspect(
             other => other,
         })?;
     trusted_parents(&source.parents)?;
+    let source = source.stable_parents();
     render_error(id, &text)?;
     let permissions = source
         .fingerprint
@@ -786,7 +787,6 @@ impl Intent {
             let fingerprint = Fingerprint::from_stat(&stat);
             if !record::owned_regular(&stat, &fingerprint)
                 || fingerprint.mode & 0o7777 != self.permissions
-                || journal::digest(&bytes) != self.digest
                 || !matches_live(&handle, &self.destination, &fingerprint, &bytes)?
             {
                 return Err(conflict());

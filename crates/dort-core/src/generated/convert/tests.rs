@@ -109,8 +109,8 @@ fn converted(outcome: ConvertOutcome) -> Converted {
 
 #[test]
 fn a_reviewed_conversion_keeps_the_source_bytes_and_reports_the_retained_link() {
-    let root = tempfile::tempdir().unwrap().path().canonicalize().unwrap();
-    let f = Fixture::new(&root);
+    let root = tempfile::tempdir().unwrap();
+    let f = Fixture::new(&root.path().canonicalize().unwrap());
     let review = Convert::prepare(&f.host, None, "settings", &[]).unwrap();
     let review = review.review();
     assert_eq!(review.before, SOURCE);
@@ -131,8 +131,8 @@ fn a_reviewed_conversion_keeps_the_source_bytes_and_reports_the_retained_link() 
 
 #[test]
 fn a_source_with_template_syntax_refuses_and_names_the_line() {
-    let root = tempfile::tempdir().unwrap().path().canonicalize().unwrap();
-    let f = Fixture::new(&root);
+    let root = tempfile::tempdir().unwrap();
+    let f = Fixture::new(&root.path().canonicalize().unwrap());
     fs::write(f.repo.join("source"), "theme = dark\nfont = {{ name }}\n").unwrap();
     let error = Convert::prepare(&f.host, None, "settings", &[])
         .unwrap_err()
@@ -151,8 +151,8 @@ fn each_partial_boundary_resumes_twice_and_converges() {
         (Boundary::Exchanged, 1),
         (Boundary::Mapping, 2),
     ] {
-        let root = tempfile::tempdir().unwrap().path().canonicalize().unwrap();
-        let f = Fixture::new(&root);
+        let root = tempfile::tempdir().unwrap();
+        let f = Fixture::new(&root.path().canonicalize().unwrap());
         let outcome = f
             .approve()
             .execute_at(|at| {
@@ -180,8 +180,8 @@ fn each_partial_boundary_resumes_twice_and_converges() {
 
 #[test]
 fn a_changed_source_refuses_the_stale_approval_and_writes_nothing() {
-    let root = tempfile::tempdir().unwrap().path().canonicalize().unwrap();
-    let f = Fixture::new(&root);
+    let root = tempfile::tempdir().unwrap();
+    let f = Fixture::new(&root.path().canonicalize().unwrap());
     let approval = f.approve();
     fs::write(f.repo.join("source"), "theme = light\n").unwrap();
     let error = approval.execute().unwrap_err().to_string();
@@ -194,8 +194,8 @@ fn a_changed_source_refuses_the_stale_approval_and_writes_nothing() {
 
 #[test]
 fn a_foreign_or_unsafe_link_refuses() {
-    let root = tempfile::tempdir().unwrap().path().canonicalize().unwrap();
-    let f = Fixture::new(&root);
+    let root = tempfile::tempdir().unwrap();
+    let f = Fixture::new(&root.path().canonicalize().unwrap());
     let other = f.repo.join("other");
     fs::write(&other, "elsewhere\n").unwrap();
     fs::remove_file(&f.dest).unwrap();
@@ -215,8 +215,8 @@ fn a_foreign_or_unsafe_link_refuses() {
 
 #[test]
 fn a_template_path_used_by_another_mapping_refuses() {
-    let root = tempfile::tempdir().unwrap().path().canonicalize().unwrap();
-    let f = Fixture::new(&root);
+    let root = tempfile::tempdir().unwrap();
+    let f = Fixture::new(&root.path().canonicalize().unwrap());
     fs::create_dir_all(f.repo.join("templates")).unwrap();
     fs::write(f.repo.join("templates/settings.jinja"), "shared\n").unwrap();
     fs::write(
