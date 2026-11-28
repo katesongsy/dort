@@ -175,6 +175,7 @@ impl<'a> Reader<'a> {
 pub enum ReviewStage {
     Changes,
     Generated,
+    TemplateSource,
     DeclaredCheck,
     InstallMissing,
     InstalledInspect,

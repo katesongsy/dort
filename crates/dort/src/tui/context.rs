@@ -48,6 +48,7 @@ pub fn entries(app: &App) -> Vec<Entry> {
                 Profiles,
             ],
         ),
+        Tab::Files if app.files_page == Page::Templates => (vec![], vec![]),
         Tab::Files if app.files_page == Page::Generated => (vec![], vec![ClearFilter, Refresh]),
         Tab::Files => (
             vec![

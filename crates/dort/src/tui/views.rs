@@ -47,6 +47,7 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, _height: u16, _width: u
             "Repository: {:?}\n\nUp/Down select a line. Ctrl-U clears it, Backspace edits its end, Del removes it, and F4 inserts a line after it. Enter validates the draft and opens the diff.\n\nOnly dort.toml is saved after approval. If a legacy tool has more than one rule or an unsupported manager, choose a supported rule or manage that tool separately and fix its references. Edit larger repairs externally.",
             app.shell.repair.as_ref().map(|draft| draft.repository())
         ),
+        Overlay::Form(Form::TemplateFile) => "Source files live in the repository. Create or edit .jinja files under templates/.".into(),
         Overlay::Form(Form::LocalInputs) => "Read or set declared inputs for this file. Settings stay on this machine. No secrets.".into(),
         Overlay::Form(Form::Generated) => "Use Tab or the arrow keys to move between fields. Backspace edits the end of a field. Ctrl-U clears it. Paste text into the focused field. The review shows the rendered output before saving only dort.toml.".into(),
         Overlay::Form(Form::Configure) => {

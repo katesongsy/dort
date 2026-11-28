@@ -9,6 +9,7 @@ pub enum Form {
     Clone,
     Configure,
     Generated,
+    TemplateFile,
     LocalInputs,
     Repair,
     Adopt,
@@ -261,6 +262,7 @@ pub struct Shell {
     pub init_draft: String,
     pub clone_fields: [String; 2],
     pub generated: Option<super::generated::Draft>,
+    pub template_file: Option<super::templates::Screen>,
     pub local_inputs: Option<super::local_inputs::Panel>,
     pub open_template_editor: bool,
     pub repair: Option<super::configuration::RepairEditor>,
@@ -301,6 +303,7 @@ impl Shell {
             init_draft: String::new(),
             clone_fields: Default::default(),
             generated: None,
+            template_file: None,
             local_inputs: None,
             open_template_editor: false,
             repair: None,
@@ -340,8 +343,14 @@ impl Shell {
         ) || matches!(
             self.overlay,
             Some(Overlay::Form(Form::Repair | Form::Generated))
-        ) || (matches!(self.overlay, Some(Overlay::Form(Form::LocalInputs)))
-            && self.local_inputs.as_ref().is_some_and(|p| p.editing()))
+        ) || (matches!(self.overlay, Some(Overlay::Form(Form::TemplateFile)))
+            && self
+                .template_file
+                .as_ref()
+                .and_then(|screen| screen.draft())
+                .is_some())
+            || (matches!(self.overlay, Some(Overlay::Form(Form::LocalInputs)))
+                && self.local_inputs.as_ref().is_some_and(|p| p.editing()))
             || (matches!(self.overlay, Some(Overlay::Form(Form::Configure)))
                 && self
                     .configuration
@@ -384,7 +393,11 @@ impl Shell {
             Form::Choose => &self.choose_draft,
             Form::Init => &self.init_draft,
             Form::Clone => &self.clone_fields[1],
-            Form::Configure | Form::Repair | Form::Generated | Form::LocalInputs => "",
+            Form::Configure
+            | Form::Repair
+            | Form::Generated
+            | Form::LocalInputs
+            | Form::TemplateFile => "",
             Form::Adopt => &self.adoption.target,
             Form::Check => &self.manifest_draft,
             Form::KeepId | Form::RemoveId => &self.unmanage_id,
@@ -482,7 +495,10 @@ impl Shell {
         }
         if let Some(Overlay::Form(form)) = self.overlay {
             if key.code == KeyCode::F(3) {
-                return if matches!(form, Form::Generated | Form::LocalInputs) {
+                return if matches!(
+                    form,
+                    Form::Generated | Form::LocalInputs | Form::TemplateFile
+                ) {
                     None
                 } else {
                     self.form_action(super::forms::Command::Details)
@@ -637,6 +653,11 @@ impl Shell {
                 KeyCode::Enter => return Some(Intent::Submit(Form::Repair)),
                 _ => self.repair.as_mut()?.key(key),
             },
+            Overlay::Form(Form::TemplateFile) => {
+                if key.code == KeyCode::Esc {
+                    return Some(Intent::LeaveDraft);
+                }
+            }
             Overlay::Form(Form::Generated) => {
                 let draft = self.generated.as_mut()?;
                 match key.code {
@@ -696,6 +717,7 @@ impl Shell {
                     Form::Configure
                     | Form::Generated
                     | Form::LocalInputs
+                    | Form::TemplateFile
                     | Form::Repair
                     | Form::Clone
                     | Form::Adopt

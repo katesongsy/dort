@@ -64,7 +64,7 @@ impl Topic {
             Self::Managed => {
                 guide!("Managed files", "A mapping tells Dort which repository file to link into your home folder. Select a mapping and press Enter to inspect its source, destination and status.";
                     "Read status" => "Linked means the destination points to the expected source. Needs apply means it is not in place yet. Blocked means Dort found a conflict. Read the reason in Details before applying.",
-                    "Generated files" => "Press 4 to open Generated.",
+                    "Template files" => "Press 5 to open Templates. Press 4 for Generated.",
                     "Choose which files to apply" => "Apply reviews the active profiles, even with a filter on screen. To review a subset, press Space to mark the mappings and use Apply marked. Marks can be hidden by the filter.",
                     "Change what Dort manages" => "Add file mapping or Edit file mapping saves a declaration for later apply. Unmanage leaves a regular copy at the destination. Delete link removes the link at the destination. Both keep the repository source.",
                 )
@@ -75,10 +75,16 @@ impl Topic {
                     "Return to the list" => "Press Esc to choose a different mapping or mark a group. Apply marked uses the marks. Filtering alone never limits Apply.",
                 )
             }
+            Self::TemplateFiles => {
+                guide!("Template files", "Browse repository template paths and mapping counts. Enter reads the selected source without rendering it.";
+                    "Create or edit" => "Press s for a new file. In a source view, press Enter to edit an editable .jinja file under templates/. Create any missing folders in the repository first.",
+                    "Review and save" => "Tab moves between fields. Enter in the template adds a line. Press Esc to leave the field, then Enter to review. Scroll to the end and press y to save. Home files and mappings stay unchanged.",
+                )
+            }
             Self::GeneratedFiles => {
                 guide!("Generated files", "Press s for New generated file. Select a template to see its destination and source.";
                     "Preview" => "Press Enter or v for rendered output and current destination status.",
-                    "Edit" => "Press e to edit an inline template or its inputs. Edit file-backed templates in the repository.",
+                    "Edit" => "Press e to edit the template in dort.toml or its inputs. Open Files / Templates to edit a template file.",
                     "Local inputs" => "Press l on a file with declared local inputs. Review a value change or clear it. Settings stay on this machine.",
                     "Inspect" => "Press F3 for details. Esc returns to the selected row.",
                 )

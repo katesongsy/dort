@@ -119,6 +119,9 @@ impl Activity {
             }
             Task::InspectLocalInputs(_) => "Read local inputs",
             Task::ReviewLocalInput(_) => "Review local input",
+            Task::ListTemplates(_) => "List template files",
+            Task::ShowTemplate(..) => "Read template source",
+            Task::ReviewTemplate(..) => "Review template file",
             Task::PreviewGenerated(_) => "Preview generated file",
             Task::ReviewGeneratedDeployment(_) => "Review deployment",
             Task::ReviewGeneratedUpdate(_, action) => {
@@ -172,6 +175,7 @@ impl Activity {
                     Approved::EnvironmentAbandon(_) => "Abandon environment run",
                     Approved::Profile(_) => "Save profile choice",
                     Approved::LocalInput(_) => "Save local settings",
+                    Approved::TemplateFile(..) => "Save template file",
                     Approved::GeneratedDeployment(_) => "Deploy generated file",
                     Approved::GeneratedUpdate(p) => {
                         crate::services::generated_update::confirmation_label(p.action())
@@ -376,6 +380,13 @@ impl Activity {
             Pending::LocalInput(p) => (
                 pending.confirmation_label(),
                 vec![("Generated file", p.review().id.to_owned())],
+            ),
+            Pending::TemplateFile(p, root) => (
+                pending.confirmation_label(),
+                vec![
+                    ("Repository", root.display().to_string()),
+                    ("Template", p.review().path.display().to_string()),
+                ],
             ),
             Pending::GeneratedDeployment(p) => (
                 "Deploy generated file",

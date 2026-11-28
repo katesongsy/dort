@@ -113,6 +113,7 @@ pub fn local_catalog(group: usize) -> &'static [(&'static str, Place)] {
             ("2 Discover", Place::Action(Action::Discover)),
             ("3 Ignored paths", Place::Action(Action::ManageIgnored)),
             ("4 Generated", Place::Files(FilesPage::Generated)),
+            ("5 Templates", Place::Files(FilesPage::Templates)),
         ],
         4 => &[
             ("1 Manifest checks", Place::Manifest),
@@ -214,6 +215,9 @@ impl App {
             }
             Place::Files(page) => {
                 self.go_files_page(page);
+                if page == FilesPage::Templates {
+                    return self.load_templates();
+                }
                 None
             }
             Place::Destination(tab) => self.activate(Action::Destination(tab)),

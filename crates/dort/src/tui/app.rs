@@ -82,6 +82,7 @@ pub struct App {
     return_to_discover: bool,
     rediscovering_after_adoption: bool,
     pub files_page: FilesPage,
+    pub(super) templates: super::templates::Inventory,
     pub inventory: super::inventory::Inventory,
     pub batch_editor: Option<super::batch_ui::Editor>,
     pub discovery: Option<std::sync::Arc<crate::services::Discovery>>,
@@ -120,6 +121,16 @@ impl App {
             .and_then(|d| d.overview.as_ref())
             .and_then(|o| o.registered)
             == Some(true)
+    }
+    fn template_repository(&self) -> Option<PathBuf> {
+        self.registered_repository()
+            .then(|| self.data.as_ref()?.repository.clone())
+            .flatten()
+    }
+    pub(super) fn load_templates(&mut self) -> Option<Task> {
+        let root = self.template_repository()?;
+        self.templates.open(&root);
+        Some(Task::ListTemplates(root))
     }
     pub(super) fn checks_primary(&self) -> Action {
         if self.showing_diagnostics {
@@ -174,6 +185,7 @@ impl App {
             return_to_discover: false,
             rediscovering_after_adoption: false,
             files_page: FilesPage::Managed,
+            templates: Default::default(),
             inventory: Default::default(),
             batch_editor: None,
             discovery: None,
@@ -370,6 +382,43 @@ impl App {
                     },
                 ));
                 self.status = "".into();
+                None
+            }
+            Ok(Output::TemplateList(rows)) => {
+                self.templates.replace(rows);
+                self.status = "".into();
+                None
+            }
+            Ok(Output::TemplateSource(source)) => {
+                self.shell.template_file = Some(super::templates::Screen::view(*source));
+                self.shell.overlay = Some(Overlay::Form(Form::TemplateFile));
+                self.status = "".into();
+                None
+            }
+            Ok(Output::TemplateWritten(outcome, rows)) => {
+                self.clear_template_form();
+                self.shell.back();
+                self.receipt = None;
+                self.show_result = true;
+                self.details_scroll = 0;
+                let mut text = crate::services::template_files::outcome(&outcome);
+                match rows {
+                    Ok(rows) => self.templates.replace(rows),
+                    Err(error) => {
+                        self.templates.replace(Vec::new());
+                        text.push_str(&format!("\nCould not refresh template files: {error}\n"));
+                    }
+                }
+                self.result = Some(text);
+                self.status = if matches!(
+                    outcome,
+                    dort_core::template_files::Outcome::NeedsAttention { .. }
+                ) {
+                    "Template write needs attention"
+                } else {
+                    "Template write finished"
+                }
+                .into();
                 None
             }
             Ok(Output::Generated(preview)) => {
@@ -673,7 +722,7 @@ impl App {
         let previous = self.last_click.take();
         let row_click = matches!(target, Target::Row(_))
             && self.tab == Tab::Files
-            && self.files_page != FilesPage::Generated
+            && matches!(self.files_page, FilesPage::Managed | FilesPage::Discover)
             && !self.busy;
         // Row selection does not alter layout: retain render-owned hits for coalesced clicks.
         // Checkbox/chevron hits remain single-click controls, never double-click marks.
@@ -856,6 +905,8 @@ impl App {
             Target::Row(index) => {
                 if self.tab == Tab::Overview && self.profiles.open {
                     self.profiles.selected = index;
+                } else if self.tab == Tab::Files && self.files_page == FilesPage::Templates {
+                    self.templates.select(index);
                 } else if self.tab == Tab::Files && super::tree::position(self, index).is_some() {
                     super::tree::select(self, index);
                     self.inventory.details = false;
@@ -999,6 +1050,9 @@ impl App {
                         if !panel.editing() {
                             panel.focus_at(index);
                         }
+                    }
+                    Some(Overlay::Form(Form::TemplateFile)) => {
+                        self.shell.template_file.as_mut()?.focus_at(index);
                     }
                     Some(Overlay::Form(Form::Generated)) => {
                         let draft = self.shell.generated.as_mut()?;
@@ -1715,6 +1769,33 @@ impl App {
             }
             return None;
         }
+        if matches!(self.shell.overlay, Some(Overlay::Form(Form::TemplateFile))) {
+            if key.code == KeyCode::Esc {
+                self.leave_template_form();
+                return None;
+            }
+            if key.code == KeyCode::Enter
+                && key.modifiers.is_empty()
+                && (self.form_page().is_none() || !self.form_has_focus())
+            {
+                return self.intent(Intent::Submit(Form::TemplateFile));
+            }
+            let focused = self.form_has_focus();
+            if let Err(error) = self
+                .shell
+                .template_file
+                .as_mut()?
+                .key(key, focused, &self.hits)
+            {
+                self.shell.form_feedback = Some((Form::TemplateFile, error.to_string()));
+            } else if matches!(
+                key.code,
+                KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete
+            ) {
+                self.shell.form_feedback = None;
+            }
+            return None;
+        }
         if self.shell.overlay.is_some() {
             let report_scroll = !self.shell.form_details
                 && !self.shell.picker_details
@@ -1790,6 +1871,33 @@ impl App {
         self.workspace_key(key)
     }
     fn workspace_key(&mut self, key: KeyEvent) -> Option<Task> {
+        if self.tab == Tab::Files && self.files_page == FilesPage::Templates {
+            let root = self.template_repository()?;
+            match key.code {
+                KeyCode::Char('s') if key.modifiers.is_empty() => {
+                    self.shell.template_file = Some(super::templates::Screen::Draft(
+                        super::templates::Draft::create(),
+                    ));
+                    self.shell.overlay = Some(Overlay::Form(Form::TemplateFile));
+                    self.form_focus = self.form_page();
+                    return None;
+                }
+                KeyCode::Char('r' | 'R')
+                    if !key
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                {
+                    return self.load_templates();
+                }
+                _ => {
+                    return self.templates.key(
+                        key,
+                        root,
+                        self.inventory.viewport(self.files_page).page(),
+                    );
+                }
+            }
+        }
         if self.tab == Tab::Recovery
             && self.history_region == Region::Details
             && !self.history_search.editing
@@ -2263,6 +2371,15 @@ impl App {
                 .as_ref()?
                 .change(true)
                 .map(Task::ReviewLocalInput),
+            Intent::Submit(Form::TemplateFile) => {
+                let root = self.template_repository()?;
+                let screen = self.shell.template_file.as_mut()?;
+                let editing = screen.draft().is_some();
+                self.shell.form_feedback = None;
+                let task = screen.submit(root);
+                self.form_focus = if editing { None } else { self.form_page() };
+                task
+            }
             Intent::Submit(Form::Generated) => {
                 use super::configuration::Request;
                 self.shell.form_feedback = None;
@@ -2308,6 +2425,7 @@ impl App {
                     Form::Configure
                     | Form::Generated
                     | Form::LocalInputs
+                    | Form::TemplateFile
                     | Form::Repair
                     | Form::Adopt
                     | Form::Check
@@ -2812,6 +2930,14 @@ impl App {
                         .map(|error| (Form::Generated, error.to_string()))
                 });
             }
+            Some("template file") => {
+                self.shell.form_feedback = self.shell.template_file.as_mut().and_then(|screen| {
+                    screen
+                        .paste(text)
+                        .err()
+                        .map(|error| (Form::TemplateFile, error.to_string()))
+                });
+            }
             Some("local inputs") => {
                 self.shell.form_feedback = self.shell.local_inputs.as_mut().and_then(|panel| {
                     panel
@@ -2849,6 +2975,10 @@ impl App {
                 Form::Configure => "configuration",
                 Form::Repair => "manifest repair",
                 Form::Generated => "generated file",
+                Form::TemplateFile => {
+                    self.shell.template_file.as_ref()?.draft()?;
+                    "template file"
+                }
                 Form::LocalInputs if self.shell.local_inputs.as_ref()?.editing() => "local inputs",
                 Form::LocalInputs => return None,
                 Form::KeepId => "keep",
@@ -2956,6 +3086,7 @@ impl App {
             FilesPage::Managed => self.selected,
             FilesPage::Discover => self.candidate_selected,
             FilesPage::Generated => self.inventory.generated_selected,
+            FilesPage::Templates => 0,
         })
     }
     pub fn file_rows_empty(&self) -> bool {

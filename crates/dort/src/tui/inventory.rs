@@ -24,6 +24,7 @@ pub enum Page {
     Managed,
     Discover,
     Generated,
+    Templates,
 }
 impl Page {
     pub fn location(self) -> &'static str {
@@ -31,6 +32,7 @@ impl Page {
             Self::Managed => "Files / Managed",
             Self::Discover => "Files / Discover",
             Self::Generated => "Files / Generated",
+            Self::Templates => "Files / Templates",
         }
     }
 }
@@ -44,6 +46,8 @@ pub struct Inventory {
     pub managed: Search,
     pub candidates: Search,
     generated: Search,
+    template_search: Search,
+    template_viewport: super::navigation::ListViewport,
     pub generated_selected: usize,
     pub saved_template: Option<String>,
     pub details: bool,
@@ -61,6 +65,7 @@ impl Inventory {
             Page::Managed => &self.managed_viewport,
             Page::Discover => &self.candidate_viewport,
             Page::Generated => &self.generated_viewport,
+            Page::Templates => &self.template_viewport,
         }
     }
 
@@ -69,6 +74,7 @@ impl Inventory {
             Page::Managed => &self.managed,
             Page::Discover => &self.candidates,
             Page::Generated => &self.generated,
+            Page::Templates => &self.template_search,
         }
     }
 
@@ -77,6 +83,7 @@ impl Inventory {
             Page::Managed => &mut self.managed,
             Page::Discover => &mut self.candidates,
             Page::Generated => &mut self.generated,
+            Page::Templates => &mut self.template_search,
         }
     }
 }
