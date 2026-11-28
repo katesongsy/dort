@@ -3,7 +3,7 @@ use crate::{
     adoption::{parent_identity, same, transaction_id},
     context::HostContext,
     error::io_error,
-    journal,
+    generated, journal,
     local::{LocalConfig, repository_state_path},
     model::{FileMode, ManagedFile},
     observation::{self, Entry},
@@ -74,6 +74,7 @@ pub struct Preview {
     original: Vec<u8>,
     replacement: String,
     description: String,
+    generated: Option<generated::Preview>,
 }
 
 pub struct Approval(Preview);
@@ -182,19 +183,33 @@ fn edit_file(doc: &mut DocumentMut, manifest: &Manifest, file: &ManagedFile) -> 
             .as_array_of_tables_mut()
             .and_then(|files| files.get_mut(index))
             .ok_or_else(|| invalid("Use an array of file tables to edit this mapping."))?;
+        if let Some((legacy, template)) = existing.remove_entry("recipe") {
+            let mut key = toml_edit::Key::new("template");
+            *key.leaf_decor_mut() = legacy.leaf_decor().clone();
+            existing.insert_formatted(&key, template);
+        }
         for (key, changed) in [
             ("source", before.source != file.source),
+            ("template", before.template != file.template),
+            ("inputs", before.inputs != file.inputs),
             ("target", before.target != file.target),
             ("profiles", before.profiles != file.profiles),
             ("requires", before.requires != file.requires),
             ("overrides", before.overrides != file.overrides),
         ] {
             if changed && let Some(field) = fields.get(key) {
-                let field = field
+                let mut field = field
                     .clone()
                     .into_value()
                     .map_err(|_| invalid("Could not prepare the file mapping."))?;
-                existing.insert(key, Item::Value(field));
+                if key == "template"
+                    && let Some(previous) = existing.get_mut(key).and_then(Item::as_value_mut)
+                {
+                    *field.decor_mut() = previous.decor().clone();
+                    *previous = field;
+                } else {
+                    existing.insert(key, Item::Value(field));
+                }
             } else if changed {
                 existing.remove(key);
             }
@@ -203,10 +218,17 @@ fn edit_file(doc: &mut DocumentMut, manifest: &Manifest, file: &ManagedFile) -> 
         if !doc.contains_key("files") {
             doc["files"] = Item::ArrayOfTables(toml_edit::ArrayOfTables::new());
         }
+        let mut mapping = Table::new();
+        for (key, field) in fields.into_table() {
+            let field = field
+                .into_value()
+                .map_err(|_| invalid("Could not prepare the file mapping."))?;
+            mapping.insert(&key, Item::Value(field));
+        }
         doc["files"]
             .as_array_of_tables_mut()
             .ok_or_else(|| invalid("Use an array of file tables to add a mapping."))?
-            .push(fields.into_table());
+            .push(mapping);
     }
     Ok(())
 }
@@ -231,7 +253,10 @@ impl Preview {
             .map(|(id, _)| id.clone())
             .ok_or_else(|| invalid("Choose a registered repository."))?;
         let path = repository.join("dort.toml");
-        let (manifest, entry) = observation::read_manifest(&path)?;
+        let (manifest, entry) = observation::read_manifest(&path).map_err(|error| match error {
+            Error::Parse(_) => invalid("Invalid manifest. Contents withheld."),
+            other => other,
+        })?;
         let original = crate::adoption::checked_bytes(&entry)?;
         let text =
             std::str::from_utf8(&original).map_err(|_| invalid("Manifest must be UTF-8."))?;
@@ -239,6 +264,7 @@ impl Preview {
             .parse()
             .map_err(|_| invalid("Invalid manifest. Contents withheld."))?;
         let mut watched_target = None;
+        let mut generated_id = None;
         let description = match change {
             Change::Profile { .. } | Change::RenameProfile { .. } => {
                 let renamed;
@@ -318,8 +344,10 @@ impl Preview {
                     mapping: file,
                     before,
                 } = change.as_ref();
-                if file.mode != FileMode::Link {
-                    return Err(invalid("Only link mappings can be edited here."));
+                let inline =
+                    |file: &ManagedFile| file.mode == FileMode::Template && file.template.is_some();
+                if file.mode != FileMode::Link && !inline(file) {
+                    return Err(invalid("Choose a link mapping or an inline template."));
                 }
                 let previous = manifest
                     .files
@@ -328,7 +356,7 @@ impl Preview {
                 match (before.is_some(), previous) {
                     (false, Some(_)) => {
                         return Err(invalid(
-                            "That mapping ID already exists. Select it and choose Edit file mapping.",
+                            "That file ID already exists. Choose a different ID or edit the saved file.",
                         ));
                     }
                     (true, None) => {
@@ -342,45 +370,67 @@ impl Preview {
                     return Err(invalid("That mapping changed. Refresh and edit it again."));
                 }
                 if let Some(previous) = previous {
-                    if previous.mode != FileMode::Link {
-                        return Err(invalid("Only link mappings can be edited here."));
+                    if previous.mode != file.mode || inline(previous) != inline(file) {
+                        return Err(invalid("Keep the existing file mode and source type."));
                     }
-                    let source = |m: &ManagedFile| {
-                        repository.join(m.overrides.get(&host.platform).unwrap_or(&m.source))
-                    };
-                    let target = host.target_path(&previous.target, Some(repository))?;
-                    if previous.target != file.target || source(previous) != source(file) {
-                        let before = observation::inspect(&target, false)?;
-                        if observation::link_path(&before).as_ref() == Some(&source(previous)) {
+                    if inline(file) {
+                        if previous.profiles != file.profiles
+                            || previous.requires != file.requires
+                            || previous.permissions != file.permissions
+                        {
                             return Err(invalid(
-                                "Keep the current managed file before changing its source or destination. Then add the mapping again.",
+                                "Keep the saved profiles, required tools, and permissions.",
                             ));
                         }
-                        watched_target = Some(before);
+                    } else {
+                        let source = |m: &ManagedFile| -> Result<PathBuf> {
+                            let path = m
+                                .source_for(host.platform)
+                                .ok_or_else(|| invalid("Enter a repository source."))?;
+                            Ok(repository.join(path))
+                        };
+                        let target = host.target_path(&previous.target, Some(repository))?;
+                        let previous_source = source(previous)?;
+                        if previous.target != file.target || previous_source != source(file)? {
+                            let before = observation::inspect(&target, false)?;
+                            if observation::link_path(&before).as_ref() == Some(&previous_source) {
+                                return Err(invalid(
+                                    "Keep the current managed file before changing its source or destination. Then add the mapping again.",
+                                ));
+                            }
+                            watched_target = Some(before);
+                        }
                     }
                 }
                 if previous != Some(file) {
                     edit_file(&mut doc, &manifest, file)?;
                 }
-                let override_path = |p: Platform| {
-                    file.overrides
-                        .get(&p)
-                        .map_or_else(|| "Use source".into(), |p| format!("{p:?}"))
-                };
-                format!(
-                    "Save file mapping {:?}.\nSource: {:?}\nHome destination: {:?}\nProfiles: {}\nRequires: {}\nmacOS source: {}\nLinux source: {}",
-                    file.id,
-                    file.source,
-                    file.target,
-                    file.profiles.join(", "),
-                    if file.requires.is_empty() {
-                        "None".into()
-                    } else {
-                        file.requires.join(", ")
-                    },
-                    override_path(Platform::Macos),
-                    override_path(Platform::Linux)
-                )
+                if inline(file) {
+                    generated_id = Some(file.id.as_str());
+                    format!("Save generated file {:?}.", file.id)
+                } else {
+                    let override_path = |p: Platform| {
+                        file.overrides
+                            .get(&p)
+                            .map_or_else(|| "Use source".into(), |p| format!("{p:?}"))
+                    };
+                    format!(
+                        "Save file mapping {:?}.\nSource: {:?}\nHome destination: {:?}\nProfiles: {}\nRequires: {}\nmacOS source: {}\nLinux source: {}",
+                        file.id,
+                        file.source
+                            .as_deref()
+                            .ok_or_else(|| invalid("Enter a repository source."))?,
+                        file.target,
+                        file.profiles.join(", "),
+                        if file.requires.is_empty() {
+                            "None".into()
+                        } else {
+                            file.requires.join(", ")
+                        },
+                        override_path(Platform::Macos),
+                        override_path(Platform::Linux)
+                    )
+                }
             }
         };
         let replacement = if matches!(change, Change::File(change) if change.before.as_ref() == Some(&change.mapping))
@@ -390,11 +440,17 @@ impl Preview {
             doc.to_string()
         };
         let parsed = Manifest::parse(&replacement).map_err(|error| match error {
-            Error::Parse(_) => invalid("Cannot save an invalid manifest."),
+            Error::Parse(_) => invalid(
+                "Dort could not prepare this change to dort.toml. No changes were made. If it happens again, report it as a Dort bug.",
+            ),
             error => error,
         })?;
         parsed.validate_file_targets(host, &parsed.profiles.known(), Some(repository), None)?;
+        let generated = generated_id
+            .map(|id| generated::Preview::from_manifest(host, repository, &parsed, id))
+            .transpose()?;
         Ok(Self {
+            generated,
             repository: repository.to_owned(),
             backup_root: repository_state_path(host, &repository_id)?.join("manifest-edits"),
             repair_git: None,
@@ -405,6 +461,10 @@ impl Preview {
             replacement,
             description,
         })
+    }
+
+    pub fn generated(&self) -> Option<&generated::Preview> {
+        self.generated.as_ref()
     }
 
     pub fn unchanged(&self) -> bool {

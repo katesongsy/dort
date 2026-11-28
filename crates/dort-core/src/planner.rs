@@ -30,7 +30,7 @@ pub enum UnmanageMode {
 #[derive(Debug, Clone, Serialize)]
 pub struct FileSnapshot {
     pub mapping: ManagedFile,
-    pub source_path: PathBuf,
+    pub source_path: Option<PathBuf>,
     pub target_path: PathBuf,
     pub source: Option<Entry>,
     pub destination: Option<Entry>,
@@ -121,7 +121,9 @@ fn observe_inner(
     };
     let mut files = vec![];
     for mapping in mappings {
-        let source_path = repository.join(mapping.source_for(host.platform));
+        let source_path = mapping
+            .source_for(host.platform)
+            .map(|p| repository.join(p));
         let target_path = host.target_path(&mapping.target, Some(repository))?;
         let mut blockers = vec![];
         if mapping.mode != FileMode::Link {
@@ -144,7 +146,7 @@ fn observe_inner(
                 None
             }
         };
-        let source = capture(&source_path);
+        let source = source_path.as_deref().and_then(&mut capture);
         let destination = capture(&target_path);
         files.push(FileSnapshot {
             mapping,
@@ -162,8 +164,10 @@ fn observe_inner(
             .iter()
             .filter(|f| f.mode == FileMode::Link && !selected(&f.profiles, &active))
         {
-            let source = repository.join(mapping.source_for(host.platform));
-            if let Ok(target) = host.target_path(&mapping.target, Some(repository))
+            if let Some(source) = mapping
+                .source_for(host.platform)
+                .map(|p| repository.join(p))
+                && let Ok(target) = host.target_path(&mapping.target, Some(repository))
                 && let Ok(entry) = observation::inspect(&target, false)
                 && observation::link_path(&entry).as_ref() == Some(&source)
             {
@@ -217,15 +221,20 @@ fn validate_adoption(
             "adoption cannot create platform overrides".into(),
         ));
     }
-    for existing in &manifest.files {
-        for source in std::iter::once(&existing.source).chain(existing.overrides.values()) {
-            if source.starts_with(&mapping.source) || mapping.source.starts_with(source) {
-                return Err(Error::Invalid(
-                    "Source overlaps an existing mapping. Choose a different repository source."
-                        .into(),
-                ));
-            }
-        }
+    let source = mapping
+        .source
+        .as_deref()
+        .filter(|_| mapping.mode == FileMode::Link)
+        .ok_or_else(|| Error::Invalid("Adoption requires a link and repository source.".into()))?;
+    if manifest
+        .files
+        .iter()
+        .flat_map(ManagedFile::source_paths)
+        .any(|existing| crate::manifest::paths_overlap(existing, source))
+    {
+        return Err(Error::Invalid(
+            "Source overlaps an existing mapping. Choose a different repository source.".into(),
+        ));
     }
     Ok(())
 }
@@ -357,7 +366,9 @@ fn plan_inner(snapshot: Snapshot, environment: bool) -> Plan {
                 .blockers
                 .push("tool prerequisite verification is unsupported".into());
         }
-        if let (Some(source), Some(destination)) = (&file.source, &file.destination) {
+        if let (Some(source_path), Some(source), Some(destination)) =
+            (&file.source_path, &file.source, &file.destination)
+        {
             if destination.sensitive {
                 result.blockers.push(
                     "destination appears sensitive; ordinary link operations are refused".into(),
@@ -385,7 +396,7 @@ fn plan_inner(snapshot: Snapshot, environment: bool) -> Plan {
                         snapshot.user_id,
                         &mut result.blockers,
                     );
-                    if observation::sensitive_path(&file.source_path) {
+                    if observation::sensitive_path(source_path) {
                         result
                             .blockers
                             .push("adoption source path appears sensitive".into());
@@ -396,12 +407,12 @@ fn plan_inner(snapshot: Snapshot, environment: bool) -> Plan {
                             path: manifest.clone(),
                         },
                         Effect::EnsureParents {
-                            path: file.source_path.clone(),
+                            path: source_path.clone(),
                             permissions: "0700".into(),
                         },
                         Effect::CopySource {
                             from: file.target_path.clone(),
-                            to: file.source_path.clone(),
+                            to: source_path.clone(),
                             permissions: permissions(destination),
                         },
                         Effect::AddMapping {
@@ -413,14 +424,14 @@ fn plan_inner(snapshot: Snapshot, environment: bool) -> Plan {
                         },
                         Effect::Link {
                             target: file.target_path.clone(),
-                            source: file.source_path.clone(),
+                            source: source_path.clone(),
                         },
                     ];
                 }
                 Request::Apply => {
                     regular(source, "source", snapshot.user_id, &mut result.blockers);
                     if destination.kind == Kind::Symlink
-                        && observation::link_path(destination).as_ref() == Some(&file.source_path)
+                        && observation::link_path(destination).as_ref() == Some(source_path)
                     {
                         result.outcome = Outcome::NoOp;
                     } else {
@@ -439,14 +450,14 @@ fn plan_inner(snapshot: Snapshot, environment: bool) -> Plan {
                         });
                         result.effects.push(Effect::Link {
                             target: file.target_path.clone(),
-                            source: file.source_path.clone(),
+                            source: source_path.clone(),
                         });
                     }
                 }
                 Request::Unmanage { mode, .. } => {
                     regular(source, "source", snapshot.user_id, &mut result.blockers);
                     if destination.kind != Kind::Symlink
-                        || observation::link_path(destination).as_ref() != Some(&file.source_path)
+                        || observation::link_path(destination).as_ref() != Some(source_path)
                     {
                         result.blockers.push("unmanage requires the currently correct managed link; destination drift is refused".into());
                     }
@@ -460,7 +471,7 @@ fn plan_inner(snapshot: Snapshot, environment: bool) -> Plan {
                     });
                     result.effects.push(match mode {
                         UnmanageMode::Keep => Effect::Materialize {
-                            source: file.source_path.clone(),
+                            source: source_path.clone(),
                             target: file.target_path.clone(),
                             permissions: permissions(source),
                         },
@@ -516,16 +527,20 @@ impl Plan {
                 .iter()
                 .find(|input| input.mapping.id == file.id)
             {
-                let _ = writeln!(
-                    text,
-                    "  Source: {} (permissions: {})",
-                    input.source_path.display(),
-                    input
-                        .source
-                        .as_ref()
-                        .filter(|e| e.fingerprint.is_some())
-                        .map_or("absent/unknown".into(), permissions)
-                );
+                if let Some(path) = &input.source_path {
+                    let _ = writeln!(
+                        text,
+                        "  Source: {} (permissions: {})",
+                        path.display(),
+                        input
+                            .source
+                            .as_ref()
+                            .filter(|e| e.fingerprint.is_some())
+                            .map_or("absent/unknown".into(), permissions)
+                    );
+                } else {
+                    let _ = writeln!(text, "  Template: Inline in dort.toml");
+                }
                 let _ = writeln!(
                     text,
                     "  Destination: {} (permissions: {})",

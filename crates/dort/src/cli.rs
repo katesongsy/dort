@@ -373,13 +373,14 @@ pub fn run() -> ExitCode {
                 | Error::RecoveryRequired(_)
                 | Error::NoRepository => (2, "validation"),
             };
+            let message = match error {
+                Error::Parse(_) => "Invalid TOML. Check the file syntax.".into(),
+                other => other.to_string(),
+            };
             if cli.json {
-                eprintln!(
-                    "{}",
-                    serde_json::json!({"error": error.to_string(), "kind": kind})
-                );
+                eprintln!("{}", serde_json::json!({"error": message, "kind": kind}));
             } else {
-                eprintln!("error: {error}");
+                eprintln!("error: {message}");
             }
             ExitCode::from(code)
         }
@@ -1275,7 +1276,10 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                             "{}: {} -> {}",
                             file.mapping.id,
                             file.target_path.display(),
-                            file.source_path.display()
+                            file.source_path.as_ref().map_or_else(
+                                || "Inline template in dort.toml".into(),
+                                |path| path.display().to_string()
+                            )
                         );
                         println!(
                             "  Source: {:?}; destination: {:?}",

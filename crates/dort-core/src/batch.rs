@@ -151,12 +151,20 @@ pub(crate) fn validate_adoptions(
         if !mapping.overrides.is_empty() {
             return Err(Error::Invalid("batch adoption cannot add overrides".into()));
         }
-        for existing in &manifest.files {
-            for source in std::iter::once(&existing.source).chain(existing.overrides.values()) {
-                if overlap(source, &mapping.source) {
-                    return Err(Error::Invalid("batch adoption sources overlap".into()));
-                }
-            }
+        let source = mapping
+            .source
+            .as_deref()
+            .filter(|_| mapping.mode == crate::model::FileMode::Link)
+            .ok_or_else(|| {
+                Error::Invalid("Adoption requires a link and repository source.".into())
+            })?;
+        if manifest
+            .files
+            .iter()
+            .flat_map(ManagedFile::source_paths)
+            .any(|existing| overlap(existing, source))
+        {
+            return Err(Error::Invalid("batch adoption sources overlap".into()));
         }
         manifest.files.push(mapping.clone());
     }
@@ -218,9 +226,13 @@ pub fn plan(inputs: Snapshot) -> Plan {
                 for b in &other.files {
                     if a.mapping.id == b.mapping.id
                         || overlap(&a.target_path, &b.target_path)
-                        || overlap(&a.source_path, &b.source_path)
-                        || overlap(&a.source_path, &b.target_path)
-                        || overlap(&a.target_path, &b.source_path)
+                        || a.source_path.iter().any(|path| {
+                            overlap(path, &b.target_path)
+                                || b.source_path.iter().any(|other| overlap(path, other))
+                        })
+                        || b.source_path
+                            .iter()
+                            .any(|path| overlap(&a.target_path, path))
                     {
                         blockers.push("batch IDs, sources or destinations conflict".into());
                     }

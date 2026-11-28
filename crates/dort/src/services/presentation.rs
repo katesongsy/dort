@@ -27,12 +27,24 @@ pub fn generated_inputs(preview: &dort_core::generated::Preview) -> String {
     }
 }
 
+pub fn generated_source(preview: &dort_core::generated::Preview) -> String {
+    preview.source.as_ref().map_or_else(
+        || "Inline template in dort.toml".into(),
+        |source| source.display().to_string(),
+    )
+}
 pub fn generated(preview: &dort_core::generated::Preview) -> String {
+    format!(
+        "Generated file preview: {}\nNo files written.\n{}",
+        inline(&preview.id),
+        generated_details(preview)
+    )
+}
+pub fn generated_details(preview: &dort_core::generated::Preview) -> String {
     use std::fmt::Write;
     let mut text = format!(
-        "Generated file preview: {}\nNo files written.\nSource: {}\nDestination: {}\nDestination status: {}\nInputs from dort.toml: {}\n",
-        inline(&preview.id),
-        inline(&preview.source.display().to_string()),
+        "Source: {}\nDestination: {}\nDestination status: {}\nInputs from dort.toml: {}\n",
+        inline(&generated_source(preview)),
         inline(&preview.destination.display().to_string()),
         preview.destination_status.label(),
         generated_inputs(preview),
@@ -40,6 +52,15 @@ pub fn generated(preview: &dort_core::generated::Preview) -> String {
     if let Some(mode) = &preview.permissions {
         let _ = writeln!(text, "Declared permissions: {mode}");
     }
+    let _ = writeln!(
+        text,
+        "Final newline: {}",
+        if preview.rendered.ends_with('\n') {
+            "Yes"
+        } else {
+            "No"
+        }
+    );
     text.push_str("\nRendered output\n");
     text.push_str(&safe(&preview.rendered));
     if !text.ends_with('\n') {

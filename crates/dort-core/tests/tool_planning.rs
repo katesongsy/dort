@@ -555,7 +555,8 @@ fn pure_package_planning_does_not_expand_or_observe_unrelated_file_targets() {
     let mut m = manifest(vec![tool("node", Provider::Brew, "node", None)]);
     m.files.push(dort_core::model::ManagedFile {
         id: "unrelated".into(),
-        source: "absent/source".into(),
+        source: Some("absent/source".into()),
+        template: None,
         target: "~/.unrelated".into(),
         mode: dort_core::model::FileMode::Template,
         profiles: vec!["base".into()],

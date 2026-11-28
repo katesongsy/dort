@@ -217,7 +217,7 @@ enum Detail {
         command: Option<Vec<String>>,
     },
     File {
-        source: PathBuf,
+        source: Option<PathBuf>,
         destination: PathBuf,
         effects: Vec<planner::Effect>,
     },
@@ -717,7 +717,12 @@ impl Preview {
                     destination,
                     effects,
                 } => {
-                    let _ = writeln!(text, "   Source: {source:?}\n   Target: {destination:?}");
+                    if let Some(source) = source {
+                        let _ = writeln!(text, "   Source: {source:?}");
+                    } else {
+                        let _ = writeln!(text, "   Template: Inline in dort.toml");
+                    }
+                    let _ = writeln!(text, "   Target: {destination:?}");
                     for effect in effects {
                         let _ = writeln!(text, "   {effect:?}");
                     }

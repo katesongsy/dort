@@ -8,6 +8,7 @@ pub enum Form {
     Init,
     Clone,
     Configure,
+    Generated,
     Repair,
     Adopt,
     Check,
@@ -137,6 +138,8 @@ pub enum Action {
     AdoptSelected,
     BatchAdopt,
     PreviewGenerated,
+    NewGenerated,
+    EditGenerated,
     ApplyMarked,
     KeepMarked,
     RemoveMarked,
@@ -206,6 +209,8 @@ impl Action {
             Self::AdoptSelected => "Adopt selected eligible file (editable draft)",
             Self::BatchAdopt => "Adopt marked files (combined editable batch)",
             Self::PreviewGenerated => "Preview generated file",
+            Self::NewGenerated => "New generated file",
+            Self::EditGenerated => "Edit generated file",
             Self::ApplyMarked => "Apply marked mappings (selected batch)",
             Self::KeepMarked => "Keep marked mappings (combined batch)",
             Self::RemoveMarked => "Delete marked links (each exact ID then yes)",
@@ -251,6 +256,8 @@ pub struct Shell {
     pub page_rows: std::cell::Cell<u16>,
     pub init_draft: String,
     pub clone_fields: [String; 2],
+    pub generated: Option<super::generated::Draft>,
+    pub open_template_editor: bool,
     pub repair: Option<super::configuration::RepairEditor>,
     pub configuration: Option<super::configuration::Draft>,
     pub path_focused: usize,
@@ -286,6 +293,8 @@ impl Shell {
             page_rows: std::cell::Cell::new(1),
             init_draft: String::new(),
             clone_fields: Default::default(),
+            generated: None,
+            open_template_editor: false,
             repair: None,
             configuration: None,
             path_focused: 0,
@@ -320,12 +329,14 @@ impl Shell {
             self.overlay,
             Some(Overlay::Form(Form::Clone | Form::Choose | Form::Init))
                 if self.path_focused < 2
-        ) || matches!(self.overlay, Some(Overlay::Form(Form::Repair)))
-            || (matches!(self.overlay, Some(Overlay::Form(Form::Configure)))
-                && self
-                    .configuration
-                    .as_ref()
-                    .is_some_and(|draft| !draft.is_default_row(draft.focus)))
+        ) || matches!(
+            self.overlay,
+            Some(Overlay::Form(Form::Repair | Form::Generated))
+        ) || (matches!(self.overlay, Some(Overlay::Form(Form::Configure)))
+            && self
+                .configuration
+                .as_ref()
+                .is_some_and(|draft| !draft.is_default_row(draft.focus)))
             || (matches!(self.overlay, Some(Overlay::Form(Form::Adopt)))
                 && self.adoption.focused < AdoptionDraft::FIELDS)
             || (matches!(self.overlay, Some(Overlay::Form(Form::Check)))
@@ -344,12 +355,25 @@ impl Shell {
             None
         };
     }
+    pub fn finish_template_edit(&mut self, result: dort_core::Result<String>) {
+        let Some(draft) = self.generated.as_mut() else {
+            return;
+        };
+        self.form_feedback = match result {
+            Ok(text) => {
+                draft.template.replace(text);
+                draft.focus_template();
+                None
+            }
+            Err(error) => Some((Form::Generated, error.to_string())),
+        };
+    }
     pub fn draft(&self, form: Form) -> &str {
         match form {
             Form::Choose => &self.choose_draft,
             Form::Init => &self.init_draft,
             Form::Clone => &self.clone_fields[1],
-            Form::Configure | Form::Repair => "",
+            Form::Configure | Form::Repair | Form::Generated => "",
             Form::Adopt => &self.adoption.target,
             Form::Check => &self.manifest_draft,
             Form::KeepId | Form::RemoveId => &self.unmanage_id,
@@ -363,7 +387,17 @@ impl Shell {
         match command {
             Command::Submit => Some(Intent::Submit(form)),
             Command::InsertLine => {
-                self.repair.as_mut()?.insert();
+                if form == Form::Repair {
+                    self.repair.as_mut()?.insert();
+                }
+                None
+            }
+            Command::OpenTemplateEditor => {
+                self.open_template_editor = form == Form::Generated
+                    && self
+                        .generated
+                        .as_ref()
+                        .is_some_and(|draft| !draft.entering_inputs());
                 None
             }
             Command::Toggle => {
@@ -575,6 +609,30 @@ impl Shell {
                 KeyCode::Enter => return Some(Intent::Submit(Form::Repair)),
                 _ => self.repair.as_mut()?.key(key),
             },
+            Overlay::Form(Form::Generated) => {
+                let draft = self.generated.as_mut()?;
+                match key.code {
+                    KeyCode::Esc if !draft.back() => {
+                        self.generated = None;
+                        self.back();
+                    }
+                    KeyCode::Esc => self.form_feedback = None,
+                    KeyCode::Enter if !draft.template_focused() => {
+                        return Some(Intent::Submit(Form::Generated));
+                    }
+                    KeyCode::F(4) if !draft.entering_inputs() => {
+                        return Some(Intent::Submit(Form::Generated));
+                    }
+                    KeyCode::F(5) if !draft.entering_inputs() => {
+                        return self.form_action(super::forms::Command::OpenTemplateEditor);
+                    }
+                    _ => {
+                        if let Err(error) = draft.key(key) {
+                            self.form_feedback = Some((Form::Generated, error.to_string()));
+                        }
+                    }
+                }
+            }
             Overlay::Form(Form::Configure) => match key.code {
                 KeyCode::Esc => self.back(),
                 KeyCode::Enter => return Some(Intent::Submit(Form::Configure)),
@@ -592,6 +650,7 @@ impl Shell {
                     Form::Choose => &mut self.choose_draft,
                     Form::Init => &mut self.init_draft,
                     Form::Configure
+                    | Form::Generated
                     | Form::Repair
                     | Form::Clone
                     | Form::Adopt

@@ -439,7 +439,7 @@ fn managed_files_preview_without_opening_details_in_a_wide_split() {
     let mut data = super::actions::Data::default();
     data.managed.push(ManagedRow {
         id: "a".into(),
-        source: "/synthetic/source".into(),
+        source: Some("/synthetic/source".into()),
         target: f.host.home.join(".a"),
         state: "Linked",
         source_kind: "Regular file",
@@ -468,7 +468,7 @@ fn already_managed_candidates_are_marked_and_cannot_be_adopted_again() {
     let mut data = super::actions::Data::default();
     data.managed.push(ManagedRow {
         id: "existing".into(),
-        source: "/synthetic/source".into(),
+        source: Some("/synthetic/source".into()),
         target: target.clone(),
         state: "Linked",
         source_kind: "Regular file",

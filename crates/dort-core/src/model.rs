@@ -46,7 +46,10 @@ pub enum FileMode {
 #[serde(deny_unknown_fields)]
 pub struct ManagedFile {
     pub id: String,
-    pub source: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<PathBuf>,
+    #[serde(alias = "recipe", skip_serializing_if = "Option::is_none")]
+    pub template: Option<String>,
     pub target: PathBuf,
     pub mode: FileMode,
     #[serde(default = "base_profiles")]
@@ -60,8 +63,29 @@ pub struct ManagedFile {
     pub permissions: Option<String>,
 }
 
+pub(crate) enum FileContent<'a> {
+    Source(&'a std::path::Path),
+    Template(&'a str),
+}
+
 impl ManagedFile {
-    pub(crate) fn source_for(&self, platform: Platform) -> &std::path::Path {
-        self.overrides.get(&platform).unwrap_or(&self.source)
+    pub fn source_for(&self, platform: Platform) -> Option<&std::path::Path> {
+        self.source
+            .as_ref()
+            .map(|source| self.overrides.get(&platform).unwrap_or(source).as_path())
+    }
+
+    pub(crate) fn source_paths(&self) -> impl Iterator<Item = &PathBuf> {
+        self.source.iter().chain(self.overrides.values())
+    }
+
+    pub(crate) fn content_for(&self, platform: Platform) -> Option<FileContent<'_>> {
+        match (self.source_for(platform), self.template.as_deref()) {
+            (Some(path), None) => Some(FileContent::Source(path)),
+            (None, Some(text)) if self.mode == FileMode::Template && self.overrides.is_empty() => {
+                Some(FileContent::Template(text))
+            }
+            _ => None,
+        }
     }
 }

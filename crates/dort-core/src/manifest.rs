@@ -102,7 +102,10 @@ impl Manifest {
             }
             check_profiles(&file.id, &file.profiles, &known, true, &mut issues);
             check_references(&file.id, &file.requires, &tool_ids, &mut issues);
-            for source in std::iter::once(&file.source).chain(file.overrides.values()) {
+            if file.content_for(Platform::Linux).is_none() {
+                issues.push(format!("{}: use a source path, or an inline template in template mode without source overrides", file.id));
+            }
+            for source in file.source_paths() {
                 if !valid_source(source) {
                     issues.push(format!("{}: source must be repository-relative without traversal or reserved paths", file.id));
                 }

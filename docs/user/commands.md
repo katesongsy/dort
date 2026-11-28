@@ -42,6 +42,16 @@ Use `1` for Managed, `2` for Discover and `3` for Ignored paths. `g` opens Git.
 - Select a generated file in **Managed** and choose **Preview generated file** (`Enter` or `v`). Scroll with the arrows or page keys. `End` jumps to the end of the output; `Esc` returns to Managed.
 - In either list, `Space` marks or unmarks, and `Home` / `End` select the first or last row. Hidden marks still count.
 - **Delete link** and **Delete marked** are separate actions. Review the paths and confirm the exact mapping IDs before deleting links.
+#### Generated files
+
+In **Files**, open **Managed**. Press `s` or choose **New generated file**. Enter a file ID and a Home destination. Press `Tab` or `Shift+Tab` to move between fields. In **Template**, `Enter` adds a newline. Use the arrows, `Home`, and `End` to edit, or paste several lines at once. Use `{{ name }}` for an input. Keep secrets out of templates and inputs.
+
+Choose **Open in editor** (`F5`) to edit the template in an external editor. Set `VISUAL` or `EDITOR` before starting Dort, for example `VISUAL='code --wait'`. Dort tries `VISUAL` first. Choose an editor command that waits until you close the file. The editor gets a temporary copy of the template. Save and exit the editor to return to the draft.
+
+Choose **Continue** (`F4`). If the template uses inputs, enter the named values. Leave a value blank to render nothing. Choose **Review generated file** after entering inputs. Read the output. Press `y` when **Save generated file** is ready. `Esc` from the review or inputs returns to the draft. Saving changes only `dort.toml`.
+
+To revisit a saved template, select it in Managed. Press `v` to preview it or `e` to choose **Edit generated file**. File-backed templates can be previewed; edit their source in the repository.
+
 ## Tools
 
 Tools has three tabs: **1 Declared**, **2 Installed**, **3 History**.

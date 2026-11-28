@@ -745,13 +745,11 @@ fn validate_scope(host: &HostContext, j: &Journal) -> Result<()> {
     }
     let mut snapshots = vec![];
     for w in &h.watches {
-        let source = h.repository.join(
-            w.mapping
-                .overrides
-                .get(&host.platform)
-                .unwrap_or(&w.mapping.source),
-        );
-        if w.source.path != source
+        let source = w
+            .mapping
+            .source_for(host.platform)
+            .map(|p| h.repository.join(p));
+        if source.as_ref() != Some(&w.source.path)
             || w.destination.path != host.target_path(&w.mapping.target, Some(&h.repository))?
         {
             return Err(Error::Invalid(
@@ -784,7 +782,7 @@ fn validate_scope(host: &HostContext, j: &Journal) -> Result<()> {
             },
             files: vec![planner::FileSnapshot {
                 mapping: w.mapping.clone(),
-                source_path: w.source.path.clone(),
+                source_path: Some(w.source.path.clone()),
                 target_path: w.destination.path.clone(),
                 source: Some(w.source.clone()),
                 destination: Some(w.destination.clone()),

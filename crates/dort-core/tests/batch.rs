@@ -185,7 +185,7 @@ fn combined_batches_are_one_transaction_selected_scope_and_guarded_recovery() {
                 ["preserved", "a", "b"]
             );
             assert_eq!(
-                manifest.files[0].source,
+                manifest.files[0].source.clone().unwrap(),
                 std::path::PathBuf::from("preserved")
             );
             assert_eq!(
@@ -383,7 +383,7 @@ fn combined_conflicts_blocked_items_acknowledgements_and_stale_approval_fail_clo
     let f = Fixture::new(Action::Adopt);
     let mut m = mappings();
     m.truncate(2);
-    m[1].source = m[0].source.join("child");
+    m[1].source = Some(m[0].source.as_ref().unwrap().join("child"));
     assert!(batch::observe(&f.home.host, &f.repo, &[], Request::Adopt(m)).is_err());
     assert!(
         batch::observe(

@@ -15,11 +15,14 @@ pub enum Command {
     Discard,
     Details,
     InsertLine,
+    OpenTemplateEditor,
     Toggle,
 }
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
     let s = &app.shell;
     let line_labels;
+    let generated_fields;
+    let mut area = area;
     let (fields, focus, primary): (Vec<(&str, &str)>, usize, &'static str) = match form {
         Form::Adopt => (
             vec![
@@ -36,6 +39,45 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                 return;
             };
             (draft.fields(), draft.focus, draft.primary())
+        }
+        Form::Generated => {
+            let Some(draft) = &s.generated else {
+                return;
+            };
+            let heading = Rect::new(area.x, area.y, area.width, 1);
+            ui::prose(frame, heading, &draft.title(), ui::heading());
+            let instructions = draft.instructions();
+            let height = if usize::from(area.width) < instructions.len() {
+                2
+            } else {
+                1
+            };
+            ui::prose(
+                frame,
+                Rect::new(area.x, area.y + 1, area.width, height),
+                instructions,
+                ui::muted(),
+            );
+            area = Rect::new(
+                area.x,
+                area.y + 1 + height,
+                area.width,
+                area.height.saturating_sub(1 + height),
+            );
+            generated_fields = draft.input_fields();
+            let primary = if draft.entering_inputs() {
+                "Review generated file"
+            } else {
+                "Continue"
+            };
+            (
+                generated_fields
+                    .iter()
+                    .map(|(label, value)| (label.as_str(), *value))
+                    .collect(),
+                draft.focus(),
+                primary,
+            )
         }
         Form::Repair => {
             let Some(editor) = &s.repair else {
@@ -81,7 +123,15 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
     };
     let mut actions = vec![ui::ActionButton {
         label: primary,
-        key: "Enter",
+        key: if form == Form::Generated
+            && s.generated
+                .as_ref()
+                .is_some_and(|draft| !draft.entering_inputs())
+        {
+            "F4"
+        } else {
+            "Enter"
+        },
         target: Target::FormAction(Command::Submit),
     }];
     match form {
@@ -114,6 +164,17 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                 target: Target::FormAction(Command::Discard),
             });
         }
+        Form::Generated
+            if s.generated
+                .as_ref()
+                .is_some_and(|draft| !draft.entering_inputs()) =>
+        {
+            actions.push(ui::ActionButton {
+                label: "Open in editor",
+                key: "F5",
+                target: Target::FormAction(Command::OpenTemplateEditor),
+            })
+        }
         Form::Repair => actions.push(ui::ActionButton {
             label: "Insert line",
             key: "F4",
@@ -143,11 +204,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
         }),
         _ => (),
     }
-    actions.push(ui::ActionButton {
-        label: "Details",
-        key: "F3",
-        target: Target::FormAction(Command::Details),
-    });
+    if form != Form::Generated {
+        actions.push(ui::ActionButton {
+            label: "Details",
+            key: "F3",
+            target: Target::FormAction(Command::Details),
+        });
+    }
     let choices = match form {
         Form::Adopt => vec![AdoptionDraft::PROFILES_FIELD],
         Form::Configure => s
@@ -185,6 +248,20 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                     tone: ui::design::Tone::Attention,
                 })
         });
+    let controls = ui::FormActions {
+        choices: &choices,
+        toggles: &toggles,
+        buttons: &actions,
+        feedback,
+    };
+    if form == Form::Generated
+        && let Some(draft) = &s.generated
+        && !draft.entering_inputs()
+    {
+        let area = ui::action_bar(frame, area, &app.hits, controls);
+        draft.draw_template(frame, area, &app.hits);
+        return;
+    }
     ui::field_page(
         frame,
         area,
@@ -192,11 +269,6 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
         focus,
         &app.hits,
         |i| Target::FormControl(i, false),
-        ui::FormActions {
-            choices: &choices,
-            toggles: &toggles,
-            buttons: &actions,
-            feedback,
-        },
+        controls,
     );
 }

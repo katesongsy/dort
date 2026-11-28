@@ -24,7 +24,8 @@ fn adopt() -> Request {
     Request::Adopt {
         mapping: ManagedFile {
             id: "zshrc".into(),
-            source: PathBuf::from("files/zshrc"),
+            source: Some(PathBuf::from("files/zshrc")),
+            template: None,
             target: PathBuf::from("~/.zshrc"),
             mode: FileMode::Link,
             profiles: vec!["base".into()],
@@ -148,7 +149,7 @@ fn adoption_refuses_existing_source_duplicate_mapping_and_unsafe_source_paths() 
         let Request::Adopt { mut mapping } = adopt() else {
             unreachable!()
         };
-        mapping.source = source.into();
+        mapping.source = Some(source.into());
         assert!(planner::observe(&home.host, &repo, &[], Request::Adopt { mapping }).is_err());
     }
     manifest(&repo, &[("existing", "files/zshrc", "~/.other")]);
@@ -319,7 +320,10 @@ fn active_profiles_overrides_collisions_and_protected_targets_are_enforced() {
         planner::observe(&home.host, &repo, &["dev".into()], Request::Apply).unwrap(),
     );
     assert!(!plan.has_blockers());
-    assert_eq!(plan.inputs.files[0].source_path, repo.join("platform"));
+    assert_eq!(
+        plan.inputs.files[0].source_path,
+        Some(repo.join("platform"))
+    );
     for target in [
         home.host.config_dir.join("x"),
         home.host.state_dir.join("x"),
