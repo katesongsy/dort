@@ -220,6 +220,12 @@ Open `templates/editor.jinja`, choose **Edit template file**, and append a line.
 
 Choose **New template file** (`s`). Create `templates/new.jinja`, then compare the approved text and mode `0644` on disk. Verify both paths with `dort files templates list` and `dort files templates show templates/new.jinja`. Clean up the run.
 
+## Reference an existing template file
+
+In a disposable repository, create `templates/editor.jinja` containing `font={{ size }}`. In **Files → Generated**, choose **New generated file**. Set ID `prefs` and destination `~/settings`. Tab to **Template content** and press Space, then Enter on `templates/editor.jinja`. Continue, set `size` to `18`, and review. The review names the template file and shows `font=18`. Save and check that `dort.toml` has `source = "templates/editor.jinja"`, that the template file is unchanged, and that `~/settings` does not exist.
+
+When you edit this mapping, the source picks and the manifest write are separate effects; a source change between review and approval blocks the save.
+
 ## Gotchas
 
 - Exit the draft with Esc before the harness sends `q`. A focused field treats `q` as text.
