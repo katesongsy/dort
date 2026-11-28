@@ -231,3 +231,26 @@ fn a_template_path_used_by_another_mapping_refuses() {
         .to_string();
     assert!(error.contains("already used by another mapping"), "{error}");
 }
+
+#[test]
+fn a_conversion_keeps_every_other_mapping() {
+    let root = tempfile::tempdir().unwrap();
+    let f = Fixture::new(&root.path().canonicalize().unwrap());
+    fs::write(f.repo.join("other"), "other\n").unwrap();
+    fs::write(
+        f.repo.join("dort.toml"),
+        format!("{MANIFEST}\n[[files]]\nid = 'extra'\nmode = 'link'\nsource = 'other'\ntarget = '~/app/extra'\n"),
+    )
+    .unwrap();
+    converted(f.approve().execute().unwrap());
+    f.assert_converted();
+    let manifest =
+        crate::Manifest::parse(&fs::read_to_string(f.repo.join("dort.toml")).unwrap()).unwrap();
+    assert_eq!(manifest.files.len(), 2);
+    assert_eq!(manifest.files[1].id, "extra");
+    assert_eq!(manifest.files[1].mode, FileMode::Link);
+    assert_eq!(
+        manifest.files[1].source.as_deref(),
+        Some(Path::new("other"))
+    );
+}
