@@ -240,6 +240,14 @@ On a repository with no `templates/` folder, open **Files → Generated → New 
 
 Approve and check that `templates/` is `0755`, the file is `0644` with the reviewed bytes, `dort.toml` references it, and the Home destination is absent. Deploy from the preview and compare the written file with `font=18`. Clean up the run.
 
+## Convert a managed link
+
+In a disposable repository, put `font=18` in `files/editor.conf`, link `~/.editor.conf` to it, and declare a link mapping. In **Files → Managed**, select the mapping and press `c`. The review names the source, `templates/editor.jinja`, the destination, the retained link target, and the three effects. Press Esc and confirm the link and `dort.toml` are unchanged.
+
+Reopen the review, press End, and choose **Convert to generated file**. Check that the destination is a regular file with the reviewed bytes, the template file matches, `templates/` is `0755`, and the mapping is `mode = "template"` with `source = "templates/editor.jinja"`. The old source file stays.
+
+A source containing `{{` refuses with the line number and changes nothing, for example `Line 2 of the source contains {{`. Clean up the run.
+
 ## Gotchas
 
 - Exit the draft with Esc before the harness sends `q`. A focused field treats `q` as text.
