@@ -74,7 +74,7 @@ pub struct Preview {
     original: Vec<u8>,
     replacement: String,
     description: String,
-    generated: Option<generated::Preview>,
+    generated: Option<generated::DeclarationPreview>,
 }
 
 pub struct Approval(Preview);
@@ -194,6 +194,7 @@ fn edit_file(doc: &mut DocumentMut, manifest: &Manifest, file: &ManagedFile) -> 
             ("inputs", before.inputs != file.inputs),
             ("syntax", before.syntax != file.syntax),
             ("host_inputs", before.host_inputs != file.host_inputs),
+            ("local_inputs", before.local_inputs != file.local_inputs),
             ("target", before.target != file.target),
             ("profiles", before.profiles != file.profiles),
             ("requires", before.requires != file.requires),
@@ -249,10 +250,7 @@ impl Preview {
     pub fn prepare(host: &HostContext, repository: &Path, change: &Change) -> Result<Self> {
         let (local, config) = LocalConfig::load_bound(host)?;
         let repository_id = local
-            .repositories
-            .iter()
-            .find(|(_, r)| r.root == repository)
-            .map(|(id, _)| id.clone())
+            .repository_id(repository)
             .ok_or_else(|| invalid("Choose a registered repository."))?;
         let path = repository.join("dort.toml");
         let (manifest, entry) = observation::read_manifest(&path).map_err(|error| match error {
@@ -409,7 +407,22 @@ impl Preview {
                 }
                 if inline(file) {
                     generated_id = Some(file.id.as_str());
-                    format!("Save generated file {:?}.", file.id)
+                    let mut description = format!("Save generated file {:?}.", file.id);
+                    if file.local_inputs.is_some()
+                        || previous.is_some_and(|mapping| mapping.local_inputs.is_some())
+                    {
+                        let names = file.local_inputs.as_deref().unwrap_or_default();
+                        description.push_str(&format!(
+                            "\nHome destination: {:?}\nDeclared local inputs: {}",
+                            file.target,
+                            if names.is_empty() {
+                                "None".into()
+                            } else {
+                                names.join(", ")
+                            },
+                        ));
+                    }
+                    description
                 } else {
                     let override_path = |p: Platform| {
                         file.overrides
@@ -449,12 +462,20 @@ impl Preview {
         })?;
         parsed.validate_file_targets(host, &parsed.profiles.known(), Some(repository), None)?;
         let generated = generated_id
-            .map(|id| generated::Preview::from_manifest(host, repository, &parsed, id))
+            .map(|id| {
+                generated::Preview::from_manifest(
+                    host,
+                    repository,
+                    Some(repository_id),
+                    &parsed,
+                    id,
+                )
+            })
             .transpose()?;
         Ok(Self {
             generated,
             repository: repository.to_owned(),
-            backup_root: repository_state_path(host, &repository_id)?.join("manifest-edits"),
+            backup_root: repository_state_path(host, repository_id)?.join("manifest-edits"),
             repair_git: None,
             config,
             manifest: entry,
@@ -466,7 +487,11 @@ impl Preview {
     }
 
     pub fn generated(&self) -> Option<&generated::Preview> {
-        self.generated.as_ref()
+        self.generated.as_ref()?.as_ref().ok()
+    }
+
+    pub fn local_input_setup(&self) -> Option<&generated::LocalInputSetup> {
+        self.generated.as_ref()?.as_ref().err()
     }
 
     pub fn unchanged(&self) -> bool {
@@ -474,10 +499,15 @@ impl Preview {
     }
 
     pub fn human(&self) -> String {
-        format!(
+        let mut review = format!(
             "Repository: {:?}\n\n{}\n\nUpdate dort.toml only. Home files and packages stay in place. The previous manifest is backed up privately.",
             self.repository, self.description
-        )
+        );
+        if let Some(setup) = self.local_input_setup() {
+            review.push_str("\n\nNo rendered preview yet. Save the declaration only, then open Local inputs on this file in Generated.\n");
+            review.push_str(setup.guidance());
+        }
+        review
     }
 
     pub fn approve(self) -> Approval {

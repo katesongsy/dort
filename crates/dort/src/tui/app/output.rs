@@ -499,10 +499,14 @@ impl App {
             }
             return None;
         }
+        let mut local_input_note = "";
         if completion.operation == "Manifest change"
             && matches!(self.shell.overlay, Some(Overlay::Form(Form::Generated)))
             && let Some(draft) = self.shell.generated.take()
         {
+            if draft.has_local_inputs() {
+                local_input_note = "\nReturn to Generated and open Local inputs (l) to set values on this machine.";
+            }
             self.inventory.saved_template = Some(draft.id().into());
             self.inventory.details = false;
         }
@@ -546,7 +550,7 @@ impl App {
         }
         self.shell.back();
         self.result = Some(format!(
-            "{} completed.\n{}",
+            "{} completed.\n{}{local_input_note}",
             completion.operation,
             completion
                 .transaction_id

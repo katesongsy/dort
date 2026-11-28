@@ -123,6 +123,7 @@ pub(super) struct Draft {
     pub template: TemplateBuffer,
     syntax: Dialect,
     host_inputs: HostInputs,
+    local_inputs: Vec<String>,
     values: BTreeMap<String, String>,
     step: Step,
     template_focus: usize,
@@ -139,6 +140,7 @@ enum Step {
 enum InputField {
     Value(String),
     Host { key: HostInput, referenced: bool },
+    Local { name: String, referenced: bool },
 }
 
 impl Draft {
@@ -159,6 +161,10 @@ impl Draft {
                 .as_ref()
                 .and_then(|f| f.host_inputs)
                 .unwrap_or_default(),
+            local_inputs: before
+                .as_ref()
+                .and_then(|f| f.local_inputs.clone())
+                .unwrap_or_default(),
             values: before
                 .as_ref()
                 .map_or_else(BTreeMap::new, |f| f.inputs.clone()),
@@ -166,6 +172,10 @@ impl Draft {
             template_focus: if before.is_some() { 1 } else { 0 },
             before,
         }
+    }
+
+    pub fn has_local_inputs(&self) -> bool {
+        self.syntax == Dialect::Jinja && !self.local_inputs.is_empty()
     }
 
     pub fn id(&self) -> &str {
@@ -186,13 +196,13 @@ impl Draft {
                 "Use {{ name }} for inputs. Enter adds a line. Tab moves fields."
             }
             (false, Dialect::Jinja) => {
-                "Use {{ inputs.name }} and {{ host.os }}. Enter adds a line. Tab moves fields."
+                "Use {{ inputs.name }}, {{ host.os }} or {{ local.name }}. Enter adds a line."
             }
             (true, Dialect::Literal) => {
                 "Enter literal values. Blanks and spaces are kept. Never enter secrets."
             }
             (true, Dialect::Jinja) => {
-                "Set values and allow host fields you need. Leave unused inputs unset. No secrets."
+                "Declare local names. Set their values after saving. Leave unused inputs unset. No secrets."
             }
         }
     }
@@ -226,6 +236,22 @@ impl Draft {
                         self.values.get(name).map_or(unset, String::as_str),
                     )
                 }
+                InputField::Local { name, referenced } => (
+                    format!(
+                        "local.{name} ({}, {})",
+                        if self.local_inputs.contains(name) {
+                            "declared"
+                        } else {
+                            "undeclared"
+                        },
+                        if *referenced {
+                            "possible reference"
+                        } else {
+                            "unused"
+                        },
+                    ),
+                    "",
+                ),
                 InputField::Host { key, referenced } => (
                     format!(
                         "host.{}{}",
@@ -238,7 +264,7 @@ impl Draft {
             .collect()
     }
 
-    pub fn host_rows(&self) -> Vec<(usize, bool)> {
+    pub fn toggle_rows(&self) -> Vec<(usize, bool)> {
         let Step::Inputs { fields, .. } = &self.step else {
             return Vec::new();
         };
@@ -247,6 +273,7 @@ impl Draft {
             .enumerate()
             .filter_map(|(i, field)| match field {
                 InputField::Host { key, .. } => Some((i, self.host_inputs.contains(*key))),
+                InputField::Local { name, .. } => Some((i, self.local_inputs.contains(name))),
                 InputField::Value(_) => None,
             })
             .collect()
@@ -307,17 +334,26 @@ impl Draft {
         self.syntax = syntax;
     }
 
-    pub fn toggle_host(&mut self) -> bool {
+    pub fn toggle_declaration(&mut self) -> bool {
         let Step::Inputs { fields, focus } = &self.step else {
             return false;
         };
-        let InputField::Host { key, .. } = fields[*focus] else {
-            return false;
-        };
-        self.host_inputs = HostInput::ALL
-            .into_iter()
-            .filter(|&k| self.host_inputs.contains(k) != (k == key))
-            .collect();
+        match &fields[*focus] {
+            InputField::Host { key, .. } => {
+                self.host_inputs = HostInput::ALL
+                    .into_iter()
+                    .filter(|&k| self.host_inputs.contains(k) != (k == *key))
+                    .collect();
+            }
+            InputField::Local { name, .. } => {
+                if let Some(index) = self.local_inputs.iter().position(|key| key == name) {
+                    self.local_inputs.remove(index);
+                } else {
+                    self.local_inputs.push(name.clone());
+                }
+            }
+            InputField::Value(_) => return false,
+        }
         true
     }
 
@@ -340,9 +376,22 @@ impl Draft {
             .filter_map(|name| name.strip_prefix("inputs."))
             .chain(self.values.keys().map(String::as_str))
             .collect();
-        Ok(names
+        let local_names: BTreeSet<_> = references
+            .iter()
+            .filter_map(|name| name.strip_prefix("local."))
+            .chain(self.local_inputs.iter().map(String::as_str))
+            .collect();
+        Ok(local_names
             .into_iter()
-            .map(|name| InputField::Value(name.to_owned()))
+            .map(|name| InputField::Local {
+                name: name.to_owned(),
+                referenced: references.contains(&format!("local.{name}")),
+            })
+            .chain(
+                names
+                    .into_iter()
+                    .map(|name| InputField::Value(name.to_owned())),
+            )
             .chain(HostInput::ALL.into_iter().map(|key| InputField::Host {
                 key,
                 referenced: references.contains(&format!("host.{}", key.key())),
@@ -391,6 +440,7 @@ impl Draft {
             inputs: BTreeMap::new(),
             syntax: None,
             host_inputs: None,
+            local_inputs: None,
             permissions: None,
         });
         mapping.target = self.target.trim().into();
@@ -406,6 +456,18 @@ impl Draft {
         };
         mapping.host_inputs = if self.syntax == Dialect::Jinja {
             Some(self.host_inputs).filter(|keys| *keys != HostInputs::default())
+        } else {
+            None
+        };
+        mapping.local_inputs = if self.syntax == Dialect::Jinja {
+            Some(self.local_inputs.clone()).filter(|names| {
+                !names.is_empty()
+                    || self
+                        .before
+                        .as_ref()
+                        .and_then(|f| f.local_inputs.as_ref())
+                        .is_some_and(Vec::is_empty)
+            })
         } else {
             None
         };
@@ -535,7 +597,7 @@ impl Draft {
             return self.template.key(key);
         }
         match key.code {
-            KeyCode::Char(' ') if key.modifiers.is_empty() && self.toggle_host() => (),
+            KeyCode::Char(' ') if key.modifiers.is_empty() && self.toggle_declaration() => (),
             KeyCode::Down => self.focus_at(self.focus() + 1),
             KeyCode::Up => self.focus_at(self.focus().saturating_sub(1)),
             KeyCode::Home => self.focus_at(0),

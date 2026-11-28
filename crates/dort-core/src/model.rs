@@ -130,6 +130,8 @@ pub struct ManagedFile {
     pub syntax: Option<Dialect>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host_inputs: Option<HostInputs>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_inputs: Option<Vec<String>>,
     pub permissions: Option<String>,
 }
 

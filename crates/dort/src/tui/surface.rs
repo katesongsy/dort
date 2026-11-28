@@ -73,6 +73,7 @@ impl App {
                     Form::Clone => "Session / Clone repository",
                     Form::Repair => "Manifest repair draft",
                     Form::Generated => "Files / Generated file draft",
+                    Form::LocalInputs => "Files / Local inputs",
                     Form::Configure => self
                         .shell
                         .configuration

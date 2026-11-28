@@ -23,6 +23,7 @@ pub(super) enum Topic {
     GeneratedFiles,
     Generated,
     GeneratedDraft,
+    LocalInputs,
     Recovery,
     RecoveryDetails,
     Checks,
@@ -111,6 +112,7 @@ impl Topic {
             },
             Form::Repair => Self::Repair,
             Form::Generated => Self::GeneratedDraft,
+            Form::LocalInputs => Self::LocalInputs,
             Form::Check => Self::CheckForm,
             Form::Choose => Self::ChoosePath,
             Form::Clone => Self::Clone,
@@ -211,6 +213,7 @@ impl Topic {
         if let Some(preview) = &app.preview {
             use super::full_check::Destination;
             return match &preview.pending {
+                Pending::LocalInput(_) => Self::LocalInputs,
                 Pending::Environment(_) => Self::Environment,
                 Pending::FullCheck(check) => match check.destination {
                     Destination::Environment { .. } => Self::EnvironmentCheck,

@@ -187,7 +187,7 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
         result.push(ui::ActionButton {
             label: if app
                 .form_page()
-                .is_some_and(|owner| owner != "generated file")
+                .is_some_and(|owner| !matches!(owner, "generated file" | "local inputs"))
                 && app.form_has_focus()
             {
                 "Stop editing"
@@ -200,7 +200,7 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
     }
     if app
         .form_page()
-        .is_some_and(|owner| owner != "generated file")
+        .is_some_and(|owner| !matches!(owner, "generated file" | "local inputs"))
         && app.form_has_focus()
     {
         for action in &mut result {
@@ -271,10 +271,16 @@ fn compact(label: &'static str) -> &'static str {
         "Env plan"
     } else if label == Action::PreviewGenerated.label() {
         "Preview"
+    } else if label == Action::LocalInputs.label() {
+        "Inputs"
     } else if label == Action::NewGenerated.label() {
         "New"
     } else if label == Action::EditGenerated.label() {
         "Edit"
+    } else if label == "Save local input" {
+        "Save input"
+    } else if label == "Clear local input" {
+        "Clear input"
     } else if label == "Open in editor" {
         "Editor"
     } else if label == "Add file mapping" {

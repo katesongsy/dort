@@ -9,6 +9,7 @@ pub enum Form {
     Clone,
     Configure,
     Generated,
+    LocalInputs,
     Repair,
     Adopt,
     Check,
@@ -138,6 +139,7 @@ pub enum Action {
     AdoptSelected,
     BatchAdopt,
     PreviewGenerated,
+    LocalInputs,
     NewGenerated,
     EditGenerated,
     ApplyMarked,
@@ -209,6 +211,7 @@ impl Action {
             Self::AdoptSelected => "Adopt selected eligible file (editable draft)",
             Self::BatchAdopt => "Adopt marked files (combined editable batch)",
             Self::PreviewGenerated => "Preview generated file",
+            Self::LocalInputs => "Local inputs",
             Self::NewGenerated => "New generated file",
             Self::EditGenerated => "Edit generated file",
             Self::ApplyMarked => "Apply marked mappings (selected batch)",
@@ -257,6 +260,7 @@ pub struct Shell {
     pub init_draft: String,
     pub clone_fields: [String; 2],
     pub generated: Option<super::generated::Draft>,
+    pub local_inputs: Option<super::local_inputs::Panel>,
     pub open_template_editor: bool,
     pub repair: Option<super::configuration::RepairEditor>,
     pub configuration: Option<super::configuration::Draft>,
@@ -278,6 +282,7 @@ pub enum Intent {
     Unignore(std::path::PathBuf),
     Action(Action),
     Submit(Form),
+    ClearLocalInput,
     Known(usize),
     Active,
     ApplyProfiles {
@@ -294,6 +299,7 @@ impl Shell {
             init_draft: String::new(),
             clone_fields: Default::default(),
             generated: None,
+            local_inputs: None,
             open_template_editor: false,
             repair: None,
             configuration: None,
@@ -332,11 +338,13 @@ impl Shell {
         ) || matches!(
             self.overlay,
             Some(Overlay::Form(Form::Repair | Form::Generated))
-        ) || (matches!(self.overlay, Some(Overlay::Form(Form::Configure)))
-            && self
-                .configuration
-                .as_ref()
-                .is_some_and(|draft| !draft.is_default_row(draft.focus)))
+        ) || (matches!(self.overlay, Some(Overlay::Form(Form::LocalInputs)))
+            && self.local_inputs.as_ref().is_some_and(|p| p.editing()))
+            || (matches!(self.overlay, Some(Overlay::Form(Form::Configure)))
+                && self
+                    .configuration
+                    .as_ref()
+                    .is_some_and(|draft| !draft.is_default_row(draft.focus)))
             || (matches!(self.overlay, Some(Overlay::Form(Form::Adopt)))
                 && self.adoption.focused < AdoptionDraft::FIELDS)
             || (matches!(self.overlay, Some(Overlay::Form(Form::Check)))
@@ -348,6 +356,7 @@ impl Shell {
     }
     pub fn back(&mut self) {
         self.scroll = 0;
+        self.local_inputs = None;
         self.overlay = if self.return_to_adopt {
             self.return_to_adopt = false;
             Some(Overlay::Form(Form::Adopt))
@@ -373,7 +382,7 @@ impl Shell {
             Form::Choose => &self.choose_draft,
             Form::Init => &self.init_draft,
             Form::Clone => &self.clone_fields[1],
-            Form::Configure | Form::Repair | Form::Generated => "",
+            Form::Configure | Form::Repair | Form::Generated | Form::LocalInputs => "",
             Form::Adopt => &self.adoption.target,
             Form::Check => &self.manifest_draft,
             Form::KeepId | Form::RemoveId => &self.unmanage_id,
@@ -386,6 +395,8 @@ impl Shell {
         use super::forms::Command;
         match command {
             Command::Submit => Some(Intent::Submit(form)),
+            Command::ClearLocalInput if form == Form::LocalInputs => Some(Intent::ClearLocalInput),
+            Command::ClearLocalInput => None,
             Command::InsertLine => {
                 if form == Form::Repair {
                     self.repair.as_mut()?.insert();
@@ -641,6 +652,25 @@ impl Shell {
                     }
                 }
             }
+            Overlay::Form(Form::LocalInputs) => {
+                let panel = self.local_inputs.as_mut()?;
+                match key.code {
+                    KeyCode::Esc => {
+                        self.form_feedback = None;
+                        if !panel.back() {
+                            self.back();
+                        }
+                    }
+                    KeyCode::Enter => return Some(Intent::Submit(Form::LocalInputs)),
+                    KeyCode::F(6) if !panel.editing() => return Some(Intent::ClearLocalInput),
+                    _ => {
+                        self.form_feedback = panel
+                            .key(key)
+                            .err()
+                            .map(|e| (Form::LocalInputs, e.to_string()));
+                    }
+                }
+            }
             Overlay::Form(Form::Configure) => match key.code {
                 KeyCode::Esc => self.back(),
                 KeyCode::Enter => return Some(Intent::Submit(Form::Configure)),
@@ -659,6 +689,7 @@ impl Shell {
                     Form::Init => &mut self.init_draft,
                     Form::Configure
                     | Form::Generated
+                    | Form::LocalInputs
                     | Form::Repair
                     | Form::Clone
                     | Form::Adopt

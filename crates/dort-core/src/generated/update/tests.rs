@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    generated::Deployment,
-    local::RepositoryRegistry,
+    generated::{Deployment, local_inputs},
+    local::{LocalConfig, RepositoryRegistry, repository_state_path},
     platform::{Architecture, Platform},
 };
 use std::{
@@ -628,14 +628,21 @@ fn recovery_keeps_the_approved_render_after_context_and_source_change() {
     fs::write(
         &manifest,
         format!(
-            "{}syntax = 'jinja'\nhost_inputs = ['arch']\n",
+            "{}syntax = 'jinja'\nhost_inputs = ['arch']\nlocal_inputs = ['editor']\n",
             fs::read_to_string(&manifest).unwrap()
         ),
     )
     .unwrap();
-    fs::write(f.repo.join("source"), "{{ host.arch }}").unwrap();
+    fs::write(f.repo.join("source"), "{{ host.arch }} {{ local.editor }}").unwrap();
+    let setting = |value| {
+        local_inputs::Preview::prepare(&f.host, &f.repo, "settings", "editor", Some(value))
+            .unwrap()
+            .approve()
+    };
+    const APPROVED: &str = "x86_64 helix";
+    setting("helix").execute().unwrap();
     let approved = Update::prepare(&f.host, None, "settings", &[]).unwrap();
-    assert_eq!(approved.review().proposed, "x86_64");
+    assert_eq!(approved.review().proposed, APPROVED);
     let outcome = approved
         .approve()
         .execute_at(|at| {
@@ -653,13 +660,35 @@ fn recovery_keeps_the_approved_render_after_context_and_source_change() {
             ..
         }
     ));
+    assert!(
+        matches!(setting("vim").execute(), Err(Error::Invalid(message)) if message.contains("needs recovery"))
+    );
+    let local = LocalConfig::load(&f.host).unwrap();
+    let folder = repository_state_path(&f.host, local.repository_id(&f.repo).unwrap())
+        .unwrap()
+        .join("generated-inputs");
+    let settings = fs::read_dir(folder)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let original = fs::read_to_string(&settings).unwrap();
+    fs::write(&settings, "unreadable settings").unwrap();
     f.host.architecture = Architecture::Aarch64;
-    fs::write(f.repo.join("source"), "changed {{ host.arch }}").unwrap();
+    fs::write(
+        f.repo.join("source"),
+        "changed {{ host.arch }} {{ local.editor }}",
+    )
+    .unwrap();
     assert!(matches!(
         recover_update(&f.host).unwrap(),
         Some(UpdateOutcome::Updated { .. })
     ));
-    assert_eq!(fs::read_to_string(&f.dest).unwrap(), "x86_64");
-    assert!(f.slot().load().unwrap().unwrap().deployed == Stamp::new(b"x86_64", Mode(0o600)));
+    assert_eq!(fs::read_to_string(&f.dest).unwrap(), APPROVED);
+    assert!(
+        f.slot().load().unwrap().unwrap().deployed == Stamp::new(APPROVED.as_bytes(), Mode(0o600))
+    );
+    fs::write(&settings, original.replace("helix", "vim")).unwrap();
     assert_eq!(f.status(), DriftStatus::UpdateAvailable);
 }

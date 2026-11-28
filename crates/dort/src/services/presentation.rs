@@ -18,6 +18,25 @@ pub fn safe(text: &str) -> String {
 pub fn inline(text: &str) -> String {
     safe(text).replace('\n', "\\n")
 }
+pub fn local_input_value(value: Option<&str>) -> String {
+    match value {
+        None => "Unset".into(),
+        Some("") => "\"\" (empty)".into(),
+        Some(text) => format!("\"{}\"", text.escape_default()),
+    }
+}
+
+pub fn local_input_review(review: dort_core::generated::local_inputs::Review<'_>) -> String {
+    format!(
+        "Repository: {}\nGenerated file: {}\nInput: local.{}\n\nPrevious value: {}\nProposed value: {}\n\nSave only local settings on this machine. dort.toml and the generated file stay in place. No secrets.\n",
+        inline(&review.repository.display().to_string()),
+        inline(review.id),
+        inline(review.name),
+        local_input_value(review.previous),
+        local_input_value(review.proposed),
+    )
+}
+
 pub fn template_syntax(syntax: Dialect) -> &'static str {
     match syntax {
         Dialect::Literal => "Literal",
@@ -31,6 +50,7 @@ pub fn generated_input_lines(inputs: &ResolvedInputs) -> impl Iterator<Item = St
         let source = match input.provenance {
             InputProvenance::Manifest => "dort.toml",
             InputProvenance::Host(_) => "this host",
+            InputProvenance::MachineLocal => "local settings on this machine",
         };
         format!(
             "{} = \"{}\" ({source})",

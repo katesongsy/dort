@@ -354,6 +354,7 @@ pub enum Pending {
     Profile(Box<dort_core::local::ProfilePreview>),
     ToolDeclaration(Box<dort_core::tools::declaration::Preview>),
     Ignore(dort_core::discovery_ignore::Preview),
+    LocalInput(Box<dort_core::generated::local_inputs::Preview>),
     GeneratedDeployment(Box<dort_core::generated::Deployment>),
     GeneratedUpdate(Box<Update>),
     GeneratedRecovery(UpdateLocation),
@@ -368,6 +369,7 @@ impl Pending {
         Ok(match self {
             Self::ToolDeclaration(p) => crate::services::declaration::report(p),
             Self::Ignore(preview) => preview.human(),
+            Self::LocalInput(p) => crate::services::presentation::local_input_review(p.review()),
             Self::GeneratedDeployment(p) => {
                 crate::services::presentation::generated_deployment(p.review())
             }
@@ -432,6 +434,8 @@ impl Pending {
             Self::FullCheck(_) => "Run checks",
             Self::EnvironmentAbandon(_) => "Abandon environment run",
             Self::Profile(_) => "Save profile choice",
+            Self::LocalInput(p) if p.review().proposed.is_none() => "Clear local input",
+            Self::LocalInput(_) => "Save local input",
             Self::GeneratedDeployment(_) => "Deploy generated file",
             Self::GeneratedUpdate(p) => generated_update::confirmation_label(p.action()),
             Self::GeneratedRecovery(location) => generated_update::recovery_label(location.action),
@@ -479,6 +483,7 @@ impl Pending {
             Self::ToolDeclaration(p) => dort_core::tools::declaration::Approval::from_preview(*p)
                 .map(|a| Approved::ToolDeclaration(Box::new(a))),
             Self::Ignore(preview) => Ok(Approved::Ignore(preview.approve())),
+            Self::LocalInput(p) => Ok(Approved::LocalInput(Box::new(p.approve()))),
             Self::GeneratedDeployment(p) => {
                 Ok(Approved::GeneratedDeployment(Box::new(p.approve())))
             }
@@ -525,6 +530,7 @@ pub enum Approved {
     Profile(Box<dort_core::local::ProfileApproval>),
     ToolDeclaration(Box<dort_core::tools::declaration::Approval>),
     Ignore(dort_core::discovery_ignore::Approval),
+    LocalInput(Box<dort_core::generated::local_inputs::Approval>),
     GeneratedDeployment(Box<dort_core::generated::Approval>),
     GeneratedUpdate(Box<UpdateApproval>),
     GeneratedRecovery(UpdateLocation),
@@ -588,6 +594,7 @@ impl Approved {
                 approval.execute(host, false)?;
                 ("Discovery preferences", None, None)
             }
+            Self::LocalInput(approval) => return approval.execute().map(Output::LocalInputSaved),
             Self::GeneratedDeployment(approval) => {
                 return match approval.execute() {
                     Err(error @ Error::RecoveryRequired(_)) => Err(error),
@@ -751,6 +758,8 @@ pub enum Task {
     ToolDeclaration(crate::services::declaration::Request),
     IgnoredPaths,
     Ignore(PathBuf, bool),
+    InspectLocalInputs(String),
+    ReviewLocalInput(super::local_inputs::Change),
     PreviewGenerated(String),
     ReviewGeneratedDeployment(String),
     ReviewGeneratedUpdate(String, UpdateAction),
@@ -819,6 +828,8 @@ pub enum Output {
     ToolClosePreview(Box<dort_core::tools::install::ClosePreview>),
     ToolClosed(std::result::Result<dort_core::tools::install::Attempt, String>),
     IgnoredPaths(Vec<PathBuf>),
+    LocalInputs(String, Vec<dort_core::generated::local_inputs::Row>),
+    LocalInputSaved(bool),
     Generated(Box<dort_core::generated::Preview>),
     GeneratedDeployed(std::result::Result<dort_core::generated::Published, String>),
     GeneratedUpdated(Option<UpdateOutcome>),
@@ -1021,6 +1032,22 @@ pub fn perform_scoped_with_install_progress(
             };
             dort_core::discovery_ignore::Preview::prepare(host, relative, ignored)
                 .map(|p| Output::Preview(Pending::Ignore(p)))
+        }
+        Task::InspectLocalInputs(id) => {
+            let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
+            dort_core::generated::local_inputs::inspect(host, &root, &id)
+                .map(|rows| Output::LocalInputs(id, rows))
+        }
+        Task::ReviewLocalInput(change) => {
+            let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
+            dort_core::generated::local_inputs::Preview::prepare(
+                host,
+                &root,
+                &change.id,
+                &change.name,
+                change.value.as_deref(),
+            )
+            .map(|p| Output::Preview(Pending::LocalInput(Box::new(p))))
         }
         Task::PreviewGenerated(id) => crate::services::preview_generated(
             host,

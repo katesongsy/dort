@@ -497,3 +497,179 @@ fn clone_review_and_invalid_manifest_keep_home_targets_untouched() {
     assert!(!s.home.join(".editor").exists());
     s.cmd().args(["profiles", "list"]).assert().success();
 }
+
+#[test]
+fn local_input_cli_reviews_private_values_and_keeps_repository_and_mapping_scope() {
+    let s = Sandbox::new();
+    s.init();
+    let manifest = r#"schema = 1
+[[files]]
+id = "editor"
+mode = "template"
+target = "~/settings"
+syntax = "jinja"
+local_inputs = ["name", "unused"]
+template = "editor={{ local.name }}"
+[[files]]
+id = "other"
+mode = "template"
+target = "~/other"
+syntax = "jinja"
+local_inputs = ["name"]
+template = "{{ local.name }}"
+"#;
+    let path = s.repo.join("dort.toml");
+    fs::write(&path, manifest).unwrap();
+    let alternate = s.root.join("alternate");
+    fs::create_dir_all(alternate.join(".git")).unwrap();
+    fs::write(alternate.join("dort.toml"), manifest).unwrap();
+    let output = s
+        .cmd()
+        .arg("--repo")
+        .arg(&alternate)
+        .args(["files", "local-inputs", "editor"])
+        .assert()
+        .failure();
+    assert!(
+        String::from_utf8_lossy(&output.get_output().stderr).contains("Register this repository")
+    );
+    s.cmd()
+        .args(["--yes", "init"])
+        .arg(&alternate)
+        .assert()
+        .success();
+    let json = |mut cmd: Command, args: &[&str]| {
+        let output = cmd.args(args).assert().success();
+        serde_json::from_slice::<serde_json::Value>(&output.get_output().stdout).unwrap()
+    };
+    let rows = |id| json(s.repo(), &["--json", "files", "local-inputs", id]);
+    assert_eq!(
+        rows("editor")["inputs"][0]["value"],
+        serde_json::Value::Null
+    );
+    s.repo()
+        .args([
+            "--yes",
+            "files",
+            "set-local-input",
+            "editor",
+            "name",
+            "--dry-run",
+        ])
+        .assert()
+        .failure();
+    assert_eq!(
+        rows("editor")["inputs"][0]["value"],
+        serde_json::Value::Null
+    );
+    let proposal = json(
+        s.repo(),
+        &[
+            "--json",
+            "--dry-run",
+            "--yes",
+            "files",
+            "set-local-input",
+            "editor",
+            "name",
+            "",
+        ],
+    );
+    assert_eq!(proposal["previous"], serde_json::Value::Null);
+    assert_eq!(proposal["proposed"], "");
+    assert_eq!(
+        rows("editor")["inputs"][0]["value"],
+        serde_json::Value::Null
+    );
+    let set = [
+        "files",
+        "set-local-input",
+        "editor",
+        "name",
+        "a\tprivate\nvalue",
+    ];
+    let denied = s.repo().args(set).assert().failure().stdout("");
+    assert!(String::from_utf8_lossy(&denied.get_output().stderr).contains("write requires --yes"));
+    let mut set_cmd = s.repo();
+    set_cmd.args(["--yes", "--json"]);
+    let result = json(set_cmd, &set);
+    assert_eq!(result["changed"], true);
+    assert!(!result.to_string().contains("private"));
+    assert_eq!(rows("editor")["inputs"][0]["value"], "a\tprivate\nvalue");
+    assert_eq!(
+        rows("editor")["inputs"][1]["value"],
+        serde_json::Value::Null
+    );
+    assert_eq!(rows("other")["inputs"][0]["value"], serde_json::Value::Null);
+    let mut alt_cmd = s.cmd();
+    alt_cmd.arg("--repo").arg(&alternate);
+    assert_eq!(
+        json(alt_cmd, &["--json", "files", "local-inputs", "editor"])["inputs"][0]["value"],
+        serde_json::Value::Null
+    );
+    let output = s
+        .repo()
+        .args(["files", "local-inputs", "editor"])
+        .assert()
+        .success();
+    assert!(
+        String::from_utf8_lossy(&output.get_output().stdout).contains("\"a\\tprivate\\nvalue\"")
+    );
+    let rendered = json(
+        s.repo(),
+        &["--json", "files", "preview-generated", "editor"],
+    );
+    assert_eq!(rendered["rendered"], "editor=a\tprivate\nvalue");
+    assert_eq!(
+        rendered["resolved_inputs"]["local.name"]["provenance"],
+        "machine_local"
+    );
+    let output = s
+        .repo()
+        .args([
+            "--yes",
+            "files",
+            "set-local-input",
+            "editor",
+            "undeclared",
+            "not-recorded",
+        ])
+        .assert()
+        .failure();
+    assert!(String::from_utf8_lossy(&output.get_output().stderr).contains("Declare the input"));
+    s.repo()
+        .args(["--yes", "files", "set-local-input", "editor", "name", ""])
+        .assert()
+        .success();
+    assert_eq!(rows("editor")["inputs"][0]["value"], "");
+    assert_eq!(
+        json(
+            s.repo(),
+            &[
+                "--json",
+                "--dry-run",
+                "files",
+                "clear-local-input",
+                "editor",
+                "name"
+            ]
+        )["proposed"],
+        serde_json::Value::Null
+    );
+    assert_eq!(rows("editor")["inputs"][0]["value"], "");
+    s.repo()
+        .args(["--yes", "files", "clear-local-input", "editor", "name"])
+        .assert()
+        .success();
+    assert_eq!(
+        rows("editor")["inputs"][0]["value"],
+        serde_json::Value::Null
+    );
+    assert_eq!(fs::read_to_string(path).unwrap(), manifest);
+    assert_eq!(
+        fs::read_to_string(alternate.join("dort.toml")).unwrap(),
+        manifest
+    );
+    assert!(!s.home.join("settings").exists());
+    assert!(!s.home.join("other").exists());
+}

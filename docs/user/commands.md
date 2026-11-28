@@ -49,9 +49,11 @@ In **Files**, press `4` to open **Generated**. Press `s` or choose **New generat
 
 Choose **Open in editor** (`F5`) to edit the template in an external editor. Set `VISUAL` or `EDITOR` before starting Dort, for example `VISUAL='code --wait'`. Dort tries `VISUAL` first. Choose an editor command that waits until you close the file. The editor gets a temporary copy of the template. Save and exit the editor to return to the draft.
 
-Choose **Continue** (`F4`). In **Literal**, leave a value blank to render nothing. In **Jinja**, leave unused inputs unset. Use `F6` to set an empty string or unset a value. Press `Space` or click to allow a host field. **Referenced** marks fields the template may use, even in branches that do not run.
+Choose **Continue** (`F4`). In **Literal**, leave a value blank to render nothing. In **Jinja**, leave unused inputs unset. Use `F6` to set an empty string or unset a value. Press `Space` or click to allow a host field. **Referenced** marks fields the template may use, even in branches that do not run. For `{{ local.name }}`, press `Space` or click to declare the name.
 
-Choose **Review generated file** after entering inputs. Check the resolved values, their sources, and the output. Press `y` when **Save generated file** is ready. `Esc` goes back without losing your input values or host choices. Saving changes only `dort.toml`.
+Choose **Review generated file** after entering inputs. Check the resolved values, their sources, and the output. Press `y` when **Save generated file** is ready. `Esc` keeps your draft inputs. If a declared local input needs a value, choose **Save declaration only**. Saving changes only `dort.toml`.
+
+Select the saved file and open **Local inputs** (`l`). Select a name and press `Enter` to set its value. Blank sets an empty string. **Clear** (`F6`) makes a set value unset. Review the change, scroll to the end, then press `y` to save it only on this machine. Keep secrets out of local inputs. Preview again to see the new output before deployment.
 
 Select a saved template in **Generated**. Press `Enter` or `v` for **Preview generated file**. Scroll with the arrows or page keys. `End` jumps to the end of the output. `Esc` returns to the selected template. Press `e` for **Edit generated file**. Edit file-backed templates in the repository.
 
@@ -163,6 +165,17 @@ dort --repo PATH --json files preview-generated editor-settings
 ```
 
 Renders the template with its declared inputs. If Dort recorded the deployment, the status distinguishes template changes from local edits, permission changes, and deletion. A file over 128 KiB or one that cannot be read safely stays unverified. Dort never reads the contents of an unrecorded destination. JSON includes the status, proposed text, and resolved values with their sources. No files are written.
+
+### Read or change local inputs
+
+```sh
+dort files local-inputs editor-settings
+dort --dry-run files set-local-input editor-settings editor vim
+dort --yes files set-local-input editor-settings editor vim
+dort --yes files clear-local-input editor-settings editor
+```
+
+Use the registered repository and the declared name without `local.`. Use `--repo PATH` to select another registered repository. Pass `''` to set an empty string. Clearing unsets the value and keeps its declaration. These commands leave the manifest and generated file in place. JSON reads and dry runs show the selected values; write results report only what changed. Never pass secrets as values.
 
 ### Deploy a generated file
 

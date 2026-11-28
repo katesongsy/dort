@@ -486,6 +486,216 @@ fn jinja_draft_opts_in_and_keeps_explicit_values_and_host_choices_until_review()
 }
 
 #[test]
+fn generated_local_inputs_from_empty_repository_to_deploy_and_update() {
+    use dort_core::generated::local_inputs;
+
+    for (width, height) in [(48, 14), (112, 28)] {
+        let mut w = Workshop::new(width, height);
+        let blank = w.manifest();
+        let target = w.host.home.join("settings");
+        w.press(KeyCode::Char('s'));
+        w.paste("prefs");
+        w.press(KeyCode::Tab);
+        w.paste("~/settings");
+        w.press(KeyCode::Tab);
+        w.paste("editor=[{{ local.editor }}]\n{% if false %}{{ local.later }}{% endif %}{# local.comment #}");
+        w.press(KeyCode::Tab);
+        w.press(KeyCode::Enter);
+        w.press(KeyCode::Down);
+        w.press(KeyCode::Enter);
+        w.press(KeyCode::F(4));
+        assert!(w.screen().contains("local.editor (undeclared"));
+        w.press(KeyCode::Enter);
+        assert!(w.app.preview.is_none());
+        assert_eq!(w.manifest(), blank);
+        if width < 80 {
+            w.press(KeyCode::Char(' '));
+        } else {
+            assert!(click_label(&mut w.app, width, height, "local.editor (undeclared").is_none());
+        }
+        assert!(w.screen().contains("local.editor (declared"));
+        w.press(KeyCode::Tab);
+        assert!(w.screen().contains("local.later (undeclared"));
+        w.press(KeyCode::Char(' '));
+        w.press(KeyCode::Esc);
+        w.press(KeyCode::F(4));
+        assert!(w.screen().contains("local.editor (declared"));
+        w.press(KeyCode::Enter);
+        assert!(w.review().contains("Declared local inputs: editor, later"));
+        assert!(w.review().contains("No rendered preview yet"));
+        assert!(w.review().contains("Local inputs on this file"));
+        assert!(!w.review().contains("Rendered output"));
+        w.screen();
+        w.press(KeyCode::End);
+        let screen = w.screen();
+        assert!(screen.contains("Save declaration only"), "{screen}");
+        w.press(KeyCode::Esc);
+        assert!(w.screen().contains("local.editor (declared"));
+        w.press(KeyCode::Enter);
+        w.approve();
+        let saved = w.manifest();
+        let manifest = dort_core::Manifest::parse(&saved).unwrap();
+        assert_eq!(
+            manifest.files[0].local_inputs.as_deref().unwrap(),
+            ["editor", "later"]
+        );
+        assert!(!target.exists());
+        assert!(
+            w.app
+                .result
+                .as_ref()
+                .unwrap()
+                .contains("open Local inputs (l)")
+        );
+        w.press(KeyCode::Esc);
+        w.press(KeyCode::Char('v'));
+        assert!(w.app.error.as_ref().unwrap().contains("Check Local inputs"));
+        w.press(KeyCode::Esc);
+        let label = if width < 80 {
+            "l Inputs"
+        } else {
+            "l Local inputs"
+        };
+        let task = click_label(&mut w.app, width, height, label).expect("Local inputs click");
+        w.run(task);
+        let screen = w.screen();
+        assert!(screen.contains("local.editor"));
+        assert!(screen.contains("Unset"));
+        assert!(screen.contains("Esc Back"));
+        let (row, column) = screen
+            .lines()
+            .enumerate()
+            .find_map(|(y, line)| {
+                line.find("Declared name")
+                    .map(|x| (y as u16 + 1, line[..x].chars().count() as u16))
+            })
+            .unwrap();
+        assert!(
+            w.app
+                .mouse(
+                    MouseEvent {
+                        kind: MouseEventKind::ScrollDown,
+                        column,
+                        row,
+                        modifiers: KeyModifiers::NONE,
+                    },
+                    width,
+                    height
+                )
+                .is_none()
+        );
+        let screen = w.screen();
+        assert!(screen.contains("local.later on this machine"), "{screen}");
+        assert!(click_label(&mut w.app, width, height, "local.editor").is_none());
+        assert!(w.screen().contains("local.editor on this machine"));
+        assert!(click_label(&mut w.app, width, height, "Enter Set value").is_none());
+        w.press(KeyCode::Enter);
+        assert!(
+            w.review()
+                .contains("Previous value: Unset\nProposed value: \"\" (empty)")
+        );
+        w.paste("ignored while reviewing");
+        w.app.dry_run = true;
+        w.screen();
+        w.press(KeyCode::End);
+        w.screen();
+        w.press(KeyCode::Char('y'));
+        assert!(w.app.preview.is_some());
+        w.app.dry_run = false;
+        w.press(KeyCode::Esc);
+        assert!(!w.screen().contains("ignored while reviewing"));
+        w.press(KeyCode::Esc);
+        assert!(w.screen().contains("Unset"));
+        w.press(KeyCode::Enter);
+        w.press(KeyCode::Enter);
+        w.approve();
+        assert_eq!(w.manifest(), saved);
+        assert!(!target.exists());
+        w.press(KeyCode::Esc);
+        w.press(KeyCode::Char('l'));
+        assert!(w.screen().contains("Empty"));
+        if width < 80 {
+            w.press(KeyCode::F(6));
+        } else {
+            let task = click_label(&mut w.app, width, height, "F6 Clear").expect("Clear action");
+            w.run(task);
+        }
+        assert!(
+            w.review()
+                .contains("Previous value: \"\" (empty)\nProposed value: Unset")
+        );
+        w.press(KeyCode::Esc);
+        assert!(w.screen().contains("Empty"));
+        w.press(KeyCode::F(6));
+        w.approve();
+        assert_eq!(w.manifest(), saved);
+        assert!(!target.exists());
+        w.press(KeyCode::Esc);
+        w.press(KeyCode::Char('l'));
+        assert!(w.screen().contains("Unset"));
+        w.press(KeyCode::Enter);
+        w.paste("  vim\t");
+        w.press(KeyCode::Enter);
+        assert!(w.review().contains("Proposed value: \"  vim\\t\""));
+        w.approve();
+        w.press(KeyCode::Esc);
+        assert_eq!(w.manifest(), saved);
+        assert!(!target.exists());
+        assert!(!w.screen().contains("vim"));
+        w.press(KeyCode::Char('v'));
+        w.press(KeyCode::End);
+        let screen = w.screen();
+        assert!(screen.contains("editor=["), "{screen}");
+        w.press(KeyCode::Char('R'));
+        assert!(
+            w.review()
+                .contains("local.editor = \"  vim\\t\" (local settings on this machine)")
+        );
+        w.approve();
+        assert_eq!(fs::read(&target).unwrap(), b"editor=[  vim\t]\n");
+        w.press(KeyCode::Esc);
+        w.press(KeyCode::Char('l'));
+        w.press(KeyCode::Enter);
+        let clear =
+            ratatui::crossterm::event::KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL);
+        w.app.key(clear, width, height);
+        w.paste("nano");
+        w.press(KeyCode::Enter);
+        local_inputs::Preview::prepare(&w.host, &w.repo, "prefs", "editor", Some("emacs"))
+            .unwrap()
+            .approve()
+            .execute()
+            .unwrap();
+        w.approve();
+        assert!(w.app.error.as_ref().unwrap().contains("Open a new review"));
+        assert_eq!(w.manifest(), saved);
+        assert_eq!(fs::read(&target).unwrap(), b"editor=[  vim\t]\n");
+        w.press(KeyCode::Esc);
+        w.press(KeyCode::Enter);
+        assert!(
+            w.review()
+                .contains("Previous value: \"emacs\"\nProposed value: \"nano\"")
+        );
+        w.approve();
+        w.press(KeyCode::Esc);
+        w.press(KeyCode::Char('v'));
+        assert!(w.screen().contains("Update available"));
+        w.press(KeyCode::Char('R'));
+        assert!(w.review().contains("NEW | editor=[nano]\\n"));
+        assert_eq!(fs::read(&target).unwrap(), b"editor=[  vim\t]\n");
+        w.approve();
+        assert_eq!(fs::read(&target).unwrap(), b"editor=[nano]\n");
+        assert_eq!(w.manifest(), saved);
+        w.press(KeyCode::Esc);
+        w.press(KeyCode::Char('e'));
+        w.press(KeyCode::F(4));
+        assert!(w.screen().contains("local.editor (declared"));
+        w.press(KeyCode::Tab);
+        assert!(w.screen().contains("local.later (declared"));
+    }
+}
+
+#[test]
 fn stale_generated_review_cannot_replace_a_new_manifest() {
     let mut w = Workshop::new(100, 26);
     w.press(KeyCode::Char('s'));

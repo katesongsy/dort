@@ -276,6 +276,12 @@ pub(super) fn controls(app: &App) -> impl Iterator<Item = ui::ActionButton> {
     };
     let generated = [
         (
+            Action::LocalInputs.label(),
+            "l",
+            Action::LocalInputs,
+            app.action_reason(Action::LocalInputs).is_none(),
+        ),
+        (
             Action::NewGenerated.label(),
             "s",
             Action::NewGenerated,

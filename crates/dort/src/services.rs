@@ -271,6 +271,7 @@ pub fn adopt_request(target: &Path, id: &str, source: &Path) -> Request {
             inputs: Default::default(),
             syntax: None,
             host_inputs: None,
+            local_inputs: None,
             permissions: None,
         },
     }

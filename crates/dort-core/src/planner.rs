@@ -13,6 +13,10 @@ use std::{
 };
 
 #[derive(Debug, Clone, Serialize)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "Keep the existing by-value adoption API."
+)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum Request {
     Apply,

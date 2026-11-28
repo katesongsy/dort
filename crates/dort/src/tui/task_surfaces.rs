@@ -117,6 +117,8 @@ impl Activity {
             Task::DiscoverContent(_) | Task::DiscoveryTree(_) | Task::GitPreview(_) => {
                 unreachable!("private passive reads have no activity surface")
             }
+            Task::InspectLocalInputs(_) => "Read local inputs",
+            Task::ReviewLocalInput(_) => "Review local input",
             Task::PreviewGenerated(_) => "Preview generated file",
             Task::ReviewGeneratedDeployment(_) => "Review deployment",
             Task::ReviewGeneratedUpdate(_, action) => {
@@ -169,6 +171,7 @@ impl Activity {
                     Approved::FullCheck(_) => "Run checks",
                     Approved::EnvironmentAbandon(_) => "Abandon environment run",
                     Approved::Profile(_) => "Save profile choice",
+                    Approved::LocalInput(_) => "Save local settings",
                     Approved::GeneratedDeployment(_) => "Deploy generated file",
                     Approved::GeneratedUpdate(p) => {
                         crate::services::generated_update::confirmation_label(p.action())
@@ -370,6 +373,10 @@ impl Activity {
             ),
             Pending::Environment(_) => ("Environment", vec![]),
             Pending::Profile(_) => ("Save profile choice", vec![]),
+            Pending::LocalInput(p) => (
+                pending.confirmation_label(),
+                vec![("Generated file", p.review().id.to_owned())],
+            ),
             Pending::GeneratedDeployment(p) => (
                 "Deploy generated file",
                 vec![("Destination", p.review().destination.display().to_string())],

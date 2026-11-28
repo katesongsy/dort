@@ -230,6 +230,16 @@ enum FilesCommand {
     },
     /// Show rendered output and deployment status without writing files.
     PreviewGenerated { id: String },
+    /// Show the declared local inputs and values for one generated file. No writes.
+    LocalInputs { id: String },
+    /// Set a non-secret value on this machine. Pass an empty string to set it empty.
+    SetLocalInput {
+        id: String,
+        name: String,
+        value: String,
+    },
+    /// Clear a local input value without changing its declaration or deploying the file.
+    ClearLocalInput { id: String, name: String },
     /// Review and create one generated file at a missing Home destination.
     DeployGenerated {
         id: String,
@@ -1237,6 +1247,41 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
             }
         }
         Command::Files { command } => match command {
+            FilesCommand::LocalInputs { id } => {
+                let root = local_input_repository(cli, &local)?;
+                let rows = dort_core::generated::local_inputs::inspect(&host, &root, id)?;
+                if cli.json {
+                    let inputs: Vec<_> = rows
+                        .iter()
+                        .map(|row| serde_json::json!({"name": row.name, "value": row.value}))
+                        .collect();
+                    print_ascii_json(
+                        &serde_json::json!({"schema": 1, "read_only": true, "repository": root, "id": id, "inputs": inputs}),
+                        "could not encode local inputs",
+                    )?;
+                } else {
+                    println!(
+                        "Local inputs for {} on this machine",
+                        presentation::inline(id)
+                    );
+                    if rows.is_empty() {
+                        println!("No local inputs declared.");
+                    }
+                    for row in &rows {
+                        println!(
+                            "local.{}: {}",
+                            presentation::inline(&row.name),
+                            presentation::local_input_value(row.value.as_deref())
+                        );
+                    }
+                }
+            }
+            FilesCommand::SetLocalInput { id, name, value } => {
+                return change_local_input(cli, &host, &local, id, name, Some(value));
+            }
+            FilesCommand::ClearLocalInput { id, name } => {
+                return change_local_input(cli, &host, &local, id, name, None);
+            }
             FilesCommand::PreviewGenerated { id } => {
                 let preview =
                     crate::services::preview_generated(&host, &local, cli.repo.as_deref(), id)?;
@@ -1528,6 +1573,59 @@ fn approve(cli: &Cli) -> dort_core::Result<()> {
     }
     Ok(())
 }
+fn local_input_repository(cli: &Cli, local: &LocalConfig) -> dort_core::Result<PathBuf> {
+    if cli.confirm_remove.is_some() {
+        return Err(Error::Invalid(
+            "Local inputs do not use --confirm-remove.".into(),
+        ));
+    }
+    local.select_repository(cli.repo.as_deref())
+}
+
+fn change_local_input(
+    cli: &Cli,
+    host: &HostContext,
+    local: &LocalConfig,
+    id: &str,
+    name: &str,
+    value: Option<&str>,
+) -> dort_core::Result<ExitCode> {
+    let root = local_input_repository(cli, local)?;
+    let preview =
+        dort_core::generated::local_inputs::Preview::prepare(host, &root, id, name, value)?;
+    let action = if value.is_some() { "set" } else { "clear" };
+    if cli.dry_run && cli.json {
+        let review = preview.review();
+        print_ascii_json(
+            &serde_json::json!({"schema": 1, "read_only": true, "action": action, "repository": review.repository, "id": review.id, "name": review.name, "previous": review.previous, "proposed": review.proposed}),
+            "could not encode local input review",
+        )?;
+    } else if cli.dry_run || (!cli.yes && interactive(cli)) {
+        print_update_review(&presentation::local_input_review(preview.review()))?;
+    }
+    if cli.dry_run {
+        return Ok(ExitCode::SUCCESS);
+    }
+    approve(cli)?;
+    let changed = preview.approve().execute()?;
+    if cli.json {
+        print_ascii_json(
+            &serde_json::json!({"schema": 1, "action": action, "id": id, "name": name, "changed": changed}),
+            "could not encode local input result",
+        )?;
+    } else {
+        println!(
+            "{} Preview the generated file to see its output.",
+            match (changed, value.is_some()) {
+                (false, _) => "Local input unchanged.",
+                (true, true) => "Local input saved.",
+                (true, false) => "Local input cleared.",
+            }
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 fn change_generated(
     cli: &Cli,
     host: &HostContext,

@@ -210,6 +210,13 @@ impl LocalConfig {
         )
     }
 
+    pub(crate) fn repository_id(&self, root: &Path) -> Option<&str> {
+        self.repositories
+            .iter()
+            .find(|(_, record)| record.root == root)
+            .map(|(id, _)| id.as_str())
+    }
+
     pub fn select_repository(&self, explicit: Option<&Path>) -> Result<PathBuf> {
         if let Some(path) = explicit {
             return path
