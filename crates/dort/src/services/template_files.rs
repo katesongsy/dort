@@ -1,5 +1,5 @@
 use super::presentation::inline;
-use dort_core::template_files::{Outcome, Retained, Review, Row, Source};
+use dort_core::template_files::{Action, Outcome, Removed, Retained, Review, Row, Source};
 use dort_core::{Error, Result, template::SOURCE_LIMIT};
 use std::{
     fmt::Write,
@@ -54,24 +54,44 @@ fn summary(row: &Row) -> String {
 }
 
 pub fn review(change: Review<'_>) -> String {
-    let action = if change.before.is_some() {
-        "Edit"
-    } else {
-        "Create"
-    };
     let mut text = format!(
-        "{action} template file: {}\nPermissions: {:04o}\nMappings declaring this path: {}\nMappings and Home files stay unchanged.\n",
-        path(change.path),
-        change.permissions,
-        change.mappings,
+        "{} template file: {}\n",
+        change.action.label(),
+        path(change.path)
     );
+    if let Some(folder) = &change.folder {
+        let _ = writeln!(
+            text,
+            "Create folder: {} | permissions {:04o} | owned by you\nThe folder is new and stays if the file step fails.",
+            path(&folder.path),
+            folder.permissions
+        );
+    }
+    let _ = writeln!(
+        text,
+        "Permissions: {:04o}\nMappings declaring this path: {}",
+        change.permissions, change.mappings
+    );
+    match change.action {
+        Action::Delete => {
+            text.push_str(
+                "The file moves to private Dort state. Mappings and Home files stay unchanged.\n",
+            );
+        }
+        _ => text.push_str("Mappings and Home files stay unchanged.\n"),
+    }
+    if let Some(removed) = &change.removed {
+        let _ = writeln!(text, "Retained copy: {}", path(removed));
+    }
     if let Some(retained) = change.retained {
         backups(&mut text, &retained);
     }
     if let Some(before) = change.before {
         contents(&mut text, "Before", before);
     }
-    contents(&mut text, "After", change.after);
+    if let Some(after) = change.after {
+        contents(&mut text, "After", after);
+    }
     text
 }
 
@@ -103,17 +123,31 @@ fn contents(text: &mut String, label: &str, body: &str) {
 pub fn outcome(outcome: &Outcome) -> String {
     let mut text = String::new();
     match outcome {
-        Outcome::Created => text.push_str("Created template file.\n"),
+        Outcome::Created { folder_created } => {
+            if *folder_created {
+                text.push_str("Created templates/ with permissions 0755.\n");
+            }
+            text.push_str("Created template file.\n");
+        }
         Outcome::Edited(retained) => {
             text.push_str("Saved template file.\n");
             backups(&mut text, retained);
         }
+        Outcome::Deleted(removed) => {
+            text.push_str("Deleted template file.\n");
+            kept(&mut text, removed);
+        }
         Outcome::NeedsAttention {
             retained,
+            removed,
+            folder_created,
             competing_change,
             durability_unknown,
         } => {
-            text.push_str("The template write ran. Inspect the file before retrying.\n");
+            if *folder_created {
+                text.push_str("Created templates/ with permissions 0755.\n");
+            }
+            text.push_str("The template change ran. Inspect the file before retrying.\n");
             if *competing_change {
                 text.push_str("Another change overlapped the save. Dort did not undo the save.\n");
             }
@@ -123,9 +157,16 @@ pub fn outcome(outcome: &Outcome) -> String {
             if let Some(retained) = retained {
                 backups(&mut text, retained);
             }
+            if let Some(removed) = removed {
+                kept(&mut text, removed);
+            }
         }
     }
     text
+}
+
+fn kept(text: &mut String, removed: &Removed) {
+    let _ = writeln!(text, "Retained copy: {}", path(&removed.path));
 }
 
 fn backups(text: &mut String, retained: &Retained) {
@@ -140,21 +181,101 @@ fn backups(text: &mut String, retained: &Retained) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dort_core::template_files::Folder;
     use std::path::Path;
 
     #[test]
     fn template_files_review_distinguishes_line_endings_whitespace_and_delimiters() {
         let report = review(Review {
+            action: Action::Edit,
             path: Path::new("templates/file.jinja"),
+            folder: None,
             before: Some(" \t|\\\r\nlast"),
-            after: "\u{00a0}\n",
+            after: Some("\u{00a0}\n"),
             permissions: 0o640,
             mappings: 1,
             retained: None,
+            removed: None,
         });
         assert!(report.contains("Edit template file: templates/file.jinja\nPermissions: 0640\n"));
         assert!(report.contains("\n| \\t\\|\\\\\\r\\n|\n|last|\n"));
         assert!(report.contains("\n|\\u{a0}\\n|\n"));
+    }
+
+    #[test]
+    fn template_files_review_names_the_folder_before_the_file() {
+        let report = review(Review {
+            action: Action::Create,
+            path: Path::new("templates/new.jinja"),
+            folder: Some(Folder {
+                path: "templates".into(),
+                permissions: 0o755,
+            }),
+            before: None,
+            after: Some("value"),
+            permissions: 0o644,
+            mappings: 0,
+            retained: None,
+            removed: None,
+        });
+        let folder = report
+            .find("Create folder: templates | permissions 0755")
+            .unwrap();
+        let file = report
+            .find("Create template file: templates/new.jinja")
+            .unwrap();
+        assert!(file < folder, "{report}");
+        assert!(report.contains("\n|value|\n"), "{report}");
+    }
+
+    #[test]
+    fn template_files_delete_review_names_the_retained_copy_and_no_after_text() {
+        let report = review(Review {
+            action: Action::Delete,
+            path: Path::new("templates/old.jinja"),
+            folder: None,
+            before: Some("gone"),
+            after: None,
+            permissions: 0o600,
+            mappings: 0,
+            retained: None,
+            removed: Some("/state/removed".into()),
+        });
+        assert!(report.starts_with("Delete template file: templates/old.jinja\n"));
+        assert!(
+            report.contains("The file moves to private Dort state."),
+            "{report}"
+        );
+        assert!(
+            report.contains("Retained copy: /state/removed\n"),
+            "{report}"
+        );
+        assert!(
+            report.contains("\n|gone|\n") && !report.contains("After"),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn template_files_outcome_names_the_folder_and_the_removed_copy() {
+        assert_eq!(
+            outcome(&Outcome::Created {
+                folder_created: true
+            }),
+            "Created templates/ with permissions 0755.\nCreated template file.\n"
+        );
+        assert_eq!(
+            outcome(&Outcome::Created {
+                folder_created: false
+            }),
+            "Created template file.\n"
+        );
+        assert_eq!(
+            outcome(&Outcome::Deleted(Removed {
+                path: "/state/removed".into()
+            })),
+            "Deleted template file.\nRetained copy: /state/removed\n"
+        );
     }
 
     #[test]
@@ -164,6 +285,8 @@ mod tests {
                 reviewed: "/state/reviewed".into(),
                 displaced: "/state/replaced".into(),
             }),
+            removed: None,
+            folder_created: false,
             competing_change: true,
             durability_unknown: false,
         });

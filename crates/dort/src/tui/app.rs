@@ -423,13 +423,12 @@ impl App {
                     }
                 }
                 self.result = Some(text);
-                self.status = if matches!(
-                    outcome,
-                    dort_core::template_files::Outcome::NeedsAttention { .. }
-                ) {
-                    "Template write needs attention"
-                } else {
-                    "Template write finished"
+                self.status = match &outcome {
+                    dort_core::template_files::Outcome::NeedsAttention { .. } => {
+                        "Template change needs attention"
+                    }
+                    dort_core::template_files::Outcome::Deleted(_) => "Template file deleted",
+                    _ => "Template change finished",
                 }
                 .into();
                 None

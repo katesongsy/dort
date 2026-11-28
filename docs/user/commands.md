@@ -69,7 +69,9 @@ For local edits or changed permissions, **Review replacement** (`R`) compares th
 
 Press `5` in **Files** to open **Templates**. The list shows repository paths, mapping counts, and whether you can edit each path. Press `Enter` to view the selected source without rendering it. **Read only** files can be viewed but not edited here.
 
-Press `s` for **New template file**, or press `Enter` in an editable source view. For a new file, enter a repository-relative path such as `templates/editor.jinja`. Create `templates/` and any needed subfolder in the repository before reviewing. Dort edits only `.jinja` files under `templates/`.
+Press `s` for **New template file**, or press `Enter` in an editable source view. For a new file, enter a repository-relative path such as `templates/editor.jinja`. When `templates/` is missing, the review creates it first with mode `0755`. A subfolder you name must already exist. Dort edits only `.jinja` files under `templates/`.
+
+Press `d` on an editable row for **Delete template file**. Dort deletes the file only when no mapping uses it, and names every mapping that does. The review shows the text and the private path that keeps the file. The file moves there instead of being unlinked.
 
 Use `Tab` to move between fields. In **Template**, `Enter` adds a line. Press `Esc` to leave the field, then `Enter` to review. Read the escaped source and scroll to the end before pressing `y`. Saving leaves mappings and Home files unchanged. An edit shows the private paths where Dort kept the reviewed and replaced copies. Keep secrets out of template files.
 
@@ -174,9 +176,11 @@ dort --dry-run files templates create templates/editor.jinja --from ./draft.jinj
 dort --yes files templates create templates/editor.jinja --from ./draft.jinja
 dort --dry-run files templates edit templates/editor.jinja --from ./draft.jinja
 dort --yes files templates edit templates/editor.jinja --from ./draft.jinja
+dort --dry-run files templates delete templates/editor.jinja
+dort --yes files templates delete templates/editor.jinja
 ```
 
-Use a regular UTF-8 file for `--from`. Keep secrets out of the proposed text. Create `templates/` and any needed subfolder in the registered repository first. Review the exact escaped text with `--dry-run`, or omit `--yes` in a terminal to review and confirm. `--json` gives the exact text for `show` and `--dry-run`. If a write needs attention, inspect the template and any retained copies before retrying.
+Use a regular UTF-8 file for `--from`. Keep secrets out of the proposed text. When `templates/` is missing, `create` makes it with mode `0755` first. A named subfolder must already exist. `delete` refuses a file that any mapping uses and moves the file to private state instead of unlinking it. Review with `--dry-run`, or omit `--yes` in a terminal to review and confirm. `--json` gives the exact text for `show` and `--dry-run`. If a write needs attention, inspect the template and any retained copy before retrying.
 
 ### Preview a generated file
 

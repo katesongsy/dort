@@ -298,6 +298,8 @@ enum TemplateCommand {
         #[arg(long)]
         from: PathBuf,
     },
+    /// Review and delete a .jinja file that no mapping references.
+    Delete { path: PathBuf },
 }
 
 #[derive(Subcommand)]
@@ -1651,20 +1653,38 @@ fn templates(
             }
             return Ok(ExitCode::SUCCESS);
         }
-        TemplateCommand::Create { path, from } => (Change::Create(path.clone()), from),
-        TemplateCommand::Edit { path, from } => {
-            (Change::Edit(template_files::show(host, &root, path)?), from)
-        }
+        TemplateCommand::Create { path, from } => (Change::Create(path.clone()), Some(from)),
+        TemplateCommand::Edit { path, from } => (
+            Change::Edit(template_files::show(host, &root, path)?),
+            Some(from),
+        ),
+        TemplateCommand::Delete { path } => (
+            Change::Delete(template_files::show(host, &root, path)?),
+            None,
+        ),
     };
-    let preview = Preview::prepare(host, &root, change, report::read_proposed(from)?)?;
+    let text = match from {
+        Some(from) => report::read_proposed(from)?,
+        None => String::new(),
+    };
+    let preview = Preview::prepare(host, &root, change, text)?;
     if cli.dry_run {
         let review = preview.review();
         if cli.json {
-            encode(
-                json!({"read_only": true, "path": review.path, "before": review.before,
-                "after": review.after, "permissions": review.permissions, "mappings": review.mappings,
-                "retained": review.retained.map(|paths| json!({"reviewed": paths.reviewed, "displaced": paths.displaced}))}),
-            )?;
+            encode(json!({
+                "read_only": true,
+                "action": review.action.label().to_lowercase(),
+                "path": review.path,
+                "folder": review.folder.as_ref().map(|folder| json!({
+                    "path": folder.path, "permissions": folder.permissions
+                })),
+                "before": review.before,
+                "after": review.after,
+                "permissions": review.permissions,
+                "mappings": review.mappings,
+                "retained": review.retained.map(|paths| json!({"reviewed": paths.reviewed, "displaced": paths.displaced})),
+                "removed": review.removed,
+            }))?;
         } else {
             print!("{}", report::review(review));
         }
@@ -1677,17 +1697,23 @@ fn templates(
     let outcome = preview.approve().execute(host)?;
     if cli.json {
         encode(match &outcome {
-            Outcome::Created => json!({"outcome": "created"}),
+            Outcome::Created { folder_created } => {
+                json!({"outcome": "created", "folder_created": folder_created})
+            }
             Outcome::Edited(paths) => json!({"outcome": "edited",
                 "retained": {"reviewed": paths.reviewed, "displaced": paths.displaced}}),
+            Outcome::Deleted(removed) => json!({"outcome": "deleted", "removed": removed.path}),
             Outcome::NeedsAttention {
                 retained,
+                removed,
+                folder_created,
                 competing_change,
                 durability_unknown,
             } => json!({
                 "outcome": "needs_attention", "competing_change": competing_change,
-                "durability_unknown": durability_unknown,
+                "durability_unknown": durability_unknown, "folder_created": folder_created,
                 "retained": retained.as_ref().map(|paths| json!({"reviewed": paths.reviewed, "displaced": paths.displaced})),
+                "removed": removed.as_ref().map(|removed| &removed.path),
             }),
         })?;
     } else {

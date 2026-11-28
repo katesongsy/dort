@@ -52,6 +52,10 @@ impl Inventory {
         self.selected = index.min(self.rows.len().saturating_sub(1));
     }
 
+    fn selected_row(&self) -> Option<&Row> {
+        self.rows.get(self.selected)
+    }
+
     pub fn key(&mut self, key: KeyEvent, root: PathBuf, page: usize) -> Option<Task> {
         if !key.modifiers.is_empty() && key.modifiers != KeyModifiers::SHIFT {
             return None;
@@ -65,9 +69,14 @@ impl Inventory {
             KeyCode::End | KeyCode::Char('G') => usize::MAX,
             KeyCode::Enter => {
                 return self
-                    .rows
-                    .get(self.selected)
+                    .selected_row()
                     .map(|r| Task::ShowTemplate(root, r.path.clone()));
+            }
+            KeyCode::Char('d') => {
+                return self
+                    .selected_row()
+                    .filter(|r| r.editable)
+                    .map(|r| Task::ReviewTemplateDelete(root, r.path.clone()));
             }
             _ => return None,
         };
@@ -97,6 +106,9 @@ impl Inventory {
             return;
         }
         app.presented("View source", "Enter", key_target(KeyCode::Enter));
+        if self.selected_row().is_some_and(|row| row.editable) {
+            app.presented("Delete", "d", key_target(KeyCode::Char('d')));
+        }
         let collection = Collection::new(
             [
                 Constraint::Min(12),
@@ -181,7 +193,7 @@ impl Screen {
                 root,
                 Box::new(match &draft.change {
                     Change::Create(path) => Change::Create(path.clone()),
-                    Change::Edit(source) => Change::Edit(source.clone()),
+                    Change::Edit(source) | Change::Delete(source) => Change::Edit(source.clone()),
                 }),
                 draft.buffer.text().to_owned(),
             )),
@@ -263,7 +275,7 @@ impl Draft {
     fn new(change: Change) -> Self {
         let (text, content) = match &change {
             Change::Create(_) => (String::new(), false),
-            Change::Edit(source) => (source.text().to_owned(), true),
+            Change::Edit(source) | Change::Delete(source) => (source.text().to_owned(), true),
         };
         Self {
             change,
@@ -275,7 +287,7 @@ impl Draft {
     pub fn dirty(&self) -> bool {
         match &self.change {
             Change::Create(path) => path.as_os_str() != NEW_PATH || !self.buffer.text().is_empty(),
-            Change::Edit(source) => source.text() != self.buffer.text(),
+            Change::Edit(source) | Change::Delete(source) => source.text() != self.buffer.text(),
         }
     }
 
@@ -352,6 +364,7 @@ impl Draft {
                 ),
                 ui::heading(),
             ),
+            Change::Delete(_) => (),
         }
         let block = ui::pane("Template", focused && self.content);
         let inner = if content.height >= 3 {

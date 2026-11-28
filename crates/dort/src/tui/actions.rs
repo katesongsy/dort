@@ -439,8 +439,11 @@ impl Pending {
             Self::Profile(_) => "Save profile choice",
             Self::LocalInput(p) if p.review().proposed.is_none() => "Clear local input",
             Self::LocalInput(_) => "Save local input",
-            Self::TemplateFile(p, _) if p.review().before.is_none() => "Create template file",
-            Self::TemplateFile(..) => "Save template file",
+            Self::TemplateFile(p, _) => match p.review().action {
+                template_files::Action::Create => "Create template file",
+                template_files::Action::Edit => "Save template file",
+                template_files::Action::Delete => "Delete template file",
+            },
             Self::GeneratedDeployment(_) => "Deploy generated file",
             Self::GeneratedUpdate(p) => generated_update::confirmation_label(p.action()),
             Self::GeneratedRecovery(location) => generated_update::recovery_label(location.action),
@@ -777,6 +780,7 @@ pub enum Task {
     ReadDraftSource(PathBuf, PathBuf),
     ShowTemplate(PathBuf, PathBuf),
     ReviewTemplate(PathBuf, Box<template_files::Change>, String),
+    ReviewTemplateDelete(PathBuf, PathBuf),
     PreviewGenerated(String),
     ReviewGeneratedDeployment(String),
     ReviewGeneratedUpdate(String, UpdateAction),
@@ -1084,6 +1088,13 @@ pub fn perform_scoped_with_install_progress(
             template_files::Preview::prepare(host, &root, *change, text)
                 .map(|p| Output::Preview(Pending::TemplateFile(Box::new(p), root)))
         }
+        Task::ReviewTemplateDelete(root, path) => template_files::Preview::prepare(
+            host,
+            &root,
+            template_files::Change::Delete(template_files::show(host, &root, &path)?),
+            String::new(),
+        )
+        .map(|p| Output::Preview(Pending::TemplateFile(Box::new(p), root))),
         Task::PreviewGenerated(id) => crate::services::preview_generated(
             host,
             &LocalConfig::load(host)?,
