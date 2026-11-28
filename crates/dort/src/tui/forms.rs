@@ -183,16 +183,19 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
         {
             if let Some(draft) = &s.generated {
                 if app.form_has_focus() && draft.on_content_row() {
+                    let next = if draft.content_is_new() {
+                        "In dort.toml"
+                    } else if draft.content_is_file() {
+                        "New template file"
+                    } else {
+                        "Template file"
+                    };
                     actions.push(ui::ActionButton {
-                        label: if draft.content_is_file() {
-                            "In dort.toml"
-                        } else {
-                            "Template file"
-                        },
+                        label: next,
                         key: "Space",
                         target: Target::FormAction(Command::ToggleGeneratedSource),
                     });
-                } else if draft.content_is_inline() {
+                } else if !draft.content_is_file() {
                     actions.push(ui::ActionButton {
                         label: "Open in editor",
                         key: "F5",

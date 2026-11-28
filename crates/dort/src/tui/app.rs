@@ -440,6 +440,7 @@ impl App {
                 self.status = "".into();
                 None
             }
+            Ok(Output::ComposeFinished(outcome)) => self.accept_compose(*outcome),
             Ok(Output::GeneratedDeployed(result)) => self.accept_generated_deployment(result),
             Ok(Output::GeneratedUpdated(outcome)) => self.accept_generated_update(outcome),
             Ok(Output::History {
@@ -2410,9 +2411,16 @@ impl App {
                 use super::configuration::Request;
                 self.shell.form_feedback = None;
                 match self.shell.generated.as_mut()?.submit() {
-                    Ok(Some(change)) => {
+                    Ok(Some(super::generated::Submission::Edit(change))) => {
                         self.form_focus = None;
                         Some(Task::Configuration(Box::new(Request::Manifest(change))))
+                    }
+                    Ok(Some(super::generated::Submission::Compose { mapping, text })) => {
+                        self.form_focus = None;
+                        Some(Task::Configuration(Box::new(Request::Compose {
+                            mapping,
+                            text,
+                        })))
                     }
                     Ok(None) => {
                         self.form_focus = self.form_page();

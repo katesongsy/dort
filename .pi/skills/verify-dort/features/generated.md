@@ -234,6 +234,12 @@ In a disposable repository, create `templates/editor.jinja` containing `font={{ 
 
 When you edit this mapping, the source picks and the manifest write are separate effects; a source change between review and approval blocks the save.
 
+## Create a template file and mapping together
+
+On a repository with no `templates/` folder, open **Files → Generated → New generated file**. Set the ID and destination. On **Template content**, press Space to open the picker, Esc back, then Space again for **New template file**. Type `editor.jinja` after the prefilled `templates/`, Tab to Template, and enter `font={{ size }}`. Continue, set `size` to `18`, and review. The review names the folder, the file, its `0644` mode, the mapping, and `font=18`.
+
+Approve and check that `templates/` is `0755`, the file is `0644` with the reviewed bytes, `dort.toml` references it, and the Home destination is absent. Deploy from the preview and compare the written file with `font=18`. Clean up the run.
+
 ## Gotchas
 
 - Exit the draft with Esc before the harness sends `q`. A focused field treats `q` as text.

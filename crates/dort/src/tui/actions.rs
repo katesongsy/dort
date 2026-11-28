@@ -579,6 +579,11 @@ impl Approved {
                     .map(str::to_owned);
                 ("Manifest change", id, None)
             }
+            Self::Configuration(super::configuration::Approval::Compose(p)) => {
+                return p
+                    .execute(host)
+                    .map(|outcome| Output::ComposeFinished(Box::new(outcome)));
+            }
             Self::Environment(p) => return p.execute(host, observer).map(Output::EnvironmentRun),
             Self::FullCheck(p) => return p.execute(host),
             Self::EnvironmentAbandon(p) => return p.execute(host).map(Output::EnvironmentRun),
@@ -860,6 +865,7 @@ pub enum Output {
         std::result::Result<Vec<template_files::Row>, String>,
     ),
     Generated(Box<dort_core::generated::Preview>),
+    ComposeFinished(Box<dort_core::generated::compose::Outcome>),
     GeneratedDeployed(std::result::Result<dort_core::generated::Published, String>),
     GeneratedUpdated(Option<UpdateOutcome>),
     DiscoveryTree(super::discovery_tree::Report),
@@ -1234,6 +1240,12 @@ pub fn perform_scoped_with_install_progress(
                         return Ok(Output::MappingUnchanged);
                     }
                     Preview::Manifest(Box::new(preview))
+                }
+                Request::Compose { mapping, text } => {
+                    let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
+                    Preview::Compose(Box::new(dort_core::generated::compose::Preview::prepare(
+                        host, &root, *mapping, text,
+                    )?))
                 }
                 Request::OpenRepair(root, git) => {
                     return dort_core::manifest_edit::RepairDraft::open(host, &root, &git)

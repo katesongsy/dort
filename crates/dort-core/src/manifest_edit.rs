@@ -274,6 +274,17 @@ fn same_entry(before: &Entry, after: &Entry) -> bool {
 
 impl Preview {
     pub fn prepare(host: &HostContext, repository: &Path, change: &Change) -> Result<Self> {
+        Self::prepare_with_source(host, repository, change, None)
+    }
+
+    /// `pending` supplies a template file's text before the file exists, so one
+    /// request can create a template file and its mapping together.
+    pub(crate) fn prepare_with_source(
+        host: &HostContext,
+        repository: &Path,
+        change: &Change,
+        pending: Option<(&Path, &str)>,
+    ) -> Result<Self> {
         let (local, config) = LocalConfig::load_bound(host)?;
         let repository_id = local
             .repository_id(repository)
@@ -498,6 +509,7 @@ impl Preview {
                     Some(repository_id),
                     &parsed,
                     id,
+                    pending,
                 )?;
                 (
                     Some(preview),
@@ -555,10 +567,15 @@ impl Preview {
 
 impl Approval {
     pub fn execute(self, host: &HostContext) -> Result<Option<PathBuf>> {
-        let p = self.0;
         let lock = WriterLock::acquire(host)?;
         lock.check_context(host)?;
         journal::ensure_writable(host)?;
+        self.execute_locked(host)
+    }
+
+    /// Commit the reviewed manifest under a writer lock the caller already holds.
+    pub(crate) fn execute_locked(self, host: &HostContext) -> Result<Option<PathBuf>> {
+        let p = self.0;
         let path = &p.manifest.path;
         let compare = || -> Result<()> {
             let config = match &p.repair_git {

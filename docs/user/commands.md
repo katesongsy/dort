@@ -47,6 +47,8 @@ In **Files**, press `4` to open **Generated**. Press `s` or choose **New generat
 
 Templates use Jinja. Use `{{ name }}` or `{{ inputs.name }}` for a manifest input. Use `{{ host.os }}` for the operating system or `{{ host.hostname }}` for the hostname. See [Jinja templates](manifest.md#jinja-templates) for examples and all host values.
 
+Press `Tab` to the **Template content** row, then `Space` to cycle **In dort.toml**, **Template file** and **New template file**. **Template file** saves the path of a file already under `templates/`. **New template file** asks for a path such as `templates/editor.jinja` and keeps its text in **Template**. The review shows the folder, the escaped text, mode `0644`, the mapping destination and the rendered output. One approval writes the file and the mapping. When the mapping is not written, the file stays and the result names its path; approving the same draft again writes the mapping alone.
+
 Choose **Open in editor** (`F5`) to edit the template in an external editor. Set `VISUAL` or `EDITOR` before starting Dort, for example `VISUAL='code --wait'`. Dort tries `VISUAL` first. Choose an editor command that waits until you close the file. The editor gets a temporary copy of the template. Save and exit the editor to return to the draft.
 
 Press Esc to leave the field, then Enter to continue. You can also click **Continue**. Leave unused inputs unset. Use `F6` to set an empty string or unset a value. Press `Space` or click to allow a host field. **Referenced** marks fields the template may use, even in branches that do not run. For `{{ local.name }}`, press `Space` or click to declare the name.

@@ -694,10 +694,26 @@ fn unreferenced(repo: &Repository<'_>, path: &Path) -> Result<()> {
 
 impl Approval {
     pub fn execute(self, host: &HostContext) -> Result<Outcome> {
-        self.execute_before_publish(host, || {})
+        let _lock = WriterLock::acquire(host)?;
+        self.execute_with_context(host, || {})
     }
 
+    #[cfg(test)]
     fn execute_before_publish(
+        self,
+        host: &HostContext,
+        before_publish: impl FnOnce(),
+    ) -> Result<Outcome> {
+        let _lock = WriterLock::acquire(host)?;
+        self.execute_with_context(host, before_publish)
+    }
+
+    /// Apply the reviewed change under a writer lock the caller already holds.
+    pub(crate) fn execute_locked(self, host: &HostContext) -> Result<Outcome> {
+        self.execute_with_context(host, || {})
+    }
+
+    fn execute_with_context(
         self,
         host: &HostContext,
         before_publish: impl FnOnce(),
@@ -709,7 +725,6 @@ impl Approval {
         {
             return Err(stale());
         }
-        let _lock = WriterLock::acquire(host)?;
         journal::ensure_writable(host)?;
         let review = p.review();
         let absolute = p.root.join(review.path);

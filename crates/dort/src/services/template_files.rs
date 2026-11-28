@@ -101,7 +101,7 @@ pub fn show(source: &Source) -> String {
     text
 }
 
-fn contents(text: &mut String, label: &str, body: &str) {
+pub(super) fn contents(text: &mut String, label: &str, body: &str) {
     let _ = writeln!(text, "\n{label} (escaped text)");
     if body.is_empty() {
         text.push_str("Empty file\n");

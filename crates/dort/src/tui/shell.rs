@@ -424,7 +424,7 @@ impl Shell {
                     && self
                         .generated
                         .as_ref()
-                        .is_some_and(|draft| !draft.entering_inputs() && draft.content_is_inline());
+                        .is_some_and(|draft| !draft.entering_inputs() && !draft.content_is_file());
                 None
             }
             Command::ToggleGeneratedInput if form == Form::Generated => {

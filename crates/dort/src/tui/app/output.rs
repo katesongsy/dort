@@ -413,6 +413,37 @@ impl App {
         None
     }
 
+    /// One request wrote the template file and the mapping. A missing mapping keeps the draft so
+    /// another approval writes it alone.
+    pub(super) fn accept_compose(
+        &mut self,
+        outcome: dort_core::generated::compose::Outcome,
+    ) -> Option<Task> {
+        use dort_core::generated::compose::Outcome;
+        self.receipt = None;
+        self.failure = None;
+        self.details_scroll = 0;
+        let saved = !matches!(outcome, Outcome::MappingNotWritten { .. });
+        if saved {
+            self.draft_exit = None;
+            if let Some(draft) = self.shell.generated.take() {
+                self.inventory.saved_template = Some(draft.id().into());
+                self.inventory.details = false;
+            }
+            self.clear_template_form();
+            self.shell.back();
+        }
+        self.result = Some(crate::services::compose::outcome(&outcome));
+        self.show_result = true;
+        self.status = if saved {
+            "Template file and mapping saved."
+        } else {
+            "Template file is in place. Mapping not written."
+        }
+        .into();
+        (!self.quit && saved).then_some(Task::Refresh)
+    }
+
     pub(super) fn accept_generated_deployment(
         &mut self,
         result: Result<dort_core::generated::Published, String>,
