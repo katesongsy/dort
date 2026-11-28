@@ -18,6 +18,7 @@ pub enum Command {
     OpenTemplateEditor,
     ToggleGeneratedInput,
     ToggleGeneratedDeclaration,
+    ToggleGeneratedSource,
     ClearLocalInput,
     Toggle,
 }
@@ -180,11 +181,25 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                 .as_ref()
                 .is_some_and(|draft| !draft.entering_inputs()) =>
         {
-            actions.push(ui::ActionButton {
-                label: "Open in editor",
-                key: "F5",
-                target: Target::FormAction(Command::OpenTemplateEditor),
-            })
+            if let Some(draft) = &s.generated {
+                if app.form_has_focus() && draft.on_content_row() {
+                    actions.push(ui::ActionButton {
+                        label: if draft.content_is_file() {
+                            "In dort.toml"
+                        } else {
+                            "Template file"
+                        },
+                        key: "Space",
+                        target: Target::FormAction(Command::ToggleGeneratedSource),
+                    });
+                } else if draft.content_is_inline() {
+                    actions.push(ui::ActionButton {
+                        label: "Open in editor",
+                        key: "F5",
+                        target: Target::FormAction(Command::OpenTemplateEditor),
+                    });
+                }
+            }
         }
         Form::Generated if app.form_has_focus() => {
             if let Some(label) = s.generated.as_ref().and_then(|draft| draft.value_action()) {

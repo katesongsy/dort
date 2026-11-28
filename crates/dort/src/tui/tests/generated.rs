@@ -258,6 +258,7 @@ fn generated_fields_own_keys_until_esc_and_continue_accepts_a_click() {
     w.press(KeyCode::Tab);
     w.paste("~/settings");
     w.press(KeyCode::Tab);
+    w.press(KeyCode::Tab);
     w.paste("theme={{ theme }}");
     w.press(KeyCode::Enter);
     w.press(KeyCode::Char('q'));
@@ -508,6 +509,7 @@ fn blank_repository_can_create_cancel_save_preview_and_edit_generated_template()
         w.press(KeyCode::BackTab);
         w.paste(" ");
         w.press(KeyCode::Tab);
+        w.press(KeyCode::Tab);
         w.paste("{broken={{ env.HOME }}");
         w.continue_form();
         assert!(w.app.preview.is_none());
@@ -607,6 +609,7 @@ fn jinja_draft_opts_in_and_keeps_explicit_values_and_host_choices_until_review()
         w.paste("prefs");
         w.press(KeyCode::Tab);
         w.paste("~/settings");
+        w.press(KeyCode::Tab);
         w.press(KeyCode::Tab);
         let template = concat!(
             "theme=[{{ inputs.theme }}]\n",
@@ -726,6 +729,7 @@ fn generated_local_inputs_from_empty_repository_to_deploy_and_update() {
         w.paste("prefs");
         w.press(KeyCode::Tab);
         w.paste("~/settings");
+        w.press(KeyCode::Tab);
         w.press(KeyCode::Tab);
         w.paste("editor=[{{ local.editor }}]\n{% if false %}{{ local.later }}{% endif %}{# local.comment #}");
         w.continue_form();
@@ -930,6 +934,7 @@ fn stale_generated_review_cannot_replace_a_new_manifest() {
     w.press(KeyCode::Tab);
     w.paste("~/settings");
     w.press(KeyCode::Tab);
+    w.press(KeyCode::Tab);
     w.paste("theme=dark");
     w.continue_form();
     assert!(w.review().contains("theme=dark"));
@@ -970,6 +975,7 @@ fn generated_save_selects_the_saved_template_even_when_a_filter_hides_it() {
     w.paste("zeta");
     w.press(KeyCode::Tab);
     w.paste("~/.zeta");
+    w.press(KeyCode::Tab);
     w.press(KeyCode::Tab);
     w.paste("second output");
     w.continue_form();

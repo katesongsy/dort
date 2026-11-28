@@ -313,6 +313,12 @@ impl Topic {
                     "Before saving" => "Enter opens a review of the local setting. It does not edit dort.toml. Esc returns with the current setting unchanged.",
                 )
             }
+            Self::ChooseTemplateFile => {
+                guide!("Choose a template file", "Use the arrows to move and Enter to read the file into this generated file draft. Only repository template files that Dort can read appear here.";
+                    "What changes" => "The draft holds the repository path. Review shows the rendered output. Saving writes dort.toml only and leaves the template file and Home file alone.",
+                    "No files" => "Create one in Files / Templates, then choose again. Cancel with Esc keeps the draft unchanged.",
+                )
+            }
             Self::DraftReferences => {
                 guide!("Choose profiles or tools", "Use the arrows to move. For a list with multiple selections, press Space or click a row to toggle it.";
                     "Apply to the draft" => "Enter applies the selection to the draft. Esc keeps the draft unchanged. Review the form separately before saving.",

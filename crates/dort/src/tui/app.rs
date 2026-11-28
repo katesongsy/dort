@@ -122,7 +122,7 @@ impl App {
             .and_then(|o| o.registered)
             == Some(true)
     }
-    fn template_repository(&self) -> Option<PathBuf> {
+    pub(in crate::tui) fn template_repository(&self) -> Option<PathBuf> {
         self.registered_repository()
             .then(|| self.data.as_ref()?.repository.clone())
             .flatten()
@@ -386,6 +386,19 @@ impl App {
             }
             Ok(Output::TemplateList(rows)) => {
                 self.templates.replace(rows);
+                self.status = "".into();
+                None
+            }
+            Ok(Output::DraftSources(rows)) => {
+                self.open_source_choice(rows);
+                self.status = "".into();
+                None
+            }
+            Ok(Output::DraftSource(path, source)) => {
+                let draft = self.shell.generated.as_mut()?;
+                if draft.set_source_text(&path.display().to_string(), source.text().to_owned()) {
+                    self.shell.form_feedback = None;
+                }
                 self.status = "".into();
                 None
             }
@@ -1057,8 +1070,12 @@ impl App {
                     Some(Overlay::Form(Form::Generated)) => {
                         let draft = self.shell.generated.as_mut()?;
                         draft.focus_at(index);
-                        if draft.toggle_declaration() {
+                        let picker = draft.content_action(true);
+                        if draft.toggle_declaration() || picker {
                             self.shell.form_feedback = None;
+                        }
+                        if picker {
+                            return self.intent(Intent::ListDraftSources);
                         }
                     }
                     Some(Overlay::Form(Form::Configure)) => {
@@ -2295,6 +2312,16 @@ impl App {
         match intent {
             Intent::Unignore(path) => Some(Task::Ignore(path, false)),
             Intent::Action(action) => self.activate(action),
+            Intent::ListDraftSources => {
+                let Some(root) = self.template_repository() else {
+                    self.shell.form_feedback = Some((
+                        Form::Generated,
+                        "Open a registered repository to choose a template file.".into(),
+                    ));
+                    return None;
+                };
+                Some(Task::ListDraftSources(root))
+            }
             Intent::Active => Some(Task::Select(None)),
             Intent::ApplyProfiles {
                 manifest,

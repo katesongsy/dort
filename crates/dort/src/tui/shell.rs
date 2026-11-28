@@ -283,6 +283,7 @@ pub struct Shell {
 }
 pub enum Intent {
     Unignore(std::path::PathBuf),
+    ListDraftSources,
     Action(Action),
     Submit(Form),
     ClearLocalInput,
@@ -423,7 +424,7 @@ impl Shell {
                     && self
                         .generated
                         .as_ref()
-                        .is_some_and(|draft| !draft.entering_inputs());
+                        .is_some_and(|draft| !draft.entering_inputs() && draft.content_is_inline());
                 None
             }
             Command::ToggleGeneratedInput if form == Form::Generated => {
@@ -437,6 +438,13 @@ impl Shell {
                 None
             }
             Command::ToggleGeneratedInput | Command::ToggleGeneratedDeclaration => None,
+            Command::ToggleGeneratedSource if form == Form::Generated => {
+                let draft = self.generated.as_mut()?;
+                draft
+                    .content_action(true)
+                    .then_some(Intent::ListDraftSources)
+            }
+            Command::ToggleGeneratedSource => None,
             Command::Toggle => {
                 self.configuration.as_mut()?.toggle_default();
                 None
@@ -665,6 +673,14 @@ impl Shell {
                     KeyCode::Esc => self.form_feedback = None,
                     KeyCode::Enter if !focused && key.modifiers.is_empty() => {
                         return Some(Intent::Submit(Form::Generated));
+                    }
+                    KeyCode::Char(' ') | KeyCode::Enter
+                        if focused && !draft.entering_inputs() && draft.on_content_row() =>
+                    {
+                        self.form_feedback = None;
+                        if draft.content_action(key.code == KeyCode::Char(' ')) {
+                            return Some(Intent::ListDraftSources);
+                        }
                     }
                     KeyCode::F(6) if focused && draft.entering_inputs() => {
                         return self.form_action(super::forms::Command::ToggleGeneratedInput);
