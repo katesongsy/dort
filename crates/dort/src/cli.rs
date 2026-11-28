@@ -228,6 +228,11 @@ enum FilesCommand {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
+    /// List, show, create or edit repository template files.
+    Templates {
+        #[command(subcommand)]
+        command: TemplateCommand,
+    },
     /// Show rendered output and deployment status without writing files.
     PreviewGenerated { id: String },
     /// Show the declared local inputs and values for one generated file. No writes.
@@ -270,6 +275,28 @@ enum FilesCommand {
         profiles: Vec<String>,
         #[command(subcommand)]
         command: PlanCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum TemplateCommand {
+    /// List template paths, mapping counts and edit access without reading source text.
+    List,
+    /// Show one template's source text without rendering it.
+    Show { path: PathBuf },
+    /// Review and create a .jinja file under templates/.
+    Create {
+        path: PathBuf,
+        /// Read the proposed text from this local file.
+        #[arg(long)]
+        from: PathBuf,
+    },
+    /// Review and replace an existing .jinja file under templates/.
+    Edit {
+        path: PathBuf,
+        /// Read the proposed text from this local file.
+        #[arg(long)]
+        from: PathBuf,
     },
 }
 
@@ -1247,6 +1274,9 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
             }
         }
         Command::Files { command } => match command {
+            FilesCommand::Templates { command } => {
+                return templates(cli, &host, &local, command);
+            }
             FilesCommand::LocalInputs { id } => {
                 let root = local_input_repository(cli, &local)?;
                 let rows = dort_core::generated::local_inputs::inspect(&host, &root, id)?;
@@ -1573,6 +1603,103 @@ fn approve(cli: &Cli) -> dort_core::Result<()> {
     }
     Ok(())
 }
+fn templates(
+    cli: &Cli,
+    host: &HostContext,
+    local: &LocalConfig,
+    command: &TemplateCommand,
+) -> dort_core::Result<ExitCode> {
+    use crate::services::template_files as report;
+    use dort_core::template_files::{self, Change, Outcome, Preview};
+    use serde_json::json;
+
+    if cli.confirm_remove.is_some() {
+        return Err(Error::Invalid(
+            "Template files do not use --confirm-remove.".into(),
+        ));
+    }
+    let root = local.select_repository(cli.repo.as_deref())?;
+    let encode =
+        |value: serde_json::Value| print_ascii_json(&value, "could not encode template output");
+    let (change, from) = match command {
+        TemplateCommand::List => {
+            let rows = template_files::list(host, &root)?;
+            if cli.json {
+                let templates: Vec<_> = rows
+                    .iter()
+                    .map(|row| {
+                        json!({
+                            "path": row.path, "mappings": row.mappings, "editable": row.editable,
+                        })
+                    })
+                    .collect();
+                encode(json!({"templates": templates}))?;
+            } else {
+                print!("{}", report::list(&rows));
+            }
+            return Ok(ExitCode::SUCCESS);
+        }
+        TemplateCommand::Show { path } => {
+            let source = template_files::show(host, &root, path)?;
+            if cli.json {
+                encode(
+                    json!({"path": source.row().path, "mappings": source.row().mappings,
+                    "editable": source.row().editable, "permissions": source.permissions(), "text": source.text()}),
+                )?;
+            } else {
+                print!("{}", report::show(&source));
+            }
+            return Ok(ExitCode::SUCCESS);
+        }
+        TemplateCommand::Create { path, from } => (Change::Create(path.clone()), from),
+        TemplateCommand::Edit { path, from } => {
+            (Change::Edit(template_files::show(host, &root, path)?), from)
+        }
+    };
+    let preview = Preview::prepare(host, &root, change, report::read_proposed(from)?)?;
+    if cli.dry_run {
+        let review = preview.review();
+        if cli.json {
+            encode(
+                json!({"read_only": true, "path": review.path, "before": review.before,
+                "after": review.after, "permissions": review.permissions, "mappings": review.mappings,
+                "retained": review.retained.map(|paths| json!({"reviewed": paths.reviewed, "displaced": paths.displaced}))}),
+            )?;
+        } else {
+            print!("{}", report::review(review));
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+    if !cli.yes && interactive(cli) {
+        print!("{}", report::review(preview.review()));
+    }
+    approve(cli)?;
+    let outcome = preview.approve().execute(host)?;
+    if cli.json {
+        encode(match &outcome {
+            Outcome::Created => json!({"outcome": "created"}),
+            Outcome::Edited(paths) => json!({"outcome": "edited",
+                "retained": {"reviewed": paths.reviewed, "displaced": paths.displaced}}),
+            Outcome::NeedsAttention {
+                retained,
+                competing_change,
+                durability_unknown,
+            } => json!({
+                "outcome": "needs_attention", "competing_change": competing_change,
+                "durability_unknown": durability_unknown,
+                "retained": retained.as_ref().map(|paths| json!({"reviewed": paths.reviewed, "displaced": paths.displaced})),
+            }),
+        })?;
+    } else {
+        print!("{}", report::outcome(&outcome));
+    }
+    Ok(if matches!(outcome, Outcome::NeedsAttention { .. }) {
+        ExitCode::from(4)
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
 fn local_input_repository(cli: &Cli, local: &LocalConfig) -> dort_core::Result<PathBuf> {
     if cli.confirm_remove.is_some() {
         return Err(Error::Invalid(

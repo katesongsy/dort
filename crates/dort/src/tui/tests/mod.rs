@@ -571,3 +571,5 @@ fn completion_keeps_noop_result_visible_through_refresh_and_read_failure() {
 }
 
 mod draft_references;
+
+mod templates;

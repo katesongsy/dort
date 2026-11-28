@@ -29,7 +29,9 @@ impl DraftExit {
 impl App {
     pub(in crate::tui) fn template_form(&self) -> Option<Form> {
         match self.shell.overlay {
-            Some(Overlay::Form(form @ (Form::Generated | Form::LocalInputs)))
+            Some(Overlay::Form(
+                form @ (Form::Generated | Form::LocalInputs | Form::TemplateFile),
+            ))
             | Some(Overlay::DraftAbout(form)) => Some(form),
             _ => None,
         }
@@ -38,7 +40,9 @@ impl App {
     pub(super) fn template_form_visible(&self) -> bool {
         matches!(
             self.shell.overlay,
-            Some(Overlay::Form(Form::Generated | Form::LocalInputs))
+            Some(Overlay::Form(
+                Form::Generated | Form::LocalInputs | Form::TemplateFile
+            ))
         ) && self.dialog_title().is_none()
             && !self.busy
             && self.error.is_none()
@@ -60,6 +64,12 @@ impl App {
                 .generated
                 .as_ref()
                 .is_some_and(|draft| draft.dirty()),
+            Some(Form::TemplateFile) => self
+                .shell
+                .template_file
+                .as_ref()
+                .and_then(|screen| screen.draft())
+                .is_some_and(|draft| draft.dirty()),
             Some(Form::LocalInputs) => self
                 .shell
                 .local_inputs
@@ -78,6 +88,7 @@ impl App {
     pub(in crate::tui) fn clear_template_form(&mut self) {
         if self.template_form().is_some() {
             self.shell.generated = None;
+            self.shell.template_file = None;
             self.shell.local_inputs = None;
             self.shell.form_feedback = None;
             self.shell.open_template_editor = false;

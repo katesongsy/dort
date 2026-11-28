@@ -105,6 +105,7 @@ mod task_surface_tests;
 mod task_surfaces;
 mod template_buffer;
 mod template_editor;
+mod templates;
 #[cfg(test)]
 mod tests;
 mod tool_declaration;
@@ -353,7 +354,7 @@ fn run_loop(
             let generated_flow = matches!(
                 app.shell.overlay,
                 Some(shell::Overlay::Form(
-                    shell::Form::Generated | shell::Form::LocalInputs
+                    shell::Form::Generated | shell::Form::LocalInputs | shell::Form::TemplateFile
                 ))
             );
             if generated_flow != bracketed_paste {

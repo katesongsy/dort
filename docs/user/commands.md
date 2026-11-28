@@ -35,7 +35,7 @@ Reviews show exact effects. Confirm once. Help keeps drafts; choosing another de
 After a failure, `R` retries a read or asks for a fresh preview. It never replays an approval. After a failed write, `R` only refreshes; use `h` for Recovery. A blocked earlier operation names its repository and action; open Recovery.
 
 ### Files
-Press `f` to open **1 Managed**. Use `2` for **Discover**, `3` for **Ignored paths**, and `4` for **Generated**. `g` opens Git.
+Press `f` to open **1 Managed**. Use `2` for **Discover**, `3` for **Ignored paths**, `4` for **Generated**, and `5` for **Templates**. `g` opens Git.
 - **Managed:** `u` Unmanage keeps the local file; `U` Unmanage marked does the same for marked files. `m` Manual adopt opens an adoption draft. `a` Apply reviews all active files; `A` Apply marked reviews marked files only.
 - **Discover:** `a` Adopt opens a draft for the selected file; `A` Adopt marked opens a batch draft. `i` Ignore reviews excluding the selected path from discovery.
 - In **Managed**, use **Add mapping** for a file already in the repository. Select a mapping and use **Edit file mapping** to change its declaration. Review and save before applying. Adoption also lets you choose active profiles.
@@ -55,7 +55,7 @@ Choose **Review generated file** after entering inputs. Check the resolved value
 
 Select the saved file and open **Local inputs** (`l`). Select a name and press `Enter` to set its value. Blank sets an empty string. **Clear** (`F6`) makes a set value unset. Review the change, scroll to the end, then press `y` to save it only on this machine. Keep secrets out of local inputs. Preview again to see the new output before deployment.
 
-Select a saved template in **Generated**. Press `Enter` or `v` for **Preview generated file**. Scroll with the arrows or page keys. `End` jumps to the end of the output. `Esc` returns to the selected template. Press `e` for **Edit generated file**. Edit file-backed templates in the repository.
+Select a saved template in **Generated**. Press `Enter` or `v` for **Preview generated file**. Scroll with the arrows or page keys. `End` jumps to the end of the output. `Esc` returns to the selected template. Press `e` for **Edit generated file**. Open **Files / Templates** to edit a repository template file.
 
 The preview shows the resolved inputs and their sources, the proposed output, and the file's status. **Update available** means the template output or permissions changed while the deployed file stayed the same. A local edit, permission change or deletion takes precedence. The preview leaves your local file alone.
 
@@ -64,6 +64,14 @@ For a new file, choose **Review deployment** (`R`). Read the destination, permis
 When the preview says **Update available**, choose **Review update** (`R`). Read the permission change and the exact lines marked `OLD` and `NEW`. Scroll to the end, then press `y` when **Update generated file** appears.
 
 For local edits or changed permissions, **Review replacement** (`R`) compares the exact local file with the proposed output. Dort keeps the local file at the private path shown in the review if you approve. For a tracked deletion, **Review recreation** (`R`) shows the exact output and permissions. Dort creates the file only if the destination is still missing and its folder already exists. Scroll to the end before pressing `y`. Press `Esc` to keep the local file or leave it missing.
+
+#### Repository template files
+
+Press `5` in **Files** to open **Templates**. The list shows repository paths, mapping counts, and whether you can edit each path. Press `Enter` to view the selected source without rendering it. **Read only** files can be viewed but not edited here.
+
+Press `s` for **New template file**, or press `Enter` in an editable source view. For a new file, enter a repository-relative path such as `templates/editor.jinja`. Create `templates/` and any needed subfolder in the repository before reviewing. Dort edits only `.jinja` files under `templates/`.
+
+Use `Tab` to move between fields. In **Template**, `Enter` adds a line. Press `Esc` to leave the field, then `Enter` to review. Read the escaped source and scroll to the end before pressing `y`. Saving leaves mappings and Home files unchanged. An edit shows the private paths where Dort kept the reviewed and replaced copies. Keep secrets out of template files.
 
 ## Tools
 
@@ -156,6 +164,19 @@ dort --repo PATH files list --profile dev
 ```
 
 Shows active mappings and blockers without touching files or tools.
+
+### List, view, or change template files
+
+```sh
+dort files templates list
+dort files templates show templates/editor.jinja
+dort --dry-run files templates create templates/editor.jinja --from ./draft.jinja
+dort --yes files templates create templates/editor.jinja --from ./draft.jinja
+dort --dry-run files templates edit templates/editor.jinja --from ./draft.jinja
+dort --yes files templates edit templates/editor.jinja --from ./draft.jinja
+```
+
+Use a regular UTF-8 file for `--from`. Keep secrets out of the proposed text. Create `templates/` and any needed subfolder in the registered repository first. Review the exact escaped text with `--dry-run`, or omit `--yes` in a terminal to review and confirm. `--json` gives the exact text for `show` and `--dry-run`. If a write needs attention, inspect the template and any retained copies before retrying.
 
 ### Preview a generated file
 

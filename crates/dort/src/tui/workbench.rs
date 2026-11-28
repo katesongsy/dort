@@ -524,7 +524,7 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
     use super::actions::Pending;
     let document = if matches!(
         preview.pending,
-        Pending::GeneratedUpdate(_) | Pending::GeneratedRecovery(_)
+        Pending::GeneratedUpdate(_) | Pending::GeneratedRecovery(_) | Pending::TemplateFile(..)
     ) {
         Text::raw(preview.text.clone())
     } else {
@@ -548,6 +548,7 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
             Pending::GeneratedDeployment(_)
                 | Pending::GeneratedUpdate(_)
                 | Pending::GeneratedRecovery(_)
+                | Pending::TemplateFile(..)
         )
     {
         app.presented(
@@ -850,6 +851,9 @@ pub fn draw(frame: &mut Frame, app: &App) {
             overlay(frame, body, app, current);
         } else {
             match app.tab {
+                Tab::Files if app.files_page == super::inventory::Page::Templates => {
+                    app.templates.draw(frame, body, app)
+                }
                 Tab::Files => super::files::draw(frame, body, app),
                 Tab::Git => app.git_view.draw(frame, body, app.busy, &app.hits),
                 Tab::Tools if app.tools_view.landing() => {

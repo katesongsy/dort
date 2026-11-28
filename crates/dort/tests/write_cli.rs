@@ -673,3 +673,62 @@ template = "{{ local.name }}"
     assert!(!s.home.join("settings").exists());
     assert!(!s.home.join("other").exists());
 }
+
+#[test]
+fn template_files_cli_reviews_exact_bytes_and_keeps_displaced_copies() {
+    let s = Sandbox::new();
+    s.init();
+    let source = s.root.join("draft.txt");
+    let path = "templates/editor.jinja";
+    let destination = s.repo.join(path);
+    let original = "key=1 \r\nlast";
+    fs::write(&source, original).unwrap();
+    let write = |verb: &str, flags: &[&str]| {
+        s.repo()
+            .args(flags)
+            .args(["files", "templates", verb, path, "--from"])
+            .arg(&source)
+            .assert()
+    };
+    let missing = write("create", &["--dry-run"]).code(2);
+    assert!(
+        String::from_utf8_lossy(&missing.get_output().stderr)
+            .contains("Template folder is missing")
+    );
+    assert!(!s.repo.join("templates").exists());
+    fs::create_dir(s.repo.join("templates")).unwrap();
+    let review = write("create", &["--json", "--dry-run", "--yes"]).success();
+    let review: serde_json::Value = serde_json::from_slice(&review.get_output().stdout).unwrap();
+    assert_eq!(review["after"], original);
+    assert!(!destination.exists());
+    write("create", &[]).code(2);
+    assert!(!destination.exists());
+    write("create", &["--yes"])
+        .success()
+        .stdout("Created template file.\n");
+    assert_eq!(fs::read(&destination).unwrap(), original.as_bytes());
+    s.repo()
+        .args(["files", "templates", "list"])
+        .assert()
+        .success()
+        .stdout("templates/editor.jinja | 0 mappings | Editable\n");
+    let shown = s
+        .repo()
+        .args(["files", "templates", "show", path])
+        .assert()
+        .success();
+    assert!(String::from_utf8_lossy(&shown.get_output().stdout).contains("|key=1 \\r\\n|\n|last|"));
+
+    fs::write(&source, "key=2\n").unwrap();
+    let result = write("edit", &["--json", "--yes"]).success();
+    let result: serde_json::Value = serde_json::from_slice(&result.get_output().stdout).unwrap();
+    assert_eq!(result["outcome"], "edited");
+    assert_eq!(fs::read(&destination).unwrap(), b"key=2\n");
+    for name in ["reviewed", "displaced"] {
+        assert_eq!(
+            fs::read(result["retained"][name].as_str().unwrap()).unwrap(),
+            original.as_bytes()
+        );
+    }
+    assert_eq!(fs::read(s.repo.join("dort.toml")).unwrap(), b"schema = 1\n");
+}

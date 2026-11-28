@@ -11,6 +11,8 @@ pub mod installation;
 pub mod installed_tools;
 pub mod presentation;
 pub mod reconciliation;
+#[allow(dead_code, reason = "Template presentation is ready for the Files UI.")]
+pub mod template_files;
 pub mod tools;
 use dort_core::{
     Manifest, Result, adoption, bootstrap,

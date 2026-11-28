@@ -82,6 +82,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                 primary,
             )
         }
+        Form::TemplateFile => {
+            if let Some(screen) = &s.template_file {
+                screen.draw(frame, area, app);
+            }
+            return;
+        }
         Form::LocalInputs => {
             if let Some(panel) = &s.local_inputs {
                 panel.draw(frame, area, app);

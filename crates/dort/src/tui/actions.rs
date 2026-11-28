@@ -15,6 +15,7 @@ use dort_core::{
     planner::{self, Plan, Request, UnmanageMode},
     recovery,
     state::WriterLock,
+    template_files,
 };
 use std::path::{Path, PathBuf};
 
@@ -355,6 +356,7 @@ pub enum Pending {
     ToolDeclaration(Box<dort_core::tools::declaration::Preview>),
     Ignore(dort_core::discovery_ignore::Preview),
     LocalInput(Box<dort_core::generated::local_inputs::Preview>),
+    TemplateFile(Box<template_files::Preview>, PathBuf),
     GeneratedDeployment(Box<dort_core::generated::Deployment>),
     GeneratedUpdate(Box<Update>),
     GeneratedRecovery(UpdateLocation),
@@ -370,6 +372,7 @@ impl Pending {
             Self::ToolDeclaration(p) => crate::services::declaration::report(p),
             Self::Ignore(preview) => preview.human(),
             Self::LocalInput(p) => crate::services::presentation::local_input_review(p.review()),
+            Self::TemplateFile(p, _) => crate::services::template_files::review(p.review()),
             Self::GeneratedDeployment(p) => {
                 crate::services::presentation::generated_deployment(p.review())
             }
@@ -436,6 +439,8 @@ impl Pending {
             Self::Profile(_) => "Save profile choice",
             Self::LocalInput(p) if p.review().proposed.is_none() => "Clear local input",
             Self::LocalInput(_) => "Save local input",
+            Self::TemplateFile(p, _) if p.review().before.is_none() => "Create template file",
+            Self::TemplateFile(..) => "Save template file",
             Self::GeneratedDeployment(_) => "Deploy generated file",
             Self::GeneratedUpdate(p) => generated_update::confirmation_label(p.action()),
             Self::GeneratedRecovery(location) => generated_update::recovery_label(location.action),
@@ -484,6 +489,7 @@ impl Pending {
                 .map(|a| Approved::ToolDeclaration(Box::new(a))),
             Self::Ignore(preview) => Ok(Approved::Ignore(preview.approve())),
             Self::LocalInput(p) => Ok(Approved::LocalInput(Box::new(p.approve()))),
+            Self::TemplateFile(p, root) => Ok(Approved::TemplateFile(Box::new(p.approve()), root)),
             Self::GeneratedDeployment(p) => {
                 Ok(Approved::GeneratedDeployment(Box::new(p.approve())))
             }
@@ -531,6 +537,7 @@ pub enum Approved {
     ToolDeclaration(Box<dort_core::tools::declaration::Approval>),
     Ignore(dort_core::discovery_ignore::Approval),
     LocalInput(Box<dort_core::generated::local_inputs::Approval>),
+    TemplateFile(Box<template_files::Approval>, PathBuf),
     GeneratedDeployment(Box<dort_core::generated::Approval>),
     GeneratedUpdate(Box<UpdateApproval>),
     GeneratedRecovery(UpdateLocation),
@@ -595,6 +602,11 @@ impl Approved {
                 ("Discovery preferences", None, None)
             }
             Self::LocalInput(approval) => return approval.execute().map(Output::LocalInputSaved),
+            Self::TemplateFile(approval, root) => {
+                let outcome = approval.execute(host)?;
+                let rows = template_files::list(host, &root).map_err(|error| diagnostic(&error));
+                return Ok(Output::TemplateWritten(outcome, rows));
+            }
             Self::GeneratedDeployment(approval) => {
                 return match approval.execute() {
                     Err(error @ Error::RecoveryRequired(_)) => Err(error),
@@ -760,6 +772,9 @@ pub enum Task {
     Ignore(PathBuf, bool),
     InspectLocalInputs(String),
     ReviewLocalInput(super::local_inputs::Change),
+    ListTemplates(PathBuf),
+    ShowTemplate(PathBuf, PathBuf),
+    ReviewTemplate(PathBuf, Box<template_files::Change>, String),
     PreviewGenerated(String),
     ReviewGeneratedDeployment(String),
     ReviewGeneratedUpdate(String, UpdateAction),
@@ -830,6 +845,12 @@ pub enum Output {
     IgnoredPaths(Vec<PathBuf>),
     LocalInputs(String, Vec<dort_core::generated::local_inputs::Row>),
     LocalInputSaved(bool),
+    TemplateList(Vec<template_files::Row>),
+    TemplateSource(Box<template_files::Source>),
+    TemplateWritten(
+        template_files::Outcome,
+        std::result::Result<Vec<template_files::Row>, String>,
+    ),
     Generated(Box<dort_core::generated::Preview>),
     GeneratedDeployed(std::result::Result<dort_core::generated::Published, String>),
     GeneratedUpdated(Option<UpdateOutcome>),
@@ -1048,6 +1069,13 @@ pub fn perform_scoped_with_install_progress(
                 change.value.as_deref(),
             )
             .map(|p| Output::Preview(Pending::LocalInput(Box::new(p))))
+        }
+        Task::ListTemplates(root) => template_files::list(host, &root).map(Output::TemplateList),
+        Task::ShowTemplate(root, path) => template_files::show(host, &root, &path)
+            .map(|source| Output::TemplateSource(Box::new(source))),
+        Task::ReviewTemplate(root, change, text) => {
+            template_files::Preview::prepare(host, &root, *change, text)
+                .map(|p| Output::Preview(Pending::TemplateFile(Box::new(p), root)))
         }
         Task::PreviewGenerated(id) => crate::services::preview_generated(
             host,

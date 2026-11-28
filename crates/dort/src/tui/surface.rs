@@ -79,6 +79,10 @@ impl App {
                     Form::Clone => "Session / Clone repository",
                     Form::Repair => "Manifest repair draft",
                     Form::Generated => "Files / Generated file draft",
+                    Form::TemplateFile if self.form_page().is_some() => {
+                        "Files / Template file draft"
+                    }
+                    Form::TemplateFile => "Files / Template source",
                     Form::LocalInputs => "Files / Local inputs",
                     Form::Configure => self
                         .shell

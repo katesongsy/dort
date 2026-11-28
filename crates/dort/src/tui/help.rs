@@ -20,6 +20,7 @@ pub(super) enum Topic {
     ManagedContent,
     Managed,
     ManagedDetails,
+    TemplateFiles,
     GeneratedFiles,
     Generated,
     GeneratedDraft,
@@ -111,6 +112,7 @@ impl Topic {
                 Kind::Repair => Self::OpenRepair,
             },
             Form::Repair => Self::Repair,
+            Form::TemplateFile => Self::TemplateFiles,
             Form::Generated => Self::GeneratedDraft,
             Form::LocalInputs => Self::LocalInputs,
             Form::Check => Self::CheckForm,
@@ -253,6 +255,9 @@ impl Topic {
             Tab::Overview if app.profiles.open => Self::Profiles,
             Tab::Overview if app.overview_details => Self::OverviewDetails,
             Tab::Overview => Self::Overview,
+            Tab::Files if app.files_page == super::inventory::Page::Templates => {
+                Self::TemplateFiles
+            }
             Tab::Files if app.files_page == super::inventory::Page::Generated => {
                 Self::GeneratedFiles
             }

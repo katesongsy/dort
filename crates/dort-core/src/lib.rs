@@ -28,6 +28,7 @@ pub mod profiles;
 pub mod recovery;
 pub mod state;
 pub mod template;
+pub mod template_files;
 mod tool_journal;
 pub mod tools;
 
