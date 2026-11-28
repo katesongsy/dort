@@ -1,4 +1,5 @@
 use super::{app::App, components as ui, input::Wheel};
+use crate::services::presentation::{generated_input_lines, generated_source, template_syntax};
 use dort_core::generated::{DriftStatus, Preview, UpdateAction};
 use ratatui::{
     Frame,
@@ -22,11 +23,7 @@ impl Report {
         let mut lines = vec![
             section(&preview.id),
             Line::raw("Read-only preview. No files written."),
-            field(
-                "Source",
-                &crate::services::presentation::generated_source(preview),
-                Tone::Neutral,
-            ),
+            field("Source", &generated_source(preview), Tone::Neutral),
             field(
                 "Destination",
                 &preview.destination.display().to_string(),
@@ -49,11 +46,7 @@ impl Report {
         }
         lines.extend([
             Line::default(),
-            field(
-                "Inputs from dort.toml",
-                &crate::services::presentation::generated_inputs(preview),
-                Tone::Neutral,
-            ),
+            field("Syntax", template_syntax(preview.syntax), Tone::Neutral),
             field(
                 "Proposed permissions",
                 &preview.proposed_permissions(),
@@ -69,6 +62,8 @@ impl Report {
                 Tone::Neutral,
             ),
         ]);
+        lines.extend([Line::default(), section("Resolved inputs")]);
+        lines.extend(generated_input_lines(&preview.resolved_inputs).map(Line::raw));
         lines.extend([Line::default(), section("Rendered output")]);
         if preview.rendered.is_empty() {
             lines.push(Line::styled("Empty output", ui::muted()));
@@ -113,18 +108,21 @@ impl Report {
 use super::template_buffer::TemplateBuffer;
 use dort_core::{
     Error, Result,
-    generated::{VALUE_LIMIT, input_names},
+    generated::{HostInput, HostInputs, VALUE_LIMIT, input_names_for},
     manifest_edit::{Change, FileChange},
     model::{FileMode, ManagedFile, base_profiles},
+    template::Dialect,
 };
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) struct Draft {
     before: Option<ManagedFile>,
     id: String,
     target: String,
     pub template: TemplateBuffer,
+    syntax: Dialect,
+    host_inputs: HostInputs,
     values: BTreeMap<String, String>,
     step: Step,
     template_focus: usize,
@@ -132,7 +130,15 @@ pub(super) struct Draft {
 
 enum Step {
     Template,
-    Inputs { names: Vec<String>, focus: usize },
+    Inputs {
+        fields: Vec<InputField>,
+        focus: usize,
+    },
+}
+
+enum InputField {
+    Value(String),
+    Host { key: HostInput, referenced: bool },
 }
 
 impl Draft {
@@ -148,6 +154,11 @@ impl Draft {
                     .and_then(|f| f.template.clone())
                     .unwrap_or_default(),
             ),
+            syntax: before.as_ref().and_then(|f| f.syntax).unwrap_or_default(),
+            host_inputs: before
+                .as_ref()
+                .and_then(|f| f.host_inputs)
+                .unwrap_or_default(),
             values: before
                 .as_ref()
                 .map_or_else(BTreeMap::new, |f| f.inputs.clone()),
@@ -170,10 +181,19 @@ impl Draft {
     }
 
     pub fn instructions(&self) -> &'static str {
-        if self.entering_inputs() {
-            "Enter literal values. Blanks and spaces are kept. Never enter secrets."
-        } else {
-            "Use {{ name }} for inputs. Enter adds a line. Tab moves fields. Never enter secrets."
+        match (self.entering_inputs(), self.syntax) {
+            (false, Dialect::Literal) => {
+                "Use {{ name }} for inputs. Enter adds a line. Tab moves fields."
+            }
+            (false, Dialect::Jinja) => {
+                "Use {{ inputs.name }} and {{ host.os }}. Enter adds a line. Tab moves fields."
+            }
+            (true, Dialect::Literal) => {
+                "Enter literal values. Blanks and spaces are kept. Never enter secrets."
+            }
+            (true, Dialect::Jinja) => {
+                "Set values and allow host fields you need. Leave unused inputs unset. No secrets."
+            }
         }
     }
 
@@ -181,23 +201,83 @@ impl Draft {
         if self.before.is_some() { 1 } else { 2 }
     }
 
+    fn syntax_field(&self) -> usize {
+        self.template_field() + 1
+    }
+
     pub fn entering_inputs(&self) -> bool {
         matches!(self.step, Step::Inputs { .. })
     }
 
     pub fn input_fields(&self) -> Vec<(String, &str)> {
-        let Step::Inputs { names, .. } = &self.step else {
+        let Step::Inputs { fields, .. } = &self.step else {
             return Vec::new();
         };
-        names
+        fields
             .iter()
-            .map(|name| {
-                (
-                    format!("Input: {name}"),
-                    self.values.get(name).map_or("", String::as_str),
-                )
+            .map(|field| match field {
+                InputField::Value(name) => {
+                    let (prefix, unset) = match self.syntax {
+                        Dialect::Literal => ("", ""),
+                        Dialect::Jinja => ("inputs.", "(not set)"),
+                    };
+                    (
+                        format!("Input: {prefix}{name}"),
+                        self.values.get(name).map_or(unset, String::as_str),
+                    )
+                }
+                InputField::Host { key, referenced } => (
+                    format!(
+                        "host.{}{}",
+                        key.key(),
+                        if *referenced { " (referenced)" } else { "" }
+                    ),
+                    "",
+                ),
             })
             .collect()
+    }
+
+    pub fn host_rows(&self) -> Vec<(usize, bool)> {
+        let Step::Inputs { fields, .. } = &self.step else {
+            return Vec::new();
+        };
+        fields
+            .iter()
+            .enumerate()
+            .filter_map(|(i, field)| match field {
+                InputField::Host { key, .. } => Some((i, self.host_inputs.contains(*key))),
+                InputField::Value(_) => None,
+            })
+            .collect()
+    }
+
+    pub fn value_action(&self) -> Option<&'static str> {
+        let Step::Inputs { fields, focus } = &self.step else {
+            return None;
+        };
+        match &fields[*focus] {
+            InputField::Value(name) if self.syntax == Dialect::Jinja => {
+                Some(if self.values.contains_key(name) {
+                    "Unset input"
+                } else {
+                    "Set empty input"
+                })
+            }
+            _ => None,
+        }
+    }
+
+    pub fn toggle_value(&mut self) {
+        if self.value_action().is_none() {
+            return;
+        }
+        if let Step::Inputs { fields, focus } = &self.step
+            && let InputField::Value(name) = &fields[*focus]
+            && self.values.remove(name).is_none()
+        {
+            self.values.insert(name.clone(), String::new());
+        }
     }
 
     pub fn focus(&self) -> usize {
@@ -208,11 +288,37 @@ impl Draft {
     }
 
     pub fn focus_at(&mut self, index: usize) {
-        let last = self.template_field();
+        let last = self.syntax_field();
         match &mut self.step {
             Step::Template => self.template_focus = index.min(last),
-            Step::Inputs { names, focus } => *focus = index.min(names.len() - 1),
+            Step::Inputs { fields, focus } => *focus = index.min(fields.len() - 1),
         }
+    }
+
+    pub fn syntax_focused(&self) -> bool {
+        !self.entering_inputs() && self.template_focus == self.syntax_field()
+    }
+
+    pub fn syntax(&self) -> Dialect {
+        self.syntax
+    }
+
+    pub fn set_syntax(&mut self, syntax: Dialect) {
+        self.syntax = syntax;
+    }
+
+    pub fn toggle_host(&mut self) -> bool {
+        let Step::Inputs { fields, focus } = &self.step else {
+            return false;
+        };
+        let InputField::Host { key, .. } = fields[*focus] else {
+            return false;
+        };
+        self.host_inputs = HostInput::ALL
+            .into_iter()
+            .filter(|&k| self.host_inputs.contains(k) != (k == key))
+            .collect();
+        true
     }
 
     pub fn back(&mut self) -> bool {
@@ -224,25 +330,54 @@ impl Draft {
         }
     }
 
+    fn discover(&self) -> Result<Vec<InputField>> {
+        let references = input_names_for(self.id(), self.syntax, self.template.text())?;
+        if self.syntax == Dialect::Literal {
+            return Ok(references.into_iter().map(InputField::Value).collect());
+        }
+        let names: BTreeSet<_> = references
+            .iter()
+            .filter_map(|name| name.strip_prefix("inputs."))
+            .chain(self.values.keys().map(String::as_str))
+            .collect();
+        Ok(names
+            .into_iter()
+            .map(|name| InputField::Value(name.to_owned()))
+            .chain(HostInput::ALL.into_iter().map(|key| InputField::Host {
+                key,
+                referenced: references.contains(&format!("host.{}", key.key())),
+            }))
+            .collect())
+    }
+
     pub fn submit(&mut self) -> Result<Option<Change>> {
-        let template = self.template.text();
-        let names = if let Step::Inputs { names, .. } = &self.step {
-            names.clone()
+        let inputs = if let Step::Inputs { fields, .. } = &self.step {
+            fields
+                .iter()
+                .filter_map(|field| {
+                    let InputField::Value(name) = field else {
+                        return None;
+                    };
+                    let value = self
+                        .values
+                        .get(name)
+                        .cloned()
+                        .or_else(|| (self.syntax == Dialect::Literal).then(String::new))?;
+                    Some((name.clone(), value))
+                })
+                .collect()
         } else {
             if self.id.trim().is_empty() || self.target.trim().is_empty() {
                 return Err(Error::Invalid(
                     "Enter a file ID and Home destination.".into(),
                 ));
             }
-            let names = input_names(template)?
-                .into_iter()
-                .map(str::to_owned)
-                .collect::<Vec<_>>();
-            if !names.is_empty() {
-                self.step = Step::Inputs { names, focus: 0 };
+            let fields = self.discover()?;
+            if !fields.is_empty() {
+                self.step = Step::Inputs { fields, focus: 0 };
                 return Ok(None);
             }
-            names
+            BTreeMap::new()
         };
         let mut mapping = self.before.clone().unwrap_or_else(|| ManagedFile {
             id: self.id().into(),
@@ -254,17 +389,26 @@ impl Draft {
             requires: vec![],
             overrides: Default::default(),
             inputs: BTreeMap::new(),
+            syntax: None,
+            host_inputs: None,
             permissions: None,
         });
         mapping.target = self.target.trim().into();
-        mapping.template = Some(template.into());
-        mapping.inputs = names
-            .into_iter()
-            .map(|name| {
-                let value = self.values.get(&name).cloned().unwrap_or_default();
-                (name, value)
-            })
-            .collect();
+        mapping.template = Some(self.template.text().into());
+        mapping.inputs = inputs;
+        mapping.syntax = if self.syntax == Dialect::Jinja {
+            Some(Dialect::Jinja)
+        } else {
+            self.before
+                .as_ref()
+                .and_then(|file| file.syntax)
+                .filter(|&syntax| syntax == Dialect::Literal)
+        };
+        mapping.host_inputs = if self.syntax == Dialect::Jinja {
+            Some(self.host_inputs).filter(|keys| *keys != HostInputs::default())
+        } else {
+            None
+        };
         Ok(Some(Change::File(Box::new(FileChange {
             mapping,
             before: self.before.clone(),
@@ -282,13 +426,20 @@ impl Draft {
             ]
         };
         let focus = hits.input_focus_allowed();
+        let show_syntax = area.height > 2 || self.syntax_focused();
+        let body = Rect::new(
+            area.x,
+            area.y,
+            area.width,
+            area.height.saturating_sub(u16::from(show_syntax)),
+        );
         let mut y = area.y;
-        let limit = usize::from(area.height.saturating_sub(2));
+        let limit = usize::from(body.height.saturating_sub(2));
         for (index, &(label, value)) in fields.iter().enumerate() {
             if index != self.focus() && limit < fields.len() {
                 continue;
             }
-            if y == area.bottom() {
+            if y == body.bottom() {
                 break;
             }
             let rect = Rect::new(area.x, y, area.width, 1);
@@ -296,27 +447,47 @@ impl Draft {
             hits.click(rect, Target::FormControl(index, false));
             y += 1;
         }
-        let outer = Rect::new(area.x, y, area.width, area.bottom().saturating_sub(y));
-        if outer.is_empty() {
-            return;
+        let outer = Rect::new(area.x, y, area.width, body.bottom().saturating_sub(y));
+        if !outer.is_empty() {
+            let active = focus && self.template_focused();
+            let inner = if outer.height >= 3 {
+                let block = ui::design::pane("Template", active);
+                let inner = block.inner(outer);
+                frame.render_widget(block, outer);
+                inner
+            } else {
+                ui::prose(
+                    frame,
+                    Rect::new(outer.x, outer.y, outer.width, 1),
+                    "Template",
+                    ui::heading(),
+                );
+                Rect::new(outer.x, outer.y + 1, outer.width, outer.height - 1)
+            };
+            self.template.draw(frame, inner, active);
+            hits.click(outer, Target::FormControl(self.template_field(), false));
         }
-        let active = focus && self.template_focused();
-        let inner = if outer.height >= 3 {
-            let block = ui::design::pane("Template", active);
-            let inner = block.inner(outer);
-            frame.render_widget(block, outer);
-            inner
-        } else {
+        if show_syntax && area.height > 0 {
+            let rect = Rect::new(area.x, body.bottom(), area.width, 1);
             ui::prose(
                 frame,
-                Rect::new(outer.x, outer.y, outer.width, 1),
-                "Template",
+                Rect::new(rect.x, rect.y, rect.width.min(8), 1),
+                "Syntax",
                 ui::heading(),
             );
-            Rect::new(outer.x, outer.y + 1, outer.width, outer.height - 1)
-        };
-        self.template.draw(frame, inner, active);
-        hits.click(outer, Target::FormControl(self.template_field(), false));
+            ui::design::choice(
+                frame,
+                Rect::new(
+                    rect.x + rect.width.min(8),
+                    rect.y,
+                    rect.width.saturating_sub(8),
+                    1,
+                ),
+                template_syntax(self.syntax),
+                focus && self.syntax_focused(),
+            );
+            hits.click(rect, Target::FormControl(self.syntax_field(), false));
+        }
     }
 
     pub fn template_focused(&self) -> bool {
@@ -329,23 +500,27 @@ impl Draft {
 
     fn step_focus(&mut self, backwards: bool) {
         let count = match &self.step {
-            Step::Template => self.template_field() + 1,
-            Step::Inputs { names, .. } => names.len(),
+            Step::Template => self.syntax_field() + 1,
+            Step::Inputs { fields, .. } => fields.len(),
         };
         self.focus_at((self.focus() + if backwards { count - 1 } else { 1 }) % count);
     }
 
-    fn field(&mut self) -> (&mut String, usize) {
-        if let Step::Inputs { names, focus } = &self.step {
-            return (
-                self.values.entry(names[*focus].clone()).or_default(),
-                VALUE_LIMIT,
-            );
+    fn field(&mut self, create: bool) -> Option<&mut String> {
+        if let Step::Inputs { fields, focus } = &self.step {
+            let InputField::Value(name) = &fields[*focus] else {
+                return None;
+            };
+            return if create {
+                Some(self.values.entry(name.clone()).or_default())
+            } else {
+                self.values.get_mut(name)
+            };
         }
-        if self.before.is_none() && self.template_focus == 0 {
-            (&mut self.id, 4096)
-        } else {
-            (&mut self.target, 4096)
+        match self.template_focus {
+            0 if self.before.is_none() => Some(&mut self.id),
+            n if n < self.template_field() => Some(&mut self.target),
+            _ => None,
         }
     }
 
@@ -360,6 +535,7 @@ impl Draft {
             return self.template.key(key);
         }
         match key.code {
+            KeyCode::Char(' ') if key.modifiers.is_empty() && self.toggle_host() => (),
             KeyCode::Down => self.focus_at(self.focus() + 1),
             KeyCode::Up => self.focus_at(self.focus().saturating_sub(1)),
             KeyCode::Home => self.focus_at(0),
@@ -367,10 +543,14 @@ impl Draft {
             KeyCode::PageDown => self.focus_at(self.focus() + 5),
             KeyCode::PageUp => self.focus_at(self.focus().saturating_sub(5)),
             KeyCode::Backspace => {
-                self.field().0.pop();
+                if let Some(value) = self.field(false) {
+                    value.pop();
+                }
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.field().0.clear()
+                if let Some(value) = self.field(false) {
+                    value.clear();
+                }
             }
             KeyCode::Char(c)
                 if !c.is_control()
@@ -396,8 +576,9 @@ impl Draft {
         {
             return Err(Error::Invalid("Paste plain text into this field.".into()));
         }
-        let (field, limit) = self.field();
-        if text.len() > limit.saturating_sub(field.len()) {
+        let limit = if multiline { VALUE_LIMIT } else { 4096 };
+        let used = self.field(false).map_or(0, |value| value.len());
+        if text.len() > limit.saturating_sub(used) {
             return Err(Error::Invalid(
                 if multiline {
                     "Input exceeds 16 KiB."
@@ -407,7 +588,11 @@ impl Draft {
                 .into(),
             ));
         }
-        field.push_str(text);
+        if !text.is_empty()
+            && let Some(field) = self.field(true)
+        {
+            field.push_str(text);
+        }
         Ok(())
     }
 }

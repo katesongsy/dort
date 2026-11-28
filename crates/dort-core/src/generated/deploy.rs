@@ -10,6 +10,7 @@ use crate::{
     observation::{self, Entry, Parent, ParentHandle},
     profiles,
     state::WriterLock,
+    template::Dialect,
 };
 use rustix::{fs, io::Errno, process};
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,8 @@ pub struct DeploymentReview<'a> {
     pub id: &'a str,
     pub source: Option<&'a Path>,
     pub destination: &'a Path,
+    pub syntax: Dialect,
+    pub resolved_inputs: &'a super::ResolvedInputs,
     pub rendered: &'a str,
     pub permissions: String,
 }
@@ -123,6 +126,8 @@ impl Deployment {
             id: &self.preview.id,
             source: self.preview.source.as_deref(),
             destination: &self.preview.destination,
+            syntax: self.preview.syntax,
+            resolved_inputs: &self.preview.resolved_inputs,
             rendered: &self.preview.rendered,
             permissions: self.mode.label(),
         }
@@ -162,7 +167,7 @@ impl Approval {
             if scope != p.scope
                 || mode != p.mode
                 || preview.destination != *path
-                || preview.rendered != p.preview.rendered
+                || !preview.same_render(&p.preview)
             {
                 return Err(stale());
             }
@@ -478,6 +483,11 @@ fn publish(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        generated::{HostInput, InputProvenance},
+        local::RepositoryRegistry,
+        platform::{Architecture, Platform},
+    };
 
     #[test]
     fn a_file_created_at_the_last_check_is_not_replaced_and_the_stage_is_removed() {
@@ -493,5 +503,45 @@ mod tests {
         assert!(matches!(result, Err(Error::Invalid(_))));
         assert_eq!(std::fs::read(&path).unwrap(), b"existing");
         assert_eq!(std::fs::read_dir(root).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn first_deployment_rejects_changed_host_input_with_the_same_output() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let host = HostContext::new(
+            root.join("home"),
+            None,
+            None,
+            Platform::Linux,
+            Architecture::X86_64,
+        )
+        .unwrap();
+        let repo = root.join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir(&host.home).unwrap();
+        std::fs::write(
+            repo.join("dort.toml"),
+            r#"schema = 1
+[[files]]
+id = "editor"
+mode = "template"
+template = "unchanged"
+target = "~/.editor"
+syntax = "jinja"
+host_inputs = ["arch"]
+"#,
+        )
+        .unwrap();
+        RepositoryRegistry::register(&host, &WriterLock::acquire(&host).unwrap(), &repo).unwrap();
+        let mut deploy = Deployment::prepare(&host, None, "editor", &[]).unwrap();
+        assert_eq!(deploy.review().rendered, "unchanged");
+        let arch = &deploy.review().resolved_inputs["host.arch"];
+        assert_eq!(arch.value, "x86_64");
+        assert_eq!(arch.provenance, InputProvenance::Host(HostInput::Arch));
+        deploy.host.architecture = Architecture::Aarch64;
+        let error = deploy.approve().execute().err().unwrap();
+        assert!(error.to_string().contains("Deployment changed"));
+        assert!(!host.home.join(".editor").exists());
     }
 }

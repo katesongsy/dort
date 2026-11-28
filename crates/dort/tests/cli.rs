@@ -620,7 +620,7 @@ inputs = { name = "\u202efriendly", color = "blue" }
     for expected in [
         "Status: Unrecorded existing file",
         "No files written.",
-        "Inputs from dort.toml: color, name",
+        "color = \"blue\" (dort.toml)",
         "name=\\u{202e}friendly",
         "\\u{1b}[31m",
     ] {
@@ -996,6 +996,148 @@ fn tracked_generated_update_cli_is_reviewed_scoped_and_single_use() {
     assert_eq!(live.mode() & 0o7777, 0o644);
     explicit(recreate).arg("--yes").assert().code(2);
     assert_eq!(fs::metadata(&dest).unwrap().ino(), live.ino());
+}
+
+#[test]
+fn file_backed_jinja_cli_reports_escaped_input_sources_before_deploy_and_update() {
+    use dort_core::{context::HostContext, local::RepositoryRegistry, state::WriterLock};
+
+    let sandbox = Sandbox::new();
+    let manifest = sandbox.manifest(
+        r#"schema = 1
+[[files]]
+id = "settings"
+mode = "template"
+source = "file.tmpl"
+target = "~/settings"
+syntax = "jinja"
+host_inputs = ["os", "arch", "user", "hostname", "home", "config_home"]
+inputs = { theme = "a\u001bb\n" }
+"#,
+    );
+    let root = manifest.parent().unwrap();
+    fs::create_dir(root.join(".git")).unwrap();
+    let host = HostContext::new(
+        sandbox.home.clone(),
+        None,
+        None,
+        dort_core::platform::Platform::detect().unwrap(),
+        dort_core::platform::Architecture::detect().unwrap(),
+    )
+    .unwrap();
+    RepositoryRegistry::register(&host, &WriterLock::acquire(&host).unwrap(), root).unwrap();
+    let template = root.join("file.tmpl");
+    let source = concat!(
+        "{% if inputs.unset is not defined %}",
+        "{% for item in [host.os, host.arch, inputs.theme] %}{{ item }}{% endfor %}",
+        "{% endif %}"
+    );
+    fs::write(&template, source).unwrap();
+    let destination = sandbox.home.join("settings");
+    let expected = format!(
+        "{}{}a\u{1b}b\n",
+        host.platform.as_str(),
+        host.architecture.as_str()
+    );
+    let command = |verb: &str| {
+        let mut cmd = sandbox.command();
+        cmd.arg("--repo")
+            .arg(root)
+            .args(["files", verb, "settings"]);
+        cmd
+    };
+    let provenance = |report: &str| {
+        assert!(report.contains("Syntax: Jinja"), "{report}");
+        assert!(
+            report.contains("inputs.theme = \"a\\u{1b}b\\n\" (dort.toml)"),
+            "{report}"
+        );
+        assert!(
+            report.contains(&format!(
+                "host.os = \"{}\" (this host)",
+                host.platform.as_str()
+            )),
+            "{report}"
+        );
+        assert!(!report.contains('\u{1b}'), "{report}");
+    };
+    let preview = command("preview-generated")
+        .arg("--json")
+        .assert()
+        .success();
+    let json: serde_json::Value = serde_json::from_slice(&preview.get_output().stdout).unwrap();
+    assert_eq!(json["rendered"], expected);
+    assert_eq!(json["inputs"]["theme"], "a\u{1b}b\n");
+    assert_eq!(
+        json["resolved_inputs"]["inputs.theme"]["provenance"],
+        "manifest"
+    );
+    let inputs = json["resolved_inputs"].as_object().unwrap();
+    for key in ["os", "arch", "user", "hostname", "home", "config_home"] {
+        let value = &inputs[&format!("host.{key}")];
+        assert_eq!(value["provenance"]["host"], key);
+        assert!(!value["value"].as_str().unwrap().is_empty());
+    }
+    assert_eq!(inputs["host.home"]["value"], sandbox.home.to_str().unwrap());
+    assert_eq!(
+        inputs["host.config_home"]["value"],
+        sandbox.home.join(".config").to_str().unwrap()
+    );
+    let preview = command("preview-generated").assert().success();
+    provenance(std::str::from_utf8(&preview.get_output().stdout).unwrap());
+    let deploy = command("deploy-generated")
+        .arg("--dry-run")
+        .assert()
+        .success();
+    provenance(std::str::from_utf8(&deploy.get_output().stdout).unwrap());
+    assert!(!destination.exists());
+    command("deploy-generated").arg("--yes").assert().success();
+    assert_eq!(fs::read(&destination).unwrap(), expected.as_bytes());
+
+    fs::write(&template, format!("{source}{{{{ host.nonexistent }}}}")).unwrap();
+    let rejected = command("update-generated").arg("--yes").assert().code(2);
+    assert!(
+        String::from_utf8_lossy(&rejected.get_output().stderr).contains("Supply the missing input")
+    );
+    assert_eq!(fs::read(&destination).unwrap(), expected.as_bytes());
+    fs::write(&template, format!("{source}updated")).unwrap();
+    let original = fs::read_to_string(&manifest).unwrap();
+    let oversized = original.replace(
+        " }",
+        &format!(", unused = \"{}\" }}", "\\u001b".repeat(16_000)),
+    );
+    fs::write(&manifest, oversized).unwrap();
+    let blocked = command("update-generated").arg("--yes").assert().code(2);
+    assert!(
+        String::from_utf8_lossy(&blocked.get_output().stderr)
+            .contains("full update review is too large")
+    );
+    assert_eq!(fs::read(&destination).unwrap(), expected.as_bytes());
+    fs::write(&manifest, original).unwrap();
+    let review = command("update-generated")
+        .arg("--dry-run")
+        .assert()
+        .success();
+    provenance(std::str::from_utf8(&review.get_output().stdout).unwrap());
+    let review = command("update-generated")
+        .args(["--dry-run", "--json"])
+        .assert()
+        .success();
+    let json: serde_json::Value = serde_json::from_slice(&review.get_output().stdout).unwrap();
+    assert_eq!(json["schema"], 1);
+    assert_eq!(json["read_only"], true);
+    assert_eq!(json["syntax"], "jinja");
+    assert_eq!(
+        json["resolved_inputs"],
+        serde_json::Value::Object(inputs.clone())
+    );
+    provenance(json["review"].as_str().unwrap());
+    assert_eq!(fs::read(&destination).unwrap(), expected.as_bytes());
+    command("update-generated").arg("--yes").assert().success();
+    assert_eq!(
+        fs::read(&destination).unwrap(),
+        format!("{expected}updated").as_bytes()
+    );
 }
 
 #[test]

@@ -83,14 +83,15 @@ impl Topic {
                 )
             }
             Self::GeneratedDraft => {
-                guide!("Generated file draft", "Set the Home destination and template. Use {{ name }} for inputs. Tab moves between fields. In Template, Enter adds a line. Paste several lines at once.";
+                guide!("Generated file draft", "Set the Home destination and template. Tab moves between fields. In Template, Enter adds a line. Paste several lines at once.";
+                    "Choose syntax" => "Literal uses {{ name }}. Open Syntax with Enter or Space. Select Jinja and press Enter. Jinja uses {{ inputs.name }} and allowed host values such as {{ host.os }}.",
+                    "Enter inputs" => "Press F4 to continue. In Jinja, use Space or click to allow host fields. Use F6 to set an empty string or unset a value. Esc goes back without losing values or host choices. Never enter secrets.",
                     "Open in editor" => "Press F5 to use VISUAL or EDITOR. Save and exit the editor to return to the draft.",
-                    "Enter inputs" => "Press F4 to continue. Empty values and spaces are kept. Esc goes back without losing values. Never enter secrets.",
-                    "Review before saving" => "Review generated file shows the rendered text. Save generated file only updates dort.toml. Your Home files stay in place.",
+                    "Review before saving" => "Check the resolved values and rendered text. Save generated file only updates dort.toml. Your Home files stay in place.",
                 )
             }
             Self::Generated => {
-                guide!("Generated file preview", "Read the template output and its destination status. Inputs come from dort.toml. No files are written.";
+                guide!("Generated file preview", "Read the resolved values, their sources, the template output, and the destination status. No files are written.";
                     "Read the output" => "Use arrows or page keys to scroll. Home goes to the top; End goes to the last line. Esc returns to Generated.",
                     "Check the status" => "Dort shows template updates and local changes separately. The preview leaves the deployed file alone.",
                     "Deploy for the first time" => "For a new file, choose Review deployment (R). Press y when Deploy generated file appears. Esc cancels the review.",

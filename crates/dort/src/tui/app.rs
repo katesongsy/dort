@@ -954,7 +954,11 @@ impl App {
                         self.shell.repair.as_mut()?.focus_at(index)
                     }
                     Some(Overlay::Form(Form::Generated)) => {
-                        self.shell.generated.as_mut()?.focus_at(index)
+                        let draft = self.shell.generated.as_mut()?;
+                        draft.focus_at(index);
+                        if draft.toggle_host() {
+                            self.shell.form_feedback = None;
+                        }
                     }
                     Some(Overlay::Form(Form::Configure)) => {
                         let draft = self.shell.configuration.as_mut()?;

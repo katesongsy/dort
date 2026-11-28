@@ -16,6 +16,7 @@ pub enum Command {
     Details,
     InsertLine,
     OpenTemplateEditor,
+    ToggleGeneratedInput,
     Toggle,
 }
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
@@ -175,6 +176,15 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                 target: Target::FormAction(Command::OpenTemplateEditor),
             })
         }
+        Form::Generated => {
+            if let Some(label) = s.generated.as_ref().and_then(|draft| draft.value_action()) {
+                actions.push(ui::ActionButton {
+                    label,
+                    key: "F6",
+                    target: Target::FormAction(Command::ToggleGeneratedInput),
+                });
+            }
+        }
         Form::Repair => actions.push(ui::ActionButton {
             label: "Insert line",
             key: "F4",
@@ -220,12 +230,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
             .unwrap_or_default(),
         _ => vec![],
     };
-    let toggles = s
-        .configuration
-        .as_ref()
-        .filter(|_| form == Form::Configure)
-        .map(|draft| draft.toggle_rows())
-        .unwrap_or_default();
+    let toggles = match form {
+        Form::Configure => s.configuration.as_ref().map(|draft| draft.toggle_rows()),
+        Form::Generated => s.generated.as_ref().map(|draft| draft.host_rows()),
+        _ => None,
+    }
+    .unwrap_or_default();
     let feedback = s
         .configuration
         .as_ref()

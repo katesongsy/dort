@@ -32,6 +32,8 @@ fn adopt() -> Request {
             requires: vec![],
             overrides: Default::default(),
             inputs: Default::default(),
+            syntax: None,
+            host_inputs: None,
             permissions: None,
         },
     }

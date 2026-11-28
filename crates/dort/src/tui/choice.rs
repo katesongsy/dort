@@ -7,6 +7,7 @@ use super::{
     tool_declaration::{self, PROVIDER_FIELD},
     tools_install,
 };
+use dort_core::template::Dialect;
 use ratatui::{
     Frame,
     crossterm::event::{KeyCode, KeyEvent, KeyModifiers},
@@ -188,6 +189,7 @@ impl References {
 }
 #[derive(Clone)]
 enum Value {
+    TemplateSyntax(Dialect),
     ClosureProvider(usize),
     SaveProfile(String, dort_core::profiles::Choice),
     DeclarationProvider {
@@ -232,7 +234,12 @@ impl Choice {
         }
     }
     pub(super) fn edits_draft(&self) -> bool {
-        matches!(self.choices, Choices::References(_))
+        match &self.choices {
+            Choices::References(_) => true,
+            Choices::Commands(items) => items
+                .first()
+                .is_some_and(|item| matches!(item.value, Value::TemplateSyntax(_))),
+        }
     }
     pub(super) fn can_toggle(&self) -> bool {
         matches!(&self.choices, Choices::References(r) if r.field.multiple() && !r.options.is_empty())
@@ -340,6 +347,38 @@ impl App {
             return false;
         }
         let code = key.code;
+        if matches!(code, KeyCode::Enter | KeyCode::Char(' '))
+            && matches!(self.shell.overlay, Some(Overlay::Form(Form::Generated)))
+            && self.form_has_focus()
+            && let Some(draft) = self
+                .shell
+                .generated
+                .as_ref()
+                .filter(|draft| draft.syntax_focused())
+        {
+            use crate::services::presentation::template_syntax;
+            let options = [
+                (Dialect::Literal, "Named strings"),
+                (Dialect::Jinja, "Conditions and loops"),
+            ];
+            self.choice = Some(Choice::new(
+                "Choose template syntax",
+                Topic::GeneratedDraft,
+                Choices::Commands(
+                    options
+                        .into_iter()
+                        .map(|(syntax, scope)| Item {
+                            label: template_syntax(syntax).into(),
+                            scope: scope.into(),
+                            value: Value::TemplateSyntax(syntax),
+                        })
+                        .collect(),
+                ),
+                usize::from(draft.syntax() == Dialect::Jinja),
+            ));
+            self.hits.clear();
+            return true;
+        }
         if matches!(code, KeyCode::Enter | KeyCode::Char(' '))
             && let Some(field) = self.focused_reference()
         {
@@ -475,6 +514,12 @@ impl App {
                     }
                 };
                 match value {
+                    Value::TemplateSyntax(syntax)
+                        if matches!(self.shell.overlay, Some(Overlay::Form(Form::Generated))) =>
+                    {
+                        self.shell.generated.as_mut()?.set_syntax(syntax);
+                        self.shell.form_feedback = None;
+                    }
                     Value::SaveProfile(name, value) => {
                         let root = self.data.as_ref()?.repository.clone()?;
                         return Some(super::actions::Task::Profile(root, name, value));

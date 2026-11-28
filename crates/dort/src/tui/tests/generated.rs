@@ -78,10 +78,7 @@ inputs = {{ theme = "dark", padding = "{}" }}
         run(&mut app, task);
         let screen = render(&app, width, height);
         assert!(screen.contains("Generated file preview"), "{screen}");
-        assert!(
-            screen.contains("Inputs from dort.toml: padding, theme"),
-            "{screen}"
-        );
+        assert!(screen.contains("Syntax: Literal"), "{screen}");
         assert!(screen.contains("No files written."), "{screen}");
         assert!(
             !screen.contains("destination-bytes") && !screen.contains("Confirm"),
@@ -311,6 +308,8 @@ fn blank_repository_can_create_cancel_save_preview_and_edit_generated_template()
             ["accent", "theme"]
         );
         assert_eq!(saved.files[0].source, None);
+        assert_eq!(saved.files[0].syntax, None);
+        assert_eq!(saved.files[0].host_inputs, None);
         w.press(KeyCode::Esc);
         w.press(KeyCode::Char('v'));
         assert!(w.screen().contains("Inline template in dort.toml"));
@@ -337,6 +336,152 @@ fn blank_repository_can_create_cancel_save_preview_and_edit_generated_template()
         assert_eq!(edited.files[0].inputs["accent"], "blue");
         assert_eq!(edited.files[0].inputs["theme"], " dark ");
         assert_eq!(fs::read_dir(&w.host.home).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn jinja_draft_opts_in_and_keeps_explicit_values_and_host_choices_until_review() {
+    for (width, height) in [(48, 14), (112, 28)] {
+        let mut w = Workshop::new(width, height);
+        let original = w.manifest();
+        w.press(KeyCode::Char('s'));
+        w.paste("prefs");
+        w.press(KeyCode::Tab);
+        w.paste("~/settings");
+        w.press(KeyCode::Tab);
+        let template = concat!(
+            "theme=[{{ inputs.theme }}]\n",
+            "{% if inputs.empty is defined %}empty=[{{ inputs.empty }}]\n{% endif %}",
+            "{% if host.os == 'linux' and host.user is not defined %}",
+            "{% for item in [host.os, host.arch, 'fixed'] %}{{ loop.index }}={{ item }};{% endfor %}\n",
+            "{% endif %}",
+            "{% if false %}{{ inputs.optional }}{{ host.hostname }}{% endif %}",
+        );
+        w.paste(template);
+        w.press(KeyCode::F(4));
+        let screen = w.screen();
+        assert!(
+            screen.contains("Literal") && screen.contains("Use {{ name }}"),
+            "{screen}"
+        );
+        assert!(w.app.preview.is_none());
+        if width < 80 {
+            w.press(KeyCode::Tab);
+            w.press(KeyCode::Enter);
+            assert!(w.screen().contains("Choose template syntax"));
+            w.press(KeyCode::Down);
+        } else {
+            assert!(click_label(&mut w.app, width, height, "Syntax").is_none());
+            assert!(w.screen().contains("Choose template syntax"));
+            assert!(click_label(&mut w.app, width, height, "Jinja").is_none());
+        }
+        w.press(KeyCode::Enter);
+        assert!(w.screen().contains("Jinja"));
+        w.press(KeyCode::F(4));
+        assert!(w.screen().contains("Input: inputs.empty"));
+        w.press(KeyCode::Enter);
+        assert!(w.app.preview.is_none());
+        assert_eq!(w.manifest(), original);
+        assert!(w.screen().contains("Needs attention"));
+        w.press(KeyCode::F(6));
+        w.press(KeyCode::Tab);
+        assert!(w.screen().contains("Input: inputs.optional"));
+        w.press(KeyCode::Backspace);
+        w.press(KeyCode::Tab);
+        let color = " <&>\t";
+        w.paste(color);
+        w.press(KeyCode::Tab);
+        assert!(w.screen().contains("host.os (referenced)"));
+        if width < 80 {
+            w.press(KeyCode::Char(' '));
+        } else {
+            assert!(click_label(&mut w.app, width, height, "host.os (referenced)").is_none());
+        }
+        w.press(KeyCode::Tab);
+        w.press(KeyCode::Char(' '));
+        w.press(KeyCode::Esc);
+        w.press(KeyCode::Enter);
+        w.press(KeyCode::Up);
+        w.press(KeyCode::Esc);
+        assert!(w.screen().contains("Jinja"));
+        w.press(KeyCode::Enter);
+        w.press(KeyCode::Up);
+        w.press(KeyCode::Enter);
+        assert!(w.screen().contains("Literal"));
+        w.press(KeyCode::Enter);
+        w.press(KeyCode::Down);
+        w.press(KeyCode::Enter);
+        assert!(w.screen().contains("Jinja"));
+        w.press(KeyCode::F(4));
+        w.press(KeyCode::Enter);
+        let expected = format!("theme=[{color}]\nempty=[]\n1=linux;2=x86_64;3=fixed;\n");
+        for text in [
+            "Syntax: Jinja",
+            "host.os = \"linux\" (this host)",
+            "host.arch = \"x86_64\" (this host)",
+            "inputs.empty = \"\" (dort.toml)",
+            "inputs.theme = \" <&>\\t\" (dort.toml)",
+        ] {
+            assert!(w.review().contains(text), "{:?}", w.review());
+        }
+        assert!(!w.review().contains("inputs.optional"), "{:?}", w.review());
+        assert_eq!(w.manifest(), original);
+        let target = w.host.home.join("settings");
+        assert!(!target.exists());
+        w.approve();
+        assert!(!target.exists());
+        let saved = dort_core::Manifest::parse(&w.manifest()).unwrap();
+        assert_eq!(
+            saved.files[0].syntax,
+            Some(dort_core::template::Dialect::Jinja)
+        );
+        assert_eq!(saved.files[0].template.as_deref(), Some(template));
+        let keys: Vec<_> = saved.files[0]
+            .host_inputs
+            .unwrap()
+            .iter()
+            .map(|key| key.key())
+            .collect();
+        assert_eq!(keys, ["os", "arch"]);
+        w.press(KeyCode::Esc);
+        w.press(KeyCode::Char('v'));
+        assert!(w.screen().contains("Syntax: Jinja"));
+        w.press(KeyCode::Char('R'));
+        assert!(w.review().contains("host.os = \"linux\" (this host)"));
+        assert!(
+            w.review()
+                .contains("inputs.theme = \" <&>\\t\" (dort.toml)")
+        );
+        w.approve();
+        assert_eq!(fs::read(&target).unwrap(), expected.as_bytes());
+
+        w.press(KeyCode::Esc);
+        w.press(KeyCode::Char('e'));
+        w.press(KeyCode::F(4));
+        w.press(KeyCode::Tab);
+        w.press(KeyCode::Tab);
+        w.app.key(
+            ratatui::crossterm::event::KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+            width,
+            height,
+        );
+        w.paste("light");
+        w.press(KeyCode::Enter);
+        w.approve();
+        assert_eq!(fs::read(&target).unwrap(), expected.as_bytes());
+        w.press(KeyCode::Esc);
+        w.press(KeyCode::Char('v'));
+        assert!(w.screen().contains("Update available"));
+        w.press(KeyCode::Char('R'));
+        assert!(w.review().contains("host.os = \"linux\" (this host)"));
+        assert!(w.review().contains("inputs.theme = \"light\" (dort.toml)"));
+        assert!(w.review().contains("NEW | theme=[light]\\n"));
+        assert_eq!(fs::read(&target).unwrap(), expected.as_bytes());
+        w.approve();
+        assert_eq!(
+            fs::read(&target).unwrap(),
+            expected.replace(color, "light").as_bytes()
+        );
     }
 }
 

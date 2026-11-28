@@ -43,15 +43,19 @@ Press `f` to open **1 Managed**. Use `2` for **Discover**, `3` for **Ignored pat
 - **Delete link** and **Delete marked** are separate actions. Review the paths and confirm the exact mapping IDs before deleting links.
 #### Generated files
 
-In **Files**, press `4` to open **Generated**. Press `s` or choose **New generated file**. Enter a file ID and a Home destination. Press `Tab` or `Shift+Tab` to move between fields. In **Template**, `Enter` adds a newline. Use the arrows, `Home`, and `End` to edit, or paste several lines at once. Use `{{ name }}` for an input. Keep secrets out of templates and inputs.
+In **Files**, press `4` to open **Generated**. Press `s` or choose **New generated file**. Enter a file ID and a Home destination. Press `Tab` or `Shift+Tab` to move between fields. In **Template**, `Enter` adds a newline. Use the arrows, `Home`, and `End` to edit, or paste several lines at once. Keep secrets out of templates and inputs.
+
+**Syntax** defaults to **Literal**. Use `{{ name }}` for an input. For conditions or loops, select **Syntax** and press `Enter` or `Space`. Select **Jinja**, then press `Enter` to apply it. Use `{{ inputs.name }}` for a named value and `{{ host.os }}` for an allowed host value. See [Jinja templates](manifest.md#jinja-templates) for examples and available host fields.
 
 Choose **Open in editor** (`F5`) to edit the template in an external editor. Set `VISUAL` or `EDITOR` before starting Dort, for example `VISUAL='code --wait'`. Dort tries `VISUAL` first. Choose an editor command that waits until you close the file. The editor gets a temporary copy of the template. Save and exit the editor to return to the draft.
 
-Choose **Continue** (`F4`). If the template uses inputs, enter the named values. Leave a value blank to render nothing. Choose **Review generated file** after entering inputs. Read the output. Press `y` when **Save generated file** is ready. `Esc` from the review or inputs returns to the draft. Saving changes only `dort.toml`.
+Choose **Continue** (`F4`). In **Literal**, leave a value blank to render nothing. In **Jinja**, leave unused inputs unset. Use `F6` to set an empty string or unset a value. Press `Space` or click to allow a host field. **Referenced** marks fields the template may use, even in branches that do not run.
+
+Choose **Review generated file** after entering inputs. Check the resolved values, their sources, and the output. Press `y` when **Save generated file** is ready. `Esc` goes back without losing your input values or host choices. Saving changes only `dort.toml`.
 
 Select a saved template in **Generated**. Press `Enter` or `v` for **Preview generated file**. Scroll with the arrows or page keys. `End` jumps to the end of the output. `Esc` returns to the selected template. Press `e` for **Edit generated file**. Edit file-backed templates in the repository.
 
-The preview shows the proposed output and the file's status. **Update available** means the template output or permissions changed while the deployed file stayed the same. A local edit, permission change or deletion takes precedence. The preview leaves your local file alone.
+The preview shows the resolved inputs and their sources, the proposed output, and the file's status. **Update available** means the template output or permissions changed while the deployed file stayed the same. A local edit, permission change or deletion takes precedence. The preview leaves your local file alone.
 
 For a new file, choose **Review deployment** (`R`). Read the destination, permissions and escaped output. Scroll to the end, then press `y` when **Deploy generated file** appears. `Esc` cancels the review.
 
@@ -158,7 +162,7 @@ dort --repo PATH files preview-generated editor-settings
 dort --repo PATH --json files preview-generated editor-settings
 ```
 
-Renders the template with literal inputs from `dort.toml`. If Dort recorded the deployment, the status distinguishes template changes from local edits, permission changes and deletion. A file over 128 KiB or one that cannot be read safely stays unverified. Dort never reads the contents of an unrecorded destination. JSON includes the status, proposed text and input values. No files are written.
+Renders the template with its declared inputs. If Dort recorded the deployment, the status distinguishes template changes from local edits, permission changes, and deletion. A file over 128 KiB or one that cannot be read safely stays unverified. Dort never reads the contents of an unrecorded destination. JSON includes the status, proposed text, and resolved values with their sources. No files are written.
 
 ### Deploy a generated file
 
@@ -169,7 +173,7 @@ dort --json --dry-run files deploy-generated editor-settings
 dort --json --yes files deploy-generated editor-settings
 ```
 
-Review the destination, permissions and exact rendered output before confirming. Use a registered repository. JSON and nonterminal writes require `--yes`.
+Review the destination, permissions, resolved inputs, and exact rendered output before confirming. Use a registered repository. JSON and nonterminal writes require `--yes`.
 
 First deployment creates one regular file at a missing path below HOME. Create the destination folder first. Dort refuses symlinks, shared writable folders, protected paths, inactive profiles and files with tool requirements. The default mode is `0600`. The mode cannot grant group or other users write access.
 
@@ -184,7 +188,7 @@ dort --json --dry-run files update-generated editor-settings --profile dev
 dort --json --yes files update-generated editor-settings --profile dev
 ```
 
-Dort updates only a file that still matches its last deployment. Read the old and new permissions, escaped changes to the contents and final newline status. If the full review cannot fit, split the change into smaller steps. JSON and nonterminal writes require `--yes`. A dry run cannot approve a later write.
+Dort updates only a file that still matches its last deployment. Read the resolved inputs, permission changes, escaped content changes, and final newline status. If the full review cannot fit, split the change into smaller steps. JSON and nonterminal writes require `--yes`. A dry run cannot approve a later write.
 
 The update replaces the file and keeps the previous file in a private folder beside it. Dort reports the path. The destination filesystem must support exchanging the two files. A local edit, permission change or deletion prevents an update.
 

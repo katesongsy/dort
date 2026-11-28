@@ -186,6 +186,19 @@ Open the preview of a deployed file after editing its contents and permissions. 
 
 Move the destination aside in the disposable HOME. Reopen the preview and choose **Review recreation**. Press End and choose **Recreate generated file**. Compare the recreated file's contents and mode with the review. Only the replacement has a retained prior file. Clean up the run.
 
+## Use Jinja and host values
+
+In a blank disposable repository, open **Files → Generated → New generated file**. Set ID `prefs` and destination `~/settings`. Paste this text with a final newline:
+
+```jinja
+theme=[{{ inputs.theme }}]
+{% if host.os is defined %}{% for item in [host.os, host.arch] %}{{ item }};{% endfor %}{% endif %}{% if false %}{{ inputs.optional }}{% endif %}
+```
+
+Tab from Template to **Syntax**. Open the picker with Enter, select **Jinja**, and press F4 to continue. Leave `inputs.optional` unset. Enter `dark` for `inputs.theme` and enable `host.os` and `host.arch`. Review and save. Check that approving the manifest does not create the destination.
+
+Open the saved preview and choose **Review deployment**. Confirm that `inputs.theme` comes from `dort.toml` and the two host values come from **this host**. Approve and compare the file to `theme=[dark]\n<os>;<arch>;\n`, using the exact values from the review. Confirm the same output and value sources with `dort --json files preview-generated prefs`. Clean up the run.
+
 ## Gotchas
 
 - Exit the draft with Esc before the harness sends `q`. A focused field treats `q` as text.
