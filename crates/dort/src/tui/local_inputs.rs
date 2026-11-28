@@ -51,6 +51,16 @@ impl Panel {
         self.edit.is_some()
     }
 
+    pub fn dirty(&self) -> bool {
+        self.edit.as_deref().is_some_and(|edit| {
+            self.rows[self.selected]
+                .value
+                .as_deref()
+                .unwrap_or_default()
+                != edit
+        })
+    }
+
     pub fn focus_at(&mut self, index: usize) {
         self.selected = index.min(self.rows.len().saturating_sub(1));
         self.scroll = 0;
@@ -178,7 +188,7 @@ impl Panel {
                     toggles: &[],
                     buttons: &[ui::ActionButton {
                         label: "Review value",
-                        key: "Enter",
+                        key: app.draft_continue_key(),
                         target: Target::FormAction(Command::Submit),
                     }],
                     feedback,

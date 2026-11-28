@@ -170,6 +170,25 @@ impl Draft {
         }
     }
 
+    pub fn dirty(&self) -> bool {
+        let before = self.before.as_ref();
+        self.id != before.map_or("", |file| &file.id)
+            || self.target != before.and_then(|file| file.target.to_str()).unwrap_or("")
+            || self.template.text()
+                != before
+                    .and_then(|file| file.template.as_deref())
+                    .unwrap_or("")
+            || self.host_inputs != before.and_then(|file| file.host_inputs).unwrap_or_default()
+            || before.map_or(!self.values.is_empty(), |file| self.values != file.inputs)
+            || self.local_inputs_changed(before.and_then(|file| file.local_inputs.as_deref()))
+    }
+
+    fn local_inputs_changed(&self, before: Option<&[String]>) -> bool {
+        let before = before.unwrap_or(&[]);
+        self.local_inputs.len() != before.len()
+            || !self.local_inputs.iter().all(|name| before.contains(name))
+    }
+
     pub fn has_local_inputs(&self) -> bool {
         !self.local_inputs.is_empty()
     }
@@ -190,7 +209,7 @@ impl Draft {
         if self.entering_inputs() {
             "Declare local names. Set their values after saving. Leave unused inputs unset. No secrets."
         } else {
-            "Use {{ name }}, {{ host.os }} or {{ local.name }}. Enter adds a line."
+            "Use {{ name }}, {{ host.os }} or {{ local.name }}. In Template, Enter adds a line."
         }
     }
 
@@ -414,14 +433,10 @@ impl Draft {
         mapping.template = Some(self.template.text().into());
         mapping.inputs = inputs;
         mapping.host_inputs = Some(self.host_inputs).filter(|keys| *keys != HostInputs::default());
-        mapping.local_inputs = Some(self.local_inputs.clone()).filter(|names| {
-            !names.is_empty()
-                || self
-                    .before
-                    .as_ref()
-                    .and_then(|f| f.local_inputs.as_ref())
-                    .is_some_and(Vec::is_empty)
-        });
+        if self.local_inputs_changed(mapping.local_inputs.as_deref()) {
+            mapping.local_inputs =
+                Some(self.local_inputs.clone()).filter(|names| !names.is_empty());
+        }
         Ok(Some(Change::File(Box::new(FileChange {
             mapping,
             before: self.before.clone(),

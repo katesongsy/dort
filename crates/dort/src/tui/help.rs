@@ -240,7 +240,7 @@ impl Topic {
                 }
                 Overlay::Ignored { .. } => Some(Self::Ignored),
                 Overlay::Generated(_) => Some(Self::Generated),
-                Overlay::About => Some(Self::About),
+                Overlay::About | Overlay::DraftAbout(_) => Some(Self::About),
                 Overlay::Repositories { .. } => Some(Self::Repositories),
                 Overlay::Profiles(picker) if picker.standalone => Some(Self::StandaloneProfiles),
                 Overlay::Profiles(_) => Some(Self::TemporaryProfiles),

@@ -16,7 +16,10 @@ use dort_core::{
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::path::PathBuf;
 
+mod draft;
 mod output;
+
+pub(super) use draft::DraftExit;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -64,6 +67,7 @@ pub struct App {
     pub git_view: super::git::State,
     pub tools_view: super::tools::State,
     pub form_focus: Option<&'static str>,
+    pub(super) draft_exit: Option<DraftExit>,
     pub result: Option<String>,
     pub receipt: Option<super::task_surfaces::Receipt>,
     pub show_result: bool,
@@ -155,6 +159,7 @@ impl App {
             git_view: super::git::State::new(),
             tools_view: Default::default(),
             form_focus: None,
+            draft_exit: None,
             result: None,
             receipt: None,
             show_result: false,
@@ -351,6 +356,7 @@ impl App {
                 None
             }
             Ok(Output::LocalInputSaved(changed)) => {
+                self.draft_exit = None;
                 self.shell.back();
                 self.receipt = None;
                 self.show_result = true;
@@ -707,6 +713,17 @@ impl App {
         width: u16,
         height: u16,
     ) -> Option<Task> {
+        if self.draft_exit.is_some() {
+            return match target {
+                Target::Key(key) => self.action_key(key, width, height),
+                Target::Back | Target::DismissDialog => self.action_key(
+                    KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                    width,
+                    height,
+                ),
+                _ => None,
+            };
+        }
         if self.busy
             && !matches!(
                 target,
@@ -758,11 +775,6 @@ impl App {
                 None
             }
             Target::LocalDestination(group, index) => {
-                if let Some(reason) = self.navigation_block() {
-                    self.interaction_notice = Some(reason);
-                    self.status = reason.into();
-                    return None;
-                }
                 let (_, place) = *super::navigation::local_catalog(group).get(index)?;
                 self.go_place(place)
             }
@@ -957,12 +969,18 @@ impl App {
                     None
                 }
             }
-            Target::FormAction(command) => self
-                .shell
-                .form_action(command)
-                .and_then(|intent| self.intent(intent)),
+            Target::FormAction(command) => {
+                if self.template_form().is_some() && !self.template_form_visible() {
+                    return None;
+                }
+                self.shell
+                    .form_action(command)
+                    .and_then(|intent| self.intent(intent))
+            }
             Target::FormControl(index, activate) => {
-                self.form_page()?;
+                if self.form_page().is_none() && !self.template_form_visible() {
+                    return None;
+                }
                 match self.shell.overlay {
                     Some(Overlay::Form(Form::Adopt)) => {
                         self.shell.adoption.focused =
@@ -1247,10 +1265,17 @@ impl App {
             .as_ref()
             .map(|h| (h.content_focus, h.content_scroll));
         let form_before = self.form_page();
-        let transient_before = self.help.is_some() || self.more.is_some() || self.choice.is_some();
+        let transient = |app: &Self| {
+            app.help.is_some()
+                || app.more.is_some()
+                || app.choice.is_some()
+                || app.draft_exit.is_some()
+                || matches!(app.shell.overlay, Some(Overlay::DraftAbout(_)))
+        };
+        let transient_before = transient(self);
         let task = self.key_inner(key, width, height, more_actions, section_shortcuts);
         self.sync_git_preview();
-        let transient_after = self.help.is_some() || self.more.is_some() || self.choice.is_some();
+        let transient_after = transient(self);
         if transient_before != transient_after {
             self.hits.invalidate_review();
         }
@@ -1282,6 +1307,9 @@ impl App {
         more_actions: Option<Vec<super::components::ActionButton>>,
         section_shortcuts: bool,
     ) -> Option<Task> {
+        if self.draft_exit.is_some() {
+            return self.confirm_draft_exit(key);
+        }
         let interrupt =
             key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
         if interrupt
@@ -1295,12 +1323,8 @@ impl App {
                         || self.preview.is_some()
                         || !self.text_entry())))
         {
-            self.git_view.discard_preview();
-            if self.busy {
-                self.exit_requested = true;
-                self.status = "Exit requested; waiting for the active worker. Approved writes run to completion.".into();
-            } else {
-                self.quit = true;
+            if !self.defer_draft_exit(DraftExit::Quit) {
+                self.request_quit();
             }
             return None;
         }
@@ -1327,11 +1351,6 @@ impl App {
             && let Some(place) = super::navigation::section_shortcut(letter)
         {
             if width < 48 || height < 14 {
-                return None;
-            }
-            if let Some(reason) = self.navigation_block() {
-                self.interaction_notice = Some(reason);
-                self.status = reason.into();
                 return None;
             }
             return self.go_place(place);
@@ -1371,6 +1390,12 @@ impl App {
             self.open_help();
             return None;
         }
+        if let Some(Overlay::DraftAbout(form)) = self.shell.overlay {
+            if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
+                self.shell.overlay = Some(Overlay::Form(form));
+            }
+            return None;
+        }
         if width < 48 || height < 14 {
             if key.code == KeyCode::Esc {
                 if self.error.is_some() {
@@ -1383,6 +1408,13 @@ impl App {
                     self.details_scroll = 0;
                 } else if self.preview.is_some() {
                     self.preview = None;
+                } else if self.template_form().is_some() {
+                    if self.form_page().is_some() && self.form_has_focus() {
+                        self.form_focus = None;
+                    } else if !self.busy {
+                        let intent = self.shell.key(key, 0, false);
+                        return intent.and_then(|intent| self.intent(intent));
+                    }
                 } else if self.shell.overlay.is_some() {
                     self.shell.back();
                 } else {
@@ -1498,14 +1530,10 @@ impl App {
                     );
                 }
                 KeyCode::Char('h') => {
-                    self.error = None;
-                    self.preview = None;
-                    self.retry = None;
-                    self.tab = Tab::Recovery;
-                    self.shell.overlay = None;
-
-                    self.details_scroll = 0;
-                    return Some(Task::History);
+                    if self.defer_draft_exit(DraftExit::Recovery) {
+                        return None;
+                    }
+                    return self.recover_from_error();
                 }
                 KeyCode::Char('r') => {
                     self.error = None;
@@ -1619,10 +1647,7 @@ impl App {
                 self.form_focus = Some(owner);
                 return None;
             }
-            if key.code == KeyCode::Esc
-                && self.form_has_focus()
-                && !matches!(owner, "generated file" | "local inputs")
-            {
+            if key.code == KeyCode::Esc && self.form_has_focus() {
                 self.form_focus = None;
                 return None;
             }
@@ -1706,7 +1731,7 @@ impl App {
                 }
             }
             let count = self.data.as_ref().map_or(0, |data| data.known_roots.len());
-            if let Some(intent) = self.shell.key(key, count) {
+            if let Some(intent) = self.shell.key(key, count, self.form_has_focus()) {
                 return self.intent(intent);
             }
             return None;
@@ -2216,10 +2241,15 @@ impl App {
             Intent::Submit(Form::Repair) => Some(Task::Configuration(Box::new(
                 self.shell.repair.as_ref()?.change(),
             ))),
+            Intent::LeaveDraft => {
+                self.leave_template_form();
+                None
+            }
             Intent::Submit(Form::LocalInputs) => {
                 let panel = self.shell.local_inputs.as_mut()?;
                 self.shell.form_feedback = None;
                 if panel.editing() {
+                    self.form_focus = None;
                     panel.change(false).map(Task::ReviewLocalInput)
                 } else {
                     panel.begin_set();
@@ -2238,9 +2268,13 @@ impl App {
                 self.shell.form_feedback = None;
                 match self.shell.generated.as_mut()?.submit() {
                     Ok(Some(change)) => {
+                        self.form_focus = None;
                         Some(Task::Configuration(Box::new(Request::Manifest(change))))
                     }
-                    Ok(None) => None,
+                    Ok(None) => {
+                        self.form_focus = self.form_page();
+                        None
+                    }
                     Err(error) => {
                         self.show_input_problem(super::actions::diagnostic(&error));
                         None
@@ -2339,6 +2373,28 @@ impl App {
             self.interaction_notice = Some(reason);
             self.status = reason.into();
             return None;
+        }
+        if let Some(form) = self.template_form() {
+            match action {
+                Action::About => {
+                    self.hits.invalidate_review();
+                    self.shell.overlay = Some(Overlay::DraftAbout(form));
+                    return None;
+                }
+                Action::PreviewOnly => {
+                    self.hits.invalidate_review();
+                    self.preview = None;
+                    self.toggle_preview_only();
+                    return None;
+                }
+                _ => (),
+            }
+        }
+        if self.defer_draft_exit(DraftExit::Open(action)) {
+            return None;
+        }
+        if self.template_form().is_some() {
+            self.leave_page_for_navigation();
         }
         self.status = "".into();
         self.interaction_notice = None;
@@ -2644,16 +2700,7 @@ impl App {
             }
             Action::Refresh if self.tab == Tab::Git => return self.git_task(),
             Action::Refresh => return Some(self.refresh_task()),
-            Action::PreviewOnly => {
-                if self.preview_only_locked {
-                    self.status = "--dry-run locks this session to preview-only.".into();
-                } else {
-                    self.dry_run = !self.dry_run;
-                    self.status =
-                        "Preview-only mode changed; approval always requires a fresh preview."
-                            .into();
-                }
-            }
+            Action::PreviewOnly => self.toggle_preview_only(),
             Action::Diagnostics => {
                 self.go_tab(Tab::Checks);
                 self.showing_diagnostics = true;
@@ -2725,6 +2772,21 @@ impl App {
         self.clamp_history_selection();
         None
     }
+    fn toggle_preview_only(&mut self) {
+        if self.preview_only_locked {
+            self.status = "--dry-run locks this session to preview-only.".into();
+        } else {
+            self.dry_run = !self.dry_run;
+            self.status =
+                "Preview-only mode changed; approval always requires a fresh preview.".into();
+        }
+    }
+    pub(super) fn finish_template_edit(&mut self, result: dort_core::Result<String>) {
+        if self.form_page() == Some("generated file") {
+            self.form_focus = self.form_page();
+            self.shell.finish_template_edit(result);
+        }
+    }
     pub(super) fn key_text_entry(&self) -> bool {
         self.help.is_none()
             && self.more.is_none()
@@ -2766,6 +2828,7 @@ impl App {
         if self.help.is_some()
             || self.more.is_some()
             || self.choice.is_some()
+            || self.draft_exit.is_some()
             || self.busy
             || self.error.is_some()
             || self.show_result
@@ -2786,7 +2849,8 @@ impl App {
                 Form::Configure => "configuration",
                 Form::Repair => "manifest repair",
                 Form::Generated => "generated file",
-                Form::LocalInputs => "local inputs",
+                Form::LocalInputs if self.shell.local_inputs.as_ref()?.editing() => "local inputs",
+                Form::LocalInputs => return None,
                 Form::KeepId => "keep",
                 Form::RemoveId => "remove",
             });
@@ -2828,9 +2892,8 @@ impl App {
         None
     }
     pub(super) fn form_has_focus(&self) -> bool {
-        self.form_page().is_none_or(|owner| {
-            matches!(owner, "generated file" | "local inputs") || self.form_focus == Some(owner)
-        })
+        self.form_page()
+            .is_none_or(|owner| self.form_focus == Some(owner))
     }
     fn focus_first_field(&mut self) {
         self.shell.scroll = 0;
@@ -3023,6 +3086,14 @@ impl App {
         }
     }
     pub(super) fn can_switch_scope(&self) -> bool {
+        if self.template_form().is_some() {
+            return self
+                .data
+                .as_ref()
+                .is_some_and(|data| data.overview.is_some())
+                && self.navigation_block().is_none()
+                && !self.key_text_entry();
+        }
         self.data
             .as_ref()
             .is_some_and(|data| data.overview.is_some())
