@@ -74,12 +74,18 @@ pub fn generated(preview: &dort_core::generated::Preview) -> String {
     )
 }
 pub fn generated_details(preview: &dort_core::generated::Preview) -> String {
-    use std::fmt::Write;
     let mut text = format!(
         "Source: {}\nDestination: {}\n",
         inline(&generated_source(preview)),
         inline(&preview.destination.display().to_string()),
     );
+    write_generated_body(&mut text, preview);
+    text
+}
+
+/// Everything below the source and destination lines.
+pub fn write_generated_body(text: &mut String, preview: &dort_core::generated::Preview) {
+    use std::fmt::Write;
     if let Some(status) = preview.drift_status {
         let _ = writeln!(text, "Status: {}\n{}", status.label(), status.guidance());
     }
@@ -98,13 +104,12 @@ pub fn generated_details(preview: &dort_core::generated::Preview) -> String {
         }
     );
     text.push('\n');
-    write_generated_inputs(&mut text, &preview.resolved_inputs);
+    write_generated_inputs(text, &preview.resolved_inputs);
     text.push_str("\nRendered output\n");
     text.push_str(&safe(&preview.rendered));
     if !text.ends_with('\n') {
         text.push('\n');
     }
-    text
 }
 pub fn generated_deployment(review: dort_core::generated::DeploymentReview<'_>) -> String {
     use std::fmt::Write;

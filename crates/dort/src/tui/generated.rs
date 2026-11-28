@@ -114,6 +114,8 @@ use dort_core::{
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::{BTreeMap, BTreeSet};
 
+const NEW_PATH: &str = "templates/";
+
 pub(super) struct Draft {
     before: Option<ManagedFile>,
     id: String,
@@ -136,6 +138,19 @@ enum Content {
     Inline,
     /// An existing repository template file, by repository-relative path.
     File(String),
+    /// A template file this draft creates, by repository-relative path.
+    New(String),
+}
+
+/// What approval writes.
+pub enum Submission {
+    /// The mapping alone.
+    Edit(Change),
+    /// A new template file and its mapping.
+    Compose {
+        mapping: Box<ManagedFile>,
+        text: String,
+    },
 }
 
 impl Content {
@@ -242,6 +257,8 @@ impl Draft {
     pub fn instructions(&self) -> &'static str {
         if self.entering_inputs() {
             "Declare local names. Set their values after saving. Leave unused inputs unset. No secrets."
+        } else if self.content_is_new() {
+            "Name the new file under templates/. Dort creates it with the mapping on approval."
         } else if self.content_is_file() {
             "Enter or Space chooses a template file. Dort saves the path and writes dort.toml only."
         } else {
@@ -258,9 +275,14 @@ impl Draft {
         self.field_rows()
     }
 
+    /// Index of the new file name row. Only a draft that creates a file has one.
+    fn name_row(&self) -> Option<usize> {
+        self.content_is_new().then(|| self.content_row() + 1)
+    }
+
     /// Index of the template editor or the read-only template file pane.
     pub fn template_field(&self) -> usize {
-        self.content_row() + 1
+        self.content_row() + 1 + usize::from(self.content_is_new())
     }
 
     pub fn on_content_row(&self) -> bool {
@@ -275,30 +297,41 @@ impl Draft {
         matches!(self.content, Content::File(_))
     }
 
+    pub fn content_is_new(&self) -> bool {
+        matches!(self.content, Content::New(_))
+    }
+
     pub fn content_value(&self) -> String {
         match &self.content {
             Content::Inline => "In dort.toml".into(),
             Content::File(path) if path.is_empty() => "Choose a file".into(),
             Content::File(path) => path.clone(),
+            Content::New(_) => "New template file".into(),
         }
     }
 
     pub fn source_path(&self) -> Option<&str> {
         match &self.content {
             Content::File(path) if !path.is_empty() => Some(path),
+            Content::New(path) if !path.trim().is_empty() => Some(path.trim()),
             _ => None,
         }
     }
 
-    /// Space and Enter on the content row. True when a template file is still needed.
+    /// Space and Enter on the content row. True when an existing template file is still needed.
     pub fn content_action(&mut self, toggle: bool) -> bool {
         if self.entering_inputs() || !self.on_content_row() {
             return false;
         }
-        if toggle && self.content_is_file() {
-            self.content = Content::Inline;
-        } else if self.content_is_inline() {
-            self.content = Content::File(String::new());
+        self.content = match (&self.content, toggle) {
+            (Content::Inline, _) => Content::File(String::new()),
+            (Content::File(_), true) => Content::New(NEW_PATH.into()),
+            (Content::New(_), true) => Content::Inline,
+            _ => return self.content_is_file(),
+        };
+        self.source_text = None;
+        if self.content_is_new() {
+            self.focus_at(self.name_row().unwrap_or_default());
         }
         self.content_is_file()
     }
@@ -312,7 +345,7 @@ impl Draft {
 
     /// Keep the text read for the current choice. False when it was replaced.
     pub fn set_source_text(&mut self, path: &str, text: String) -> bool {
-        if self.source_path() != Some(path) {
+        if self.content != Content::File(path.to_owned()) {
             return false;
         }
         self.source_text = Some(text);
@@ -324,6 +357,14 @@ impl Draft {
         match (&self.content, &self.source_text) {
             (Content::File(_), Some(text)) => text,
             _ => self.template.text(),
+        }
+    }
+
+    /// The file name typed for a new template file.
+    fn new_name(&self) -> Option<&str> {
+        match &self.content {
+            Content::New(path) => Some(path),
+            _ => None,
         }
     }
 
@@ -499,7 +540,7 @@ impl Draft {
             .collect())
     }
 
-    pub fn submit(&mut self) -> Result<Option<Change>> {
+    pub fn submit(&mut self) -> Result<Option<Submission>> {
         let inputs = if let Step::Inputs { fields, .. } = &self.step {
             fields
                 .iter()
@@ -520,6 +561,11 @@ impl Draft {
             if self.content_is_file() && self.source_path().is_none() {
                 return Err(Error::Invalid(
                     "Choose a template file for this generated file.".into(),
+                ));
+            }
+            if self.content_is_new() && self.source_path().is_none() {
+                return Err(Error::Invalid(
+                    "Enter a name for the new template file.".into(),
                 ));
             }
             let fields = self.discover()?;
@@ -555,10 +601,18 @@ impl Draft {
             mapping.local_inputs =
                 Some(self.local_inputs.clone()).filter(|names| !names.is_empty());
         }
-        Ok(Some(Change::File(Box::new(FileChange {
+        let change = FileChange {
             mapping,
             before: self.before.clone(),
-        }))))
+        };
+        Ok(Some(if self.content_is_new() {
+            Submission::Compose {
+                mapping: Box::new(change.mapping),
+                text: self.template.text().to_owned(),
+            }
+        } else {
+            Submission::Edit(Change::File(Box::new(change)))
+        }))
     }
 
     pub fn draw_template(&self, frame: &mut Frame, area: Rect, hits: &super::input::Hits) {
@@ -573,6 +627,9 @@ impl Draft {
             ]
         };
         fields.push(("Template content", content.as_str()));
+        if let Some(name) = self.new_name() {
+            fields.push(("New template file", name));
+        }
         let focus = hits.input_focus_allowed();
         let body = area;
         let mut y = area.y;
@@ -644,7 +701,7 @@ impl Draft {
     }
 
     pub fn template_focused(&self) -> bool {
-        self.content_is_inline()
+        !self.content_is_file()
             && !self.entering_inputs()
             && self.template_focus == self.template_field()
     }
@@ -675,10 +732,16 @@ impl Draft {
         if self.template_focus >= self.template_field() || self.on_content_row() {
             return None;
         }
-        match self.template_focus {
-            0 if self.before.is_none() => Some(&mut self.id),
-            _ => Some(&mut self.target),
+        if self.name_row() == Some(self.template_focus) {
+            let Content::New(path) = &mut self.content else {
+                return None;
+            };
+            return Some(path);
         }
+        if self.before.is_none() && self.template_focus == 0 {
+            return Some(&mut self.id);
+        }
+        Some(&mut self.target)
     }
 
     pub fn key(&mut self, key: KeyEvent) -> Result<()> {

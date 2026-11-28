@@ -1,4 +1,5 @@
 //! Application dispatch shared by CLI and TUI. Callers approve writes first.
+pub mod compose;
 pub mod declaration;
 pub mod declared_tools;
 #[cfg(test)]

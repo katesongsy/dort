@@ -1599,6 +1599,18 @@ impl Workshop {
         self.press(KeyCode::Tab);
         self.press(KeyCode::Char(' '));
     }
+
+    /// New generated file draft whose content choice is a new template file.
+    fn new_file_draft(&mut self, id: &str, name: &str) {
+        self.press(KeyCode::Char('s'));
+        self.paste(id);
+        self.press(KeyCode::Tab);
+        self.paste("~/settings");
+        self.content_row();
+        self.press(KeyCode::Esc);
+        self.press(KeyCode::Char(' '));
+        self.paste(name);
+    }
 }
 
 #[test]
@@ -1672,6 +1684,11 @@ fn generated_draft_keeps_its_text_and_inputs_when_the_file_picker_cancels() {
     assert!(screen.contains("Choose a file"), "{screen}");
     assert!(screen.contains("prefs"), "{screen}");
     assert!(screen.contains("~/settings"), "{screen}");
+    w.press(KeyCode::Char(' '));
+    let screen = w.screen();
+    assert!(screen.contains("New template file"), "{screen}");
+    assert!(screen.contains("templates/"), "{screen}");
+    w.press(KeyCode::BackTab);
     w.press(KeyCode::Char(' '));
     let screen = w.screen();
     assert!(screen.contains("In dort.toml"), "{screen}");
@@ -1789,4 +1806,107 @@ inputs = { theme = "dark" }
         "{}",
         w.screen()
     );
+}
+
+#[test]
+fn generated_draft_creates_a_template_file_and_its_mapping_together() {
+    use std::os::unix::fs::PermissionsExt;
+    for (width, height) in [(48, 14), (120, 32)] {
+        let mut w = Workshop::new(width, height);
+        let original = w.manifest();
+        w.new_file_draft("prefs", "prefs.jinja");
+        let screen = w.screen();
+        assert!(screen.contains("New template file"), "{screen}");
+        assert!(screen.contains("templates/prefs.jinja"), "{screen}");
+        w.press(KeyCode::Tab);
+        let text = "theme={{ inputs.theme }}\n";
+        w.paste(text);
+        w.continue_form();
+        w.paste("dark");
+        w.continue_form();
+        let review = w.review().to_owned();
+        for expected in [
+            "Template file: templates/prefs.jinja",
+            "File permissions: 0644",
+            "Create folder: templates | permissions 0755",
+            "|theme={{ inputs.theme }}\\n|",
+            "inputs.theme = \"dark\" (dort.toml)",
+            "Rendered output",
+            "theme=dark",
+        ] {
+            assert!(
+                review.contains(expected),
+                "{expected} missing from {review}"
+            );
+        }
+        let destination = w.host.home.join("settings");
+        assert!(
+            review.contains(&format!("Destination: {}", destination.display())),
+            "{review}"
+        );
+        assert!(
+            review.contains("Source: templates/prefs.jinja (new file)"),
+            "{review}"
+        );
+        assert_eq!(w.manifest(), original);
+        assert!(!w.repo.join("templates").exists());
+        w.approve();
+        let path = w.repo.join("templates/prefs.jinja");
+        assert_eq!(fs::read_to_string(&path).unwrap(), text);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        assert_eq!(
+            fs::metadata(w.repo.join("templates"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+        let saved = dort_core::Manifest::parse(&w.manifest()).unwrap();
+        assert_eq!(saved.files.len(), 1);
+        assert_eq!(
+            saved.files[0].source.as_deref(),
+            Some(std::path::Path::new("templates/prefs.jinja"))
+        );
+        assert_eq!(saved.files[0].template, None);
+        assert_eq!(saved.files[0].target.to_str(), Some("~/settings"));
+        assert_eq!(saved.files[0].inputs["theme"], "dark");
+        let screen = w.screen();
+        assert!(screen.contains("Created template file."), "{screen}");
+        assert!(
+            screen.contains("Wrote the mapping in dort.toml."),
+            "{screen}"
+        );
+        assert_eq!(fs::read_dir(&w.host.home).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn generated_draft_discards_a_new_template_file_without_writing() {
+    let mut w = Workshop::new(120, 32);
+    let original = w.manifest();
+    w.new_file_draft("prefs", "prefs.jinja");
+    w.press(KeyCode::Tab);
+    w.paste("theme=dark\n");
+    w.continue_form();
+    assert!(
+        w.review().contains("Template file: templates/prefs.jinja"),
+        "{:?}",
+        w.app.preview.as_ref().map(|p| &p.text)
+    );
+    w.press(KeyCode::Esc);
+    assert!(w.app.preview.is_none());
+    w.press(KeyCode::Esc);
+    let screen = w.screen();
+    assert!(screen.contains("Discard unsaved changes?"), "{screen}");
+    assert!(!w.repo.join("templates").exists());
+    assert_eq!(w.manifest(), original);
+    w.press(KeyCode::Char('d'));
+    assert!(w.app.shell.generated.is_none());
+    assert!(!w.repo.join("templates").exists());
+    assert_eq!(w.manifest(), original);
+    assert_eq!(fs::read_dir(&w.host.home).unwrap().count(), 0);
 }

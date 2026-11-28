@@ -49,7 +49,7 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, _height: u16, _width: u
         ),
         Overlay::Form(Form::TemplateFile) => "Source files live in the repository. Create or edit .jinja files under templates/.".into(),
         Overlay::Form(Form::LocalInputs) => "Read or set declared inputs for this file. Settings stay on this machine. No secrets.".into(),
-        Overlay::Form(Form::Generated) => "Use Tab or the arrow keys to move between fields. Backspace edits the end of a field. Ctrl-U clears it. Paste text into the focused field. The review shows the rendered output before saving only dort.toml.".into(),
+        Overlay::Form(Form::Generated) => "Use Tab or the arrow keys to move between fields. Backspace edits the end of a field. Ctrl-U clears it. Paste text into the focused field. The review shows the exact bytes and output before saving.".into(),
         Overlay::Form(Form::Configure) => {
             "Review the changes to dort.toml before saving. Home files and packages stay in place."
                 .into()
