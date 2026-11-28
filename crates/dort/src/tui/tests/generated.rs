@@ -288,6 +288,7 @@ fn blank_repository_can_create_cancel_save_preview_and_edit_generated_template()
             w.review()
         );
         assert!(w.review().contains("Update dort.toml only"));
+        assert!(!w.review().contains("Status:"));
         w.paste("y\n");
         w.press(KeyCode::Enter);
         assert_eq!(w.manifest(), blank);
@@ -491,6 +492,20 @@ target = "~/settings"
         w.press(KeyCode::Char('y'));
         assert_eq!(w.manifest(), declaration);
         assert_eq!(fs::read_dir(&w.host.home).unwrap().count(), 1);
+        w.press(KeyCode::Esc);
+        w.run(Task::PreviewGenerated("settings".into()));
+        let screen = w.screen();
+        assert!(screen.contains("Up to date"), "{screen}");
+        assert!(!screen.contains("Review deployment"), "{screen}");
+        fs::remove_file(&target).unwrap();
+        w.run(Task::PreviewGenerated("settings".into()));
+        let screen = w.screen();
+        assert!(screen.contains("Local file deleted"), "{screen}");
+        assert!(!screen.contains("Review deployment"), "{screen}");
+        w.press(KeyCode::Char('R'));
+        w.press(KeyCode::Char('y'));
+        assert!(!target.exists());
+        assert!(w.screen().contains("Local file deleted"));
     }
 }
 

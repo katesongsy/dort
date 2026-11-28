@@ -1,13 +1,16 @@
 //! Previews and first deployment of repository-declared generated files.
 mod deploy;
+mod record;
 use crate::{
     Error, Manifest, Result,
     context::HostContext,
+    local::LocalConfig,
     manifest::paths_overlap,
     model::{FileContent, FileMode, ManagedFile},
     observation::{self, Entry, Kind},
 };
 pub use deploy::{Approval, Deployment, DeploymentReview, Published};
+use rustix::{fs, io::Errno};
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -18,6 +21,25 @@ pub const TEMPLATE_LIMIT: usize = 64 * 1024;
 pub const VALUE_LIMIT: usize = 16 * 1024;
 const OUTPUT_LIMIT: usize = 128 * 1024;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Mode(u32);
+
+impl Mode {
+    fn declared(permissions: Option<&str>) -> Self {
+        Self(permissions.map_or(0o600, |mode| {
+            u32::from_str_radix(mode, 8).expect("validated manifest permissions")
+        }))
+    }
+
+    fn permits_deployment(self) -> bool {
+        self.0 & 0o022 == 0
+    }
+
+    fn label(self) -> String {
+        format!("{:04o}", self.0)
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct Preview {
     pub id: String,
@@ -27,6 +49,8 @@ pub struct Preview {
     pub rendered: String,
     pub destination_status: DestinationStatus,
     pub permissions: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drift_status: Option<DriftStatus>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -47,7 +71,71 @@ impl DestinationStatus {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DriftStatus {
+    Missing,
+    MissingParent,
+    UnrecordedExisting,
+    UpToDate,
+    UpdateAvailable,
+    LocallyEdited,
+    LocalPermissionsChanged,
+    LocallyEditedAndPermissionsChanged,
+    LocallyDeleted,
+    Unsafe,
+    Unverifiable,
+}
+
+impl DriftStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Missing => "New file",
+            Self::MissingParent => "Destination folder missing",
+            Self::UnrecordedExisting => "Unrecorded existing file",
+            Self::UpToDate => "Up to date",
+            Self::UpdateAvailable => "Update available",
+            Self::LocallyEdited => "Local edits",
+            Self::LocalPermissionsChanged => "Local permissions changed",
+            Self::LocallyEditedAndPermissionsChanged => "Local edits and permissions changed",
+            Self::LocallyDeleted => "Local file deleted",
+            Self::Unsafe => "Unsafe destination",
+            Self::Unverifiable => "Cannot verify deployment",
+        }
+    }
+
+    pub fn guidance(self) -> &'static str {
+        match self {
+            Self::Missing => "Review first deployment to create the file.",
+            Self::MissingParent => "Create the destination folder, then preview again.",
+            Self::UnrecordedExisting => {
+                "Dort leaves the existing file alone. Choose a different destination to deploy."
+            }
+            Self::UpToDate => "No action needed.",
+            Self::UpdateAvailable => {
+                "The template output or permissions changed. Dort leaves the deployed file alone."
+            }
+            Self::LocallyEdited
+            | Self::LocalPermissionsChanged
+            | Self::LocallyEditedAndPermissionsChanged => {
+                "Inspect the local file before making changes. Dort leaves it alone."
+            }
+            Self::LocallyDeleted => {
+                "Restore the file yourself or leave it missing. First deployment cannot recreate it."
+            }
+            Self::Unsafe => "Check the destination path and access. Dort leaves it alone.",
+            Self::Unverifiable => {
+                "Check file access, size and Dort's local state, then preview again."
+            }
+        }
+    }
+}
+
 impl Preview {
+    pub fn proposed_permissions(&self) -> String {
+        Mode::declared(self.permissions.as_deref()).label()
+    }
+
     pub fn prepare(host: &HostContext, repository: &Path, id: &str) -> Result<Self> {
         observation::validate_output_path(repository)?;
         let (manifest, _) = observation::read_manifest(&repository.join("dort.toml")).map_err(
@@ -58,7 +146,10 @@ impl Preview {
                 other => other,
             },
         )?;
-        Self::from_manifest(host, repository, &manifest, id)
+        let mut preview = Self::from_manifest(host, repository, &manifest, id)?;
+        let local = LocalConfig::load(host)?;
+        preview.drift_status = Some(preview.drift_status(host, &local, repository, &manifest));
+        Ok(preview)
     }
 
     pub(crate) fn from_manifest(
@@ -106,10 +197,101 @@ impl Preview {
                 inputs: file.inputs.clone(),
                 rendered,
                 permissions: file.permissions.clone(),
+                drift_status: None,
             },
             source,
         ))
     }
+
+    fn drift_status(
+        &self,
+        host: &HostContext,
+        local: &LocalConfig,
+        repository: &Path,
+        manifest: &Manifest,
+    ) -> DriftStatus {
+        let path = &self.destination;
+        let Ok(handle) = deploy::destination_handle(host, local, path) else {
+            return DriftStatus::Unsafe;
+        };
+        let receipt = local
+            .repositories
+            .iter()
+            .find(|(_, record)| record.root == repository);
+        let stamp = match receipt {
+            Some((id, _)) => {
+                match record::Slot::new(host, id, &self.id, path).and_then(|slot| slot.load()) {
+                    Ok(stamp) => stamp,
+                    Err(_) => return DriftStatus::Unverifiable,
+                }
+            }
+            None => None,
+        };
+        let stat = if handle.missing {
+            Err(Errno::NOENT)
+        } else {
+            fs::statat(
+                &handle.directory,
+                &handle.name,
+                fs::AtFlags::SYMLINK_NOFOLLOW,
+            )
+        };
+        let mode = Mode::declared(self.permissions.as_deref());
+        match stat {
+            Err(Errno::NOENT) => match stamp {
+                Some(_) => DriftStatus::LocallyDeleted,
+                None if !mode.permits_deployment() => DriftStatus::Unsafe,
+                None if handle.missing => DriftStatus::MissingParent,
+                None => DriftStatus::Missing,
+            },
+            Ok(stat) => match stamp {
+                Some(stamp) if !overlaps_secret_target(host, repository, manifest, path, &stat) => {
+                    stamp.observe(
+                        path,
+                        &handle,
+                        &stat,
+                        &record::Stamp::new(self.rendered.as_bytes(), mode),
+                    )
+                }
+                None if record::owned_regular(
+                    &stat,
+                    &observation::Fingerprint::from_stat(&stat),
+                ) =>
+                {
+                    DriftStatus::UnrecordedExisting
+                }
+                _ => DriftStatus::Unsafe,
+            },
+            Err(_) => DriftStatus::Unverifiable,
+        }
+    }
+}
+
+fn overlaps_secret_target(
+    host: &HostContext,
+    repository: &Path,
+    manifest: &Manifest,
+    path: &Path,
+    stat: &fs::Stat,
+) -> bool {
+    let fp = observation::Fingerprint::from_stat(stat);
+    manifest
+        .files
+        .iter()
+        .filter(|file| file.mode == FileMode::Secret)
+        .any(|file| {
+            host.target_path(&file.target, Some(repository))
+                .ok()
+                .is_some_and(|secret| {
+                    paths_overlap(&secret, path)
+                        || observation::inspect(&secret, false)
+                            .ok()
+                            .and_then(|e| e.fingerprint)
+                            .is_some_and(|other| {
+                                fp.device == other.device && fp.inode == other.inode
+                            })
+                })
+        })
 }
 
 fn find_file<'a>(manifest: &'a Manifest, id: &str) -> Result<&'a ManagedFile> {

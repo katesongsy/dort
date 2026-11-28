@@ -52,7 +52,9 @@ Choose **Continue** (`F4`). If the template uses inputs, enter the named values.
 
 To revisit a saved template, select it in Managed. Press `v` to preview it or `e` to choose **Edit generated file**. Edit file-backed templates in the repository.
 
-To deploy for the first time, open the preview and choose **Review deployment** (`R`). Read the destination, permissions and escaped output. Scroll to the end, then press `y` when **Deploy generated file** appears. `Esc` cancels the review.
+The preview shows the proposed output and the file's status. **Update available** means the template output or permissions changed while the deployed file stayed the same. A local edit, permission change or deletion takes precedence. The preview leaves your local file alone.
+
+For a new file, choose **Review deployment** (`R`). Read the destination, permissions and escaped output. Scroll to the end, then press `y` when **Deploy generated file** appears. `Esc` cancels the review.
 
 ## Tools
 
@@ -153,7 +155,7 @@ dort --repo PATH files preview-generated editor-settings
 dort --repo PATH --json files preview-generated editor-settings
 ```
 
-Renders the repository template with literal inputs from `dort.toml`. Shows if the destination is missing, exists and must be kept, or is unsafe. Dort checks the destination without reading its contents. No files are written. JSON includes the exact rendered text and input values.
+Renders the template with literal inputs from `dort.toml`. If Dort recorded the deployment, the status distinguishes template changes from local edits, permission changes and deletion. A file over 128 KiB or one that cannot be read safely stays unverified. Dort never reads the contents of an unrecorded destination. JSON includes the status, proposed text and input values. No files are written.
 
 ### Deploy a generated file
 
@@ -168,7 +170,7 @@ Review the destination, permissions and exact rendered output before confirming.
 
 First deployment creates one regular file at a missing path below HOME. Create the destination folder first. Dort refuses symlinks, shared writable folders, protected paths, inactive profiles and files with tool requirements. The default mode is `0600`. The mode cannot grant group or other users write access.
 
-Existing destinations stay untouched, even if the bytes match. First deployment has no drift tracking, replacement or rollback. Bulk file apply and environment apply do not deploy templates.
+A successful first deployment records what Dort wrote. If recording fails, Dort leaves the file in place and warns that future previews may not be able to verify it. A pre-existing file without a record stays untouched, even if it matches the template. If you delete a recorded file, first deployment cannot recreate it. Bulk file apply and environment apply do not deploy templates.
 
 ### Plan
 

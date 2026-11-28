@@ -1,4 +1,4 @@
-use super::{DestinationStatus, Preview, find_file};
+use super::{DestinationStatus, DriftStatus, Mode, Preview, find_file, record};
 use crate::{
     Error, Result, adoption,
     context::HostContext,
@@ -27,6 +27,7 @@ pub struct Deployment {
     explicit: Option<PathBuf>,
     temporary_profiles: Vec<String>,
     scope: Scope,
+    record: record::Slot,
     preview: Preview,
     mode: Mode,
 }
@@ -39,14 +40,6 @@ struct Scope {
     manifest: Entry,
     source: Option<Entry>,
     missing_destination: Vec<Parent>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Mode(u32);
-impl Mode {
-    fn label(self) -> String {
-        format!("{:04o}", self.0)
-    }
 }
 
 #[derive(Serialize)]
@@ -67,6 +60,27 @@ pub struct Published {
     pub destination: PathBuf,
     pub permissions: String,
     pub directory_synced: bool,
+    pub record_warning: Option<&'static str>,
+}
+
+impl Published {
+    fn after_publish(
+        destination: PathBuf,
+        mode: Mode,
+        directory_synced: bool,
+        record: record::Slot,
+        rendered: &[u8],
+    ) -> Self {
+        let saved = directory_synced && record.save(record::Stamp::new(rendered, mode)).is_ok();
+        Self {
+            destination,
+            permissions: mode.label(),
+            directory_synced,
+            record_warning: (!saved).then_some(
+                "Dort could not save a reliable deployment record. Future previews may not be able to verify this file.",
+            ),
+        }
+    }
 }
 
 fn invalid(message: impl Into<String>) -> Error {
@@ -80,12 +94,13 @@ impl Deployment {
         id: &str,
         temporary_profiles: &[String],
     ) -> Result<Self> {
-        let (scope, preview, mode) = read_scope(host, explicit, id, temporary_profiles)?;
+        let (scope, record, preview, mode) = read_scope(host, explicit, id, temporary_profiles)?;
         Ok(Self {
             host: host.clone(),
             explicit: explicit.map(Path::to_owned),
             temporary_profiles: temporary_profiles.to_vec(),
             scope,
+            record,
             preview,
             mode,
         })
@@ -115,7 +130,7 @@ impl Approval {
         journal::ensure_writable(&p.host)?;
         let path = &p.preview.destination;
         let reviewed_parent = || {
-            let handle = missing_parent_handle(path)?;
+            let handle = require_missing(path, checked_parent(path)?, false)?;
             if !observation::same_parent_identity_and_access(
                 &handle.parents,
                 &p.scope.missing_destination,
@@ -126,7 +141,7 @@ impl Approval {
         };
         let handle = reviewed_parent()?;
         let verify_review = || {
-            let (scope, preview, mode) = read_scope(
+            let (scope, _, preview, mode) = read_scope(
                 &p.host,
                 p.explicit.as_deref(),
                 &p.preview.id,
@@ -149,11 +164,13 @@ impl Approval {
                 reviewed_parent()?;
                 Ok(())
             })?;
-        Ok(Published {
-            destination: p.preview.destination,
-            permissions: p.mode.label(),
+        Ok(Published::after_publish(
+            p.preview.destination,
+            p.mode,
             directory_synced,
-        })
+            p.record,
+            p.preview.rendered.as_bytes(),
+        ))
     }
 }
 
@@ -166,7 +183,7 @@ fn read_scope(
     explicit: Option<&Path>,
     id: &str,
     temporary_profiles: &[String],
-) -> Result<(Scope, Preview, Mode)> {
+) -> Result<(Scope, record::Slot, Preview, Mode)> {
     let (local, config) = LocalConfig::load_bound(host)?;
     let (repository_id, repository) = match explicit {
         Some(root) => {
@@ -210,40 +227,12 @@ fn read_scope(
     }
     manifest.validate_selection(host, &profiles, Some(repository))?;
     let destination = host.target_path(&file.target, Some(repository))?;
-    if observation::sensitive_path(&destination)
-        || destination
-            .components()
-            .any(|part| part.as_os_str().eq_ignore_ascii_case(".git"))
-        || local
-            .repositories
-            .values()
-            .any(|record| paths_overlap(&destination, &record.root))
-    {
-        return Err(invalid(
-            "Destination is protected. Choose a non-sensitive path outside registered repositories.",
-        ));
-    }
-    let handle = missing_parent_handle(&destination)?;
-    let protected = [&host.config_dir, &host.state_dir]
-        .into_iter()
-        .chain(local.repositories.values().map(|record| &record.root));
-    for root in protected {
-        if let Ok(entry) = observation::inspect(root, false)
-            && let Some(fp) = entry.fingerprint
-            && handle.parents.iter().any(|parent| {
-                parent.fingerprint.device == fp.device && parent.fingerprint.inode == fp.inode
-            })
-        {
-            return Err(invalid(
-                "Destination overlaps Dort state or a registered repository.",
-            ));
-        }
-    }
-    let mode = Mode(match &file.permissions {
-        Some(value) => u32::from_str_radix(value, 8).expect("validated manifest permissions"),
-        None => 0o600,
-    });
-    if mode.0 & 0o022 != 0 {
+    let handle = destination_handle(host, &local, &destination)?;
+    let record = record::Slot::new(host, repository_id, &file.id, &destination)?;
+    let recorded = record.load().map_err(|_| record::invalid())?.is_some();
+    let handle = require_missing(&destination, handle, recorded)?;
+    let mode = Mode::declared(file.permissions.as_deref());
+    if !mode.permits_deployment() {
         return Err(invalid(
             "Generated permissions must not allow group or other users to write the file.",
         ));
@@ -268,28 +257,78 @@ fn read_scope(
             source: source.map(Entry::stable_parents),
             missing_destination,
         },
+        record,
         preview,
         mode,
     ))
 }
 
-fn missing_parent_handle(path: &Path) -> Result<ParentHandle> {
+pub(super) fn destination_handle(
+    host: &HostContext,
+    local: &LocalConfig,
+    destination: &Path,
+) -> Result<ParentHandle> {
+    if observation::sensitive_path(destination)
+        || destination
+            .components()
+            .any(|part| part.as_os_str().eq_ignore_ascii_case(".git"))
+        || local
+            .repositories
+            .values()
+            .any(|record| paths_overlap(destination, &record.root))
+    {
+        return Err(invalid(
+            "Destination is protected. Choose a non-sensitive path outside registered repositories.",
+        ));
+    }
+    let handle = checked_parent(destination)?;
+    let protected = [&host.config_dir, &host.state_dir]
+        .into_iter()
+        .chain(local.repositories.values().map(|record| &record.root));
+    for root in protected {
+        if let Ok(entry) = observation::inspect(root, false)
+            && let Some(fp) = entry.fingerprint
+            && handle.parents.iter().any(|parent| {
+                parent.fingerprint.device == fp.device && parent.fingerprint.inode == fp.inode
+            })
+        {
+            return Err(invalid(
+                "Destination overlaps Dort state or a registered repository.",
+            ));
+        }
+    }
+    Ok(handle)
+}
+
+fn checked_parent(path: &Path) -> Result<ParentHandle> {
     #[cfg(target_os = "macos")]
     let handle = observation::parent_handle_with(path, acl::require_no_write_grants)?;
     #[cfg(not(target_os = "macos"))]
     let handle = observation::parent_handle(path)?;
-    if handle.missing {
-        return Err(invalid(format!(
+    trusted_parents(&handle.parents)?;
+    Ok(handle)
+}
+
+fn require_missing(path: &Path, handle: ParentHandle, recorded: bool) -> Result<ParentHandle> {
+    let stat = if handle.missing {
+        Err(Errno::NOENT)
+    } else {
+        fs::statat(
+            &handle.directory,
+            &handle.name,
+            fs::AtFlags::SYMLINK_NOFOLLOW,
+        )
+    };
+    match stat {
+        Err(Errno::NOENT) if recorded => Err(invalid(format!(
+            "{}. {}",
+            DriftStatus::LocallyDeleted.label(),
+            DriftStatus::LocallyDeleted.guidance()
+        ))),
+        Err(Errno::NOENT) if handle.missing => Err(invalid(format!(
             "Destination folder {} is missing. Create it, then review again.",
             path.parent().expect("destination parent").display()
-        )));
-    }
-    trusted_parents(&handle.parents)?;
-    match fs::statat(
-        &handle.directory,
-        &handle.name,
-        fs::AtFlags::SYMLINK_NOFOLLOW,
-    ) {
+        ))),
         Err(Errno::NOENT) => Ok(handle),
         Ok(_) => Err(invalid(
             "Destination already exists. Choose a missing destination; Dort will not replace it.",
@@ -350,9 +389,8 @@ fn publish(
         verify()?;
         let named = fs::statat(directory, temporary.as_str(), fs::AtFlags::SYMLINK_NOFOLLOW)
             .map_err(|error| io_error("recheck staged generated file", path, error))?;
-        if observation::Fingerprint::from_stat(&named)
-            != observation::Fingerprint::from_stat(&staged)
-        {
+        let staged = observation::Fingerprint::from_stat(&staged);
+        if staged.mode & 0o7777 != mode.0 || observation::Fingerprint::from_stat(&named) != staged {
             return Err(stale());
         }
         fs::renameat_with(
@@ -395,7 +433,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let root = root.path().canonicalize().unwrap();
         let path = root.join("generated");
-        let handle = missing_parent_handle(&path).unwrap();
+        let handle = require_missing(&path, checked_parent(&path).unwrap(), false).unwrap();
         let result = publish(&handle, &path, Mode(0o600), b"reviewed", || {
             std::fs::write(&path, b"existing").unwrap();
             Ok(())

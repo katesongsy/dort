@@ -528,11 +528,13 @@ fn overlay(frame: &mut Frame, inner: Rect, app: &App, overlay: &Overlay) {
     match overlay {
         Overlay::Generated(report) => {
             report.draw(frame, inner, app);
-            app.presented(
-                "Review deployment",
-                "r",
-                Target::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)),
-            );
+            if report.can_review_deployment() {
+                app.presented(
+                    "Review deployment",
+                    "r",
+                    Target::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)),
+                );
+            }
             if frame.area().width >= 64 {
                 app.presented(
                     "Last line",
