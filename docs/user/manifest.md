@@ -66,7 +66,9 @@ inputs = { theme = "dark" }
 
 Dort renders `theme = dark` followed by a newline. Use `template` for text in `dort.toml`, or use `source` to point to a UTF-8 file in the repository. An inline template cannot use `source` or platform source overrides.
 
-The default syntax is `literal`. Use a single name in each `{{ ... }}`. Names use ASCII letters, digits, and underscores and start with a letter or underscore. Inputs are strings and are not expanded again. Keep secrets out of templates and inputs. Dort refuses content that looks like credentials.
+All templates use Jinja. Input names use ASCII letters, digits, and underscores and start with a letter or underscore. Inputs are strings and are not expanded again. Keep secrets out of templates and inputs. Dort refuses content that looks like credentials.
+
+If you used an older literal template, review its output before deploying. Jinja now interprets `{%` and `{#` in template text. `true`, `false`, and `none` are Jinja values; use `inputs.true`, `inputs.false`, or `inputs.none` to read manifest inputs with those names. Dort ignores the old `syntax` key.
 
 Dort still reads the older `recipe` key. Use only one spelling. Saving an edit writes `template`.
 
@@ -74,14 +76,13 @@ Limits: 64 KiB per UTF-8 template, 16 KiB per input value, and 128 KiB of render
 
 #### Jinja templates
 
-Set `syntax = "jinja"` for conditions and simple loops. Use `inputs.name` for a value from the manifest. List each host field you want to allow in `host_inputs`. For a value set on each machine, use `local.name` and list `name` in `local_inputs`. Store only names in the manifest. Set non-secret values in [Files / Generated](commands.md#generated-files).
+Use `inputs.name` or `name` for a value from the manifest. Use `host.hostname` for the OS hostname. List each host field you want to allow in `host_inputs`. For a value set on each machine, use `local.name` and list `name` in `local_inputs`. Store only names in the manifest. Set non-secret values in [Files / Generated](commands.md#generated-files).
 
 ```toml
 [[files]]
 id = "editor-settings"
 mode = "template"
 target = "~/.config/editor/settings.conf"
-syntax = "jinja"
 host_inputs = ["os"]
 inputs = { theme = "dark" }
 template = '''

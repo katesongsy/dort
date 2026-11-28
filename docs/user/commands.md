@@ -45,11 +45,11 @@ Press `f` to open **1 Managed**. Use `2` for **Discover**, `3` for **Ignored pat
 
 In **Files**, press `4` to open **Generated**. Press `s` or choose **New generated file**. Enter a file ID and a Home destination. Press `Tab` or `Shift+Tab` to move between fields. In **Template**, `Enter` adds a newline. Use the arrows, `Home`, and `End` to edit, or paste several lines at once. Keep secrets out of templates and inputs.
 
-**Syntax** defaults to **Literal**. Use `{{ name }}` for an input. For conditions or loops, select **Syntax** and press `Enter` or `Space`. Select **Jinja**, then press `Enter` to apply it. Use `{{ inputs.name }}` for a named value and `{{ host.os }}` for an allowed host value. See [Jinja templates](manifest.md#jinja-templates) for examples and available host fields.
+Templates use Jinja. Use `{{ name }}` or `{{ inputs.name }}` for a manifest input. Use `{{ host.os }}` for the operating system or `{{ host.hostname }}` for the hostname. See [Jinja templates](manifest.md#jinja-templates) for examples and all host values.
 
 Choose **Open in editor** (`F5`) to edit the template in an external editor. Set `VISUAL` or `EDITOR` before starting Dort, for example `VISUAL='code --wait'`. Dort tries `VISUAL` first. Choose an editor command that waits until you close the file. The editor gets a temporary copy of the template. Save and exit the editor to return to the draft.
 
-Choose **Continue** (`F4`). In **Literal**, leave a value blank to render nothing. In **Jinja**, leave unused inputs unset. Use `F6` to set an empty string or unset a value. Press `Space` or click to allow a host field. **Referenced** marks fields the template may use, even in branches that do not run. For `{{ local.name }}`, press `Space` or click to declare the name.
+Choose **Continue** (`F4`). Leave unused inputs unset. Use `F6` to set an empty string or unset a value. Press `Space` or click to allow a host field. **Referenced** marks fields the template may use, even in branches that do not run. For `{{ local.name }}`, press `Space` or click to declare the name.
 
 Choose **Review generated file** after entering inputs. Check the resolved values, their sources, and the output. Press `y` when **Save generated file** is ready. `Esc` keeps your draft inputs. If a declared local input needs a value, choose **Save declaration only**. Saving changes only `dort.toml`.
 
