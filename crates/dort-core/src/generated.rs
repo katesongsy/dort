@@ -184,6 +184,7 @@ impl Preview {
         let local = LocalConfig::load(host)?;
         let repository_id = local.repository_id(repository);
         let mut preview = Self::from_manifest(host, repository, repository_id, &manifest, id)?
+            .0
             .map_err(|setup| {
                 let guidance = setup.guidance();
                 Error::Invalid(if repository_id.is_some() {
@@ -196,17 +197,17 @@ impl Preview {
         Ok(preview)
     }
 
+    /// Renders one declaration. Also returns the template file read for it, if any.
     pub(crate) fn from_manifest(
         host: &HostContext,
         repository: &Path,
         repository_id: Option<&str>,
         manifest: &Manifest,
         id: &str,
-    ) -> Result<DeclarationPreview> {
+    ) -> Result<(DeclarationPreview, Option<Entry>)> {
         let file = find_file(manifest, id)?;
         let destination = host.target_path(&file.target, Some(repository))?;
         Self::render_file(host, repository, repository_id, manifest, file, destination)
-            .map(|(preview, _)| preview)
     }
 
     fn render_file(
