@@ -351,7 +351,12 @@ impl App {
                 None
             }
             Ok(Output::GeneratedDeployed(result)) => self.accept_generated_deployment(result),
-            Ok(Output::History { rows, error }) => self.accept_history(rows, error),
+            Ok(Output::GeneratedUpdated(outcome)) => self.accept_generated_update(outcome),
+            Ok(Output::History {
+                rows,
+                error,
+                generated_recovery,
+            }) => self.accept_history(rows, error, generated_recovery),
             Ok(Output::Diagnostics(report)) => self.accept_diagnostics(report),
             Ok(Output::ToolAttempts(result)) => self.accept_tool_attempts(result),
             Ok(Output::ToolClosePreview(preview)) => self.accept_tool_close_preview(preview),
@@ -1624,13 +1629,19 @@ impl App {
             return None;
         }
         if let Some(Overlay::Generated(report)) = &self.shell.overlay {
-            if report.can_review_deployment()
-                && matches!(key.code, KeyCode::Char('r' | 'R'))
+            if matches!(key.code, KeyCode::Char('r' | 'R'))
                 && !key
                     .modifiers
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
             {
-                return Some(Task::ReviewGeneratedDeployment(report.id.clone()));
+                if report.can_review_deployment() {
+                    return Some(Task::ReviewGeneratedDeployment(report.id.clone()));
+                }
+                if report.can_review_update() {
+                    let id = report.id.clone();
+                    self.shell.back();
+                    return Some(Task::ReviewGeneratedUpdate(id));
+                }
             }
             if key.code == KeyCode::Esc {
                 self.shell.back();
@@ -1984,6 +1995,16 @@ impl App {
             KeyCode::Up => self.selected = self.selected.saturating_sub(1),
             KeyCode::Char('a') if self.tab == Tab::Overview => {
                 return self.activate(Action::Apply);
+            }
+            KeyCode::Char('u')
+                if self.tab == Tab::Recovery
+                    && self
+                        .data
+                        .as_ref()
+                        .and_then(|d| d.generated_recovery.as_ref())
+                        .is_some_and(Result::is_ok) =>
+            {
+                return Some(Task::ReviewGeneratedRecovery);
             }
             KeyCode::Char('b') if self.tab == Tab::Recovery => {
                 return self.activate(Action::Rollback);

@@ -94,12 +94,14 @@ impl Topic {
                     "Read the output" => "Use arrows or page keys to scroll. Home goes to the top; End goes to the last line. Esc returns to Generated.",
                     "Check the status" => "Dort shows template updates and local changes separately. The preview leaves the deployed file alone.",
                     "Deploy for the first time" => "For a new file, choose Review deployment (R). Press y when Deploy generated file appears. Esc cancels the review.",
+                    "Update a deployed file" => "When Update available appears, choose Review update (R). Read the contents and permission changes. Press y when Update generated file appears at the end. Esc returns to the selected file.",
                 )
             }
             Self::Recovery => {
                 guide!("Recovery", "Select an operation record and press Enter to inspect its state and available recovery actions. This list includes records from other repositories.";
                     "Pick a recovery action" => "Rollback reviews which files can be restored. Resume continues recoverable setup. Abandon closes incomplete setup and keeps what was published, including private files. Read the reason if an action is blocked.",
                     "Check current files" => "Dort checks paths and refuses to restore files that no longer match the expected state. Rollback does not uninstall packages. Backups are private files, not encrypted.",
+                    "Generated update" => "If a generated update stopped, choose Review generated recovery (u). The new file may already be visible. Recovery checks the current state without replacing either file.",
                 )
             }
             Self::RecoveryDetails => {

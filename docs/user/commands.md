@@ -55,6 +55,8 @@ The preview shows the proposed output and the file's status. **Update available*
 
 For a new file, choose **Review deployment** (`R`). Read the destination, permissions and escaped output. Scroll to the end, then press `y` when **Deploy generated file** appears. `Esc` cancels the review.
 
+When the preview says **Update available**, choose **Review update** (`R`). Read the permission change and the exact lines marked `OLD` and `NEW`. Scroll to the end, then press `y` when **Update generated file** appears. `Esc` returns to the selected file without updating it.
+
 ## Tools
 
 Tools has three tabs: **1 Declared**, **2 Installed**, **3 History**.
@@ -170,6 +172,19 @@ Review the destination, permissions and exact rendered output before confirming.
 First deployment creates one regular file at a missing path below HOME. Create the destination folder first. Dort refuses symlinks, shared writable folders, protected paths, inactive profiles and files with tool requirements. The default mode is `0600`. The mode cannot grant group or other users write access.
 
 A successful first deployment records what Dort wrote. If recording fails, Dort leaves the file in place and warns that future previews may not be able to verify it. A pre-existing file without a record stays untouched, even if it matches the template. If you delete a recorded file, first deployment cannot recreate it. Bulk file apply and environment apply do not deploy templates.
+
+### Update a generated file
+
+```sh
+dort files update-generated editor-settings --dry-run
+dort files update-generated editor-settings
+dort --json --dry-run files update-generated editor-settings --profile dev
+dort --json --yes files update-generated editor-settings --profile dev
+```
+
+Dort updates only a file that still matches its last deployment. Read the old and new permissions, escaped changes to the contents and final newline status. If the full review cannot fit, split the change into smaller steps. JSON and nonterminal writes require `--yes`. A dry run cannot approve a later write.
+
+The update replaces the file and keeps the previous file in a private folder beside it. Dort reports the path. The destination filesystem must support exchanging the two files. A local edit, permission change or deletion prevents an update.
 
 ### Plan
 
@@ -312,6 +327,15 @@ dort recovery abandon REPOSITORY_ID OPERATION_ID --dry-run
 - `resume`: continue an intact repository setup.
 - `abandon`: mark an incomplete setup abandoned. It keeps any published repository and registration.
 
+For an interrupted generated update, open **Recovery** and choose **Review generated recovery** (`u`), or run:
+
+```sh
+dort recovery recover-update --dry-run
+dort recovery recover-update
+```
+
+The new file may already be at the destination. Recovery finishes or clears the pending record without replacing either file. If it stops on a conflict, keep both files and check the reported paths. If the destination folder moved, use the reported private folder device and inode to identify it. While the update remains unresolved, Dort blocks other writes across all repositories.
+
 Recovery checks current files and refuses changed state. It never runs automatically. An unresolved or damaged record can block new writes until you inspect it.
 
 ## Exit codes
@@ -322,6 +346,6 @@ Recovery checks current files and refuses changed state. It never runs automatic
 | 1 | I/O failure or unavailable data |
 | 2 | Invalid input, configuration or unsupported host |
 | 3 | Another Dort process holds the write lock |
-| 4 | Blocked plan or recovery diagnosis reports write blockers |
+| 4 | Blocked plan, incomplete generated update or recovery blocker |
 
 Exit 4 still prints the full report on stdout. JSON errors go to stderr.

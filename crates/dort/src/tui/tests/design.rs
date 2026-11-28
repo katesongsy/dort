@@ -466,6 +466,7 @@ fn recovery_table_has_typed_columns_selection_and_integrity_styles_at_all_sizes(
             history_row(Some(3), Some(Phase::Preparing), None, 'b'),
         ],
         error: None,
+        generated_recovery: None,
     }));
     key(&mut app, KeyCode::Down);
     for (w, h) in [(48, 14), (80, 24), (110, 24), (140, 40)] {
@@ -542,6 +543,7 @@ fn recovery_details_distinguish_sections_fields_and_status() {
         app.complete(Ok(Output::History {
             rows: vec![history_row(Some(1), Some(phase), problem, 'a')],
             error: None,
+            generated_recovery: None,
         }));
         key(&mut app, KeyCode::Enter);
         let b = buffer(&app, 80, 40);
@@ -581,6 +583,7 @@ fn compact_recovery_shows_option_before_identifiers_and_keeps_it_during_scroll()
     app.complete(Ok(Output::History {
         rows: vec![history_row(Some(3), Some(Phase::Preparing), None, 'a')],
         error: None,
+        generated_recovery: None,
     }));
     let (w, h) = (48, 14);
     assert!(
@@ -743,6 +746,7 @@ fn recovery_details_keep_full_ids_and_guards_inspectable_without_mutating_diagno
         app.complete(Ok(Output::History {
             rows: vec![history_row(schema, phase, problem, 'a')],
             error: None,
+            generated_recovery: None,
         }));
         let before = serde_json::to_value(&app.data.as_ref().unwrap().history).unwrap();
         key(&mut app, KeyCode::Enter);

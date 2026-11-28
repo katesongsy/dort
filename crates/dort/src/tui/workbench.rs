@@ -283,8 +283,10 @@ fn compact(label: &'static str) -> &'static str {
         "Edit mapping"
     } else if label == Action::SaveProfileChoice.label() {
         "Local choice"
-    } else if label == "Review deployment" {
+    } else if matches!(label, "Review deployment" | "Review update") {
         label
+    } else if label == "Review generated recovery" {
+        "Generated recovery"
     } else if label == "Review resume" {
         "Resume review"
     } else if label == "Edit profile defaults" {
@@ -482,13 +484,22 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
     let Some(preview) = &app.preview else {
         return;
     };
+    use super::actions::Pending;
+    let document = if matches!(
+        preview.pending,
+        Pending::GeneratedUpdate(_) | Pending::GeneratedRecovery(_)
+    ) {
+        Text::raw(preview.text.clone())
+    } else {
+        ui::review_text(&preview.text)
+    };
     ui::reader::Reader::new(&app.hits)
         .with_wheel(Wheel::Preview)
         .review(
             frame,
             area,
             None,
-            &ui::review_text(&preview.text),
+            &document,
             ui::reader::ReviewStage::Changes,
             &preview.reader,
         );
@@ -527,9 +538,16 @@ fn overlay(frame: &mut Frame, inner: Rect, app: &App, overlay: &Overlay) {
     match overlay {
         Overlay::Generated(report) => {
             report.draw(frame, inner, app);
-            if report.can_review_deployment() {
+            let review = if report.can_review_deployment() {
+                Some("Review deployment")
+            } else if report.can_review_update() {
+                Some("Review update")
+            } else {
+                None
+            };
+            if let Some(label) = review {
                 app.presented(
-                    "Review deployment",
+                    label,
                     "r",
                     Target::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)),
                 );

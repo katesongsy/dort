@@ -1,13 +1,15 @@
 mod support;
 use dort_core::{
     Error, Result,
-    generated::{Deployment, DriftStatus, Preview},
+    generated::{
+        Deployment, DriftStatus, Preview, Update, UpdateOutcome, pending_update, recover_update,
+    },
     local::{LocalConfig, RepositoryRegistry, repository_state_path},
     state::WriterLock,
 };
 use std::{
     fs,
-    os::unix::fs::{PermissionsExt, symlink},
+    os::unix::fs::{MetadataExt, PermissionsExt, symlink},
     path::{Path, PathBuf},
 };
 use support::TestHome;
@@ -46,6 +48,9 @@ impl Fixture {
     }
     fn prepare(&self) -> Result<Deployment> {
         Deployment::prepare(&self.home.host, None, "settings", &[])
+    }
+    fn update(&self) -> Result<Update> {
+        Update::prepare(&self.home.host, None, "settings", &[])
     }
     fn blocked(&self) -> String {
         let Err(Error::Invalid(reason)) = self.prepare() else {
@@ -130,6 +135,94 @@ fn drift_distinguishes_proposed_changes_from_local_edits_permissions_and_deletio
     fs::remove_dir(&f.folder).unwrap();
     assert_eq!(f.status(), DriftStatus::LocallyDeleted);
     assert!(f.blocked().contains("First deployment cannot recreate it"));
+}
+
+#[test]
+fn reviewed_update_publishes_exact_bytes_and_mode_and_keeps_the_old_inode() {
+    for proposed in [RENDERED, b" next=update\x00\r\n"] {
+        let f = Fixture::new();
+        f.deploy();
+        let old = fs::metadata(f.destination()).unwrap();
+        if proposed != RENDERED {
+            fs::write(f.repo.join("settings.tmpl"), proposed).unwrap();
+        }
+        f.manifest(&format!("schema = 1\n{FILE}permissions = '0644'\n"));
+        assert_eq!(f.status(), DriftStatus::UpdateAvailable);
+        let update = f.update().unwrap();
+        let view = update.review();
+        assert_eq!(view.deployed, RENDERED);
+        assert_eq!(view.deployed_permissions, "0600");
+        assert_eq!(view.proposed.as_bytes(), proposed);
+        assert_eq!(view.proposed_permissions, "0644");
+        drop(update);
+        assert_eq!(fs::read_dir(&f.folder).unwrap().count(), 1);
+
+        let UpdateOutcome::Updated { location } = f.update().unwrap().approve().execute().unwrap()
+        else {
+            panic!("expected completed update");
+        };
+        assert_eq!(fs::read(&location.destination).unwrap(), proposed);
+        assert_eq!(
+            fs::metadata(&location.destination).unwrap().mode() & 0o7777,
+            0o644
+        );
+        assert_eq!(fs::read(&location.artifact).unwrap(), RENDERED);
+        let retained = fs::metadata(&location.artifact).unwrap();
+        assert_eq!((retained.dev(), retained.ino()), (old.dev(), old.ino()));
+        assert_eq!(retained.mode() & 0o7777, 0o600);
+        assert_eq!(
+            fs::metadata(location.artifact.parent().unwrap())
+                .unwrap()
+                .mode()
+                & 0o7777,
+            0o700
+        );
+        assert_eq!(f.status(), DriftStatus::UpToDate);
+        assert!(pending_update(&f.home.host).unwrap().is_none());
+        assert!(recover_update(&f.home.host).unwrap().is_none());
+        assert!(f.update().is_err());
+
+        fs::write(f.repo.join("settings.tmpl"), b"third generation").unwrap();
+        let UpdateOutcome::Updated { location: next } =
+            f.update().unwrap().approve().execute().unwrap()
+        else {
+            panic!("expected second update");
+        };
+        assert_eq!(fs::read(&next.artifact).unwrap(), proposed);
+        assert_eq!(fs::read(&location.artifact).unwrap(), RENDERED);
+        assert_eq!(f.status(), DriftStatus::UpToDate);
+    }
+}
+
+#[test]
+fn only_tracked_current_files_can_be_updated_and_same_bytes_do_not_make_a_stale_inode_current() {
+    let f = Fixture::new();
+    assert!(f.update().is_err());
+    fs::write(f.destination(), RENDERED).unwrap();
+    assert!(f.update().is_err());
+    fs::remove_file(f.destination()).unwrap();
+    f.deploy();
+    assert!(f.update().is_err());
+    fs::write(f.repo.join("settings.tmpl"), b"new recipe").unwrap();
+    let approval = f.update().unwrap().approve();
+    let sibling = f.folder.join("local-temp");
+    fs::write(&sibling, RENDERED).unwrap();
+    fs::set_permissions(&sibling, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::rename(sibling, f.destination()).unwrap();
+    assert!(matches!(approval.execute(), Err(Error::Invalid(_))));
+    assert_eq!(fs::read_dir(&f.folder).unwrap().count(), 1);
+    assert_eq!(fs::read(f.destination()).unwrap(), RENDERED);
+
+    let approval = f.update().unwrap().approve();
+    fs::write(f.repo.join("settings.tmpl"), b"changed since review").unwrap();
+    assert!(matches!(approval.execute(), Err(Error::Invalid(_))));
+    fs::set_permissions(f.destination(), fs::Permissions::from_mode(0o640)).unwrap();
+    assert!(f.update().is_err());
+    fs::write(f.destination(), b"locally edited").unwrap();
+    assert!(f.update().is_err());
+    fs::remove_file(f.destination()).unwrap();
+    assert!(f.update().is_err());
+    assert_eq!(fs::read_dir(&f.folder).unwrap().count(), 0);
 }
 
 #[test]

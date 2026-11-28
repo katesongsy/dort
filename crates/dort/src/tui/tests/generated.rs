@@ -642,3 +642,224 @@ fn dry_run_and_blocked_deployment_never_offer_approval() {
     w.press(KeyCode::Char('y'));
     assert!(!target.exists());
 }
+
+fn tracked(w: &mut Workshop) -> (std::path::PathBuf, std::path::PathBuf) {
+    fs::write(
+        w.repo.join("dort.toml"),
+        "schema=1\n[[files]]\nid='settings'\nmode='template'\ntarget='~/settings'\nsource='file.tmpl'\npermissions='0600'\n",
+    )
+    .unwrap();
+    let source = w.repo.join("file.tmpl");
+    fs::write(&source, b"keep\nold value\n").unwrap();
+    dort_core::generated::Deployment::prepare(&w.host, None, "settings", &[])
+        .unwrap()
+        .approve()
+        .execute()
+        .unwrap();
+    w.run(Task::Refresh);
+    (source, w.host.home.join("settings"))
+}
+
+#[test]
+fn tracked_update_displays_exact_escaped_diff_and_requires_a_fresh_approval() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut w = Workshop::new(48, 14);
+    let (source, target) = tracked(&mut w);
+    let proposed = format!("keep\n{}END\t\\\x1b  ", "x".repeat(82));
+    fs::write(&source, &proposed).unwrap();
+    let manifest = w.manifest().replace("0600", "0644");
+    fs::write(w.repo.join("dort.toml"), &manifest).unwrap();
+
+    w.screen();
+    w.press(KeyCode::Enter);
+    let screen = w.screen();
+    assert!(screen.contains("Review update"), "{screen}");
+    assert!(!screen.contains("Review deployment"));
+    let task = click_label(&mut w.app, w.width, w.height, "Review update").unwrap();
+    w.run(task);
+    let screen = w.screen();
+    assert!(screen.contains("Permissions: 0600 -> 0644"), "{screen}");
+    assert!(w.review().contains("Final newline: Yes -> No"));
+    assert!(w.review().contains("OLD | old\\x20value\\n"));
+    assert!(!w.review().contains("OLD | keep"));
+    assert!(!w.review().contains('\x1b'));
+    w.press(KeyCode::Enter);
+    w.press(KeyCode::Char('y'));
+    w.press(KeyCode::End);
+    w.press(KeyCode::Char('y'));
+    assert_eq!(fs::read(&target).unwrap(), b"keep\nold value\n");
+    let screen = w.screen();
+    assert!(screen.contains("End of update review"), "{screen}");
+    let joined = screen.lines().map(str::trim_end).collect::<String>();
+    assert!(joined.contains("END\\t\\\\\\x1b\\x20\\x20"), "{screen}");
+    assert!(screen.contains("Update generated file"));
+    w.press(KeyCode::Esc);
+    let screen = w.screen();
+    assert!(!screen.contains("Generated file preview"), "{screen}");
+    assert!(screen.contains("settings"), "{screen}");
+    assert_eq!(fs::read_dir(&w.host.home).unwrap().count(), 1);
+
+    w.app.dry_run = true;
+    w.press(KeyCode::Enter);
+    w.press(KeyCode::Char('R'));
+    w.screen();
+    w.press(KeyCode::End);
+    let screen = w.screen();
+    assert!(screen.contains("End of update review"), "{screen}");
+    assert!(!screen.contains("Update generated file"), "{screen}");
+    w.press(KeyCode::Char('y'));
+    assert_eq!(fs::read(&target).unwrap(), b"keep\nold value\n");
+    w.press(KeyCode::Esc);
+    w.app.dry_run = false;
+
+    w.press(KeyCode::Enter);
+    w.press(KeyCode::Char('R'));
+    w.approve();
+    let screen = w.screen();
+    assert!(screen.contains("Generated update recorded"), "{screen}");
+    let metadata = fs::metadata(&target).unwrap();
+    assert_eq!(metadata.permissions().mode() & 0o777, 0o644);
+    use std::os::unix::fs::MetadataExt;
+    w.press(KeyCode::Char('y'));
+    let private = fs::read_dir(&w.host.home)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.is_dir())
+        .unwrap();
+    let saved = fs::read_dir(private)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    assert_eq!(fs::read(saved).unwrap(), b"keep\nold value\n");
+    assert_eq!(fs::read(&target).unwrap(), proposed.as_bytes());
+    assert_eq!(fs::metadata(&target).unwrap().ino(), metadata.ino());
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Enter);
+    let screen = w.screen();
+    assert!(screen.contains("Up to date"), "{screen}");
+    assert!(!screen.contains("Review update"));
+}
+
+#[test]
+fn tracked_update_rejects_stale_input_and_live_edits() {
+    for change_live in [false, true] {
+        let mut w = Workshop::new(80, 24);
+        let (source, target) = tracked(&mut w);
+        fs::write(&source, "proposed").unwrap();
+        w.screen();
+        w.press(KeyCode::Enter);
+        w.press(KeyCode::Char('R'));
+        assert!(w.review().contains("NEW | proposed"));
+        if change_live {
+            fs::write(&target, "local edit").unwrap();
+        } else {
+            fs::write(&source, "later proposal").unwrap();
+        }
+        w.approve();
+        let screen = w.screen();
+        assert!(screen.contains("Open a new review"), "{screen}");
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            if change_live {
+                "local edit"
+            } else {
+                "keep\nold value\n"
+            }
+        );
+        assert_eq!(fs::read_dir(&w.host.home).unwrap().count(), 1);
+        if change_live {
+            w.press(KeyCode::Esc);
+            w.run(Task::PreviewGenerated("settings".into()));
+            let screen = w.screen();
+            assert!(screen.contains("Local edits"), "{screen}");
+            assert!(!screen.contains("Review update"));
+            w.press(KeyCode::Char('R'));
+            assert!(w.app.preview.is_none());
+        }
+    }
+}
+
+#[test]
+fn update_refuses_when_the_full_review_exceeds_the_display_limit() {
+    let mut w = Workshop::new(80, 24);
+    let (source, target) = tracked(&mut w);
+    fs::write(source, " ".repeat(20_000)).unwrap();
+    w.screen();
+    w.press(KeyCode::Enter);
+    w.press(KeyCode::Char('R'));
+    let screen = w.screen();
+    assert!(screen.contains("too large to display"), "{screen}");
+    w.press(KeyCode::End);
+    w.press(KeyCode::Char('y'));
+    assert_eq!(fs::read(&target).unwrap(), b"keep\nold value\n");
+    assert_eq!(fs::read_dir(&w.host.home).unwrap().count(), 1);
+}
+
+#[test]
+fn interrupted_generated_update_has_explicit_recovery_and_truthful_effects() {
+    use crate::tui::actions::{Output, Pending};
+    use dort_core::generated::{ExchangeStatus, UpdateLocation, UpdateOutcome};
+    let mut w = Workshop::new(80, 24);
+    let location = || UpdateLocation {
+        destination: "/home/settings".into(),
+        artifact: "/home/.saved/file".into(),
+        stage_device: 12,
+        stage_inode: 34,
+    };
+    w.app.complete(Ok(Output::GeneratedUpdated(Some(
+        UpdateOutcome::NeedsRecovery {
+            location: location(),
+            exchange: ExchangeStatus::Unknown,
+            reason: "The files changed.".into(),
+        },
+    ))));
+    let screen = w.screen();
+    assert!(
+        screen.contains("The new file may already be visible"),
+        "{screen}"
+    );
+    assert!(screen.contains("/home/.saved/file"), "{screen}");
+    assert!(screen.contains("h Recovery"), "{screen}");
+    assert!(!screen.contains("No changes were made"));
+
+    let task = w.app.key(key(KeyCode::Char('h')), w.width, w.height);
+    assert!(matches!(task, Some(Task::History)));
+    w.app.complete(Ok(Output::History {
+        rows: vec![],
+        error: None,
+        generated_recovery: Some(Ok(location())),
+    }));
+    let screen = w.screen();
+    assert!(
+        screen.contains("Generated update needs recovery"),
+        "{screen}"
+    );
+    assert!(screen.contains("Blocked writes: 1"), "{screen}");
+    assert!(matches!(
+        click_label(&mut w.app, w.width, w.height, "Review generated recovery"),
+        Some(Task::ReviewGeneratedRecovery),
+    ));
+    w.app
+        .complete(Ok(Output::Preview(Pending::GeneratedRecovery(location()))));
+    assert!(
+        w.app
+            .key(key(KeyCode::Char('y')), w.width, w.height)
+            .is_none()
+    );
+    let screen = w.screen();
+    assert!(
+        screen.contains("It does not replace either file."),
+        "{screen}"
+    );
+    assert!(matches!(
+        super::tests::approve_ready(&mut w.app, w.width, w.height),
+        Some(Task::Execute(_)),
+    ));
+    assert!(
+        w.app
+            .key(key(KeyCode::Char('y')), w.width, w.height)
+            .is_none()
+    );
+}

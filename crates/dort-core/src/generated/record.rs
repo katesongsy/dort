@@ -18,25 +18,33 @@ use std::{
 const SCHEMA: u32 = 1;
 const LIMIT: u64 = 32 * 1024;
 
-#[derive(PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Identity {
-    repository_id: String,
-    mapping_id: String,
-    destination: String,
+pub(super) struct Identity {
+    pub(super) repository_id: String,
+    pub(super) mapping_id: String,
+    pub(super) destination: String,
 }
 
 pub(super) struct Slot {
     folder: PathBuf,
     name: String,
-    identity: Identity,
+    pub(super) identity: Identity,
 }
 
-#[derive(PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Stamp {
     sha256: String,
-    mode: u32,
+    pub(super) mode: u32,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct DeploymentRecord {
+    pub(super) deployed: Stamp,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) retained: Option<PathBuf>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -45,6 +53,8 @@ struct Receipt {
     schema: u32,
     identity: Identity,
     deployed: Stamp,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    retained: Option<PathBuf>,
 }
 
 impl Slot {
@@ -75,7 +85,7 @@ impl Slot {
         })
     }
 
-    pub(super) fn load(&self) -> Result<Option<Stamp>> {
+    pub(super) fn load(&self) -> Result<Option<DeploymentRecord>> {
         let Some(dir) = PrivateDir::open(&self.folder, false)? else {
             return Ok(None);
         };
@@ -98,18 +108,47 @@ impl Slot {
         {
             return Err(invalid());
         }
-        Ok(Some(receipt.deployed))
+        Ok(Some(DeploymentRecord {
+            deployed: receipt.deployed,
+            retained: receipt.retained,
+        }))
     }
 
     pub(super) fn save(self, deployed: Stamp) -> Result<()> {
+        let deployment = DeploymentRecord {
+            deployed,
+            retained: None,
+        };
+        let text = self.encode(deployment)?;
+        let dir = PrivateDir::open(&self.folder, true)?.expect("created deployment records folder");
+        dir.create(&self.name, text.as_bytes())
+    }
+
+    pub(super) fn replace(&self, deployment: DeploymentRecord) -> Result<()> {
+        let text = self.encode(deployment)?;
+        self.directory()?.replace(&self.name, &text)
+    }
+
+    pub(super) fn sync(&self) -> Result<()> {
+        self.directory()?.sync()
+    }
+
+    fn directory(&self) -> Result<PrivateDir> {
+        PrivateDir::open(&self.folder, false)?.ok_or_else(invalid)
+    }
+
+    fn encode(&self, deployment: DeploymentRecord) -> Result<String> {
         let receipt = Receipt {
             schema: SCHEMA,
-            identity: self.identity,
-            deployed,
+            identity: self.identity.clone(),
+            deployed: deployment.deployed,
+            retained: deployment.retained,
         };
-        let bytes = serde_json::to_vec(&receipt).map_err(|_| invalid())?;
-        let dir = PrivateDir::open(&self.folder, true)?.expect("created deployment records folder");
-        dir.create(&self.name, &bytes)
+        let text = serde_json::to_string(&receipt).map_err(|_| invalid())?;
+        if text.len() as u64 > LIMIT {
+            return Err(invalid());
+        }
+        Ok(text)
     }
 }
 
@@ -133,7 +172,7 @@ impl Stamp {
         }
     }
 
-    fn valid(&self) -> bool {
+    pub(super) fn valid(&self) -> bool {
         self.mode <= 0o777
             && Mode(self.mode).permits_deployment()
             && self.sha256.len() == 64
@@ -150,27 +189,15 @@ impl Stamp {
         stat: &fs::Stat,
         proposed: &Self,
     ) -> DriftStatus {
-        let fp = Fingerprint::from_stat(stat);
-        if !owned_regular(stat, &fp) {
-            return DriftStatus::Unsafe;
-        }
-        if fp.mode & 0o400 == 0 {
-            return DriftStatus::Unverifiable;
-        }
-        let Ok(bytes) = observation::read_checked_bounded(handle, path, &fp, OUTPUT_LIMIT as u64)
-        else {
-            return DriftStatus::Unverifiable;
+        let (fp, bytes) = match read_tracked(path, handle, stat) {
+            Ok(observed) => observed,
+            Err(status) => return status,
         };
-        if observation::inspect(path, false).ok().is_none_or(|after| {
-            after.fingerprint.as_ref() != Some(&fp)
-                || !observation::same_parent_identity_and_access(&handle.parents, &after.parents)
-        }) {
-            return DriftStatus::Unverifiable;
-        }
-        if observation::sensitive_content(&bytes) {
-            return DriftStatus::Unsafe;
-        }
-        match (digest(&bytes) != self.sha256, fp.mode & 0o7777 != self.mode) {
+        self.compare(&Self::new(&bytes, Mode(fp.mode & 0o7777)), proposed)
+    }
+
+    pub(super) fn compare(&self, live: &Self, proposed: &Self) -> DriftStatus {
+        match (live.sha256 != self.sha256, live.mode != self.mode) {
             (true, true) => DriftStatus::LocallyEditedAndPermissionsChanged,
             (true, false) => DriftStatus::LocallyEdited,
             (false, true) => DriftStatus::LocalPermissionsChanged,
@@ -178,4 +205,30 @@ impl Stamp {
             (false, false) => DriftStatus::UpdateAvailable,
         }
     }
+}
+
+pub(super) fn read_tracked(
+    path: &Path,
+    handle: &ParentHandle,
+    stat: &fs::Stat,
+) -> std::result::Result<(Fingerprint, Vec<u8>), DriftStatus> {
+    let fp = Fingerprint::from_stat(stat);
+    if !owned_regular(stat, &fp) {
+        return Err(DriftStatus::Unsafe);
+    }
+    if fp.mode & 0o400 == 0 {
+        return Err(DriftStatus::Unverifiable);
+    }
+    let bytes = observation::read_checked_bounded(handle, path, &fp, OUTPUT_LIMIT as u64)
+        .map_err(|_| DriftStatus::Unverifiable)?;
+    if observation::inspect(path, false).ok().is_none_or(|after| {
+        after.fingerprint.as_ref() != Some(&fp)
+            || !observation::same_parent_identity_and_access(&handle.parents, &after.parents)
+    }) {
+        return Err(DriftStatus::Unverifiable);
+    }
+    if observation::sensitive_content(&bytes) {
+        return Err(DriftStatus::Unsafe);
+    }
+    Ok((fp, bytes))
 }
