@@ -3,7 +3,7 @@ use crate::{
     Error, Result,
     context::HostContext,
     model::{HostInput, ManagedFile},
-    template::{Context, Dialect, Input},
+    template::{self, Context, Input},
 };
 use serde::Serialize;
 use std::{collections::BTreeMap, ffi::CStr, mem::MaybeUninit, ptr};
@@ -22,7 +22,7 @@ pub struct ResolvedInput {
     pub provenance: InputProvenance,
 }
 
-/// Jinja qualifies manifest, host and machine-local values as `inputs.*`, `host.*` and `local.*`.
+/// Names are qualified as `inputs.*`, `host.*` and `local.*`.
 pub type ResolvedInputs = BTreeMap<String, ResolvedInput>;
 
 impl HostInput {
@@ -113,12 +113,22 @@ pub(super) fn text_map<'a>(items: impl IntoIterator<Item = (&'a String, &'a Stri
         .collect()
 }
 
+/// Root names, except a name that a namespace owns. Those stay reachable as `inputs.name`.
 pub(super) fn manifest_context(file: &ManagedFile) -> Context {
-    let values = text_map(&file.inputs);
-    match file.syntax.unwrap_or_default() {
-        Dialect::Literal => values,
-        Dialect::Jinja => Context::from([("inputs".into(), Input::Map(values))]),
+    let mut context = Context::new();
+    let mut named_after_a_namespace = Context::new();
+    for (name, value) in &file.inputs {
+        let value = Input::Text(value.clone());
+        if template::is_namespace(name) {
+            named_after_a_namespace.insert(name.clone(), value);
+        } else {
+            context.insert(name.clone(), value);
+        }
     }
+    if !named_after_a_namespace.is_empty() {
+        context.insert("inputs".into(), Input::Map(named_after_a_namespace));
+    }
+    context
 }
 
 pub(super) fn resolve(
@@ -126,16 +136,12 @@ pub(super) fn resolve(
     host: &HostContext,
     local: &Values,
 ) -> Result<(Context, ResolvedInputs)> {
-    let prefix = match file.syntax.unwrap_or_default() {
-        Dialect::Literal => "",
-        Dialect::Jinja => "inputs.",
-    };
     let mut resolved: ResolvedInputs = file
         .inputs
         .iter()
         .map(|(key, value)| {
             (
-                format!("{prefix}{key}"),
+                format!("inputs.{key}"),
                 ResolvedInput {
                     value: value.clone(),
                     provenance: InputProvenance::Manifest,

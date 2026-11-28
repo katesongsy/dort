@@ -1644,7 +1644,7 @@ fn change_generated(
     let review = generated_update::review(&change)?;
     if cli.dry_run && cli.json {
         print_ascii_json(
-            &serde_json::json!({"schema": 1, "read_only": true, "action": change.action, "detected": change.detected, "id": change.id, "repository": change.repository, "active_profiles": change.active_profiles, "destination": change.destination, "deployed_permissions": change.deployed_permissions, "recorded_permissions": change.recorded_permissions, "proposed_permissions": change.proposed_permissions, "syntax": change.syntax, "resolved_inputs": change.resolved_inputs, "review": review}),
+            &serde_json::json!({"schema": 1, "read_only": true, "action": change.action, "detected": change.detected, "id": change.id, "repository": change.repository, "active_profiles": change.active_profiles, "destination": change.destination, "deployed_permissions": change.deployed_permissions, "recorded_permissions": change.recorded_permissions, "proposed_permissions": change.proposed_permissions, "resolved_inputs": change.resolved_inputs, "review": review}),
             "could not encode generated file review",
         )?;
     } else if !cli.json {

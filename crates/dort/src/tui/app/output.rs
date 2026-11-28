@@ -504,6 +504,7 @@ impl App {
             && matches!(self.shell.overlay, Some(Overlay::Form(Form::Generated)))
             && let Some(draft) = self.shell.generated.take()
         {
+            self.draft_exit = None;
             if draft.has_local_inputs() {
                 local_input_note = "\nReturn to Generated and open Local inputs (l) to set values on this machine.";
             }

@@ -223,7 +223,7 @@ fn edit_template(terminal: &mut DefaultTerminal, paste_enabled: bool, app: &mut 
     let (edit, editor_tty) = match prepare() {
         Ok(prepared) => prepared,
         Err(error) => {
-            app.shell.finish_template_edit(Err(error));
+            app.finish_template_edit(Err(error));
             return Ok(());
         }
     };
@@ -259,7 +259,7 @@ fn edit_template(terminal: &mut DefaultTerminal, paste_enabled: bool, app: &mut 
     }
     *terminal = DefaultTerminal::new(ratatui::backend::CrosstermBackend::new(std::io::stdout()))
         .map_err(terminal_error)?;
-    app.shell.finish_template_edit(result);
+    app.finish_template_edit(result);
     Ok(())
 }
 fn run_loop(

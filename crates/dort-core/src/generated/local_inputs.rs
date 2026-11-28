@@ -8,7 +8,7 @@ use crate::{
     model::ManagedFile,
     observation::{self, Entry, Fingerprint},
     state::{PrivateDir, WriterLock},
-    template::{self, CONTEXT_LIMIT, Dialect, VALUE_LIMIT},
+    template::{self, CONTEXT_LIMIT, VALUE_LIMIT},
 };
 use rustix::{fs, io::Errno};
 use serde::{Deserialize, Serialize};
@@ -305,14 +305,12 @@ fn validate_values(id: &str, values: &Values) -> Result<()> {
         "local".into(),
         template::Input::Map(inputs::text_map(values)),
     )]);
-    template::validate_context(id, Dialect::Jinja, &context)
-        .map_err(|error| renderer_error(Dialect::Jinja, error, None))
+    template::validate_context(id, &context).map_err(renderer_error)
 }
 
 fn validate_resolved(host: &HostContext, file: &ManagedFile, proposed: &Values) -> Result<()> {
     let (context, _) = inputs::resolve(file, host, proposed)?;
-    template::validate_context(&file.id, Dialect::Jinja, &context)
-        .map_err(|error| renderer_error(Dialect::Jinja, error, None))
+    template::validate_context(&file.id, &context).map_err(renderer_error)
 }
 
 fn invalid_storage() -> Error {

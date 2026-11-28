@@ -78,6 +78,20 @@ fn short(action: Action) -> &'static str {
 }
 /// Foreground-only metadata; no contents, serialized plans or approvals enter this model.
 pub fn actions(app: &App) -> Vec<ui::ActionButton> {
+    if app.draft_exit.is_some() {
+        return vec![
+            ui::ActionButton {
+                label: "Keep editing",
+                key: "Enter",
+                target: Target::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            },
+            ui::ActionButton {
+                label: "Discard",
+                key: "d",
+                target: Target::Key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE)),
+            },
+        ];
+    }
     if app.help.is_some() {
         return vec![ui::ActionButton {
             label: "Close Help",
@@ -185,33 +199,29 @@ pub fn actions(app: &App) -> Vec<ui::ActionButton> {
         && !result.iter().any(|a| a.key == "Esc")
     {
         result.push(ui::ActionButton {
-            label: if app
-                .form_page()
-                .is_some_and(|owner| !matches!(owner, "generated file" | "local inputs"))
-                && app.form_has_focus()
-            {
-                "Stop editing"
-            } else {
-                "Back"
-            },
+            label: "Back",
             key: "Esc",
             target: Target::Back,
         });
     }
-    if app
-        .form_page()
-        .is_some_and(|owner| !matches!(owner, "generated file" | "local inputs"))
-        && app.form_has_focus()
-    {
+    if app.form_page().is_some() && app.form_has_focus() {
         for action in &mut result {
             if action.key == "Esc" {
-                action.label = "Stop editing";
+                action.label = if app.template_form().is_some() {
+                    "Leave field"
+                } else {
+                    "Stop editing"
+                };
             }
         }
     }
     if app.form_page().is_some() && !app.form_has_focus() {
         result.push(ui::ActionButton {
-            label: "Edit fields",
+            label: if app.template_form().is_some() {
+                "Edit field"
+            } else {
+                "Edit fields"
+            },
             key: "Tab",
             target: Target::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
         });
@@ -320,8 +330,12 @@ fn compact(label: &'static str) -> &'static str {
         "Load"
     } else if label.starts_with("Done") {
         "Done"
-    } else if label == "Stop editing" {
+    } else if matches!(label, "Stop editing" | "Leave field") {
         "Unfocus"
+    } else if label == "Edit field" {
+        "Edit"
+    } else if matches!(label, "Review value" | "Review generated file") {
+        "Review"
     } else if label.starts_with("Confirm") {
         "Confirm"
     } else if label.starts_with("Continue") {
@@ -352,16 +366,22 @@ pub(super) fn strip_actions(
         width
     };
     let mut available = actions(app);
-    if app.help.is_none() && !available.iter().any(|a| a.key == "F1") {
+    if app.help.is_none() && app.draft_exit.is_none() && !available.iter().any(|a| a.key == "F1") {
         available.push(ui::ActionButton {
             key: "F1",
             label: "Help",
             target: Target::Action(Action::Help),
         });
     }
-    // Controllers supply relevance order; navigation keeps reserved trailing positions.
-    available
-        .sort_by_key(|a| usize::from(!matches!(a.target, Target::Continue) && a.key != "Enter"));
+    let click_continue = |a: &ui::ActionButton| {
+        app.template_form().is_some()
+            && a.key.is_empty()
+            && matches!(a.target, Target::FormAction(super::forms::Command::Submit))
+    };
+    let primary = |a: &ui::ActionButton| {
+        a.key == "Enter" || matches!(a.target, Target::Continue) || click_continue(a)
+    };
+    available.sort_by_key(|a| !primary(a));
     let mut anchors: Vec<_> = available
         .iter()
         .copied()
@@ -380,8 +400,11 @@ pub(super) fn strip_actions(
             ratatui::text::Line::raw(format!(" {} {} ", a.key, label)).width() + 1
         })
         .sum();
-    let more_allowed =
-        app.more.is_none() && app.choice.is_none() && app.help.is_none() && !app.busy;
+    let more_allowed = app.more.is_none()
+        && app.choice.is_none()
+        && app.help.is_none()
+        && app.draft_exit.is_none()
+        && !app.busy;
     let mut shown: Vec<ui::ActionButton> = Vec::new();
     let mut hidden: Vec<ui::ActionButton> = Vec::new();
     let mut used = 0usize;
@@ -399,8 +422,13 @@ pub(super) fn strip_actions(
             + usize::from(!shown.is_empty());
         let enabled =
             !matches!(action.target, Target::Action(value) if app.action_reason(value).is_some());
-        if !action.key.is_empty()
-            && !(app.key_text_entry() && (action.key.chars().count() == 1 || action.key == "Space"))
+        if (!action.key.is_empty() || click_continue(&action))
+            && !(app.key_text_entry()
+                && (action.key.chars().count() == 1 || action.key == "Space")
+                && !matches!(
+                    action.target,
+                    Target::FormAction(super::forms::Command::ToggleGeneratedDeclaration)
+                ))
             && enabled
             && !overflowed
             && shown.len() + anchors.len() < 8
@@ -445,7 +473,7 @@ pub(super) fn strip_actions(
                 a.label
             },
             target: a.target,
-            primary: a.key == "Enter" || matches!(a.target, Target::Continue),
+            primary: primary(&a),
         })
         .collect();
     if !hidden.is_empty() {
@@ -720,7 +748,14 @@ pub fn draw(frame: &mut Frame, app: &App) {
             "Dort: terminal too small\nResize to 48x14; approval disabled.\nq: exit (waits for worker)",
             ui::warning(),
         );
-        if let Some(help) = &app.help {
+        if let Some(exit) = app.draft_exit {
+            ui::prose(
+                frame,
+                area,
+                &format!("{}\nEnter/Esc keep. d discards.", exit.message()),
+                ui::warning(),
+            );
+        } else if let Some(help) = &app.help {
             let dialog = ui::design::choice_dialog(frame, "Help", &app.hits);
             super::help::draw(frame, dialog.body, app, help);
             strip(frame, dialog.footer, app);
@@ -745,7 +780,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
             }),
     );
     let mut body = super::navigation::local(frame, areas.body, app);
-    let foreground = app.help.is_some() || app.more.is_some() || app.choice.is_some();
+    let draft_about = app
+        .shell
+        .overlay
+        .as_ref()
+        .filter(|overlay| matches!(overlay, Overlay::DraftAbout(_)));
+    let foreground = app.help.is_some()
+        || app.more.is_some()
+        || app.choice.is_some()
+        || app.draft_exit.is_some()
+        || draft_about.is_some();
     if !foreground && !app.busy {
         let bottom_line = |body: &mut Rect| {
             body.height = body.height.saturating_sub(1);
@@ -819,8 +863,17 @@ pub fn draw(frame: &mut Frame, app: &App) {
             }
         }
     }
-    if let Some(help) = &app.help {
+    if let Some(exit) = app.draft_exit {
+        ui::prose(
+            frame,
+            body,
+            &format!("{}\n\nEsc keeps the draft.", exit.message()),
+            ui::muted(),
+        );
+    } else if let Some(help) = &app.help {
         super::help::draw(frame, body, app, help);
+    } else if let Some(about) = draft_about {
+        overlay(frame, body, app, about);
     } else if let Some(choice) = &app.choice {
         choice.draw(
             frame,

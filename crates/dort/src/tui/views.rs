@@ -72,7 +72,7 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, _height: u16, _width: u
                 }
             )
         }
-        Overlay::About => format!(
+        Overlay::About | Overlay::DraftAbout(_) => format!(
             "Version: {}\nLicense: MIT\nHosts: macOS, Linux and WSL, ARM64 / x86_64\n\nWorks here:\nLocal repository create/attach, file discovery and links, recovery, manifest checks, read-only Git, and Homebrew/npm checks and installs.\n\nTool effects:\nChecks and installs can run package-manager code and change shared state. Homebrew installs its current formula; npm installs an exact package. No sandbox or rollback. Installs stop after 10 minutes.\n\nSafety:\nWrites need a fresh review. A failed write may leave partial effects. Git patches and selected-file previews show content on purpose. Backups are private, not encrypted. Recovery is manual.\n\nNot supported:\nGenerated file deployment, secrets, sync, Git writes and other package managers.",
             env!("CARGO_PKG_VERSION")
         ),

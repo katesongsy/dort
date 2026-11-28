@@ -7,6 +7,10 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Documentation
 
+- **files:** show the draft focus and discard flow ([2495ee7](https://github.com/katesongsy/dort/commit/2495ee73f3428186676bfb36126507987e60e9aa))
+
+- **files:** explain the single Jinja template syntax ([dd6f79b](https://github.com/katesongsy/dort/commit/dd6f79b3a36afcad8218282b1ff5155cec6af392))
+
 - **release:** include Homebrew and Cargo by default ([97c9d0b](https://github.com/katesongsy/dort/commit/97c9d0bf79ab5bb566c9bad44c0cc66477bd756c))
 
 ### Features
@@ -43,6 +47,8 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 
 ### Fixes
 
+- **tui:** preserve generated drafts until discard ([a513bb2](https://github.com/katesongsy/dort/commit/a513bb22595b10da197346ae8346b65d308036e5))
+
 - **tui:** use shared local input list controls ([a2aa43f](https://github.com/katesongsy/dort/commit/a2aa43f939e1900695e5587d84261c549af4abdd))
 
 - **app:** initialize template settings on file mappings ([35e09b8](https://github.com/katesongsy/dort/commit/35e09b810b23e3e0181189feec4c6ee26f5cb680))
@@ -64,6 +70,10 @@ Uncommitted changes are not included. Untagged history appears under Unreleased.
 - **files:** preserve actions in narrower terminals ([20a4849](https://github.com/katesongsy/dort/commit/20a4849a2f42c8bc62beef0d0e556e19b0b975cd))
 
 - **files:** append generated inputs to the right mapping ([4857b5b](https://github.com/katesongsy/dort/commit/4857b5b372cef117fe5a2fcaf611f2ae7236eccf))
+
+### Maintenance
+
+- **core:** make Jinja the only template language ([724ca61](https://github.com/katesongsy/dort/commit/724ca61c0c782b39659fb2d0c1127b438c8af173))
 
 ### Tests
 

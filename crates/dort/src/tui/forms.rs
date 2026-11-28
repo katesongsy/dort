@@ -17,6 +17,7 @@ pub enum Command {
     InsertLine,
     OpenTemplateEditor,
     ToggleGeneratedInput,
+    ToggleGeneratedDeclaration,
     ClearLocalInput,
     Toggle,
 }
@@ -131,12 +132,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
     };
     let mut actions = vec![ui::ActionButton {
         label: primary,
-        key: if form == Form::Generated
-            && s.generated
-                .as_ref()
-                .is_some_and(|draft| !draft.entering_inputs())
-        {
-            "F4"
+        key: if form == Form::Generated {
+            app.draft_continue_key()
         } else {
             "Enter"
         },
@@ -183,12 +180,18 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                 target: Target::FormAction(Command::OpenTemplateEditor),
             })
         }
-        Form::Generated => {
+        Form::Generated if app.form_has_focus() => {
             if let Some(label) = s.generated.as_ref().and_then(|draft| draft.value_action()) {
                 actions.push(ui::ActionButton {
                     label,
                     key: "F6",
                     target: Target::FormAction(Command::ToggleGeneratedInput),
+                });
+            } else {
+                actions.push(ui::ActionButton {
+                    label: "Toggle",
+                    key: "Space",
+                    target: Target::FormAction(Command::ToggleGeneratedDeclaration),
                 });
             }
         }

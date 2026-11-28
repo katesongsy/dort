@@ -510,7 +510,9 @@ fn protected_destinations_secret_contents_and_scope_blocks_do_not_offer_approval
     f.manifest(&format!("schema = 1\n{FILE}"));
     fs::write(f.repo.join("settings.tmpl"), b"password=do-not-display").unwrap();
     let error = f.blocked();
-    assert!(error.contains("may contain secrets") && !error.contains("do-not-display"));
+    assert!(
+        error.contains("Remove credentials or private keys") && !error.contains("do-not-display")
+    );
     assert_eq!(fs::read_dir(&f.folder).unwrap().count(), 0);
 }
 

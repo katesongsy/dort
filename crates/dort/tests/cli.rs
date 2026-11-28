@@ -1047,7 +1047,6 @@ inputs = { theme = "a\u001bb\n" }
         cmd
     };
     let provenance = |report: &str| {
-        assert!(report.contains("Syntax: Jinja"), "{report}");
         assert!(
             report.contains("inputs.theme = \"a\\u{1b}b\\n\" (dort.toml)"),
             "{report}"
@@ -1126,7 +1125,6 @@ inputs = { theme = "a\u001bb\n" }
     let json: serde_json::Value = serde_json::from_slice(&review.get_output().stdout).unwrap();
     assert_eq!(json["schema"], 1);
     assert_eq!(json["read_only"], true);
-    assert_eq!(json["syntax"], "jinja");
     assert_eq!(
         json["resolved_inputs"],
         serde_json::Value::Object(inputs.clone())

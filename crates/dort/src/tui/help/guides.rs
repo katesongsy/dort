@@ -85,10 +85,10 @@ impl Topic {
             }
             Self::GeneratedDraft => {
                 guide!("Generated file draft", "Set the Home destination and template. Tab moves between fields. In Template, Enter adds a line. Paste several lines at once.";
-                    "Choose syntax" => "Literal uses {{ name }}. Open Syntax with Enter or Space. Select Jinja and press Enter. Jinja uses {{ inputs.name }} and allowed host values such as {{ host.os }}.",
-                    "Enter inputs" => "Press F4 to continue. In Jinja, use Space or click to allow host fields. Use F6 to set an empty string or unset a value. Esc keeps the draft inputs. Never enter secrets.",
+                    "Continue" => "Press Esc to leave the field, then Enter. You can also click Continue or Review. Tab or click a field to edit again.",
+                    "Enter inputs" => "Use Space or click to allow host fields. Use F6 to set an empty string or unset a value. Never enter secrets.",
                     "Open in editor" => "Press F5 to use VISUAL or EDITOR. Save and exit the editor to return to the draft.",
-                    "Declare local inputs" => "Use local.name in Jinja. On the inputs step, use Space or click to declare a name. Choose Save declaration only if a value is still needed.",
+                    "Declare local inputs" => "Use local.name. On the inputs step, use Space or click to declare a name. Choose Save declaration only if a value is still needed.",
                     "Set local values" => "In Generated, select the saved file and open Local inputs (l). Enter sets a value. Blank means empty. F6 clears the value. Review before saving. No secrets.",
                     "Review before saving" => "Check the resolved values and rendered text. Save generated file only updates dort.toml. Your Home files stay in place.",
                 )
@@ -97,7 +97,7 @@ impl Topic {
                 guide!("Local inputs", "Read values for the selected generated file. Values stay on this machine. No secrets.";
                     "Set a value" => "Select a name and press Enter. Ctrl-U clears the draft. Leave it blank to set an empty string.",
                     "Clear a value" => "Use F6 on a set or empty value to make it unset.",
-                    "Review and save" => "Review the previous and proposed values. Scroll to the end and press y to save. Esc cancels. Preview the generated file to see its output.",
+                    "Review and save" => "Press Esc to leave the value field, then Enter to review. You can also click Review value. Scroll to the end and press y to save. Esc from review keeps the draft.",
                 )
             }
             Self::Generated => {

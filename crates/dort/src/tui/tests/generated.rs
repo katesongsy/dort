@@ -8,7 +8,7 @@ use dort_core::{
     context::HostContext,
     platform::{Architecture, Platform},
 };
-use ratatui::crossterm::event::{KeyCode, KeyModifiers, MouseEvent, MouseEventKind};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use std::fs;
 
 #[test]
@@ -78,7 +78,6 @@ inputs = {{ theme = "dark", padding = "{}" }}
         run(&mut app, task);
         let screen = render(&app, width, height);
         assert!(screen.contains("Generated file preview"), "{screen}");
-        assert!(screen.contains("Syntax: Literal"), "{screen}");
         assert!(screen.contains("No files written."), "{screen}");
         assert!(
             !screen.contains("destination-bytes") && !screen.contains("Confirm"),
@@ -190,9 +189,27 @@ impl Workshop {
     }
 
     fn press(&mut self, code: KeyCode) {
-        if let Some(task) = self.app.key(key(code), self.width, self.height) {
+        self.press_with(code, KeyModifiers::NONE);
+    }
+
+    fn press_with(&mut self, code: KeyCode, modifiers: KeyModifiers) {
+        let key = KeyEvent::new(code, modifiers);
+        if let Some(task) = self.app.key(key, self.width, self.height) {
             self.run(task);
         }
+    }
+
+    fn click(&mut self, label: &str) {
+        if let Some(task) = click_label(&mut self.app, self.width, self.height, label) {
+            self.run(task);
+        }
+    }
+
+    fn continue_form(&mut self) {
+        if self.app.form_page().is_some() && self.app.form_has_focus() {
+            self.press(KeyCode::Esc);
+        }
+        self.press(KeyCode::Enter);
     }
 
     fn paste(&mut self, text: &str) {
@@ -215,6 +232,239 @@ impl Workshop {
     fn manifest(&self) -> String {
         fs::read_to_string(self.repo.join("dort.toml")).unwrap()
     }
+
+    fn load_template(&mut self) {
+        fs::write(self.repo.join("dort.toml"), r#"schema = 1
+[[files]]
+id = 'prefs'
+mode = 'template'
+target = '~/settings'
+template = "{{ inputs.theme }} {% if host.os is defined %}{{ host.os }}{% else %}unknown{% endif %}{% if false %}{{ local.extra }}{% endif %}"
+inputs = { theme = 'dark' }
+"#).unwrap();
+        dort_core::Manifest::parse(&self.manifest()).unwrap();
+        self.run(Task::Refresh);
+        assert!(self.screen().contains("prefs"));
+    }
+}
+
+#[test]
+fn generated_fields_own_keys_until_esc_and_continue_accepts_a_click() {
+    let mut w = Workshop::new(100, 26);
+    w.press(KeyCode::Char('s'));
+    w.paste("prefs");
+    w.press(KeyCode::Enter);
+    assert!(w.screen().contains("File ID"));
+    w.press(KeyCode::Tab);
+    w.paste("~/settings");
+    w.press(KeyCode::Tab);
+    w.paste("theme={{ theme }}");
+    w.press(KeyCode::Enter);
+    w.press(KeyCode::Char('q'));
+    assert!(!w.app.quit);
+    w.press(KeyCode::F(4));
+    assert!(w.screen().contains("theme={{ theme }}"));
+    assert!(!w.screen().contains("Input: theme"));
+    w.press(KeyCode::Esc);
+    let screen = w.screen();
+    assert!(screen.contains("Enter Continue") && screen.contains("Tab Edit field"));
+    w.paste("not inserted");
+    w.press(KeyCode::Tab);
+    assert!(w.screen().contains("Esc Leave field"));
+    w.click("Continue");
+    w.paste("dark");
+    w.press(KeyCode::Enter);
+    assert!(w.app.preview.is_none());
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Enter);
+    assert!(w.review().contains("theme=dark\nq"));
+    assert!(!w.review().contains("not inserted"));
+}
+
+#[test]
+fn dirty_generated_inputs_guard_review_navigation_without_approving_or_leaking_keys() {
+    let mut w = Workshop::new(140, 28);
+    w.load_template();
+    let original = w.manifest();
+    w.press(KeyCode::Char('e'));
+    w.continue_form();
+    w.click("Input: theme");
+    w.paste("g");
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Enter);
+    let review = w.review().to_owned();
+    assert!(review.contains("darkg"));
+    w.press(KeyCode::Char('g'));
+    assert!(w.screen().contains("Destination: Git: Status"));
+    w.press(KeyCode::Char('y'));
+    w.press(KeyCode::Char('t'));
+    assert!(w.screen().contains("Destination: Git: Status"));
+    assert_eq!(w.manifest(), original);
+    w.click("Enter Keep editing");
+    assert_eq!(w.review(), review);
+    w.click("Tools t");
+    assert!(w.screen().contains("Destination: Tools"));
+    w.press(KeyCode::Esc);
+    assert_eq!(w.review(), review);
+    w.click("1 Managed");
+    assert!(w.screen().contains("Destination: Files / Managed"));
+    w.press(KeyCode::Esc);
+    assert_eq!(w.review(), review);
+    w.press(KeyCode::Esc);
+    assert!(w.screen().contains("darkg"));
+    w.press(KeyCode::Char('d'));
+    assert!(w.screen().contains("darkg"));
+    w.press(KeyCode::Enter);
+    w.click("3 Ignored paths");
+    assert!(w.screen().contains("Destination: Manage ignored paths"));
+    w.click("d Discard");
+    assert!(w.app.preview.is_none());
+    assert!(w.screen().contains("Files / Manage ignored paths"));
+    assert_eq!(w.manifest(), original);
+}
+
+#[test]
+fn dirty_generated_template_guards_another_workflow_and_quit_but_not_overlays() {
+    let mut w = Workshop::new(100, 26);
+    w.press(KeyCode::Char('s'));
+    w.paste("prefs");
+    w.press_with(KeyCode::Char('n'), KeyModifiers::CONTROL);
+    assert!(
+        w.screen()
+            .contains("Destination: Create/attach local repository")
+    );
+    w.press(KeyCode::Esc);
+    assert!(w.screen().contains("prefs"));
+    w.press(KeyCode::F(1));
+    assert!(w.screen().contains("Generated file draft"));
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::F(2));
+    w.click("About Dort");
+    w.press(KeyCode::Enter);
+    assert!(w.screen().contains("About Dort"));
+    assert!(!w.screen().contains("Discard unsaved changes?"));
+    w.press(KeyCode::Esc);
+    w.press_with(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert!(w.screen().contains("quit Dort?"));
+    w.press(KeyCode::Enter);
+    assert!(!w.app.quit);
+    assert!(w.screen().contains("Esc Leave field"));
+    w.press_with(KeyCode::Char('n'), KeyModifiers::CONTROL);
+    w.press(KeyCode::Char('d'));
+    assert!(w.screen().contains("Session / Create or attach repository"));
+    assert!(!w.app.quit);
+
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Char('s'));
+    w.paste("second");
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Char('q'));
+    assert!(w.screen().contains("quit Dort?"));
+    w.press(KeyCode::Char('d'));
+    assert!(w.app.quit);
+}
+
+#[test]
+fn generated_navigation_is_clean_when_untouched_or_reverted() {
+    let mut w = Workshop::new(100, 26);
+    w.press(KeyCode::Char('s'));
+    w.paste("a");
+    w.press(KeyCode::Backspace);
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Esc);
+    assert!(w.screen().contains("New generated file"));
+    assert!(!w.screen().contains("File ID"));
+
+    w.load_template();
+    w.press(KeyCode::Char('e'));
+    w.press(KeyCode::End);
+    w.paste("b");
+    w.press(KeyCode::Backspace);
+    w.press(KeyCode::BackTab);
+    w.paste("c");
+    w.press(KeyCode::Backspace);
+    w.continue_form();
+    w.press(KeyCode::Char(' '));
+    w.press(KeyCode::Char(' '));
+    w.press(KeyCode::Tab);
+    w.paste("d");
+    w.press(KeyCode::Backspace);
+    w.press(KeyCode::Tab);
+    w.press(KeyCode::Char(' '));
+    w.press(KeyCode::Char(' '));
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Char('1'));
+    assert!(w.screen().contains("Files / Managed"));
+    assert!(!w.screen().contains("Discard unsaved changes?"));
+    w.press(KeyCode::Char('q'));
+    assert!(w.app.quit);
+}
+
+#[test]
+fn local_input_value_keeps_the_field_draft_across_back_and_review() {
+    let mut w = Workshop::new(100, 26);
+    w.load_template();
+    fs::write(
+        w.repo.join("dort.toml"),
+        format!("{}local_inputs = ['extra']\n", w.manifest()),
+    )
+    .unwrap();
+    w.run(Task::Refresh);
+    w.press(KeyCode::Char('l'));
+    w.press(KeyCode::Enter);
+    w.paste("private value");
+    w.press(KeyCode::Enter);
+    assert!(w.app.preview.is_none());
+    w.press(KeyCode::Esc);
+    assert!(w.screen().contains("Enter Review value"));
+    w.paste("not inserted");
+    w.press(KeyCode::Esc);
+    assert!(w.screen().contains("Discard unsaved changes?"));
+    w.press(KeyCode::Esc);
+    assert!(w.screen().contains("private value"));
+    w.press(KeyCode::Tab);
+    assert!(w.screen().contains("Esc Leave field"));
+    w.press(KeyCode::Esc);
+    w.click("local.extra");
+    w.paste(" more");
+    assert!(w.screen().contains("Esc Leave field"));
+    w.click("Review value");
+    let review = w.review().to_owned();
+    assert!(review.contains("Proposed value: \"private value more\""));
+    w.app.dry_run = true;
+    w.screen();
+    w.press(KeyCode::End);
+    w.screen();
+    w.press(KeyCode::Char('y'));
+    w.press(KeyCode::Char('q'));
+    assert!(w.screen().contains("quit Dort?"));
+    w.press(KeyCode::Esc);
+    assert_eq!(w.review(), review);
+    w.app.dry_run = false;
+    w.press(KeyCode::Esc);
+    assert!(w.screen().contains("private value more"));
+    w.press(KeyCode::Enter);
+    w.click("1 Managed");
+    assert!(w.screen().contains("Destination: Files / Managed"));
+    w.press(KeyCode::Esc);
+    assert_eq!(w.review(), review);
+    w.approve();
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Char('1'));
+    assert!(w.screen().contains("Files / Managed"));
+    assert!(!w.screen().contains("Discard unsaved changes?"));
+    w.press(KeyCode::Char('4'));
+    w.press(KeyCode::Char('l'));
+    assert!(w.screen().contains("private value more"));
+    w.press(KeyCode::Enter);
+    w.paste(" discard me");
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Char('d'));
+    assert!(w.screen().contains("private value more"));
+    assert!(!w.screen().contains("discard me"));
+    assert!(w.screen().contains("Enter Set value"));
 }
 
 #[test]
@@ -231,7 +481,13 @@ fn blank_repository_can_create_cancel_save_preview_and_edit_generated_template()
         let screen = w.screen();
         assert!(
             screen.contains("File ID")
-                && screen.contains("F4 Continue")
+                && screen.contains("Continue")
+                && screen.contains(if width < 80 {
+                    "Esc Unfocus"
+                } else {
+                    "Esc Leave field"
+                })
+                && !screen.contains("F4 Continue")
                 && screen.contains("Template"),
             "{screen}"
         );
@@ -253,9 +509,10 @@ fn blank_repository_can_create_cancel_save_preview_and_edit_generated_template()
         w.paste(" ");
         w.press(KeyCode::Tab);
         w.paste("{broken={{ env.HOME }}");
-        w.press(KeyCode::F(4));
+        w.continue_form();
         assert!(w.app.preview.is_none());
         assert!(w.screen().contains("Needs attention"));
+        w.press(KeyCode::Tab);
         w.app.key(
             ratatui::crossterm::event::KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
             width,
@@ -265,9 +522,9 @@ fn blank_repository_can_create_cancel_save_preview_and_edit_generated_template()
         w.press(KeyCode::Enter);
         w.paste("accent=[{{ accent }}]\r\nrepeat={{ theme }}\n");
         if width > 80 {
-            assert!(click_label(&mut w.app, width, height, "F4 Continue").is_none());
+            assert!(click_label(&mut w.app, width, height, "Continue").is_none());
         } else {
-            w.press(KeyCode::F(4));
+            w.continue_form();
         }
         let screen = w.screen();
         assert!(
@@ -275,12 +532,14 @@ fn blank_repository_can_create_cancel_save_preview_and_edit_generated_template()
             "{screen}"
         );
         assert_eq!(screen.matches("Input: theme").count(), 1, "{screen}");
+        w.press(KeyCode::F(6));
         w.press(KeyCode::Tab);
         w.paste(" dark ");
         w.press(KeyCode::Esc);
-        w.press(KeyCode::F(4));
+        w.press(KeyCode::Esc);
+        w.continue_form();
         assert!(w.screen().contains(" dark"));
-        w.press(KeyCode::Enter);
+        w.continue_form();
         assert!(
             w.review()
                 .contains("theme=[ dark ]\naccent=[]\nrepeat= dark \n"),
@@ -295,7 +554,7 @@ fn blank_repository_can_create_cancel_save_preview_and_edit_generated_template()
         w.press(KeyCode::Esc);
         assert!(w.app.preview.is_none());
         assert!(w.screen().contains(" dark"));
-        w.press(KeyCode::Enter);
+        w.continue_form();
         w.approve();
         assert_eq!(fs::read_dir(&w.host.home).unwrap().count(), 0);
         let saved = dort_core::Manifest::parse(&w.manifest()).unwrap();
@@ -318,9 +577,9 @@ fn blank_repository_can_create_cancel_save_preview_and_edit_generated_template()
         assert!(w.screen().contains("Edit generated file: prefs"));
         w.press(KeyCode::End);
         w.paste("enabled=true\n");
-        w.press(KeyCode::F(4));
+        w.continue_form();
         w.paste("blue");
-        w.press(KeyCode::Enter);
+        w.continue_form();
         assert!(w.review().contains("accent=[blue]"));
         assert!(w.review().contains("enabled=true\n"));
         w.approve();
@@ -358,34 +617,19 @@ fn jinja_draft_opts_in_and_keeps_explicit_values_and_host_choices_until_review()
             "{% if false %}{{ inputs.optional }}{{ host.hostname }}{% endif %}",
         );
         w.paste(template);
-        w.press(KeyCode::F(4));
+        w.continue_form();
         let screen = w.screen();
-        assert!(
-            screen.contains("Literal") && screen.contains("Use {{ name }}"),
-            "{screen}"
-        );
+        assert!(screen.contains("Input: theme"), "{screen}");
         assert!(w.app.preview.is_none());
-        if width < 80 {
-            w.press(KeyCode::Tab);
-            w.press(KeyCode::Enter);
-            assert!(w.screen().contains("Choose template syntax"));
-            w.press(KeyCode::Down);
-        } else {
-            assert!(click_label(&mut w.app, width, height, "Syntax").is_none());
-            assert!(w.screen().contains("Choose template syntax"));
-            assert!(click_label(&mut w.app, width, height, "Jinja").is_none());
-        }
-        w.press(KeyCode::Enter);
-        assert!(w.screen().contains("Jinja"));
-        w.press(KeyCode::F(4));
-        assert!(w.screen().contains("Input: inputs.empty"));
-        w.press(KeyCode::Enter);
+        assert!(w.screen().contains("Input: empty"));
+        w.continue_form();
         assert!(w.app.preview.is_none());
         assert_eq!(w.manifest(), original);
         assert!(w.screen().contains("Needs attention"));
+        w.press(KeyCode::Tab);
         w.press(KeyCode::F(6));
         w.press(KeyCode::Tab);
-        assert!(w.screen().contains("Input: inputs.optional"));
+        assert!(w.screen().contains("Input: optional"));
         w.press(KeyCode::Backspace);
         w.press(KeyCode::Tab);
         let color = " <&>\t";
@@ -400,23 +644,11 @@ fn jinja_draft_opts_in_and_keeps_explicit_values_and_host_choices_until_review()
         w.press(KeyCode::Tab);
         w.press(KeyCode::Char(' '));
         w.press(KeyCode::Esc);
-        w.press(KeyCode::Enter);
-        w.press(KeyCode::Up);
         w.press(KeyCode::Esc);
-        assert!(w.screen().contains("Jinja"));
-        w.press(KeyCode::Enter);
-        w.press(KeyCode::Up);
-        w.press(KeyCode::Enter);
-        assert!(w.screen().contains("Literal"));
-        w.press(KeyCode::Enter);
-        w.press(KeyCode::Down);
-        w.press(KeyCode::Enter);
-        assert!(w.screen().contains("Jinja"));
-        w.press(KeyCode::F(4));
-        w.press(KeyCode::Enter);
+        w.continue_form();
+        w.continue_form();
         let expected = format!("theme=[{color}]\nempty=[]\n1=linux;2=x86_64;3=fixed;\n");
         for text in [
-            "Syntax: Jinja",
             "host.os = \"linux\" (this host)",
             "host.arch = \"x86_64\" (this host)",
             "inputs.empty = \"\" (dort.toml)",
@@ -431,10 +663,7 @@ fn jinja_draft_opts_in_and_keeps_explicit_values_and_host_choices_until_review()
         w.approve();
         assert!(!target.exists());
         let saved = dort_core::Manifest::parse(&w.manifest()).unwrap();
-        assert_eq!(
-            saved.files[0].syntax,
-            Some(dort_core::template::Dialect::Jinja)
-        );
+        assert_eq!(saved.files[0].syntax, None);
         assert_eq!(saved.files[0].template.as_deref(), Some(template));
         let keys: Vec<_> = saved.files[0]
             .host_inputs
@@ -445,7 +674,7 @@ fn jinja_draft_opts_in_and_keeps_explicit_values_and_host_choices_until_review()
         assert_eq!(keys, ["os", "arch"]);
         w.press(KeyCode::Esc);
         w.press(KeyCode::Char('v'));
-        assert!(w.screen().contains("Syntax: Jinja"));
+        assert!(w.screen().contains("Generated file preview"));
         w.press(KeyCode::Char('R'));
         assert!(w.review().contains("host.os = \"linux\" (this host)"));
         assert!(
@@ -457,7 +686,7 @@ fn jinja_draft_opts_in_and_keeps_explicit_values_and_host_choices_until_review()
 
         w.press(KeyCode::Esc);
         w.press(KeyCode::Char('e'));
-        w.press(KeyCode::F(4));
+        w.continue_form();
         w.press(KeyCode::Tab);
         w.press(KeyCode::Tab);
         w.app.key(
@@ -466,7 +695,7 @@ fn jinja_draft_opts_in_and_keeps_explicit_values_and_host_choices_until_review()
             height,
         );
         w.paste("light");
-        w.press(KeyCode::Enter);
+        w.continue_form();
         w.approve();
         assert_eq!(fs::read(&target).unwrap(), expected.as_bytes());
         w.press(KeyCode::Esc);
@@ -499,15 +728,12 @@ fn generated_local_inputs_from_empty_repository_to_deploy_and_update() {
         w.paste("~/settings");
         w.press(KeyCode::Tab);
         w.paste("editor=[{{ local.editor }}]\n{% if false %}{{ local.later }}{% endif %}{# local.comment #}");
-        w.press(KeyCode::Tab);
-        w.press(KeyCode::Enter);
-        w.press(KeyCode::Down);
-        w.press(KeyCode::Enter);
-        w.press(KeyCode::F(4));
+        w.continue_form();
         assert!(w.screen().contains("local.editor (undeclared"));
-        w.press(KeyCode::Enter);
+        w.continue_form();
         assert!(w.app.preview.is_none());
         assert_eq!(w.manifest(), blank);
+        w.press(KeyCode::Tab);
         if width < 80 {
             w.press(KeyCode::Char(' '));
         } else {
@@ -518,9 +744,10 @@ fn generated_local_inputs_from_empty_repository_to_deploy_and_update() {
         assert!(w.screen().contains("local.later (undeclared"));
         w.press(KeyCode::Char(' '));
         w.press(KeyCode::Esc);
-        w.press(KeyCode::F(4));
+        w.press(KeyCode::Esc);
+        w.continue_form();
         assert!(w.screen().contains("local.editor (declared"));
-        w.press(KeyCode::Enter);
+        w.continue_form();
         assert!(w.review().contains("Declared local inputs: editor, later"));
         assert!(w.review().contains("No rendered preview yet"));
         assert!(w.review().contains("Local inputs on this file"));
@@ -531,7 +758,7 @@ fn generated_local_inputs_from_empty_repository_to_deploy_and_update() {
         assert!(screen.contains("Save declaration only"), "{screen}");
         w.press(KeyCode::Esc);
         assert!(w.screen().contains("local.editor (declared"));
-        w.press(KeyCode::Enter);
+        w.continue_form();
         w.approve();
         let saved = w.manifest();
         let manifest = dort_core::Manifest::parse(&saved).unwrap();
@@ -589,7 +816,7 @@ fn generated_local_inputs_from_empty_repository_to_deploy_and_update() {
         assert!(click_label(&mut w.app, width, height, "local.editor").is_none());
         assert!(w.screen().contains("local.editor on this machine"));
         assert!(click_label(&mut w.app, width, height, "Enter Set value").is_none());
-        w.press(KeyCode::Enter);
+        w.continue_form();
         assert!(
             w.review()
                 .contains("Previous value: Unset\nProposed value: \"\" (empty)")
@@ -607,7 +834,7 @@ fn generated_local_inputs_from_empty_repository_to_deploy_and_update() {
         w.press(KeyCode::Esc);
         assert!(w.screen().contains("Unset"));
         w.press(KeyCode::Enter);
-        w.press(KeyCode::Enter);
+        w.continue_form();
         w.approve();
         assert_eq!(w.manifest(), saved);
         assert!(!target.exists());
@@ -635,7 +862,7 @@ fn generated_local_inputs_from_empty_repository_to_deploy_and_update() {
         assert!(w.screen().contains("Unset"));
         w.press(KeyCode::Enter);
         w.paste("  vim\t");
-        w.press(KeyCode::Enter);
+        w.continue_form();
         assert!(w.review().contains("Proposed value: \"  vim\\t\""));
         w.approve();
         w.press(KeyCode::Esc);
@@ -660,7 +887,7 @@ fn generated_local_inputs_from_empty_repository_to_deploy_and_update() {
             ratatui::crossterm::event::KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL);
         w.app.key(clear, width, height);
         w.paste("nano");
-        w.press(KeyCode::Enter);
+        w.continue_form();
         local_inputs::Preview::prepare(&w.host, &w.repo, "prefs", "editor", Some("emacs"))
             .unwrap()
             .approve()
@@ -688,7 +915,7 @@ fn generated_local_inputs_from_empty_repository_to_deploy_and_update() {
         assert_eq!(w.manifest(), saved);
         w.press(KeyCode::Esc);
         w.press(KeyCode::Char('e'));
-        w.press(KeyCode::F(4));
+        w.continue_form();
         assert!(w.screen().contains("local.editor (declared"));
         w.press(KeyCode::Tab);
         assert!(w.screen().contains("local.later (declared"));
@@ -704,12 +931,23 @@ fn stale_generated_review_cannot_replace_a_new_manifest() {
     w.paste("~/settings");
     w.press(KeyCode::Tab);
     w.paste("theme=dark");
-    w.press(KeyCode::F(4));
+    w.continue_form();
     assert!(w.review().contains("theme=dark"));
+    w.press(KeyCode::Char('g'));
+    assert!(w.screen().contains("Destination: Git: Status"));
+    w.press(KeyCode::Esc);
     let external = "schema = 1\n# External edit\n";
     fs::write(w.repo.join("dort.toml"), external).unwrap();
     w.approve();
     assert!(w.app.error.as_ref().unwrap().contains("Manifest changed"));
+    w.press(KeyCode::Enter);
+    assert!(w.screen().contains("Destination: Recovery"));
+    w.press(KeyCode::Esc);
+    assert!(w.screen().contains("Manifest changed"));
+    w.press(KeyCode::Esc);
+    assert!(w.screen().contains("theme=dark"));
+    w.press(KeyCode::Char('q'));
+    assert!(w.screen().contains("quit Dort?"));
     assert_eq!(w.manifest(), external);
     assert_eq!(fs::read_dir(&w.host.home).unwrap().count(), 0);
 }
@@ -734,7 +972,7 @@ fn generated_save_selects_the_saved_template_even_when_a_filter_hides_it() {
     w.paste("~/.zeta");
     w.press(KeyCode::Tab);
     w.paste("second output");
-    w.press(KeyCode::F(4));
+    w.continue_form();
     w.approve();
     w.press(KeyCode::Esc);
     w.press(KeyCode::Enter);
@@ -744,10 +982,10 @@ fn generated_save_selects_the_saved_template_even_when_a_filter_hides_it() {
     assert!(w.screen().contains("Edit generated file: zeta"));
     w.press(KeyCode::End);
     w.paste(" edited");
-    w.press(KeyCode::F(4));
+    w.continue_form();
     w.press(KeyCode::Esc);
     assert!(w.screen().contains("Edit generated file: zeta"));
-    w.press(KeyCode::F(4));
+    w.continue_form();
     w.approve();
     w.press(KeyCode::Esc);
     w.press(KeyCode::Char('v'));
@@ -840,6 +1078,7 @@ target = "~/config/settings"
         );
         assert!(w.screen().contains("File ID"));
         w.press(KeyCode::Esc);
+        w.press(KeyCode::Esc);
         assert!(w.screen().contains("settings4"));
         assert_eq!(w.manifest(), original);
     }
@@ -855,13 +1094,14 @@ fn editor_launches_by_key_and_mouse_and_only_updates_the_draft() {
     w.paste("~/settings");
     w.press(KeyCode::Tab);
     w.paste("before\n");
+    w.press(KeyCode::Esc);
     w.press(KeyCode::F(5));
     assert!(std::mem::take(&mut w.app.shell.open_template_editor));
     w.app
-        .shell
         .finish_template_edit(Edit::with_config(None, None, "before\n").and_then(Edit::run));
     assert!(w.screen().contains("Set VISUAL or EDITOR"));
     assert!(w.screen().contains("before"));
+    assert!(w.app.form_has_focus());
     assert!(w.app.preview.is_none());
     assert_eq!(w.manifest(), original);
 
@@ -873,18 +1113,19 @@ fn editor_launches_by_key_and_mouse_and_only_updates_the_draft() {
         "before\n",
     )
     .and_then(Edit::run);
-    w.app.shell.finish_template_edit(result);
+    w.app.finish_template_edit(result);
     assert!(w.screen().contains("after"));
+    assert!(w.app.form_has_focus());
     assert!(w.app.preview.is_none());
     assert_eq!(w.manifest(), original);
     assert!(!w.host.home.join("settings").exists());
 
-    w.press(KeyCode::F(4));
+    w.continue_form();
     assert!(w.screen().contains("Input: theme"));
     w.press(KeyCode::F(5));
     assert!(!w.app.shell.open_template_editor);
     w.paste("dark");
-    w.press(KeyCode::Enter);
+    w.continue_form();
     assert!(w.review().contains("after\ndark\n"));
     assert_eq!(w.manifest(), original);
 }

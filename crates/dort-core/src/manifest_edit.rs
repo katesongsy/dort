@@ -192,7 +192,6 @@ fn edit_file(doc: &mut DocumentMut, manifest: &Manifest, file: &ManagedFile) -> 
             ("source", before.source != file.source),
             ("template", before.template != file.template),
             ("inputs", before.inputs != file.inputs),
-            ("syntax", before.syntax != file.syntax),
             ("host_inputs", before.host_inputs != file.host_inputs),
             ("local_inputs", before.local_inputs != file.local_inputs),
             ("target", before.target != file.target),

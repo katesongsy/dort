@@ -111,6 +111,7 @@ pub enum Overlay {
     Form(Form),
     Profiles(Box<ProfilePicker>),
     About,
+    DraftAbout(Form),
     Generated(Box<super::generated::Report>),
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -283,6 +284,7 @@ pub enum Intent {
     Action(Action),
     Submit(Form),
     ClearLocalInput,
+    LeaveDraft,
     Known(usize),
     Active,
     ApplyProfiles {
@@ -368,10 +370,10 @@ impl Shell {
         let Some(draft) = self.generated.as_mut() else {
             return;
         };
+        draft.focus_template();
         self.form_feedback = match result {
             Ok(text) => {
                 draft.template.replace(text);
-                draft.focus_template();
                 None
             }
             Err(error) => Some((Form::Generated, error.to_string())),
@@ -411,11 +413,17 @@ impl Shell {
                         .is_some_and(|draft| !draft.entering_inputs());
                 None
             }
-            Command::ToggleGeneratedInput => {
+            Command::ToggleGeneratedInput if form == Form::Generated => {
                 self.generated.as_mut()?.toggle_value();
                 self.form_feedback = None;
                 None
             }
+            Command::ToggleGeneratedDeclaration if form == Form::Generated => {
+                self.generated.as_mut()?.toggle_declaration();
+                self.form_feedback = None;
+                None
+            }
+            Command::ToggleGeneratedInput | Command::ToggleGeneratedDeclaration => None,
             Command::Toggle => {
                 self.configuration.as_mut()?.toggle_default();
                 None
@@ -444,7 +452,7 @@ impl Shell {
             }
         }
     }
-    pub fn key(&mut self, key: KeyEvent, known_count: usize) -> Option<Intent> {
+    pub fn key(&mut self, key: KeyEvent, known_count: usize, focused: bool) -> Option<Intent> {
         if !self.form_details
             && matches!(self.overlay, Some(Overlay::Form(_)))
             && matches!(
@@ -472,9 +480,13 @@ impl Shell {
                 return None;
             }
         }
-        if matches!(self.overlay, Some(Overlay::Form(_))) {
+        if let Some(Overlay::Form(form)) = self.overlay {
             if key.code == KeyCode::F(3) {
-                return self.form_action(super::forms::Command::Details);
+                return if matches!(form, Form::Generated | Form::LocalInputs) {
+                    None
+                } else {
+                    self.form_action(super::forms::Command::Details)
+                };
             }
             if self.form_details {
                 if key.code == KeyCode::Esc {
@@ -523,7 +535,7 @@ impl Shell {
                 }
                 _ => (),
             },
-            Overlay::Generated(_) => unreachable!("generated reader handles keys"),
+            Overlay::Generated(_) | Overlay::DraftAbout(_) => unreachable!(),
             Overlay::About => {
                 if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?')) {
                     self.overlay = None;
@@ -628,40 +640,34 @@ impl Shell {
             Overlay::Form(Form::Generated) => {
                 let draft = self.generated.as_mut()?;
                 match key.code {
-                    KeyCode::Esc if !draft.back() => {
-                        self.generated = None;
-                        self.back();
-                    }
+                    KeyCode::Esc if !draft.back() => return Some(Intent::LeaveDraft),
                     KeyCode::Esc => self.form_feedback = None,
-                    KeyCode::Enter if !draft.template_focused() && !draft.syntax_focused() => {
+                    KeyCode::Enter if !focused && key.modifiers.is_empty() => {
                         return Some(Intent::Submit(Form::Generated));
                     }
-                    KeyCode::F(6) if draft.entering_inputs() => {
+                    KeyCode::F(6) if focused && draft.entering_inputs() => {
                         return self.form_action(super::forms::Command::ToggleGeneratedInput);
-                    }
-                    KeyCode::F(4) if !draft.entering_inputs() => {
-                        return Some(Intent::Submit(Form::Generated));
                     }
                     KeyCode::F(5) if !draft.entering_inputs() => {
                         return self.form_action(super::forms::Command::OpenTemplateEditor);
                     }
-                    _ => {
+                    _ if focused => {
                         if let Err(error) = draft.key(key) {
                             self.form_feedback = Some((Form::Generated, error.to_string()));
                         }
                     }
+                    _ => (),
                 }
             }
             Overlay::Form(Form::LocalInputs) => {
                 let panel = self.local_inputs.as_mut()?;
                 match key.code {
-                    KeyCode::Esc => {
-                        self.form_feedback = None;
-                        if !panel.back() {
-                            self.back();
-                        }
+                    KeyCode::Esc => return Some(Intent::LeaveDraft),
+                    KeyCode::Enter
+                        if (!panel.editing() || !focused) && key.modifiers.is_empty() =>
+                    {
+                        return Some(Intent::Submit(Form::LocalInputs));
                     }
-                    KeyCode::Enter => return Some(Intent::Submit(Form::LocalInputs)),
                     KeyCode::F(6) if !panel.editing() => return Some(Intent::ClearLocalInput),
                     _ => {
                         self.form_feedback = panel
