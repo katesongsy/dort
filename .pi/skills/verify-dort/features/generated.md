@@ -220,6 +220,14 @@ Open `templates/editor.jinja`, choose **Edit template file**, and append a line.
 
 Choose **New template file** (`s`). Create `templates/new.jinja`, then compare the approved text and mode `0644` on disk. Verify both paths with `dort files templates list` and `dort files templates show templates/new.jinja`. Clean up the run.
 
+Run this once against a repository with no `templates/` folder. The review names `Create folder: templates | permissions 0755` before the file, and approval makes both. The folder is `drwxr-xr-x`. Make a folder with `mkdir` after the review and confirm approval refuses without writing the file.
+
+## Delete a template file
+
+In a disposable repository, create `templates/unused.jinja` with three lines and `templates/used.jinja` declared as a template `source`. In **Files → Templates** (`5`) select the unreferenced row and press **Delete** (`d`). The review names the path, `Mappings declaring this path: 0`, the private path that keeps the file, and the escaped text. Press Esc and confirm the file is still there. Review again, press End, and choose **Delete template file**. Confirm the row is gone, the result names the retained path, and that path holds the same bytes in a `0700` folder. Select the referenced row, press `d`, and confirm the error names the mapping ID and leaves the file in place.
+
+The same two effects are reachable with `dort --dry-run files templates delete templates/unused.jinja` and `dort --yes files templates delete templates/unused.jinja`.
+
 ## Reference an existing template file
 
 In a disposable repository, create `templates/editor.jinja` containing `font={{ size }}`. In **Files → Generated**, choose **New generated file**. Set ID `prefs` and destination `~/settings`. Tab to **Template content** and press Space, then Enter on `templates/editor.jinja`. Continue, set `size` to `18`, and review. The review names the template file and shows `font=18`. Save and check that `dort.toml` has `source = "templates/editor.jinja"`, that the template file is unchanged, and that `~/settings` does not exist.
