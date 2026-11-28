@@ -125,6 +125,33 @@ PY
 python3 "$drive" cleanup generated-setup-proof
 ```
 
+## Deploy a generated file
+
+Use the first fixture above, with `permissions = "0640"` in the mapping. Leave `$HOME/.editor.conf` missing. Run this before the fixture creates the existing destination.
+
+```sh
+python3 "$drive" tui generated-preview --label deploy-cancel \
+  'wait:loaded.' "send:'f'" 'wait:Preview generated file' "send:'v'" \
+  'wait:Review deployment' "send:'R'" 'wait:Review changes' 'snap:review' \
+  "send:'\x1b'" 'wait:Review deployment' "send:'\x1b'" 'wait:Managed'
+(
+  eval "$(python3 "$drive" env generated-preview)"
+  test ! -e "$HOME/.editor.conf" && test ! -L "$HOME/.editor.conf"
+)
+python3 "$drive" tui generated-preview --label deploy \
+  'wait:loaded.' "send:'f'" 'wait:Preview generated file' "send:'v'" \
+  'wait:Review deployment' 'click:Review deployment' 'wait:Review changes' \
+  "send:'\x1b[F'" 'wait:y Deploy generated file' 'snap:approved' "send:'y'" \
+  'wait:Generated file deployed.' 'snap:deployed'
+(
+  eval "$(python3 "$drive" env generated-preview)"
+  printf 'font-size = 18\n' | cmp - "$HOME/.editor.conf"
+  python3 -c 'import os, stat, sys; assert stat.S_IMODE(os.stat(sys.argv[1]).st_mode) == 0o640' "$HOME/.editor.conf"
+)
+```
+
+Repeat **Review deployment** with the same destination. Dort refuses the file even if it matches. Check that the contents and permissions stay unchanged. Clean up the run.
+
 ## Gotchas
 
 - Exit the draft with Esc before the harness sends `q`. A focused field treats `q` as text.

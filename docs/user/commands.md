@@ -50,7 +50,9 @@ Choose **Open in editor** (`F5`) to edit the template in an external editor. Set
 
 Choose **Continue** (`F4`). If the template uses inputs, enter the named values. Leave a value blank to render nothing. Choose **Review generated file** after entering inputs. Read the output. Press `y` when **Save generated file** is ready. `Esc` from the review or inputs returns to the draft. Saving changes only `dort.toml`.
 
-To revisit a saved template, select it in Managed. Press `v` to preview it or `e` to choose **Edit generated file**. File-backed templates can be previewed; edit their source in the repository.
+To revisit a saved template, select it in Managed. Press `v` to preview it or `e` to choose **Edit generated file**. Edit file-backed templates in the repository.
+
+To deploy for the first time, open the preview and choose **Review deployment** (`R`). Read the destination, permissions and escaped output. Scroll to the end, then press `y` when **Deploy generated file** appears. `Esc` cancels the review.
 
 ## Tools
 
@@ -152,6 +154,21 @@ dort --repo PATH --json files preview-generated editor-settings
 ```
 
 Renders the repository template with literal inputs from `dort.toml`. Shows if the destination is missing, exists and must be kept, or is unsafe. Dort checks the destination without reading its contents. No files are written. JSON includes the exact rendered text and input values.
+
+### Deploy a generated file
+
+```sh
+dort --dry-run files deploy-generated editor-settings
+dort files deploy-generated editor-settings
+dort --json --dry-run files deploy-generated editor-settings
+dort --json --yes files deploy-generated editor-settings
+```
+
+Review the destination, permissions and exact rendered output before confirming. Use a registered repository. JSON and nonterminal writes require `--yes`.
+
+First deployment creates one regular file at a missing path below HOME. Create the destination folder first. Dort refuses symlinks, shared writable folders, protected paths, inactive profiles and files with tool requirements. The default mode is `0600`. The mode cannot grant group or other users write access.
+
+Existing destinations stay untouched, even if the bytes match. First deployment has no drift tracking, replacement or rollback. Bulk file apply and environment apply do not deploy templates.
 
 ### Plan
 

@@ -68,6 +68,61 @@ pub fn generated_details(preview: &dort_core::generated::Preview) -> String {
     }
     text
 }
+pub fn generated_deployment(review: dort_core::generated::DeploymentReview<'_>) -> String {
+    use std::fmt::Write;
+    let mut report = format!(
+        "Review first deployment: {}\nRepository: {}\nActive profiles: {}\nSource: {}\nCreate: {}\nPermissions: {}\n\nRendered output (spaces as \\x20, newlines as \\n)\n",
+        review.id,
+        inline(&review.repository.display().to_string()),
+        review
+            .active_profiles
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(", "),
+        review.source.map_or_else(
+            || "Inline template in dort.toml".into(),
+            |path| inline(&path.display().to_string()),
+        ),
+        inline(&review.destination.display().to_string()),
+        review.permissions,
+    );
+    if review.rendered.is_empty() {
+        report.push_str("Empty output\n");
+    }
+    for chunk in review.rendered.split_inclusive('\n') {
+        for byte in chunk.bytes() {
+            match byte {
+                b' ' => report.push_str("\\x20"),
+                b'\t' => report.push_str("\\t"),
+                b'\r' => report.push_str("\\r"),
+                b'\n' => report.push_str("\\n"),
+                b'\\' => report.push_str("\\\\"),
+                b'!'..=b'~' => report.push(char::from(byte)),
+                _ => {
+                    let _ = write!(report, "\\x{byte:02x}");
+                }
+            }
+        }
+        report.push('\n');
+    }
+    report.push_str("End of rendered output\n");
+    report
+}
+pub fn generated_published(result: &dort_core::generated::Published) -> String {
+    let written = format!(
+        "Deployed generated file: {}\nPermissions: {}",
+        inline(&result.destination.display().to_string()),
+        result.permissions,
+    );
+    if result.directory_synced {
+        written
+    } else {
+        format!(
+            "{written}\nWarning: Dort could not sync the destination folder. The file was created, but may not survive a restart."
+        )
+    }
+}
 fn paths(paths: &[std::path::PathBuf]) -> String {
     paths
         .iter()

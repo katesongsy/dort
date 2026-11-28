@@ -81,13 +81,17 @@ pub struct Entry {
 
 impl Entry {
     pub(crate) fn stable_parents(mut self) -> Self {
-        for parent in &mut self.parents {
-            parent.fingerprint.links = 0;
-            parent.fingerprint.size = 0;
-            parent.fingerprint.modified = (0, 0);
-            parent.fingerprint.changed = (0, 0);
-        }
+        stabilize_parents(&mut self.parents);
         self
+    }
+}
+
+pub(crate) fn stabilize_parents(parents: &mut [Parent]) {
+    for parent in parents {
+        parent.fingerprint.links = 0;
+        parent.fingerprint.size = 0;
+        parent.fingerprint.modified = (0, 0);
+        parent.fingerprint.changed = (0, 0);
     }
 }
 
@@ -112,6 +116,13 @@ pub(crate) struct ParentHandle {
 }
 
 pub(crate) fn parent_handle(path: &Path) -> Result<ParentHandle> {
+    parent_handle_with(path, |_, _| Ok(()))
+}
+
+pub(crate) fn parent_handle_with(
+    path: &Path,
+    mut check: impl FnMut(&File, &Path) -> Result<()>,
+) -> Result<ParentHandle> {
     validate_output_path(path)?;
     let name = path
         .file_name()
@@ -127,6 +138,7 @@ pub(crate) fn parent_handle(path: &Path) -> Result<ParentHandle> {
         let Component::Normal(name) = component else {
             continue;
         };
+        check(&directory, &walked)?;
         parents.push(parent_record(&directory, &walked)?);
         walked.push(name);
         match fs::openat(&directory, name, DIRECTORY_FLAGS, Mode::empty()) {
@@ -148,6 +160,7 @@ pub(crate) fn parent_handle(path: &Path) -> Result<ParentHandle> {
             }
         }
     }
+    check(&directory, &walked)?;
     parents.push(parent_record(&directory, &walked)?);
     Ok(ParentHandle {
         directory,
@@ -309,6 +322,9 @@ pub(crate) fn read_manifest_bytes(path: &Path) -> Result<(Vec<u8>, Entry)> {
             Error::Invalid("manifest must be an owned regular file without hard links".into())
         })?;
     let handle = parent_handle(path)?;
+    if !same_parent_identity_and_access(&handle.parents, &entry.parents) {
+        return Err(Error::Invalid("manifest folder changed during read".into()));
+    }
     let bytes = read_checked(&handle, path, fp)?;
     let mut entry = entry;
     entry.sha256 = Some(format!("{:x}", Sha256::digest(&bytes)));

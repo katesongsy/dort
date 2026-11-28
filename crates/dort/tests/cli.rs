@@ -702,3 +702,79 @@ target = "~/settings"
     assert!(!error.contains("do-not-print-this"));
     sandbox.assert_readonly();
 }
+
+#[test]
+fn generated_deployment_cli_reviews_then_requires_yes_and_never_replaces() {
+    use dort_core::{
+        context::HostContext,
+        local::RepositoryRegistry,
+        platform::{Architecture, Platform},
+        state::WriterLock,
+    };
+    let sandbox = Sandbox::new();
+    let manifest = sandbox.manifest(
+        r#"schema = 1
+[[files]]
+id = "settings"
+mode = "template"
+source = "file.tmpl"
+target = "~/settings"
+permissions = "0644"
+"#,
+    );
+    let root = manifest.parent().unwrap();
+    let expected = " x=外\t\r\nEND\x1b  ";
+    fs::create_dir(root.join(".git")).unwrap();
+    fs::write(root.join("file.tmpl"), expected).unwrap();
+    let host = HostContext::new(
+        sandbox.home.clone(),
+        None,
+        None,
+        Platform::Linux,
+        Architecture::X86_64,
+    )
+    .unwrap();
+    RepositoryRegistry::register(&host, &WriterLock::acquire(&host).unwrap(), root).unwrap();
+    let destination = sandbox.home.join("settings");
+    let command = || {
+        let mut cmd = sandbox.command();
+        cmd.args([
+            "--repo",
+            "repository",
+            "files",
+            "deploy-generated",
+            "settings",
+        ]);
+        cmd
+    };
+    let human = command().arg("--dry-run").assert().success();
+    assert!(String::from_utf8_lossy(&human.get_output().stdout).contains("END\\x1b\\x20\\x20"));
+    let preview = command()
+        .args(["--json", "--dry-run", "--yes"])
+        .assert()
+        .success();
+    let preview: serde_json::Value = serde_json::from_slice(&preview.get_output().stdout).unwrap();
+    assert_eq!(preview["rendered"], expected);
+    assert_eq!(preview["destination"], destination.to_str().unwrap());
+    assert_eq!(preview["permissions"], "0644");
+    let declined = command()
+        .arg("--json")
+        .write_stdin("yes\n")
+        .assert()
+        .code(2)
+        .stdout("");
+    assert!(String::from_utf8_lossy(&declined.get_output().stderr).contains("requires --yes"));
+    assert!(!destination.exists());
+    let receipt = command().args(["--json", "--yes"]).assert().success();
+    let receipt: serde_json::Value = serde_json::from_slice(&receipt.get_output().stdout).unwrap();
+    assert_eq!(receipt["destination"], destination.to_str().unwrap());
+    assert_eq!(receipt["directory_synced"], true);
+    assert_eq!(fs::read(&destination).unwrap(), expected.as_bytes());
+    assert_eq!(
+        fs::metadata(&destination).unwrap().permissions().mode() & 0o777,
+        0o644
+    );
+    let blocked = command().arg("--yes").assert().code(2);
+    assert!(String::from_utf8_lossy(&blocked.get_output().stderr).contains("already exists"));
+    assert_eq!(fs::read(&destination).unwrap(), expected.as_bytes());
+}

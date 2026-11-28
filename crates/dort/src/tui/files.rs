@@ -158,7 +158,7 @@ fn details(app: &App) -> Text<'static> {
                             .unwrap_or("Inline template in dort.toml"),
                     ),
                     ui::metadata("Destination", row.target.to_str().unwrap_or("unavailable")),
-                    Line::raw("Preview the output from inputs in dort.toml. No files are written."),
+                    Line::raw("Open the preview to review a first deployment."),
                 ]);
                 return Text::from(lines);
             }
@@ -522,10 +522,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                         Cell::from(format!(
                             "{}{} {}",
                             "  ".repeat(node.depth.min(indent_limit)),
-                            if row.state == "Preview only"
-                                || app
-                                    .mapping_at(i)
-                                    .is_some_and(|file| file.mode == FileMode::Template)
+                            if app
+                                .mapping_at(i)
+                                .is_some_and(|file| file.mode == FileMode::Template)
                             {
                                 "   "
                             } else if super::tree::marked(app, node) {

@@ -1,4 +1,5 @@
-//! Read-only previews of repository-declared generated files.
+//! Previews and first deployment of repository-declared generated files.
+mod deploy;
 use crate::{
     Error, Manifest, Result,
     context::HostContext,
@@ -6,6 +7,7 @@ use crate::{
     model::{FileContent, FileMode, ManagedFile},
     observation::{self, Entry, Kind},
 };
+pub use deploy::{Approval, Deployment, DeploymentReview, Published};
 use serde::Serialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -65,11 +67,18 @@ impl Preview {
         manifest: &Manifest,
         id: &str,
     ) -> Result<Self> {
-        let file = manifest
-            .files
-            .iter()
-            .find(|file| file.id == id)
-            .ok_or_else(|| Error::Invalid("No file with that ID in dort.toml.".into()))?;
+        let file = find_file(manifest, id)?;
+        let destination = host.target_path(&file.target, Some(repository))?;
+        Self::render_file(host, repository, manifest, file, destination).map(|(preview, _)| preview)
+    }
+
+    fn render_file(
+        host: &HostContext,
+        repository: &Path,
+        manifest: &Manifest,
+        file: &ManagedFile,
+        destination: PathBuf,
+    ) -> Result<(Self, Option<Entry>)> {
         if file.mode != FileMode::Template {
             return Err(Error::Invalid(
                 "Preview requires a file with mode = \"template\".".into(),
@@ -77,10 +86,9 @@ impl Preview {
         }
         let (source, rendered) = match file.content_for(host.platform) {
             Some(FileContent::Source(path)) => {
-                let source = repository.join(path);
-                let text = read_template(&source, repository, &manifest.files)?;
-                let rendered = render(&text, &file.inputs)?;
-                (Some(source), rendered)
+                let (text, entry) =
+                    read_template(&repository.join(path), repository, &manifest.files)?;
+                (Some(entry), render(&text, &file.inputs)?)
             }
             Some(FileContent::Template(text)) => (None, render(text, &file.inputs)?),
             None => {
@@ -89,21 +97,35 @@ impl Preview {
                 ));
             }
         };
-        let destination = host.target_path(&file.target, Some(repository))?;
-        Ok(Self {
-            id: file.id.clone(),
+        Ok((
+            Self {
+                id: file.id.clone(),
+                source: source.as_ref().map(|entry| entry.path.clone()),
+                destination_status: destination_status(&destination),
+                destination,
+                inputs: file.inputs.clone(),
+                rendered,
+                permissions: file.permissions.clone(),
+            },
             source,
-            destination_status: destination_status(&destination),
-            destination,
-            inputs: file.inputs.clone(),
-            rendered,
-            permissions: file.permissions.clone(),
-        })
+        ))
     }
 }
 
-fn read_template(source: &Path, repository: &Path, files: &[ManagedFile]) -> Result<String> {
-    let template = inspect_template(source)?;
+fn find_file<'a>(manifest: &'a Manifest, id: &str) -> Result<&'a ManagedFile> {
+    manifest
+        .files
+        .iter()
+        .find(|file| file.id == id)
+        .ok_or_else(|| Error::Invalid("No file with that ID in dort.toml.".into()))
+}
+
+fn read_template(
+    source: &Path,
+    repository: &Path,
+    files: &[ManagedFile],
+) -> Result<(String, Entry)> {
+    let mut template = inspect_template(source)?;
     check_secret_sources(&template, repository, files)?;
     let expected = template
         .fingerprint
@@ -130,8 +152,10 @@ fn read_template(source: &Path, repository: &Path, files: &[ManagedFile]) -> Res
     {
         return Err(unavailable());
     }
-    String::from_utf8(bytes)
-        .map_err(|_| Error::Invalid("Template source must be UTF-8 text.".into()))
+    template.sha256 = Some(crate::journal::digest(&bytes));
+    let text = String::from_utf8(bytes)
+        .map_err(|_| Error::Invalid("Template source must be UTF-8 text.".into()))?;
+    Ok((text, template))
 }
 
 pub(crate) fn input_issues(file: &ManagedFile) -> impl Iterator<Item = String> {

@@ -11,6 +11,7 @@ use ui::{
 };
 
 pub struct Report {
+    pub id: String,
     document: Text<'static>,
     pub scroll: ReviewScroll,
 }
@@ -71,6 +72,7 @@ impl Report {
         }
         lines.push(Line::styled("End of rendered output", ui::muted()));
         Self {
+            id: preview.id.clone(),
             document: Text::from(lines),
             scroll: ReviewScroll::default(),
         }

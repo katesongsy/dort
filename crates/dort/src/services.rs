@@ -66,6 +66,23 @@ pub fn preview_generated(
     dort_core::generated::Preview::prepare(host, &root, id)
 }
 
+pub fn review_generated_deployment(
+    host: &HostContext,
+    repository: Option<&Path>,
+    id: &str,
+    profiles: &[String],
+) -> Result<dort_core::generated::Deployment> {
+    let root = repository
+        .map(|path| {
+            std::path::absolute(path).map_err(|source| dort_core::Error::Io {
+                operation: "resolve repository path",
+                path: path.to_owned(),
+                source,
+            })
+        })
+        .transpose()?;
+    dort_core::generated::Deployment::prepare(host, root.as_deref(), id, profiles)
+}
 pub struct ProfileChoices {
     pub known: BTreeSet<String>,
     pub defaults: Vec<String>,

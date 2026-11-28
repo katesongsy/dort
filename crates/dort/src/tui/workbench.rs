@@ -283,6 +283,8 @@ fn compact(label: &'static str) -> &'static str {
         "Edit mapping"
     } else if label == Action::SaveProfileChoice.label() {
         "Local choice"
+    } else if label == "Review deployment" {
+        label
     } else if label == "Review resume" {
         "Resume review"
     } else if label == "Edit profile defaults" {
@@ -493,6 +495,18 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
         );
     app.preview_approval()
         .present_key(&app.hits, preview.pending.confirmation_label());
+    if frame.area().width >= 64
+        && matches!(
+            preview.pending,
+            super::actions::Pending::GeneratedDeployment(_)
+        )
+    {
+        app.presented(
+            "Last line",
+            "End",
+            Target::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)),
+        );
+    }
     if app.environment_can_check() {
         app.presented(
             "Check environment",
@@ -515,10 +529,17 @@ fn overlay(frame: &mut Frame, inner: Rect, app: &App, overlay: &Overlay) {
         Overlay::Generated(report) => {
             report.draw(frame, inner, app);
             app.presented(
-                "Last line",
-                "End",
-                Target::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)),
+                "Review deployment",
+                "r",
+                Target::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)),
             );
+            if frame.area().width >= 64 {
+                app.presented(
+                    "Last line",
+                    "End",
+                    Target::Key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE)),
+                );
+            }
         }
         Overlay::Ignored { paths, selected } => {
             super::ignored::draw(frame, inner, app, paths, *selected)

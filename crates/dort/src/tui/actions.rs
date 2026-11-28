@@ -244,7 +244,7 @@ pub fn load_scoped(
                                     state: if input.mapping.mode
                                         == dort_core::model::FileMode::Template
                                     {
-                                        "Preview only"
+                                        "Template"
                                     } else {
                                         match file.outcome {
                                             planner::Outcome::NoOp => "Linked",
@@ -328,6 +328,7 @@ pub enum Pending {
     Profile(Box<dort_core::local::ProfilePreview>),
     ToolDeclaration(Box<dort_core::tools::declaration::Preview>),
     Ignore(dort_core::discovery_ignore::Preview),
+    GeneratedDeployment(Box<dort_core::generated::Deployment>),
     Files(Box<Plan>),
     Batch(Box<dort_core::batch::Plan>),
     Init(Box<BootstrapPreview>),
@@ -339,6 +340,9 @@ impl Pending {
         Ok(match self {
             Self::ToolDeclaration(p) => crate::services::declaration::report(p),
             Self::Ignore(preview) => preview.human(),
+            Self::GeneratedDeployment(p) => {
+                crate::services::presentation::generated_deployment(p.review())
+            }
             Self::Profile(p) => p.human(),
             Self::Configuration(p) => p.human(),
             Self::Environment(p) => p.human(),
@@ -398,6 +402,7 @@ impl Pending {
             Self::FullCheck(_) => "Run checks",
             Self::EnvironmentAbandon(_) => "Abandon environment run",
             Self::Profile(_) => "Save profile choice",
+            Self::GeneratedDeployment(_) => "Deploy generated file",
             Self::Configuration(p) => p.label(),
             _ if self.adoption() => "Adopt all",
             _ => "Confirm changes",
@@ -442,6 +447,9 @@ impl Pending {
             Self::ToolDeclaration(p) => dort_core::tools::declaration::Approval::from_preview(*p)
                 .map(|a| Approved::ToolDeclaration(Box::new(a))),
             Self::Ignore(preview) => Ok(Approved::Ignore(preview.approve())),
+            Self::GeneratedDeployment(p) => {
+                Ok(Approved::GeneratedDeployment(Box::new(p.approve())))
+            }
             Self::Profile(p) => Ok(Approved::Profile(Box::new(p.approve()))),
             Self::Configuration(p) => Ok(Approved::Configuration(p.approve())),
             Self::Environment(p) => Ok(Approved::Environment(Box::new(p.approve()?))),
@@ -483,6 +491,7 @@ pub enum Approved {
     Profile(Box<dort_core::local::ProfileApproval>),
     ToolDeclaration(Box<dort_core::tools::declaration::Approval>),
     Ignore(dort_core::discovery_ignore::Approval),
+    GeneratedDeployment(Box<dort_core::generated::Approval>),
     Files(Box<FileApproval>),
     Batch(Box<dort_core::batch::Approval>),
     Init(Box<BootstrapApproval>, PathBuf),
@@ -542,6 +551,14 @@ impl Approved {
             Self::Ignore(approval) => {
                 approval.execute(host, false)?;
                 ("Discovery preferences", None, None)
+            }
+            Self::GeneratedDeployment(approval) => {
+                return match approval.execute() {
+                    Err(error @ Error::RecoveryRequired(_)) => Err(error),
+                    result => Ok(Output::GeneratedDeployed(
+                        result.map_err(|error| diagnostic(&error)),
+                    )),
+                };
             }
             Self::Batch(approval) => {
                 let lock = WriterLock::acquire(host)?;
@@ -691,6 +708,7 @@ pub enum Task {
     IgnoredPaths,
     Ignore(PathBuf, bool),
     PreviewGenerated(String),
+    ReviewGeneratedDeployment(String),
     DiscoveryTree(super::discovery_tree::Read),
     DiscoverContent(super::discover_content::Read),
     History,
@@ -756,6 +774,7 @@ pub enum Output {
     ToolClosed(std::result::Result<dort_core::tools::install::Attempt, String>),
     IgnoredPaths(Vec<PathBuf>),
     Generated(Box<dort_core::generated::Preview>),
+    GeneratedDeployed(std::result::Result<dort_core::generated::Published, String>),
     DiscoveryTree(super::discovery_tree::Report),
     DiscoverContent(super::discover_content::Report),
     History {
@@ -962,6 +981,13 @@ pub fn perform_scoped_with_install_progress(
             &id,
         )
         .map(|preview| Output::Generated(Box::new(preview))),
+        Task::ReviewGeneratedDeployment(id) => crate::services::review_generated_deployment(
+            host,
+            repository.as_deref(),
+            &id,
+            requested,
+        )
+        .map(|p| Output::Preview(Pending::GeneratedDeployment(Box::new(p)))),
         Task::DiscoveryTree(read) => Ok(Output::DiscoveryTree(read.perform())),
         Task::DiscoverContent(read) => Ok(Output::DiscoverContent(read.perform(host))),
         Task::History => Ok(match journal::diagnose(host) {

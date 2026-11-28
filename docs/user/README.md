@@ -19,6 +19,7 @@ Upgrading? See [Upgrade from v0.1.0](manifest.md#upgrade-from-v010).
 | --- | --- |
 | Validate a manifest | `manifest check`, Checks in the TUI |
 | Discover and manage dotfiles | `files discover`, `list`, `plan`, `add`, `apply`, `remove` |
+| Deploy a new generated file | Files **Review deployment** (`R` from preview), `files deploy-generated` |
 | Create or attach a local repository | `init PATH`, Create/attach |
 | Inspect Git status and diff | Git page shows patch previews; CLI uses `git status` and `git diff --patch` |
 | Check installed tools | Tools **Check installed** (`C`), `tools check` |
@@ -28,6 +29,6 @@ Upgrading? See [Upgrade from v0.1.0](manifest.md#upgrade-from-v010).
 | Add, edit or remove declarations | Tools `a` / `e` / `d`, `tools declare` / `edit` / `remove` |
 | Inspect or recover interrupted writes | `history`, `recovery list`, Recovery |
 
-Not implemented: generated file deployment, secrets, Git sync, staging/commit/push, and general package upgrades.
+Not implemented: secrets, Git sync, staging/commit/push, and general package upgrades.
 
 Every write needs a preview and confirmation. `--dry-run` previews without writing. Run `dort --help` for command syntax.
