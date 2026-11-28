@@ -6,8 +6,9 @@ use dort_core::{
     bootstrap,
     context::HostContext,
     generated::{
-        Update, UpdateAction, UpdateApproval, UpdateLocation, UpdateOutcome, pending_update,
-        recover_reviewed_update,
+        ConversionLocation, Convert, ConvertApproval, ConvertOutcome, Update, UpdateAction,
+        UpdateApproval, UpdateLocation, UpdateOutcome, pending_conversion, pending_update,
+        recover_conversion, recover_reviewed_update,
     },
     journal,
     local::LocalConfig,
@@ -57,6 +58,7 @@ pub struct FileCounts {
     pub plan_blocked: bool,
 }
 pub type GeneratedRecovery = Option<std::result::Result<UpdateLocation, String>>;
+pub type ConversionRecovery = Option<std::result::Result<ConversionLocation, String>>;
 
 #[derive(Default)]
 pub struct Data {
@@ -75,6 +77,7 @@ pub struct Data {
     pub history: Vec<journal::Diagnosis>,
     pub history_error: Option<String>,
     pub generated_recovery: GeneratedRecovery,
+    pub conversion_recovery: ConversionRecovery,
 }
 impl Data {
     pub fn is_template(&self, index: usize) -> bool {
@@ -337,7 +340,14 @@ pub fn load_scoped(
         history,
         history_error,
         generated_recovery: generated_recovery(host),
+        conversion_recovery: conversion_recovery(host),
     })
+}
+
+fn conversion_recovery(host: &HostContext) -> ConversionRecovery {
+    pending_conversion(host)
+        .transpose()
+        .map(|result| result.map_err(|error| diagnostic(&error)))
 }
 
 fn generated_recovery(host: &HostContext) -> GeneratedRecovery {
@@ -360,6 +370,8 @@ pub enum Pending {
     GeneratedDeployment(Box<dort_core::generated::Deployment>),
     GeneratedUpdate(Box<Update>),
     GeneratedRecovery(UpdateLocation),
+    Conversion(Box<Convert>),
+    ConversionRecovery(ConversionLocation),
     Files(Box<Plan>),
     Batch(Box<dort_core::batch::Plan>),
     Init(Box<BootstrapPreview>),
@@ -378,6 +390,10 @@ impl Pending {
             }
             Self::GeneratedUpdate(p) => generated_update::review(&p.review())?,
             Self::GeneratedRecovery(location) => generated_update::recovery_review(location),
+            Self::Conversion(p) => crate::services::generated_convert::review(&p.review())?,
+            Self::ConversionRecovery(location) => {
+                crate::services::generated_convert::recovery_review(location)
+            }
             Self::Profile(p) => p.human(),
             Self::Configuration(p) => p.human(),
             Self::Environment(p) => p.human(),
@@ -447,6 +463,8 @@ impl Pending {
             Self::GeneratedDeployment(_) => "Deploy generated file",
             Self::GeneratedUpdate(p) => generated_update::confirmation_label(p.action()),
             Self::GeneratedRecovery(location) => generated_update::recovery_label(location.action),
+            Self::Conversion(_) => crate::services::generated_convert::CONFIRMATION_LABEL,
+            Self::ConversionRecovery(_) => crate::services::generated_convert::RECOVERY_LABEL,
             Self::Configuration(p) => p.label(),
             _ if self.adoption() => "Adopt all",
             _ => "Confirm changes",
@@ -498,6 +516,8 @@ impl Pending {
             }
             Self::GeneratedUpdate(p) => Ok(Approved::GeneratedUpdate(Box::new(p.approve()))),
             Self::GeneratedRecovery(location) => Ok(Approved::GeneratedRecovery(location)),
+            Self::Conversion(p) => Ok(Approved::Conversion(Box::new(p.approve()))),
+            Self::ConversionRecovery(_) => Ok(Approved::ConversionRecovery),
             Self::Profile(p) => Ok(Approved::Profile(Box::new(p.approve()))),
             Self::Configuration(p) => Ok(Approved::Configuration(p.approve())),
             Self::Environment(p) => Ok(Approved::Environment(Box::new(p.approve()?))),
@@ -544,6 +564,8 @@ pub enum Approved {
     GeneratedDeployment(Box<dort_core::generated::Approval>),
     GeneratedUpdate(Box<UpdateApproval>),
     GeneratedRecovery(UpdateLocation),
+    Conversion(Box<ConvertApproval>),
+    ConversionRecovery,
     Files(Box<FileApproval>),
     Batch(Box<dort_core::batch::Approval>),
     Init(Box<BootstrapApproval>, PathBuf),
@@ -630,6 +652,14 @@ impl Approved {
             }
             Self::GeneratedRecovery(location) => {
                 return recover_reviewed_update(host, &location).map(Output::GeneratedUpdated);
+            }
+            Self::Conversion(approval) => {
+                return approval
+                    .execute()
+                    .map(|outcome| Output::ConversionDone(Some(outcome)));
+            }
+            Self::ConversionRecovery => {
+                return recover_conversion(host).map(Output::ConversionDone);
             }
             Self::Batch(approval) => {
                 let lock = WriterLock::acquire(host)?;
@@ -790,6 +820,8 @@ pub enum Task {
     ReviewGeneratedDeployment(String),
     ReviewGeneratedUpdate(String, UpdateAction),
     ReviewGeneratedRecovery,
+    ReviewConversion(String),
+    ReviewConversionRecovery,
     DiscoveryTree(super::discovery_tree::Read),
     DiscoverContent(super::discover_content::Read),
     History,
@@ -868,6 +900,7 @@ pub enum Output {
     ComposeFinished(Box<dort_core::generated::compose::Outcome>),
     GeneratedDeployed(std::result::Result<dort_core::generated::Published, String>),
     GeneratedUpdated(Option<UpdateOutcome>),
+    ConversionDone(Option<ConvertOutcome>),
     DiscoveryTree(super::discovery_tree::Report),
     DiscoverContent(super::discover_content::Report),
     History {
@@ -1126,6 +1159,17 @@ pub fn perform_scoped_with_install_progress(
         Task::ReviewGeneratedRecovery => Ok(match pending_update(host)? {
             Some(location) => Output::Preview(Pending::GeneratedRecovery(location)),
             None => Output::GeneratedUpdated(None),
+        }),
+        Task::ReviewConversion(id) => crate::services::review_generated_conversion(
+            host,
+            repository.as_deref(),
+            &id,
+            requested,
+        )
+        .map(|p| Output::Preview(Pending::Conversion(Box::new(p)))),
+        Task::ReviewConversionRecovery => Ok(match pending_conversion(host)? {
+            Some(location) => Output::Preview(Pending::ConversionRecovery(location)),
+            None => Output::ConversionDone(None),
         }),
         Task::DiscoveryTree(read) => Ok(Output::DiscoveryTree(read.perform())),
         Task::DiscoverContent(read) => Ok(Output::DiscoverContent(read.perform(host))),

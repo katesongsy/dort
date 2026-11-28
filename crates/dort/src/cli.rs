@@ -1,9 +1,12 @@
-use crate::services::{adopt_request, generated_update, presentation};
+use crate::services::{adopt_request, generated_convert, generated_update, presentation};
 use clap::{Parser, Subcommand, ValueEnum};
 use dort_core::{
     Error, bootstrap,
     context::HostContext,
-    generated::{UpdateAction, UpdateOutcome, pending_update, recover_reviewed_update},
+    generated::{
+        ConvertOutcome, UpdateAction, UpdateOutcome, pending_conversion, pending_update,
+        recover_conversion, recover_reviewed_update,
+    },
     git, journal,
     local::LocalConfig,
     planner::{self, Request, UnmanageMode},
@@ -177,6 +180,8 @@ enum RecoveryCommand {
     },
     /// Resolve an interrupted generated file change without writing the destination.
     RecoverUpdate,
+    /// Finish an interrupted conversion of a link mapping into a generated file.
+    RecoverConversion,
     /// List operation records and write blockers.
     List,
 }
@@ -247,6 +252,12 @@ enum FilesCommand {
     ClearLocalInput { id: String, name: String },
     /// Review and create one generated file at a missing Home destination.
     DeployGenerated {
+        id: String,
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
+    /// Review turning one link mapping into a generated file at the same destination.
+    ConvertGenerated {
         id: String,
         #[arg(long = "profile")]
         profiles: Vec<String>,
@@ -1149,6 +1160,9 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
         Command::Recovery {
             command: RecoveryCommand::RecoverUpdate,
         } => return recover_generated_update(cli, &host),
+        Command::Recovery {
+            command: RecoveryCommand::RecoverConversion,
+        } => return recover_generated_conversion(cli, &host),
         Command::Doctor => {
             let report = crate::services::doctor(&host, &local);
             if cli.json {
@@ -1181,12 +1195,18 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                 Ok(location) => (location, None),
                 Err(error) => (None, Some(error.to_string())),
             };
+            let (converting, conversion_error) = match pending_conversion(&host) {
+                Ok(location) => (location, None),
+                Err(error) => (None, Some(error.to_string())),
+            };
             let write_blocked = generated.is_some()
                 || generated_error.is_some()
+                || converting.is_some()
+                || conversion_error.is_some()
                 || transactions.iter().any(journal::Diagnosis::blocks_writes);
             if cli.json {
                 print_ascii_json(
-                    &serde_json::json!({"schema": 1, "read_only": true, "write_blocked": write_blocked, "transactions": transactions, "generated_update": generated, "generated_update_error": generated_error}),
+                    &serde_json::json!({"schema": 1, "read_only": true, "write_blocked": write_blocked, "transactions": transactions, "generated_update": generated, "generated_update_error": generated_error, "pending_conversion": converting, "pending_conversion_error": conversion_error}),
                     "could not encode recovery list",
                 )?;
             } else {
@@ -1212,6 +1232,18 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                 if let Some(error) = generated_error {
                     println!(
                         "Generated update status unavailable: {}",
+                        presentation::inline(&error)
+                    );
+                }
+                if let Some(location) = converting {
+                    println!(
+                        "Run `dort recovery recover-conversion --dry-run` to review the interrupted conversion.\n{}",
+                        generated_convert::recovery_review(&location)
+                    );
+                }
+                if let Some(error) = conversion_error {
+                    println!(
+                        "Conversion status unavailable: {}",
                         presentation::inline(&error)
                     );
                 }
@@ -1360,6 +1392,9 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                         );
                     }
                 }
+            }
+            FilesCommand::ConvertGenerated { id, profiles } => {
+                return convert_generated(cli, &host, &id, &profiles);
             }
             FilesCommand::UpdateGenerated { id, profiles }
             | FilesCommand::ReplaceGenerated { id, profiles }
@@ -1808,6 +1843,82 @@ fn change_generated(
     }
     approve(cli)?;
     generated_update_result(cli, update.approve().execute()?, false)
+}
+
+fn convert_generated(
+    cli: &Cli,
+    host: &HostContext,
+    id: &str,
+    profiles: &[String],
+) -> dort_core::Result<ExitCode> {
+    if cli.confirm_remove.is_some() {
+        return Err(Error::Invalid(
+            "Generated file conversion does not use --confirm-remove.".into(),
+        ));
+    }
+    let conversion =
+        crate::services::review_generated_conversion(host, cli.repo.as_deref(), id, profiles)?;
+    let change = conversion.review();
+    let review = generated_convert::review(&change)?;
+    if cli.dry_run && cli.json {
+        print_ascii_json(
+            &serde_json::json!({"schema": 1, "read_only": true, "id": change.id, "repository": change.repository, "active_profiles": change.active_profiles, "source": change.source, "template": change.template, "destination": change.destination, "retained": change.retained, "permissions": change.permissions, "template_permissions": change.template_permissions, "review": review}),
+            "could not encode conversion review",
+        )?;
+    } else if !cli.json {
+        print_update_review(&review)?;
+    }
+    if cli.dry_run {
+        return Ok(ExitCode::SUCCESS);
+    }
+    approve(cli)?;
+    conversion_result(cli, conversion.approve().execute()?)
+}
+
+fn conversion_result(cli: &Cli, outcome: ConvertOutcome) -> dort_core::Result<ExitCode> {
+    if cli.json {
+        print_ascii_json(&outcome, "could not encode conversion result")?;
+    } else {
+        println!("{}", generated_convert::outcome(&outcome));
+    }
+    Ok(match outcome {
+        ConvertOutcome::NeedsRecovery { .. } => ExitCode::from(4),
+        ConvertOutcome::Converted(_) => ExitCode::SUCCESS,
+    })
+}
+
+fn recover_generated_conversion(cli: &Cli, host: &HostContext) -> dort_core::Result<ExitCode> {
+    if cli.repo.is_some() || cli.confirm_remove.is_some() {
+        return Err(Error::Invalid(
+            "Conversion recovery is host-wide. Omit --repo and --confirm-remove.".into(),
+        ));
+    }
+    if let Some(location) = pending_conversion(host)? {
+        let review = generated_convert::recovery_review(&location);
+        if cli.dry_run && cli.json {
+            print_ascii_json(
+                &serde_json::json!({"schema": 1, "read_only": true, "pending_conversion": location, "review": review}),
+                "could not encode conversion recovery review",
+            )?;
+        } else if !cli.json {
+            print_update_review(&review)?;
+        }
+        if cli.dry_run {
+            return Ok(ExitCode::SUCCESS);
+        }
+        approve(cli)?;
+        if let Some(outcome) = recover_conversion(host)? {
+            return conversion_result(cli, outcome);
+        }
+    }
+    if cli.json {
+        print_json(
+            &serde_json::json!({"outcome": "no_pending_conversion", "read_only": cli.dry_run}),
+        )?;
+    } else {
+        println!("No conversion needs recovery.");
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn recover_generated_update(cli: &Cli, host: &HostContext) -> dort_core::Result<ExitCode> {

@@ -524,7 +524,11 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
     use super::actions::Pending;
     let document = if matches!(
         preview.pending,
-        Pending::GeneratedUpdate(_) | Pending::GeneratedRecovery(_) | Pending::TemplateFile(..)
+        Pending::GeneratedUpdate(_)
+            | Pending::GeneratedRecovery(_)
+            | Pending::Conversion(_)
+            | Pending::ConversionRecovery(_)
+            | Pending::TemplateFile(..)
     ) {
         Text::raw(preview.text.clone())
     } else {
@@ -548,6 +552,8 @@ fn preview(frame: &mut Frame, area: Rect, app: &App) {
             Pending::GeneratedDeployment(_)
                 | Pending::GeneratedUpdate(_)
                 | Pending::GeneratedRecovery(_)
+                | Pending::Conversion(_)
+                | Pending::ConversionRecovery(_)
                 | Pending::TemplateFile(..)
         )
     {

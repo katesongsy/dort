@@ -443,6 +443,7 @@ impl App {
             Ok(Output::ComposeFinished(outcome)) => self.accept_compose(*outcome),
             Ok(Output::GeneratedDeployed(result)) => self.accept_generated_deployment(result),
             Ok(Output::GeneratedUpdated(outcome)) => self.accept_generated_update(outcome),
+            Ok(Output::ConversionDone(outcome)) => self.accept_conversion(outcome),
             Ok(Output::History {
                 rows,
                 error,
@@ -2154,6 +2155,23 @@ impl App {
             }
             KeyCode::Delete if self.tab == Tab::Files => return self.activate(Action::ClearFilter),
             KeyCode::Char('p') => return self.activate(Action::Choose),
+            KeyCode::Char('c')
+                if self.tab == Tab::Recovery
+                    && self
+                        .data
+                        .as_ref()
+                        .and_then(|d| d.conversion_recovery.as_ref())
+                        .is_some_and(Result::is_ok) =>
+            {
+                return Some(Task::ReviewConversionRecovery);
+            }
+            KeyCode::Char('c')
+                if self.tab == Tab::Files
+                    && self.files_page == FilesPage::Managed
+                    && self.action_reason(Action::ConvertGenerated).is_none() =>
+            {
+                return self.activate(Action::ConvertGenerated);
+            }
             KeyCode::Char('c') => return self.activate(Action::CheckCurrent),
             KeyCode::Char('v')
                 if self.tab != Tab::Tools
@@ -2571,6 +2589,9 @@ impl App {
             }
             Action::PreviewGenerated => {
                 return Some(Task::PreviewGenerated(self.selected_mapping()?.id.clone()));
+            }
+            Action::ConvertGenerated => {
+                return Some(Task::ReviewConversion(self.selected_mapping()?.id.clone()));
             }
             Action::NewGenerated | Action::EditGenerated => {
                 let before = if action == Action::EditGenerated {
@@ -3558,6 +3579,15 @@ impl App {
                 if self.files_page != FilesPage::Managed || self.selected_mapping().is_none() =>
             {
                 Some("Select a displayed file mapping first.")
+            }
+            Action::ConvertGenerated
+                if self.tab != Tab::Files
+                    || self.files_page != FilesPage::Managed
+                    || !self
+                        .selected_mapping()
+                        .is_some_and(|file| file.mode == dort_core::model::FileMode::Link) =>
+            {
+                Some("Select a link mapping in Files / Managed.")
             }
             Action::CheckCurrent | Action::Profiles
                 if self

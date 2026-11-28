@@ -173,9 +173,14 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         .data
         .as_ref()
         .and_then(|data| data.generated_recovery.as_ref());
+    let conversion = app
+        .data
+        .as_ref()
+        .and_then(|data| data.conversion_recovery.as_ref());
     let rows = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(u16::from(generated.is_some())),
+        Constraint::Length(u16::from(conversion.is_some())),
         Constraint::Length(1),
         Constraint::Min(3),
     ])
@@ -195,6 +200,22 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             "Generated recovery unavailable. r retries."
         };
         frame.render_widget(Paragraph::new(Line::styled(notice, ui::danger())), rows[1]);
+    }
+    if let Some(pending) = conversion {
+        let notice = if pending.is_ok() {
+            if !app.history_search.editing {
+                use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+                app.presented(
+                    crate::services::generated_convert::RECOVERY_LABEL,
+                    "c",
+                    Target::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)),
+                );
+            }
+            crate::services::generated_convert::recovery_status()
+        } else {
+            "Conversion recovery unavailable. r retries."
+        };
+        frame.render_widget(Paragraph::new(Line::styled(notice, ui::danger())), rows[2]);
     }
     if !app.history_search.editing
         && app.history_region != Region::Details
@@ -216,11 +237,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         .map(|d| {
             (
                 d.history.len().to_string(),
-                if generated.is_some_and(Result::is_err) {
+                if generated.is_some_and(Result::is_err) || conversion.is_some_and(Result::is_err) {
                     "Unknown".into()
                 } else {
                     (d.history.iter().filter(|r| r.blocks_writes()).count()
-                        + usize::from(generated.is_some()))
+                        + usize::from(generated.is_some())
+                        + usize::from(conversion.is_some()))
                     .to_string()
                 },
             )
@@ -264,8 +286,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             super::input::Target::Action(super::shell::Action::Inspect),
         );
     }
-    app.hits.click(rows[2], super::input::Target::Filter);
-    let content = rows[3];
+    app.hits.click(rows[3], super::input::Target::Filter);
+    let content = rows[4];
     let Some(data) = &app.data else {
         ui::reader::Reader::new(&app.hits).report(
             frame,

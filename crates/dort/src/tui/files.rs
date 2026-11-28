@@ -201,6 +201,11 @@ fn details(app: &App) -> Text<'static> {
             lines.push(Line::raw(
                 "Keep writes a regular file. Both actions keep the source.",
             ));
+            if row.mode == FileMode::Link {
+                lines.push(Line::raw(
+                    "Convert replaces this link with a generated file and keeps the old link target.",
+                ));
+            }
             lines.push(Line::default());
             lines.push(section("File types"));
             lines.push(field("Source kind", row.source_kind, Tone::Neutral));
@@ -269,10 +274,16 @@ pub(super) fn controls(app: &App) -> impl Iterator<Item = ui::ActionButton> {
         Action::Configure(Kind::EditFile),
         mapping.is_some(),
     );
+    let convert = (
+        Action::ConvertGenerated.label(),
+        "c",
+        Action::ConvertGenerated,
+        mapping.is_some_and(|file| file.mode == FileMode::Link),
+    );
     let managed = if app.inventory.details {
-        [environment, edit, add]
+        [environment, edit, add, convert]
     } else {
-        [environment, add, edit]
+        [environment, add, edit, convert]
     };
     let generated = [
         (

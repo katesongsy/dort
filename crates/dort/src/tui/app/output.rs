@@ -503,6 +503,34 @@ impl App {
         };
         None
     }
+    pub(super) fn accept_conversion(
+        &mut self,
+        outcome: Option<dort_core::generated::ConvertOutcome>,
+    ) -> Option<Task> {
+        use dort_core::generated::ConvertOutcome;
+        self.receipt = None;
+        self.failure = None;
+        self.details_scroll = 0;
+        self.status = outcome
+            .as_ref()
+            .map_or(
+                "No conversion needs recovery.",
+                crate::services::generated_convert::status,
+            )
+            .into();
+        self.result = Some(outcome.as_ref().map_or_else(
+            || "No conversion needs recovery.".into(),
+            crate::services::generated_convert::outcome,
+        ));
+        self.show_result = true;
+        self.data
+            .get_or_insert_with(Default::default)
+            .conversion_recovery = match outcome {
+            Some(ConvertOutcome::NeedsRecovery { location, .. }) => Some(Ok(location)),
+            _ => None,
+        };
+        None
+    }
     pub(super) fn accept_completed(
         &mut self,
         completion: Completion,
