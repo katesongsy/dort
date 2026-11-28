@@ -218,6 +218,8 @@ fn edit_file(doc: &mut DocumentMut, manifest: &Manifest, file: &ManagedFile) -> 
         for (key, changed) in [
             ("source", before.source != file.source),
             ("template", before.template != file.template),
+            ("mode", before.mode != file.mode),
+            ("permissions", before.permissions != file.permissions),
             ("inputs", before.inputs != file.inputs),
             ("host_inputs", before.host_inputs != file.host_inputs),
             ("local_inputs", before.local_inputs != file.local_inputs),
@@ -533,6 +535,78 @@ impl Preview {
             original,
             replacement,
             description,
+        })
+    }
+
+    /// Review a mapping rewritten by converting a link mapping into a generated
+    /// file. The mode, source and permissions change together.
+    pub(crate) fn prepare_converted(
+        host: &HostContext,
+        repository: &Path,
+        file: &ManagedFile,
+    ) -> Result<Self> {
+        let (local, config) = LocalConfig::load_bound(host)?;
+        let repository_id = local
+            .repository_id(repository)
+            .ok_or_else(|| invalid("Choose a registered repository."))?;
+        let path = repository.join("dort.toml");
+        let (manifest, entry) = observation::read_manifest(&path)?;
+        let original = crate::adoption::checked_bytes(&entry)?;
+        let text =
+            std::str::from_utf8(&original).map_err(|_| invalid("Manifest must be UTF-8."))?;
+        let before = manifest
+            .files
+            .iter()
+            .find(|current| current.id == file.id)
+            .ok_or_else(|| {
+                invalid("That mapping no longer exists. Refresh and select it again.")
+            })?;
+        if before.mode != FileMode::Link {
+            return Err(invalid(
+                "That mapping is no longer a link mapping. Refresh and review the conversion again.",
+            ));
+        }
+        let mut doc: DocumentMut = text
+            .parse()
+            .map_err(|_| invalid("Invalid manifest. Contents withheld."))?;
+        edit_file(&mut doc, &manifest, file)?;
+        let replacement = doc.to_string();
+        let parsed = Manifest::parse(&replacement).map_err(|error| match error {
+            Error::Parse(_) => invalid(
+                "Dort could not prepare this change to dort.toml. No changes were made. If it happens again, report it as a Dort bug.",
+            ),
+            error => error,
+        })?;
+        parsed.validate_file_targets(host, &parsed.profiles.known(), Some(repository), None)?;
+        let (generated, watched_source) = generated::Preview::from_manifest(
+            host,
+            repository,
+            Some(repository_id),
+            &parsed,
+            &file.id,
+            None,
+        )?;
+        let generated = generated.map_err(|setup| invalid(setup.guidance()))?;
+        Ok(Self {
+            generated: Some(Ok(generated)),
+            repository: repository.to_owned(),
+            backup_root: repository_state_path(host, repository_id)?.join("manifest-edits"),
+            repair_git: None,
+            config,
+            manifest: entry,
+            watched_target: None,
+            watched_source: watched_source.map(|mut entry| {
+                entry.sha256 = None;
+                entry
+            }),
+            original,
+            replacement,
+            description: format!(
+                "Convert {:?} to a generated file.\nTemplate file: {:?}\nPermissions: {}",
+                file.id,
+                file.source.as_deref().unwrap_or(Path::new("")),
+                file.permissions.as_deref().unwrap_or("")
+            ),
         })
     }
 

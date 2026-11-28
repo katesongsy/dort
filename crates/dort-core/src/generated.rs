@@ -1,5 +1,6 @@
 //! Previews and deployment of repository-declared generated files.
 pub mod compose;
+mod convert;
 mod deploy;
 mod inputs;
 pub mod local_inputs;
@@ -14,6 +15,10 @@ use crate::{
     model::{FileContent, FileMode, ManagedFile},
     observation::{self, Entry, Kind},
     template::{self, Input, Issue, Template, TemplateError},
+};
+pub use convert::{
+    ConversionLocation, ConversionStep, Convert, ConvertApproval, ConvertOutcome, ConvertReview,
+    Converted, pending_conversion, recover_conversion,
 };
 pub use deploy::{Approval, Deployment, DeploymentReview, Published};
 pub use inputs::{InputProvenance, ResolvedInput, ResolvedInputs};
