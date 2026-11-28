@@ -267,7 +267,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         ])),
         rows[0],
     );
-    search(frame, rows[2], app);
+    search(frame, rows[3], app);
     if app.history_search.editing {
         app.presented(
             "Done",

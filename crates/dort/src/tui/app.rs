@@ -1318,6 +1318,18 @@ impl App {
     pub(super) fn action_key(&mut self, key: KeyEvent, width: u16, height: u16) -> Option<Task> {
         self.dispatch_key(key, width, height, false)
     }
+    /// `c` stays the Checks shortcut unless the current screen offers conversion or a check.
+    fn c_means_conversion_or_environment_check(&self) -> bool {
+        self.environment_can_check()
+            || self.action_reason(Action::ConvertGenerated).is_none()
+            || self.conversion_recovery_pending()
+    }
+    fn conversion_recovery_pending(&self) -> bool {
+        self.data
+            .as_ref()
+            .and_then(|data| data.conversion_recovery.as_ref())
+            .is_some_and(Result::is_ok)
+    }
     fn dispatch_key(
         &mut self,
         key: KeyEvent,
@@ -1419,7 +1431,7 @@ impl App {
             && key.modifiers == KeyModifiers::NONE
             && !self.key_text_entry()
             && let KeyCode::Char(letter) = key.code
-            && !(letter == 'c' && self.environment_can_check())
+            && !(letter == 'c' && self.c_means_conversion_or_environment_check())
             && let Some(place) = super::navigation::section_shortcut(letter)
         {
             if width < 48 || height < 14 {
@@ -2156,12 +2168,7 @@ impl App {
             KeyCode::Delete if self.tab == Tab::Files => return self.activate(Action::ClearFilter),
             KeyCode::Char('p') => return self.activate(Action::Choose),
             KeyCode::Char('c')
-                if self.tab == Tab::Recovery
-                    && self
-                        .data
-                        .as_ref()
-                        .and_then(|d| d.conversion_recovery.as_ref())
-                        .is_some_and(Result::is_ok) =>
+                if self.tab == Tab::Recovery && self.conversion_recovery_pending() =>
             {
                 return Some(Task::ReviewConversionRecovery);
             }

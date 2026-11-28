@@ -75,7 +75,7 @@ fn write_lines(text: &mut String, label: &str, body: &str) -> Result<()> {
                 b'\r' => text.push_str("\\r"),
                 b'\n' => text.push_str("\\n"),
                 b'\\' => text.push_str("\\\\"),
-                b'!'..=b'~' => text.push(char::from(byte)),
+                b' '..=b'~' => text.push(char::from(byte)),
                 _ => {
                     let _ = write!(text, "\\x{byte:02x}");
                 }

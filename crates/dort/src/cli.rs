@@ -1394,7 +1394,7 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                 }
             }
             FilesCommand::ConvertGenerated { id, profiles } => {
-                return convert_generated(cli, &host, &id, &profiles);
+                return convert_generated(cli, &host, id, profiles);
             }
             FilesCommand::UpdateGenerated { id, profiles }
             | FilesCommand::ReplaceGenerated { id, profiles }

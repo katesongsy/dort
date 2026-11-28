@@ -1153,3 +1153,92 @@ fn generated_recovery_is_a_read_only_no_op_when_nothing_is_pending() {
     }
     sandbox.assert_readonly();
 }
+
+#[test]
+fn convert_generated_reviews_read_only_then_converts_and_recovery_finishes() {
+    use dort_core::{
+        context::HostContext, local::RepositoryRegistry, platform::Platform, state::WriterLock,
+    };
+    let sandbox = Sandbox::new();
+    let manifest = sandbox.manifest(
+        "schema = 1\n[[files]]\nid = 'settings'\nmode = 'link'\nsource = 'settings.sh'\ntarget = '~/settings'\n",
+    );
+    let root = manifest.parent().unwrap().to_path_buf();
+    fs::create_dir(root.join(".git")).unwrap();
+    let host = HostContext::new(
+        sandbox.home.clone(),
+        None,
+        None,
+        Platform::detect().unwrap(),
+        dort_core::platform::Architecture::detect().unwrap(),
+    )
+    .unwrap();
+    RepositoryRegistry::register(&host, &WriterLock::acquire(&host).unwrap(), &root).unwrap();
+    let source = root.join("settings.sh");
+    fs::write(&source, b"keep\n").unwrap();
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o644)).unwrap();
+    let destination = sandbox.home.join("settings");
+    std::os::unix::fs::symlink(&source, &destination).unwrap();
+    let convert = || {
+        let mut command = sandbox.command();
+        command.args([
+            "--repo",
+            "repository",
+            "files",
+            "convert-generated",
+            "settings",
+        ]);
+        command
+    };
+
+    let review = convert().arg("--dry-run").assert().success();
+    let text = std::str::from_utf8(&review.get_output().stdout)
+        .unwrap()
+        .to_owned();
+    assert!(text.contains("Review conversion: settings"), "{text}");
+    assert!(
+        text.contains("Template file: \"templates/settings.jinja\""),
+        "{text}"
+    );
+    assert!(text.contains("SAME | keep\\n"), "{text}");
+    assert!(text.contains("Retained link target"), "{text}");
+    assert!(
+        fs::symlink_metadata(&destination)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert!(!root.join("templates").exists());
+
+    let review = convert().args(["--dry-run", "--json"]).assert().success();
+    let json: serde_json::Value = serde_json::from_slice(&review.get_output().stdout).unwrap();
+    assert_eq!(json["schema"], 1);
+    assert_eq!(json["read_only"], true);
+    assert_eq!(json["permissions"], "0644");
+    assert_eq!(json["template_permissions"], "0644");
+    assert!(
+        json["review"]
+            .as_str()
+            .unwrap()
+            .contains("End of conversion review")
+    );
+
+    convert().arg("--yes").assert().success();
+    assert_eq!(fs::read(&destination).unwrap(), b"keep\n");
+    assert_eq!(
+        fs::read(root.join("templates/settings.jinja")).unwrap(),
+        b"keep\n"
+    );
+    assert_eq!(
+        fs::metadata(&destination).unwrap().permissions().mode() & 0o777,
+        0o644
+    );
+    let manifest = fs::read_to_string(&manifest).unwrap();
+    assert!(manifest.contains("mode = \"template\""), "{manifest}");
+
+    sandbox
+        .command()
+        .args(["recovery", "recover-conversion", "--dry-run"])
+        .assert()
+        .success();
+}
