@@ -208,6 +208,7 @@ fn check_expr(expr: &Expr<'_>, depth: usize, in_loop: bool) -> Result<(), Reject
                 return Err((Issue::SyntaxLimit, line));
             }
         }
+        Expr::Var(node) if NAMESPACES.contains(&node.id) => return Err((Issue::Namespace, line)),
         Expr::Var(node) if !reserved(node.id) => (),
         Expr::GetAttr(node)
             if matches!(&node.expr, Expr::Var(var) if NAMESPACES.contains(&var.id)

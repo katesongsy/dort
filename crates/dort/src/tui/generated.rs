@@ -1,5 +1,5 @@
 use super::{app::App, components as ui, input::Wheel};
-use crate::services::presentation::{generated_input_lines, generated_source, template_syntax};
+use crate::services::presentation::{generated_input_lines, generated_source};
 use dort_core::generated::{DriftStatus, Preview, UpdateAction};
 use ratatui::{
     Frame,
@@ -46,7 +46,6 @@ impl Report {
         }
         lines.extend([
             Line::default(),
-            field("Syntax", template_syntax(preview.syntax), Tone::Neutral),
             field(
                 "Proposed permissions",
                 &preview.proposed_permissions(),
@@ -111,7 +110,6 @@ use dort_core::{
     generated::{HostInput, HostInputs, VALUE_LIMIT, input_names_for},
     manifest_edit::{Change, FileChange},
     model::{FileMode, ManagedFile, base_profiles},
-    template::Dialect,
 };
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::{BTreeMap, BTreeSet};
@@ -121,7 +119,6 @@ pub(super) struct Draft {
     id: String,
     target: String,
     pub template: TemplateBuffer,
-    syntax: Dialect,
     host_inputs: HostInputs,
     local_inputs: Vec<String>,
     values: BTreeMap<String, String>,
@@ -156,7 +153,6 @@ impl Draft {
                     .and_then(|f| f.template.clone())
                     .unwrap_or_default(),
             ),
-            syntax: before.as_ref().and_then(|f| f.syntax).unwrap_or_default(),
             host_inputs: before
                 .as_ref()
                 .and_then(|f| f.host_inputs)
@@ -175,7 +171,7 @@ impl Draft {
     }
 
     pub fn has_local_inputs(&self) -> bool {
-        self.syntax == Dialect::Jinja && !self.local_inputs.is_empty()
+        !self.local_inputs.is_empty()
     }
 
     pub fn id(&self) -> &str {
@@ -191,28 +187,15 @@ impl Draft {
     }
 
     pub fn instructions(&self) -> &'static str {
-        match (self.entering_inputs(), self.syntax) {
-            (false, Dialect::Literal) => {
-                "Use {{ name }} for inputs. Enter adds a line. Tab moves fields."
-            }
-            (false, Dialect::Jinja) => {
-                "Use {{ inputs.name }}, {{ host.os }} or {{ local.name }}. Enter adds a line."
-            }
-            (true, Dialect::Literal) => {
-                "Enter literal values. Blanks and spaces are kept. Never enter secrets."
-            }
-            (true, Dialect::Jinja) => {
-                "Declare local names. Set their values after saving. Leave unused inputs unset. No secrets."
-            }
+        if self.entering_inputs() {
+            "Declare local names. Set their values after saving. Leave unused inputs unset. No secrets."
+        } else {
+            "Use {{ name }}, {{ host.os }} or {{ local.name }}. Enter adds a line."
         }
     }
 
     pub fn template_field(&self) -> usize {
         if self.before.is_some() { 1 } else { 2 }
-    }
-
-    fn syntax_field(&self) -> usize {
-        self.template_field() + 1
     }
 
     pub fn entering_inputs(&self) -> bool {
@@ -226,16 +209,10 @@ impl Draft {
         fields
             .iter()
             .map(|field| match field {
-                InputField::Value(name) => {
-                    let (prefix, unset) = match self.syntax {
-                        Dialect::Literal => ("", ""),
-                        Dialect::Jinja => ("inputs.", "(not set)"),
-                    };
-                    (
-                        format!("Input: {prefix}{name}"),
-                        self.values.get(name).map_or(unset, String::as_str),
-                    )
-                }
+                InputField::Value(name) => (
+                    format!("Input: {name}"),
+                    self.values.get(name).map_or("(not set)", String::as_str),
+                ),
                 InputField::Local { name, referenced } => (
                     format!(
                         "local.{name} ({}, {})",
@@ -284,13 +261,11 @@ impl Draft {
             return None;
         };
         match &fields[*focus] {
-            InputField::Value(name) if self.syntax == Dialect::Jinja => {
-                Some(if self.values.contains_key(name) {
-                    "Unset input"
-                } else {
-                    "Set empty input"
-                })
-            }
+            InputField::Value(name) => Some(if self.values.contains_key(name) {
+                "Unset input"
+            } else {
+                "Set empty input"
+            }),
             _ => None,
         }
     }
@@ -315,23 +290,11 @@ impl Draft {
     }
 
     pub fn focus_at(&mut self, index: usize) {
-        let last = self.syntax_field();
+        let last = self.template_field();
         match &mut self.step {
             Step::Template => self.template_focus = index.min(last),
             Step::Inputs { fields, focus } => *focus = index.min(fields.len() - 1),
         }
-    }
-
-    pub fn syntax_focused(&self) -> bool {
-        !self.entering_inputs() && self.template_focus == self.syntax_field()
-    }
-
-    pub fn syntax(&self) -> Dialect {
-        self.syntax
-    }
-
-    pub fn set_syntax(&mut self, syntax: Dialect) {
-        self.syntax = syntax;
     }
 
     pub fn toggle_declaration(&mut self) -> bool {
@@ -367,13 +330,13 @@ impl Draft {
     }
 
     fn discover(&self) -> Result<Vec<InputField>> {
-        let references = input_names_for(self.id(), self.syntax, self.template.text())?;
-        if self.syntax == Dialect::Literal {
-            return Ok(references.into_iter().map(InputField::Value).collect());
-        }
+        let references = input_names_for(self.id(), self.template.text())?;
         let names: BTreeSet<_> = references
             .iter()
-            .filter_map(|name| name.strip_prefix("inputs."))
+            .filter_map(|name| match name.strip_prefix("inputs.") {
+                Some(name) => Some(name),
+                None => Some(name.as_str()).filter(|name| !name.contains('.')),
+            })
             .chain(self.values.keys().map(String::as_str))
             .collect();
         let local_names: BTreeSet<_> = references
@@ -392,10 +355,18 @@ impl Draft {
                     .into_iter()
                     .map(|name| InputField::Value(name.to_owned())),
             )
-            .chain(HostInput::ALL.into_iter().map(|key| InputField::Host {
-                key,
-                referenced: references.contains(&format!("host.{}", key.key())),
-            }))
+            .chain(
+                HostInput::ALL
+                    .into_iter()
+                    .filter(|key| {
+                        let name = format!("host.{}", key.key());
+                        references.contains(&name) || self.host_inputs.contains(*key)
+                    })
+                    .map(|key| InputField::Host {
+                        key,
+                        referenced: references.contains(&format!("host.{}", key.key())),
+                    }),
+            )
             .collect())
     }
 
@@ -407,11 +378,7 @@ impl Draft {
                     let InputField::Value(name) = field else {
                         return None;
                     };
-                    let value = self
-                        .values
-                        .get(name)
-                        .cloned()
-                        .or_else(|| (self.syntax == Dialect::Literal).then(String::new))?;
+                    let value = self.values.get(name).cloned()?;
                     Some((name.clone(), value))
                 })
                 .collect()
@@ -446,31 +413,15 @@ impl Draft {
         mapping.target = self.target.trim().into();
         mapping.template = Some(self.template.text().into());
         mapping.inputs = inputs;
-        mapping.syntax = if self.syntax == Dialect::Jinja {
-            Some(Dialect::Jinja)
-        } else {
-            self.before
-                .as_ref()
-                .and_then(|file| file.syntax)
-                .filter(|&syntax| syntax == Dialect::Literal)
-        };
-        mapping.host_inputs = if self.syntax == Dialect::Jinja {
-            Some(self.host_inputs).filter(|keys| *keys != HostInputs::default())
-        } else {
-            None
-        };
-        mapping.local_inputs = if self.syntax == Dialect::Jinja {
-            Some(self.local_inputs.clone()).filter(|names| {
-                !names.is_empty()
-                    || self
-                        .before
-                        .as_ref()
-                        .and_then(|f| f.local_inputs.as_ref())
-                        .is_some_and(Vec::is_empty)
-            })
-        } else {
-            None
-        };
+        mapping.host_inputs = Some(self.host_inputs).filter(|keys| *keys != HostInputs::default());
+        mapping.local_inputs = Some(self.local_inputs.clone()).filter(|names| {
+            !names.is_empty()
+                || self
+                    .before
+                    .as_ref()
+                    .and_then(|f| f.local_inputs.as_ref())
+                    .is_some_and(Vec::is_empty)
+        });
         Ok(Some(Change::File(Box::new(FileChange {
             mapping,
             before: self.before.clone(),
@@ -488,13 +439,7 @@ impl Draft {
             ]
         };
         let focus = hits.input_focus_allowed();
-        let show_syntax = area.height > 2 || self.syntax_focused();
-        let body = Rect::new(
-            area.x,
-            area.y,
-            area.width,
-            area.height.saturating_sub(u16::from(show_syntax)),
-        );
+        let body = area;
         let mut y = area.y;
         let limit = usize::from(body.height.saturating_sub(2));
         for (index, &(label, value)) in fields.iter().enumerate() {
@@ -529,27 +474,6 @@ impl Draft {
             self.template.draw(frame, inner, active);
             hits.click(outer, Target::FormControl(self.template_field(), false));
         }
-        if show_syntax && area.height > 0 {
-            let rect = Rect::new(area.x, body.bottom(), area.width, 1);
-            ui::prose(
-                frame,
-                Rect::new(rect.x, rect.y, rect.width.min(8), 1),
-                "Syntax",
-                ui::heading(),
-            );
-            ui::design::choice(
-                frame,
-                Rect::new(
-                    rect.x + rect.width.min(8),
-                    rect.y,
-                    rect.width.saturating_sub(8),
-                    1,
-                ),
-                template_syntax(self.syntax),
-                focus && self.syntax_focused(),
-            );
-            hits.click(rect, Target::FormControl(self.syntax_field(), false));
-        }
     }
 
     pub fn template_focused(&self) -> bool {
@@ -562,7 +486,7 @@ impl Draft {
 
     fn step_focus(&mut self, backwards: bool) {
         let count = match &self.step {
-            Step::Template => self.syntax_field() + 1,
+            Step::Template => self.template_field() + 1,
             Step::Inputs { fields, .. } => fields.len(),
         };
         self.focus_at((self.focus() + if backwards { count - 1 } else { 1 }) % count);

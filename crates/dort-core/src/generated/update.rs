@@ -11,7 +11,6 @@ use crate::{
     journal,
     observation::{self, Fingerprint, Parent, ParentHandle},
     state::{PrivateDir, WriterLock},
-    template::Dialect,
 };
 use rustix::{fs, io::Errno};
 use serde::{Deserialize, Serialize};
@@ -67,7 +66,6 @@ pub struct UpdateReview<'a> {
     pub id: &'a str,
     pub source: Option<&'a Path>,
     pub destination: &'a Path,
-    pub syntax: Dialect,
     pub resolved_inputs: &'a super::ResolvedInputs,
     pub deployed: &'a [u8],
     pub deployed_permissions: Option<String>,
@@ -232,7 +230,6 @@ impl Update {
             id: &p.preview.id,
             source: p.preview.source.as_deref(),
             destination: &p.preview.destination,
-            syntax: p.preview.syntax,
             resolved_inputs: &p.preview.resolved_inputs,
             deployed: &p.bytes,
             deployed_permissions: p

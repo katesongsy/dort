@@ -10,7 +10,6 @@ use crate::{
     observation::{self, Entry, Parent, ParentHandle},
     profiles,
     state::WriterLock,
-    template::Dialect,
 };
 use rustix::{fs, io::Errno, process};
 use serde::{Deserialize, Serialize};
@@ -60,7 +59,6 @@ pub struct DeploymentReview<'a> {
     pub id: &'a str,
     pub source: Option<&'a Path>,
     pub destination: &'a Path,
-    pub syntax: Dialect,
     pub resolved_inputs: &'a super::ResolvedInputs,
     pub rendered: &'a str,
     pub permissions: String,
@@ -126,7 +124,6 @@ impl Deployment {
             id: &self.preview.id,
             source: self.preview.source.as_deref(),
             destination: &self.preview.destination,
-            syntax: self.preview.syntax,
             resolved_inputs: &self.preview.resolved_inputs,
             rendered: &self.preview.rendered,
             permissions: self.mode.label(),

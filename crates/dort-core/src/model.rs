@@ -1,4 +1,4 @@
-use crate::{platform::Platform, template::Dialect};
+use crate::platform::Platform;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::PathBuf};
 
@@ -108,6 +108,17 @@ impl TryFrom<Vec<HostInput>> for HostInputs {
     }
 }
 
+/// Older `syntax` key. Dort accepts any value, ignores it and leaves the line alone.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct LegacySyntax;
+
+impl<'de> Deserialize<'de> for LegacySyntax {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        serde::de::IgnoredAny::deserialize(deserializer)?;
+        Ok(Self)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedFile {
@@ -126,8 +137,9 @@ pub struct ManagedFile {
     pub overrides: BTreeMap<Platform, PathBuf>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inputs: BTreeMap<String, String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub syntax: Option<Dialect>,
+    /// Older key. Dort accepts it and never writes it.
+    #[serde(default, skip_serializing)]
+    pub syntax: Option<LegacySyntax>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host_inputs: Option<HostInputs>,
     #[serde(skip_serializing_if = "Option::is_none")]

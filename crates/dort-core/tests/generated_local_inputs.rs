@@ -19,7 +19,7 @@ const TEMPLATE: &str = "{{ local.editor }}";
 
 fn file(id: &str, text: &str, names: &str) -> String {
     format!(
-        "\n[[files]]\nid = '{id}'\nmode = 'template'\ntarget = '~/{id}'\nsyntax = 'jinja'\ntemplate = '''{text}'''\nlocal_inputs = [{names}]\n"
+        "\n[[files]]\nid = '{id}'\nmode = 'template'\ntarget = '~/{id}'\ntemplate = '''{text}'''\nlocal_inputs = [{names}]\n"
     )
 }
 
@@ -396,10 +396,6 @@ fn combined_host_manifest_and_local_context_is_bounded() {
 #[test]
 fn local_declarations_reject_wrong_modes_duplicates_and_invalid_names() {
     for (text, message) in [
-        (
-            file("settings", "plain", "'editor'").replace("syntax = 'jinja'\n", ""),
-            "requires syntax",
-        ),
         (
             file("settings", "plain", "'editor'").replace("mode = 'template'", "mode = 'link'"),
             "requires template mode",

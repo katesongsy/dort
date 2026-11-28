@@ -12,7 +12,7 @@ use crate::{
     manifest::paths_overlap,
     model::{FileContent, FileMode, ManagedFile},
     observation::{self, Entry, Kind},
-    template::{self, Context, Dialect, Input, Issue, Template, TemplateError},
+    template::{self, Input, Issue, Template, TemplateError},
 };
 pub use deploy::{Approval, Deployment, DeploymentReview, Published};
 pub use inputs::{InputProvenance, ResolvedInput, ResolvedInputs};
@@ -61,8 +61,7 @@ pub struct Preview {
     pub source: Option<PathBuf>,
     pub destination: PathBuf,
     pub inputs: BTreeMap<String, String>,
-    pub syntax: Dialect,
-    /// All resolved declarations, including unused values. Jinja names are qualified.
+    /// All resolved declarations, including unused values. Names are qualified.
     pub resolved_inputs: ResolvedInputs,
     pub rendered: String,
     pub destination_status: DestinationStatus,
@@ -165,9 +164,7 @@ impl DriftStatus {
 
 impl Preview {
     fn same_render(&self, other: &Self) -> bool {
-        self.syntax == other.syntax
-            && self.resolved_inputs == other.resolved_inputs
-            && self.rendered == other.rendered
+        self.resolved_inputs == other.resolved_inputs && self.rendered == other.rendered
     }
 
     pub fn proposed_permissions(&self) -> String {
@@ -238,21 +235,16 @@ impl Preview {
                 ));
             }
         };
-        let syntax = file.syntax.unwrap_or_default();
-        let template = compile(&file.id, syntax, &text)?;
+        let template = compile(&file.id, &text)?;
         let local = local_inputs::load(host, repository_id, file)?;
         let (context, resolved_inputs) = inputs::resolve(file, host, &local)?;
-        let rendered = if syntax == Dialect::Jinja {
-            match template.render(&context) {
-                Ok(rendered) => rendered,
-                Err(error) if error.issue == Issue::MissingInput => {
-                    let setup = missing_jinja_inputs(file, &template, &resolved_inputs, error)?;
-                    return Ok((Err(setup), source));
-                }
-                Err(error) => return Err(renderer_error(syntax, error, None)),
+        let rendered = match template.render(&context) {
+            Ok(rendered) => rendered,
+            Err(error) if error.issue == Issue::MissingInput => {
+                let setup = missing_jinja_inputs(file, &template, &resolved_inputs, error)?;
+                return Ok((Err(setup), source));
             }
-        } else {
-            render(&template, syntax, &context)?
+            Err(error) => return Err(renderer_error(error)),
         };
         Ok((
             Ok(Self {
@@ -261,7 +253,6 @@ impl Preview {
                 destination_status: destination_status(&destination),
                 destination,
                 inputs: file.inputs.clone(),
-                syntax,
                 resolved_inputs,
                 rendered,
                 permissions: file.permissions.clone(),
@@ -426,7 +417,6 @@ pub(crate) fn input_issues(file: &ManagedFile) -> impl Iterator<Item = String> {
     if file.mode != FileMode::Template {
         for (present, message) in [
             (!file.inputs.is_empty(), "inputs require template mode"),
-            (file.syntax.is_some(), "syntax requires template mode"),
             (
                 file.host_inputs.is_some(),
                 "host_inputs requires template mode",
@@ -442,20 +432,7 @@ pub(crate) fn input_issues(file: &ManagedFile) -> impl Iterator<Item = String> {
         }
         return issues.into_iter();
     }
-    let syntax = file.syntax.unwrap_or_default();
-    if file.host_inputs.is_some() && syntax != Dialect::Jinja {
-        issues.push(format!(
-            "{}: host_inputs requires syntax = \"jinja\"",
-            file.id
-        ));
-    }
     if let Some(names) = &file.local_inputs {
-        if syntax != Dialect::Jinja {
-            issues.push(format!(
-                "{}: local_inputs requires syntax = \"jinja\"",
-                file.id
-            ));
-        }
         if names.iter().any(|name| !template::is_input_name(name)) {
             issues.push(format!("{}: invalid local input name; use letters, digits and underscores, starting with a letter or underscore", file.id));
         }
@@ -471,41 +448,26 @@ pub(crate) fn input_issues(file: &ManagedFile) -> impl Iterator<Item = String> {
         }
     }
     if issues.is_empty()
-        && let Err(error) = validate_declaration(file, syntax)
+        && let Err(error) = validate_declaration(file)
     {
-        issues.push(match syntax {
-            Dialect::Literal => format!("{}: {error}", file.id),
-            Dialect::Jinja => error.to_string(),
-        });
+        issues.push(error.to_string());
     }
     issues.into_iter()
 }
 
-fn validate_declaration(file: &ManagedFile, syntax: Dialect) -> Result<()> {
-    match (syntax, &file.template) {
-        (Dialect::Literal, Some(text)) => render(
-            &compile(&file.id, syntax, text)?,
-            syntax,
-            &inputs::manifest_context(file),
-        )
-        .map(|_| ()),
-        (Dialect::Literal, None) => Ok(()),
-        (Dialect::Jinja, text) => {
-            if let Some(text) = text {
-                compile(&file.id, syntax, text)?;
-            }
-            let mut context = inputs::manifest_context(file);
-            if let Some(names) = &file.local_inputs {
-                let declarations = names
-                    .iter()
-                    .map(|name| (name.clone(), Input::Text(String::new())))
-                    .collect();
-                context.insert("local".into(), Input::Map(declarations));
-            }
-            template::validate_context(&file.id, syntax, &context)
-                .map_err(|error| renderer_error(syntax, error, None))
-        }
+fn validate_declaration(file: &ManagedFile) -> Result<()> {
+    if let Some(text) = &file.template {
+        compile(&file.id, text)?;
     }
+    let mut context = inputs::manifest_context(file);
+    if let Some(names) = &file.local_inputs {
+        let declarations = names
+            .iter()
+            .map(|name| (name.clone(), Input::Text(String::new())))
+            .collect();
+        context.insert("local".into(), Input::Map(declarations));
+    }
+    template::validate_context(&file.id, &context).map_err(renderer_error)
 }
 
 fn inspect_template(path: &Path) -> Result<Entry> {
@@ -607,38 +569,19 @@ fn destination_status(path: &Path) -> DestinationStatus {
     }
 }
 
-pub fn input_names(text: &str) -> Result<BTreeSet<&str>> {
-    Ok(compile("", Dialect::Literal, text)?
-        .literal_input_names()
-        .collect())
-}
-
 /// Discover possible input references without resolving any values or reading the host.
-/// Jinja names are qualified, such as `inputs.theme`, `host.os` and `local.editor`.
-pub fn input_names_for(id: &str, syntax: Dialect, text: &str) -> Result<BTreeSet<String>> {
-    Ok(compile(id, syntax, text)?.input_names().clone())
+/// Names are qualified, such as `inputs.theme`, `host.os` and `local.editor`.
+pub fn input_names_for(id: &str, text: &str) -> Result<BTreeSet<String>> {
+    Ok(compile(id, text)?.input_names().clone())
 }
 
-fn compile<'a>(id: &'a str, syntax: Dialect, text: &'a str) -> Result<Template<'a>> {
-    Template::compile(id, syntax, text).map_err(|error| renderer_error(syntax, error, None))
-}
-
-fn render(template: &Template<'_>, syntax: Dialect, context: &Context) -> Result<String> {
-    template.render(context).map_err(|error| {
-        let missing = (syntax == Dialect::Literal && error.issue == Issue::MissingInput)
-            .then(|| {
-                template
-                    .literal_input_names()
-                    .find(|name| !context.contains_key(*name))
-            })
-            .flatten();
-        renderer_error(syntax, error, missing)
-    })
+fn compile(id: &str, text: &str) -> Result<Template> {
+    Template::compile(id, text).map_err(renderer_error)
 }
 
 fn missing_jinja_inputs(
     file: &ManagedFile,
-    template: &Template<'_>,
+    template: &Template,
     resolved: &ResolvedInputs,
     error: TemplateError,
 ) -> Result<LocalInputSetup> {
@@ -650,23 +593,30 @@ fn missing_jinja_inputs(
         .collect();
     let mut unset = Vec::new();
     let mut undeclared = Vec::new();
+    let mut missing = Vec::new();
     let mut other = false;
     for name in template
         .input_names()
         .iter()
-        .filter(|name| !resolved.contains_key(*name))
+        .filter(|name| !resolved.contains_key(resolved_name(name).as_ref()))
     {
-        match name.strip_prefix("local.") {
-            Some(key) if declared.contains(key) => {
-                unset.push(key.to_owned());
-            }
-            Some(key) => undeclared.push(key),
-            None => other = true,
+        match name.split_once('.') {
+            Some(("local", key)) if declared.contains(key) => unset.push(key.to_owned()),
+            Some(("local", key)) => undeclared.push(key),
+            Some(("inputs", key)) => missing.push(key.to_owned()),
+            Some(_) => other = true,
+            None => missing.push(name.clone()),
         }
     }
     let mut message = error.to_string();
-    if other || (unset.is_empty() && undeclared.is_empty()) {
+    if other || (unset.is_empty() && undeclared.is_empty() && missing.is_empty()) {
         message.push_str(" Declare manifest inputs in inputs and host inputs in host_inputs.");
+    }
+    if !missing.is_empty() {
+        message.push_str(&format!(
+            " Declare these names in inputs in dort.toml: {}.",
+            missing.join(", ")
+        ));
     }
     if !undeclared.is_empty() {
         message.push_str(&format!(
@@ -688,32 +638,19 @@ fn missing_jinja_inputs(
     })
 }
 
-fn renderer_error(syntax: Dialect, error: TemplateError, missing: Option<&str>) -> Error {
-    if syntax == Dialect::Jinja {
-        let mut message = error.to_string();
-        if error.issue == Issue::MissingInput {
-            message.push_str(" Declare manifest inputs in inputs and host inputs in host_inputs.");
-        }
-        return Error::Invalid(message);
+/// A bare name reads the same value as `inputs.name`.
+fn resolved_name(name: &str) -> Cow<'_, str> {
+    if name.contains('.') {
+        Cow::Borrowed(name)
+    } else {
+        Cow::Owned(format!("inputs.{name}"))
     }
-    let message = match error.issue {
-        Issue::SourceLimit => "Template exceeds 64 KiB.",
-        Issue::SensitiveSource => {
-            "Template may contain secrets. Use text without credentials or private keys."
-        }
-        Issue::LiteralSyntax => {
-            "Invalid template expression. Use {{ name }} with a single input name."
-        }
-        Issue::SensitiveInput => "An input may contain secrets. Use only non-secret values.",
-        Issue::MissingInput => {
-            return Error::Invalid(format!(
-                "Missing input {}. Add a literal string for it in inputs in dort.toml.",
-                missing.expect("literal render identifies a missing input"),
-            ));
-        }
-        Issue::OutputLimit => "Rendered text exceeds 128 KiB.",
-        Issue::SensitiveOutput => "Rendered text may contain secrets. Use only non-secret content.",
-        _ => return Error::Invalid(error.issue.to_string()),
-    };
-    Error::Invalid(message.into())
+}
+
+fn renderer_error(error: TemplateError) -> Error {
+    let mut message = error.to_string();
+    if error.issue == Issue::MissingInput {
+        message.push_str(" Declare manifest inputs in inputs and host inputs in host_inputs.");
+    }
+    Error::Invalid(message)
 }

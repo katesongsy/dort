@@ -633,7 +633,7 @@ impl Shell {
                         self.back();
                     }
                     KeyCode::Esc => self.form_feedback = None,
-                    KeyCode::Enter if !draft.template_focused() && !draft.syntax_focused() => {
+                    KeyCode::Enter if !draft.template_focused() => {
                         return Some(Intent::Submit(Form::Generated));
                     }
                     KeyCode::F(6) if draft.entering_inputs() => {

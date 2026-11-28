@@ -78,7 +78,6 @@ inputs = {{ theme = "dark", padding = "{}" }}
         run(&mut app, task);
         let screen = render(&app, width, height);
         assert!(screen.contains("Generated file preview"), "{screen}");
-        assert!(screen.contains("Syntax: Literal"), "{screen}");
         assert!(screen.contains("No files written."), "{screen}");
         assert!(
             !screen.contains("destination-bytes") && !screen.contains("Confirm"),
@@ -275,6 +274,7 @@ fn blank_repository_can_create_cancel_save_preview_and_edit_generated_template()
             "{screen}"
         );
         assert_eq!(screen.matches("Input: theme").count(), 1, "{screen}");
+        w.press(KeyCode::F(6));
         w.press(KeyCode::Tab);
         w.paste(" dark ");
         w.press(KeyCode::Esc);
@@ -360,32 +360,16 @@ fn jinja_draft_opts_in_and_keeps_explicit_values_and_host_choices_until_review()
         w.paste(template);
         w.press(KeyCode::F(4));
         let screen = w.screen();
-        assert!(
-            screen.contains("Literal") && screen.contains("Use {{ name }}"),
-            "{screen}"
-        );
+        assert!(screen.contains("Input: theme"), "{screen}");
         assert!(w.app.preview.is_none());
-        if width < 80 {
-            w.press(KeyCode::Tab);
-            w.press(KeyCode::Enter);
-            assert!(w.screen().contains("Choose template syntax"));
-            w.press(KeyCode::Down);
-        } else {
-            assert!(click_label(&mut w.app, width, height, "Syntax").is_none());
-            assert!(w.screen().contains("Choose template syntax"));
-            assert!(click_label(&mut w.app, width, height, "Jinja").is_none());
-        }
-        w.press(KeyCode::Enter);
-        assert!(w.screen().contains("Jinja"));
-        w.press(KeyCode::F(4));
-        assert!(w.screen().contains("Input: inputs.empty"));
+        assert!(w.screen().contains("Input: empty"));
         w.press(KeyCode::Enter);
         assert!(w.app.preview.is_none());
         assert_eq!(w.manifest(), original);
         assert!(w.screen().contains("Needs attention"));
         w.press(KeyCode::F(6));
         w.press(KeyCode::Tab);
-        assert!(w.screen().contains("Input: inputs.optional"));
+        assert!(w.screen().contains("Input: optional"));
         w.press(KeyCode::Backspace);
         w.press(KeyCode::Tab);
         let color = " <&>\t";
@@ -400,23 +384,10 @@ fn jinja_draft_opts_in_and_keeps_explicit_values_and_host_choices_until_review()
         w.press(KeyCode::Tab);
         w.press(KeyCode::Char(' '));
         w.press(KeyCode::Esc);
-        w.press(KeyCode::Enter);
-        w.press(KeyCode::Up);
-        w.press(KeyCode::Esc);
-        assert!(w.screen().contains("Jinja"));
-        w.press(KeyCode::Enter);
-        w.press(KeyCode::Up);
-        w.press(KeyCode::Enter);
-        assert!(w.screen().contains("Literal"));
-        w.press(KeyCode::Enter);
-        w.press(KeyCode::Down);
-        w.press(KeyCode::Enter);
-        assert!(w.screen().contains("Jinja"));
         w.press(KeyCode::F(4));
         w.press(KeyCode::Enter);
         let expected = format!("theme=[{color}]\nempty=[]\n1=linux;2=x86_64;3=fixed;\n");
         for text in [
-            "Syntax: Jinja",
             "host.os = \"linux\" (this host)",
             "host.arch = \"x86_64\" (this host)",
             "inputs.empty = \"\" (dort.toml)",
@@ -431,10 +402,7 @@ fn jinja_draft_opts_in_and_keeps_explicit_values_and_host_choices_until_review()
         w.approve();
         assert!(!target.exists());
         let saved = dort_core::Manifest::parse(&w.manifest()).unwrap();
-        assert_eq!(
-            saved.files[0].syntax,
-            Some(dort_core::template::Dialect::Jinja)
-        );
+        assert_eq!(saved.files[0].syntax, None);
         assert_eq!(saved.files[0].template.as_deref(), Some(template));
         let keys: Vec<_> = saved.files[0]
             .host_inputs
@@ -445,7 +413,7 @@ fn jinja_draft_opts_in_and_keeps_explicit_values_and_host_choices_until_review()
         assert_eq!(keys, ["os", "arch"]);
         w.press(KeyCode::Esc);
         w.press(KeyCode::Char('v'));
-        assert!(w.screen().contains("Syntax: Jinja"));
+        assert!(w.screen().contains("Generated file preview"));
         w.press(KeyCode::Char('R'));
         assert!(w.review().contains("host.os = \"linux\" (this host)"));
         assert!(
@@ -499,10 +467,6 @@ fn generated_local_inputs_from_empty_repository_to_deploy_and_update() {
         w.paste("~/settings");
         w.press(KeyCode::Tab);
         w.paste("editor=[{{ local.editor }}]\n{% if false %}{{ local.later }}{% endif %}{# local.comment #}");
-        w.press(KeyCode::Tab);
-        w.press(KeyCode::Enter);
-        w.press(KeyCode::Down);
-        w.press(KeyCode::Enter);
         w.press(KeyCode::F(4));
         assert!(w.screen().contains("local.editor (undeclared"));
         w.press(KeyCode::Enter);

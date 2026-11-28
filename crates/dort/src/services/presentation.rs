@@ -1,7 +1,6 @@
 //! Terminal-safe application reports shared by CLI and TUI.
 use dort_core::{
     generated::{InputProvenance, ResolvedInputs},
-    template::Dialect,
     tools::{inspection, install},
 };
 pub fn safe(text: &str) -> String {
@@ -35,13 +34,6 @@ pub fn local_input_review(review: dort_core::generated::local_inputs::Review<'_>
         local_input_value(review.previous),
         local_input_value(review.proposed),
     )
-}
-
-pub fn template_syntax(syntax: Dialect) -> &'static str {
-    match syntax {
-        Dialect::Literal => "Literal",
-        Dialect::Jinja => "Jinja",
-    }
 }
 
 pub fn generated_input_lines(inputs: &ResolvedInputs) -> impl Iterator<Item = String> {
@@ -93,8 +85,7 @@ pub fn generated_details(preview: &dort_core::generated::Preview) -> String {
     }
     let _ = writeln!(
         text,
-        "Syntax: {}\nProposed permissions: {}",
-        template_syntax(preview.syntax),
+        "Proposed permissions: {}",
         preview.proposed_permissions(),
     );
     let _ = writeln!(
@@ -118,7 +109,7 @@ pub fn generated_details(preview: &dort_core::generated::Preview) -> String {
 pub fn generated_deployment(review: dort_core::generated::DeploymentReview<'_>) -> String {
     use std::fmt::Write;
     let mut report = format!(
-        "Review first deployment: {}\nRepository: {}\nActive profiles: {}\nSource: {}\nCreate: {}\nSyntax: {}\nPermissions: {}\n\n",
+        "Review first deployment: {}\nRepository: {}\nActive profiles: {}\nSource: {}\nCreate: {}\nPermissions: {}\n\n",
         inline(review.id),
         inline(&review.repository.display().to_string()),
         review
@@ -132,7 +123,6 @@ pub fn generated_deployment(review: dort_core::generated::DeploymentReview<'_>) 
             |path| inline(&path.display().to_string()),
         ),
         inline(&review.destination.display().to_string()),
-        template_syntax(review.syntax),
         review.permissions,
     );
     write_generated_inputs(&mut report, review.resolved_inputs);

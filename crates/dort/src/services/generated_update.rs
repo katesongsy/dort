@@ -1,4 +1,4 @@
-use super::presentation::{safe, template_syntax, write_generated_inputs};
+use super::presentation::{safe, write_generated_inputs};
 use dort_core::{
     Error, Result,
     generated::{ExchangeStatus, UpdateAction, UpdateLocation, UpdateOutcome, UpdateReview},
@@ -56,13 +56,12 @@ pub fn review(change: &UpdateReview<'_>) -> Result<String> {
         |path| format!("{path:?}"),
     );
     let mut text = format!(
-        "{title}: {}\nRepository: {:?}\nActive profiles: {:?}\nSource: {}\nDestination: {:?}\nSyntax: {}\nDetected: {}\nPermissions: {} -> {}\nFinal newline: {} -> {}\n",
+        "{title}: {}\nRepository: {:?}\nActive profiles: {:?}\nSource: {}\nDestination: {:?}\nDetected: {}\nPermissions: {} -> {}\nFinal newline: {} -> {}\n",
         change.id,
         change.repository,
         change.active_profiles,
         source,
         change.destination,
-        template_syntax(change.syntax),
         change.detected.label(),
         change.deployed_permissions.as_deref().unwrap_or("Missing"),
         change.proposed_permissions,
