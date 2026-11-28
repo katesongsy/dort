@@ -1,6 +1,6 @@
 //! Section destinations and local page catalogs.
 use super::{
-    app::{App, Tab},
+    app::{App, DraftExit, Tab},
     components as ui,
     input::Target,
     inventory::Page as FilesPage,
@@ -113,6 +113,7 @@ pub fn local_catalog(group: usize) -> &'static [(&'static str, Place)] {
             ("2 Discover", Place::Action(Action::Discover)),
             ("3 Ignored paths", Place::Action(Action::ManageIgnored)),
             ("4 Generated", Place::Files(FilesPage::Generated)),
+            ("5 Templates", Place::Files(FilesPage::Templates)),
         ],
         4 => &[
             ("1 Manifest checks", Place::Manifest),
@@ -191,10 +192,18 @@ impl App {
         self.navigation_block().is_none()
     }
     pub(super) fn go_place(&mut self, place: Place) -> Option<super::actions::Task> {
+        if let Some(reason) = self.navigation_block() {
+            self.interaction_notice = Some(reason);
+            self.status = reason.into();
+            return None;
+        }
         if let Place::Action(action) = place
             && let Some(reason) = self.action_reason(action)
         {
             self.status = reason.into();
+            return None;
+        }
+        if self.defer_draft_exit(DraftExit::Navigate(place)) {
             return None;
         }
         self.leave_page_for_navigation();
@@ -206,6 +215,9 @@ impl App {
             }
             Place::Files(page) => {
                 self.go_files_page(page);
+                if page == FilesPage::Templates {
+                    return self.load_templates();
+                }
                 None
             }
             Place::Destination(tab) => self.activate(Action::Destination(tab)),
@@ -251,6 +263,9 @@ fn current(app: &App, group: usize) -> Place {
 /// Stable destinations only: forms, reviews and readers keep their own Back path.
 pub fn local_available(app: &App) -> bool {
     use super::shell::Overlay;
+    if app.tab == Tab::Files && app.template_form().is_some() {
+        return app.navigation_block().is_none();
+    }
     let ignored = matches!(app.shell.overlay, Some(Overlay::Ignored { .. }));
     let overview = app.tab == Tab::Overview && app.registered_repository();
     if app.tab == Tab::Overview && !overview {
@@ -293,7 +308,7 @@ pub fn local(frame: &mut Frame, area: Rect, app: &App) -> Rect {
     }
     let wrap = app.tab == Tab::Files
         && items.iter().map(|item| item.label.len() + 3).sum::<usize>() > usize::from(area.width);
-    let per_line = if wrap { 2 } else { items.len() };
+    let per_line = if wrap { 3 } else { items.len() };
     let mut height = 0;
     for row in items.chunks(per_line).take(usize::from(area.height)) {
         ui::navigation::local(

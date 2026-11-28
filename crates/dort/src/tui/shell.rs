@@ -9,6 +9,8 @@ pub enum Form {
     Clone,
     Configure,
     Generated,
+    TemplateFile,
+    LocalInputs,
     Repair,
     Adopt,
     Check,
@@ -110,6 +112,7 @@ pub enum Overlay {
     Form(Form),
     Profiles(Box<ProfilePicker>),
     About,
+    DraftAbout(Form),
     Generated(Box<super::generated::Report>),
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -138,6 +141,7 @@ pub enum Action {
     AdoptSelected,
     BatchAdopt,
     PreviewGenerated,
+    LocalInputs,
     NewGenerated,
     EditGenerated,
     ApplyMarked,
@@ -209,6 +213,7 @@ impl Action {
             Self::AdoptSelected => "Adopt selected eligible file (editable draft)",
             Self::BatchAdopt => "Adopt marked files (combined editable batch)",
             Self::PreviewGenerated => "Preview generated file",
+            Self::LocalInputs => "Local inputs",
             Self::NewGenerated => "New generated file",
             Self::EditGenerated => "Edit generated file",
             Self::ApplyMarked => "Apply marked mappings (selected batch)",
@@ -257,6 +262,8 @@ pub struct Shell {
     pub init_draft: String,
     pub clone_fields: [String; 2],
     pub generated: Option<super::generated::Draft>,
+    pub template_file: Option<super::templates::Screen>,
+    pub local_inputs: Option<super::local_inputs::Panel>,
     pub open_template_editor: bool,
     pub repair: Option<super::configuration::RepairEditor>,
     pub configuration: Option<super::configuration::Draft>,
@@ -276,8 +283,11 @@ pub struct Shell {
 }
 pub enum Intent {
     Unignore(std::path::PathBuf),
+    ListDraftSources,
     Action(Action),
     Submit(Form),
+    ClearLocalInput,
+    LeaveDraft,
     Known(usize),
     Active,
     ApplyProfiles {
@@ -294,6 +304,8 @@ impl Shell {
             init_draft: String::new(),
             clone_fields: Default::default(),
             generated: None,
+            template_file: None,
+            local_inputs: None,
             open_template_editor: false,
             repair: None,
             configuration: None,
@@ -332,11 +344,19 @@ impl Shell {
         ) || matches!(
             self.overlay,
             Some(Overlay::Form(Form::Repair | Form::Generated))
-        ) || (matches!(self.overlay, Some(Overlay::Form(Form::Configure)))
+        ) || (matches!(self.overlay, Some(Overlay::Form(Form::TemplateFile)))
             && self
-                .configuration
+                .template_file
                 .as_ref()
-                .is_some_and(|draft| !draft.is_default_row(draft.focus)))
+                .and_then(|screen| screen.draft())
+                .is_some())
+            || (matches!(self.overlay, Some(Overlay::Form(Form::LocalInputs)))
+                && self.local_inputs.as_ref().is_some_and(|p| p.editing()))
+            || (matches!(self.overlay, Some(Overlay::Form(Form::Configure)))
+                && self
+                    .configuration
+                    .as_ref()
+                    .is_some_and(|draft| !draft.is_default_row(draft.focus)))
             || (matches!(self.overlay, Some(Overlay::Form(Form::Adopt)))
                 && self.adoption.focused < AdoptionDraft::FIELDS)
             || (matches!(self.overlay, Some(Overlay::Form(Form::Check)))
@@ -348,6 +368,7 @@ impl Shell {
     }
     pub fn back(&mut self) {
         self.scroll = 0;
+        self.local_inputs = None;
         self.overlay = if self.return_to_adopt {
             self.return_to_adopt = false;
             Some(Overlay::Form(Form::Adopt))
@@ -359,10 +380,10 @@ impl Shell {
         let Some(draft) = self.generated.as_mut() else {
             return;
         };
+        draft.focus_template();
         self.form_feedback = match result {
             Ok(text) => {
                 draft.template.replace(text);
-                draft.focus_template();
                 None
             }
             Err(error) => Some((Form::Generated, error.to_string())),
@@ -373,7 +394,11 @@ impl Shell {
             Form::Choose => &self.choose_draft,
             Form::Init => &self.init_draft,
             Form::Clone => &self.clone_fields[1],
-            Form::Configure | Form::Repair | Form::Generated => "",
+            Form::Configure
+            | Form::Repair
+            | Form::Generated
+            | Form::LocalInputs
+            | Form::TemplateFile => "",
             Form::Adopt => &self.adoption.target,
             Form::Check => &self.manifest_draft,
             Form::KeepId | Form::RemoveId => &self.unmanage_id,
@@ -386,6 +411,8 @@ impl Shell {
         use super::forms::Command;
         match command {
             Command::Submit => Some(Intent::Submit(form)),
+            Command::ClearLocalInput if form == Form::LocalInputs => Some(Intent::ClearLocalInput),
+            Command::ClearLocalInput => None,
             Command::InsertLine => {
                 if form == Form::Repair {
                     self.repair.as_mut()?.insert();
@@ -397,9 +424,27 @@ impl Shell {
                     && self
                         .generated
                         .as_ref()
-                        .is_some_and(|draft| !draft.entering_inputs());
+                        .is_some_and(|draft| !draft.entering_inputs() && !draft.content_is_file());
                 None
             }
+            Command::ToggleGeneratedInput if form == Form::Generated => {
+                self.generated.as_mut()?.toggle_value();
+                self.form_feedback = None;
+                None
+            }
+            Command::ToggleGeneratedDeclaration if form == Form::Generated => {
+                self.generated.as_mut()?.toggle_declaration();
+                self.form_feedback = None;
+                None
+            }
+            Command::ToggleGeneratedInput | Command::ToggleGeneratedDeclaration => None,
+            Command::ToggleGeneratedSource if form == Form::Generated => {
+                let draft = self.generated.as_mut()?;
+                draft
+                    .content_action(true)
+                    .then_some(Intent::ListDraftSources)
+            }
+            Command::ToggleGeneratedSource => None,
             Command::Toggle => {
                 self.configuration.as_mut()?.toggle_default();
                 None
@@ -428,7 +473,7 @@ impl Shell {
             }
         }
     }
-    pub fn key(&mut self, key: KeyEvent, known_count: usize) -> Option<Intent> {
+    pub fn key(&mut self, key: KeyEvent, known_count: usize, focused: bool) -> Option<Intent> {
         if !self.form_details
             && matches!(self.overlay, Some(Overlay::Form(_)))
             && matches!(
@@ -456,9 +501,16 @@ impl Shell {
                 return None;
             }
         }
-        if matches!(self.overlay, Some(Overlay::Form(_))) {
+        if let Some(Overlay::Form(form)) = self.overlay {
             if key.code == KeyCode::F(3) {
-                return self.form_action(super::forms::Command::Details);
+                return if matches!(
+                    form,
+                    Form::Generated | Form::LocalInputs | Form::TemplateFile
+                ) {
+                    None
+                } else {
+                    self.form_action(super::forms::Command::Details)
+                };
             }
             if self.form_details {
                 if key.code == KeyCode::Esc {
@@ -507,7 +559,7 @@ impl Shell {
                 }
                 _ => (),
             },
-            Overlay::Generated(_) => unreachable!("generated reader handles keys"),
+            Overlay::Generated(_) | Overlay::DraftAbout(_) => unreachable!(),
             Overlay::About => {
                 if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?')) {
                     self.overlay = None;
@@ -609,27 +661,56 @@ impl Shell {
                 KeyCode::Enter => return Some(Intent::Submit(Form::Repair)),
                 _ => self.repair.as_mut()?.key(key),
             },
+            Overlay::Form(Form::TemplateFile) => {
+                if key.code == KeyCode::Esc {
+                    return Some(Intent::LeaveDraft);
+                }
+            }
             Overlay::Form(Form::Generated) => {
                 let draft = self.generated.as_mut()?;
                 match key.code {
-                    KeyCode::Esc if !draft.back() => {
-                        self.generated = None;
-                        self.back();
-                    }
+                    KeyCode::Esc if !draft.back() => return Some(Intent::LeaveDraft),
                     KeyCode::Esc => self.form_feedback = None,
-                    KeyCode::Enter if !draft.template_focused() => {
+                    KeyCode::Enter if !focused && key.modifiers.is_empty() => {
                         return Some(Intent::Submit(Form::Generated));
                     }
-                    KeyCode::F(4) if !draft.entering_inputs() => {
-                        return Some(Intent::Submit(Form::Generated));
+                    KeyCode::Char(' ') | KeyCode::Enter
+                        if focused && !draft.entering_inputs() && draft.on_content_row() =>
+                    {
+                        self.form_feedback = None;
+                        if draft.content_action(key.code == KeyCode::Char(' ')) {
+                            return Some(Intent::ListDraftSources);
+                        }
+                    }
+                    KeyCode::F(6) if focused && draft.entering_inputs() => {
+                        return self.form_action(super::forms::Command::ToggleGeneratedInput);
                     }
                     KeyCode::F(5) if !draft.entering_inputs() => {
                         return self.form_action(super::forms::Command::OpenTemplateEditor);
                     }
-                    _ => {
+                    _ if focused => {
                         if let Err(error) = draft.key(key) {
                             self.form_feedback = Some((Form::Generated, error.to_string()));
                         }
+                    }
+                    _ => (),
+                }
+            }
+            Overlay::Form(Form::LocalInputs) => {
+                let panel = self.local_inputs.as_mut()?;
+                match key.code {
+                    KeyCode::Esc => return Some(Intent::LeaveDraft),
+                    KeyCode::Enter
+                        if (!panel.editing() || !focused) && key.modifiers.is_empty() =>
+                    {
+                        return Some(Intent::Submit(Form::LocalInputs));
+                    }
+                    KeyCode::F(6) if !panel.editing() => return Some(Intent::ClearLocalInput),
+                    _ => {
+                        self.form_feedback = panel
+                            .key(key)
+                            .err()
+                            .map(|e| (Form::LocalInputs, e.to_string()));
                     }
                 }
             }
@@ -651,6 +732,8 @@ impl Shell {
                     Form::Init => &mut self.init_draft,
                     Form::Configure
                     | Form::Generated
+                    | Form::LocalInputs
+                    | Form::TemplateFile
                     | Form::Repair
                     | Form::Clone
                     | Form::Adopt

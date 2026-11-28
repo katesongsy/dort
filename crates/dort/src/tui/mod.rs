@@ -77,6 +77,7 @@ mod installed_tools_tests;
 #[path = "tests/interaction.rs"]
 mod interaction_tests;
 mod inventory;
+mod local_inputs;
 mod more;
 mod navigation;
 #[cfg(test)]
@@ -104,6 +105,7 @@ mod task_surface_tests;
 mod task_surfaces;
 mod template_buffer;
 mod template_editor;
+mod templates;
 #[cfg(test)]
 mod tests;
 mod tool_declaration;
@@ -222,7 +224,7 @@ fn edit_template(terminal: &mut DefaultTerminal, paste_enabled: bool, app: &mut 
     let (edit, editor_tty) = match prepare() {
         Ok(prepared) => prepared,
         Err(error) => {
-            app.shell.finish_template_edit(Err(error));
+            app.finish_template_edit(Err(error));
             return Ok(());
         }
     };
@@ -258,7 +260,7 @@ fn edit_template(terminal: &mut DefaultTerminal, paste_enabled: bool, app: &mut 
     }
     *terminal = DefaultTerminal::new(ratatui::backend::CrosstermBackend::new(std::io::stdout()))
         .map_err(terminal_error)?;
-    app.shell.finish_template_edit(result);
+    app.finish_template_edit(result);
     Ok(())
 }
 fn run_loop(
@@ -351,7 +353,9 @@ fn run_loop(
         for index in 0..64 {
             let generated_flow = matches!(
                 app.shell.overlay,
-                Some(shell::Overlay::Form(shell::Form::Generated))
+                Some(shell::Overlay::Form(
+                    shell::Form::Generated | shell::Form::LocalInputs | shell::Form::TemplateFile
+                ))
             );
             if generated_flow != bracketed_paste {
                 if generated_flow {

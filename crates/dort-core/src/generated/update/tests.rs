@@ -1,17 +1,18 @@
 use super::*;
 use crate::{
-    generated::Deployment,
-    local::RepositoryRegistry,
+    generated::{Deployment, local_inputs},
+    local::{LocalConfig, RepositoryRegistry, repository_state_path},
     platform::{Architecture, Platform},
 };
 use std::{
     fs,
-    os::unix::fs::{MetadataExt, symlink},
+    os::unix::fs::{MetadataExt, PermissionsExt, symlink},
     process::Command,
 };
 
 const OLD: &str = "original";
 const NEXT: &str = "approved";
+const LOCAL: &[u8] = b"local \xff\tbytes\r\n";
 const CHILD: &str = "generated::update::tests::crash_child";
 
 struct Fixture {
@@ -59,6 +60,21 @@ impl Fixture {
         Update::prepare(&self.host, None, "settings", &[])
             .unwrap()
             .approve()
+    }
+
+    fn prepare(&self, action: UpdateAction) -> Result<Update> {
+        Update::prepare_action(&self.host, None, "settings", &[], action)
+    }
+
+    fn set_local(&self, action: UpdateAction) {
+        match action {
+            UpdateAction::Update => (),
+            UpdateAction::Replace => {
+                fs::write(&self.dest, LOCAL).unwrap();
+                fs::set_permissions(&self.dest, fs::Permissions::from_mode(0o640)).unwrap();
+            }
+            UpdateAction::Recreate => fs::remove_file(&self.dest).unwrap(),
+        }
     }
 
     fn status(&self) -> DriftStatus {
@@ -307,6 +323,157 @@ fn damaged_pending_state_blocks_writes_and_leaves_files_in_place() {
 }
 
 #[test]
+fn local_replacement_uses_the_reviewed_bytes_modes_and_retains_the_local_inode() {
+    let root = tempfile::tempdir().unwrap();
+    let f = Fixture::new(&root.path().canonicalize().unwrap());
+    f.set_local(UpdateAction::Replace);
+    let inode = fs::metadata(&f.dest).unwrap().ino();
+    let proposed = b"next \t\r\nlast line";
+    fs::write(f.repo.join("source"), proposed).unwrap();
+    let manifest = f.repo.join("dort.toml");
+    fs::write(
+        &manifest,
+        fs::read_to_string(&manifest).unwrap() + "permissions = '0644'\n",
+    )
+    .unwrap();
+    let update = f.prepare(UpdateAction::Replace).unwrap();
+    let view = update.review();
+    assert_eq!(
+        view.detected,
+        DriftStatus::LocallyEditedAndPermissionsChanged
+    );
+    assert_eq!(view.deployed, LOCAL);
+    assert_eq!(view.deployed_permissions.as_deref(), Some("0640"));
+    assert_eq!(view.recorded_permissions, "0600");
+    assert_eq!(view.proposed.as_bytes(), proposed);
+    assert_eq!(view.proposed_permissions, "0644");
+    let retained = view.retained.unwrap();
+    assert!(!retained.exists());
+    assert!(f.prepare(UpdateAction::Update).is_err());
+    assert!(f.prepare(UpdateAction::Recreate).is_err());
+    let UpdateOutcome::Updated { location } = update.approve().execute().unwrap() else {
+        panic!("replacement did not complete");
+    };
+    assert_eq!(location.action, UpdateAction::Replace);
+    assert_eq!(location.artifact, retained);
+    assert_eq!(fs::read(&retained).unwrap(), LOCAL);
+    assert_eq!(fs::metadata(&retained).unwrap().ino(), inode);
+    assert_eq!(fs::metadata(&retained).unwrap().mode() & 0o7777, 0o640);
+    assert_eq!(fs::read(&f.dest).unwrap(), proposed);
+    assert_eq!(fs::metadata(&f.dest).unwrap().mode() & 0o7777, 0o644);
+    assert_eq!(f.status(), DriftStatus::UpToDate);
+    assert!(f.prepare(UpdateAction::Replace).is_err());
+}
+
+#[test]
+fn local_actions_refuse_stale_approvals_and_changes_after_intent() {
+    for action in [UpdateAction::Replace, UpdateAction::Recreate] {
+        let root = tempfile::tempdir().unwrap();
+        let f = Fixture::new(&root.path().canonicalize().unwrap());
+        f.set_local(action);
+        let approval = f.prepare(action).unwrap().approve();
+        fs::write(f.repo.join("source"), "proposal changed").unwrap();
+        assert!(matches!(approval.execute(), Err(Error::Invalid(_))));
+        assert_eq!(
+            fs::read_dir(f.dest.parent().unwrap()).unwrap().count(),
+            usize::from(action == UpdateAction::Replace)
+        );
+        let approval = f.prepare(action).unwrap().approve();
+        let outcome = approval
+            .execute_at(|point| {
+                if point == Boundary::Intent {
+                    fs::write(&f.dest, "changed after reviewing").unwrap();
+                }
+                Ok(())
+            })
+            .unwrap();
+        assert!(matches!(outcome, UpdateOutcome::NotExchanged { .. }));
+        assert_eq!(
+            fs::read_to_string(&f.dest).unwrap(),
+            "changed after reviewing"
+        );
+        f.assert_prior_receipt();
+        assert!(recover_update(&f.host).unwrap().is_none());
+    }
+}
+
+#[test]
+fn late_arrival_at_a_recreation_destination_is_not_replaced_even_with_identical_bytes() {
+    let root = tempfile::tempdir().unwrap();
+    let f = Fixture::new(&root.path().canonicalize().unwrap());
+    f.set_local(UpdateAction::Recreate);
+    let mut arrival = None;
+    let outcome = f
+        .prepare(UpdateAction::Recreate)
+        .unwrap()
+        .approve()
+        .execute_at(|point| {
+            if point == Boundary::Exchange {
+                fs::write(&f.dest, NEXT).unwrap();
+                fs::set_permissions(&f.dest, fs::Permissions::from_mode(0o600)).unwrap();
+                arrival = Some(fs::metadata(&f.dest).unwrap().ino());
+            }
+            Ok(())
+        })
+        .unwrap();
+    let UpdateOutcome::NotExchanged { location, .. } = outcome else {
+        panic!("late arrival was not handled: {outcome:?}");
+    };
+    assert_eq!(Some(fs::metadata(&f.dest).unwrap().ino()), arrival);
+    assert_eq!(fs::read_to_string(&f.dest).unwrap(), NEXT);
+    assert_eq!(fs::read_to_string(&location.artifact).unwrap(), NEXT);
+    assert_eq!(f.status(), DriftStatus::LocallyEdited);
+    f.assert_prior_receipt();
+    assert!(recover_update(&f.host).unwrap().is_none());
+}
+
+#[test]
+fn recovery_does_not_report_success_if_files_changed_after_saving_the_receipt() {
+    for action in [UpdateAction::Replace, UpdateAction::Recreate] {
+        let root = tempfile::tempdir().unwrap();
+        let f = Fixture::new(&root.path().canonicalize().unwrap());
+        f.set_local(action);
+        let outcome = f
+            .prepare(action)
+            .unwrap()
+            .approve()
+            .execute_at(|point| {
+                if point == Boundary::Receipt {
+                    Err(Errno::IO)
+                } else {
+                    Ok(())
+                }
+            })
+            .unwrap();
+        let UpdateOutcome::NeedsRecovery {
+            location,
+            exchange: ExchangeStatus::Completed,
+            ..
+        } = outcome
+        else {
+            panic!("expected pending record: {outcome:?}");
+        };
+        let changed = if action == UpdateAction::Recreate {
+            &location.destination
+        } else {
+            &location.artifact
+        };
+        fs::write(changed, "edited after publication").unwrap();
+        for _ in 0..2 {
+            assert!(matches!(
+                recover_reviewed_update(&f.host, &location).unwrap(),
+                Some(UpdateOutcome::NeedsRecovery {
+                    exchange: ExchangeStatus::Unknown,
+                    ..
+                })
+            ));
+            assert_eq!(fs::read(changed).unwrap(), b"edited after publication");
+            assert!(WriterLock::acquire(&f.host).is_err());
+        }
+    }
+}
+
+#[test]
 fn crash_child() {
     let Some(root) = std::env::var_os("DORT_GENERATED_CRASH_ROOT") else {
         return;
@@ -320,8 +487,17 @@ fn crash_child() {
         "receipt" => Boundary::Receipt,
         point => panic!("unknown crash point {point}"),
     };
+    let action = match std::env::var("DORT_GENERATED_CRASH_ACTION")
+        .unwrap()
+        .as_str()
+    {
+        "Update" => UpdateAction::Update,
+        "Replace" => UpdateAction::Replace,
+        "Recreate" => UpdateAction::Recreate,
+        action => panic!("unknown action {action}"),
+    };
     let f = Fixture::paths(Path::new(&root));
-    let result = f.approve().execute_at(|at| {
+    let result = f.prepare(action).unwrap().approve().execute_at(|at| {
         if at == point {
             std::process::exit(71);
         }
@@ -331,62 +507,188 @@ fn crash_child() {
 }
 
 #[test]
-fn recovery_after_process_exit_observes_names_and_never_exchanges_again() {
-    for point in ["intent", "exchange", "receipt"] {
-        let root = tempfile::tempdir().unwrap();
-        let root = root.path().canonicalize().unwrap();
-        let f = Fixture::new(&root);
-        let old_inode = fs::metadata(&f.dest).unwrap().ino();
-        let status = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", CHILD])
-            .env("DORT_GENERATED_CRASH_ROOT", &root)
-            .env("DORT_GENERATED_CRASH_POINT", point)
-            .output()
-            .unwrap();
-        assert_eq!(
-            status.status.code(),
-            Some(71),
-            "{} {}",
-            String::from_utf8_lossy(&status.stdout),
-            String::from_utf8_lossy(&status.stderr)
-        );
-        let where_ = pending_update(&f.host).unwrap().unwrap();
-        let before = point == "intent";
-        assert_eq!(
-            fs::read_to_string(&f.dest).unwrap(),
-            if before { OLD } else { NEXT }
-        );
-        assert_eq!(
-            fs::read_to_string(&where_.artifact).unwrap(),
-            if before { NEXT } else { OLD }
-        );
-        let (live_inode, private_inode) = (
-            fs::metadata(&f.dest).unwrap().ino(),
-            fs::metadata(&where_.artifact).unwrap().ino(),
-        );
-        assert_eq!(if before { live_inode } else { private_inode }, old_inode);
-        if point != "receipt" {
-            f.assert_prior_receipt();
+fn recovery_after_process_exit_observes_names_and_never_publishes_again() {
+    for action in [
+        UpdateAction::Update,
+        UpdateAction::Replace,
+        UpdateAction::Recreate,
+    ] {
+        for point in ["intent", "exchange", "receipt"] {
+            recover_after_crash(action, point);
         }
-        assert!(journal::ensure_writable(&f.host).is_err());
-        assert!(WriterLock::acquire(&f.host).is_err());
-        match recover_update(&f.host).unwrap().unwrap() {
-            UpdateOutcome::NotExchanged { location, .. } if before => assert_eq!(location, where_),
-            UpdateOutcome::Updated { location } if !before => assert_eq!(location, where_),
-            result => panic!("wrong recovery for {point}: {result:?}"),
-        }
-        assert!(recover_update(&f.host).unwrap().is_none());
-        assert_eq!(
-            f.status(),
-            if before {
-                DriftStatus::UpdateAvailable
-            } else {
-                DriftStatus::UpToDate
-            }
-        );
-        assert_eq!(fs::metadata(&f.dest).unwrap().ino(), live_inode);
-        assert_eq!(fs::metadata(&where_.artifact).unwrap().ino(), private_inode);
-        journal::ensure_writable(&f.host).unwrap();
-        assert!(WriterLock::acquire(&f.host).is_ok());
     }
+}
+
+fn recover_after_crash(action: UpdateAction, point: &str) {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path().canonicalize().unwrap();
+    let f = Fixture::new(&root);
+    f.set_local(action);
+    let candidate = if action == UpdateAction::Recreate {
+        OLD
+    } else {
+        NEXT
+    };
+    fs::write(f.repo.join("source"), candidate).unwrap();
+    let old_bytes = fs::read(&f.dest).ok();
+    let old_inode = fs::metadata(&f.dest).ok().map(|meta| meta.ino());
+    let status = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", CHILD])
+        .env("DORT_GENERATED_CRASH_ROOT", &root)
+        .env("DORT_GENERATED_CRASH_POINT", point)
+        .env("DORT_GENERATED_CRASH_ACTION", format!("{action:?}"))
+        .output()
+        .unwrap();
+    assert_eq!(
+        status.status.code(),
+        Some(71),
+        "{} {}",
+        String::from_utf8_lossy(&status.stdout),
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let where_ = pending_update(&f.host).unwrap().unwrap();
+    assert_eq!(where_.action, action);
+    let before = point == "intent";
+    let (old_name, candidate_name) = if before {
+        (&f.dest, &where_.artifact)
+    } else {
+        (&where_.artifact, &f.dest)
+    };
+    assert_eq!(fs::read(old_name).ok(), old_bytes);
+    assert_eq!(fs::read(candidate_name).unwrap(), candidate.as_bytes());
+    let inode_at = |path: &Path| fs::metadata(path).ok().map(|meta| meta.ino());
+    let candidate_inode = inode_at(candidate_name);
+    assert_eq!(inode_at(old_name), old_inode);
+    assert_eq!(fs::metadata(candidate_name).unwrap().mode() & 0o7777, 0o600);
+    if point != "receipt" {
+        f.assert_prior_receipt();
+    }
+    assert!(journal::ensure_writable(&f.host).is_err());
+    assert!(WriterLock::acquire(&f.host).is_err());
+    {
+        let _lock = WriterLock::acquire_for_generated_recovery(&f.host).unwrap();
+        assert!(matches!(
+            recover_reviewed_update(&f.host, &where_),
+            Err(Error::Locked)
+        ));
+    }
+    match recover_reviewed_update(&f.host, &where_).unwrap().unwrap() {
+        UpdateOutcome::NotExchanged { location, .. } if before => assert_eq!(location, where_),
+        UpdateOutcome::Updated { location } if !before => assert_eq!(location, where_),
+        result => panic!("wrong recovery for {point}: {result:?}"),
+    }
+    assert!(recover_update(&f.host).unwrap().is_none());
+    assert_eq!(
+        f.status(),
+        if before {
+            match action {
+                UpdateAction::Update => DriftStatus::UpdateAvailable,
+                UpdateAction::Replace => DriftStatus::LocallyEditedAndPermissionsChanged,
+                UpdateAction::Recreate => DriftStatus::LocallyDeleted,
+            }
+        } else {
+            DriftStatus::UpToDate
+        }
+    );
+    assert_eq!(inode_at(old_name), old_inode);
+    assert_eq!(inode_at(candidate_name), candidate_inode);
+    journal::ensure_writable(&f.host).unwrap();
+    assert!(WriterLock::acquire(&f.host).is_ok());
+}
+
+#[test]
+fn update_rejects_changed_host_input_with_the_same_output() {
+    let root = tempfile::tempdir().unwrap();
+    let f = Fixture::new(&root.path().canonicalize().unwrap());
+    let manifest = f.repo.join("dort.toml");
+    fs::write(
+        &manifest,
+        format!(
+            "{}syntax = 'jinja'\nhost_inputs = ['arch']\n",
+            fs::read_to_string(&manifest).unwrap()
+        ),
+    )
+    .unwrap();
+    let mut update = Update::prepare(&f.host, None, "settings", &[]).unwrap();
+    assert_eq!(update.review().proposed, NEXT);
+    assert_eq!(update.review().resolved_inputs["host.arch"].value, "x86_64");
+    update.host.architecture = Architecture::Aarch64;
+    let error = update.approve().execute().unwrap_err();
+    assert!(error.to_string().contains("review"));
+    assert_eq!(fs::read_to_string(&f.dest).unwrap(), OLD);
+    assert!(pending_update(&f.host).unwrap().is_none());
+    f.assert_prior_receipt();
+}
+
+#[test]
+fn recovery_keeps_the_approved_render_after_context_and_source_change() {
+    let root = tempfile::tempdir().unwrap();
+    let mut f = Fixture::new(&root.path().canonicalize().unwrap());
+    let manifest = f.repo.join("dort.toml");
+    fs::write(
+        &manifest,
+        format!(
+            "{}syntax = 'jinja'\nhost_inputs = ['arch']\nlocal_inputs = ['editor']\n",
+            fs::read_to_string(&manifest).unwrap()
+        ),
+    )
+    .unwrap();
+    fs::write(f.repo.join("source"), "{{ host.arch }} {{ local.editor }}").unwrap();
+    let setting = |value| {
+        local_inputs::Preview::prepare(&f.host, &f.repo, "settings", "editor", Some(value))
+            .unwrap()
+            .approve()
+    };
+    const APPROVED: &str = "x86_64 helix";
+    setting("helix").execute().unwrap();
+    let approved = Update::prepare(&f.host, None, "settings", &[]).unwrap();
+    assert_eq!(approved.review().proposed, APPROVED);
+    let outcome = approved
+        .approve()
+        .execute_at(|at| {
+            if at == Boundary::Exchanged {
+                Err(Errno::NOSPC)
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap();
+    assert!(matches!(
+        outcome,
+        UpdateOutcome::NeedsRecovery {
+            exchange: ExchangeStatus::Completed,
+            ..
+        }
+    ));
+    assert!(
+        matches!(setting("vim").execute(), Err(Error::Invalid(message)) if message.contains("needs recovery"))
+    );
+    let local = LocalConfig::load(&f.host).unwrap();
+    let folder = repository_state_path(&f.host, local.repository_id(&f.repo).unwrap())
+        .unwrap()
+        .join("generated-inputs");
+    let settings = fs::read_dir(folder)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let original = fs::read_to_string(&settings).unwrap();
+    fs::write(&settings, "unreadable settings").unwrap();
+    f.host.architecture = Architecture::Aarch64;
+    fs::write(
+        f.repo.join("source"),
+        "changed {{ host.arch }} {{ local.editor }}",
+    )
+    .unwrap();
+    assert!(matches!(
+        recover_update(&f.host).unwrap(),
+        Some(UpdateOutcome::Updated { .. })
+    ));
+    assert_eq!(fs::read_to_string(&f.dest).unwrap(), APPROVED);
+    assert!(
+        f.slot().load().unwrap().unwrap().deployed == Stamp::new(APPROVED.as_bytes(), Mode(0o600))
+    );
+    fs::write(&settings, original.replace("helix", "vim")).unwrap();
+    assert_eq!(f.status(), DriftStatus::UpdateAvailable);
 }

@@ -1,5 +1,6 @@
 use dort_core::{
     Error, Result,
+    generated::compose,
     local::registry_edit,
     manifest_edit::{self, Change, FileChange, Profile},
     model::{FileMode, ManagedFile},
@@ -23,6 +24,11 @@ pub enum Kind {
 
 pub enum Request {
     Manifest(Change),
+    /// Create a template file and the mapping that renders it.
+    Compose {
+        mapping: Box<ManagedFile>,
+        text: String,
+    },
     Registry(registry_edit::Change),
     OpenRepair(PathBuf, PathBuf),
     Repair(Arc<manifest_edit::RepairDraft>, String),
@@ -30,12 +36,14 @@ pub enum Request {
 
 pub enum Preview {
     Manifest(Box<manifest_edit::Preview>),
+    Compose(Box<compose::Preview>),
     Registry(Box<registry_edit::Preview>),
     Repair(Box<manifest_edit::RepairPreview>),
 }
 
 pub enum Approval {
     Manifest(Box<manifest_edit::Approval>),
+    Compose(Box<compose::Approval>),
     Registry(Box<registry_edit::Approval>),
     Repair(Box<manifest_edit::Approval>),
 }
@@ -53,6 +61,7 @@ impl Preview {
                     )
                 },
             ),
+            Self::Compose(p) => crate::services::compose::review(&p.review()),
             Self::Registry(p) => p.human(),
             Self::Repair(p) => p.human(),
         }
@@ -60,8 +69,10 @@ impl Preview {
 
     pub fn label(&self) -> &'static str {
         match self {
+            Self::Manifest(p) if p.local_input_setup().is_some() => "Save declaration only",
             Self::Manifest(p) if p.generated().is_some() => "Save generated file",
             Self::Manifest(_) => "Save manifest change",
+            Self::Compose(_) => "Create template file and mapping",
             Self::Registry(_) => "Save repository change",
             Self::Repair(_) => "Save repaired manifest",
         }
@@ -70,6 +81,7 @@ impl Preview {
     pub fn approve(self) -> Approval {
         match self {
             Self::Manifest(p) => Approval::Manifest(Box::new(p.approve())),
+            Self::Compose(p) => Approval::Compose(Box::new(p.approve())),
             Self::Registry(p) => Approval::Registry(Box::new(p.approve())),
             Self::Repair(p) => Approval::Repair(Box::new(p.approve())),
         }
@@ -403,6 +415,9 @@ impl Draft {
                         profiles,
                         requires: list(value(i + 3)),
                         inputs: Default::default(),
+                        syntax: None,
+                        host_inputs: None,
+                        local_inputs: None,
                         permissions: None,
                         overrides: [
                             (Platform::Macos, value(i + 4)),

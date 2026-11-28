@@ -16,6 +16,10 @@ pub enum Command {
     Details,
     InsertLine,
     OpenTemplateEditor,
+    ToggleGeneratedInput,
+    ToggleGeneratedDeclaration,
+    ToggleGeneratedSource,
+    ClearLocalInput,
     Toggle,
 }
 pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
@@ -79,6 +83,18 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                 primary,
             )
         }
+        Form::TemplateFile => {
+            if let Some(screen) = &s.template_file {
+                screen.draw(frame, area, app);
+            }
+            return;
+        }
+        Form::LocalInputs => {
+            if let Some(panel) = &s.local_inputs {
+                panel.draw(frame, area, app);
+            }
+            return;
+        }
         Form::Repair => {
             let Some(editor) = &s.repair else {
                 return;
@@ -123,12 +139,8 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
     };
     let mut actions = vec![ui::ActionButton {
         label: primary,
-        key: if form == Form::Generated
-            && s.generated
-                .as_ref()
-                .is_some_and(|draft| !draft.entering_inputs())
-        {
-            "F4"
+        key: if form == Form::Generated {
+            app.draft_continue_key()
         } else {
             "Enter"
         },
@@ -169,11 +181,43 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
                 .as_ref()
                 .is_some_and(|draft| !draft.entering_inputs()) =>
         {
-            actions.push(ui::ActionButton {
-                label: "Open in editor",
-                key: "F5",
-                target: Target::FormAction(Command::OpenTemplateEditor),
-            })
+            if let Some(draft) = &s.generated {
+                if app.form_has_focus() && draft.on_content_row() {
+                    let next = if draft.content_is_new() {
+                        "In dort.toml"
+                    } else if draft.content_is_file() {
+                        "New template file"
+                    } else {
+                        "Template file"
+                    };
+                    actions.push(ui::ActionButton {
+                        label: next,
+                        key: "Space",
+                        target: Target::FormAction(Command::ToggleGeneratedSource),
+                    });
+                } else if !draft.content_is_file() {
+                    actions.push(ui::ActionButton {
+                        label: "Open in editor",
+                        key: "F5",
+                        target: Target::FormAction(Command::OpenTemplateEditor),
+                    });
+                }
+            }
+        }
+        Form::Generated if app.form_has_focus() => {
+            if let Some(label) = s.generated.as_ref().and_then(|draft| draft.value_action()) {
+                actions.push(ui::ActionButton {
+                    label,
+                    key: "F6",
+                    target: Target::FormAction(Command::ToggleGeneratedInput),
+                });
+            } else {
+                actions.push(ui::ActionButton {
+                    label: "Toggle",
+                    key: "Space",
+                    target: Target::FormAction(Command::ToggleGeneratedDeclaration),
+                });
+            }
         }
         Form::Repair => actions.push(ui::ActionButton {
             label: "Insert line",
@@ -220,12 +264,12 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App, form: Form) {
             .unwrap_or_default(),
         _ => vec![],
     };
-    let toggles = s
-        .configuration
-        .as_ref()
-        .filter(|_| form == Form::Configure)
-        .map(|draft| draft.toggle_rows())
-        .unwrap_or_default();
+    let toggles = match form {
+        Form::Configure => s.configuration.as_ref().map(|draft| draft.toggle_rows()),
+        Form::Generated => s.generated.as_ref().map(|draft| draft.toggle_rows()),
+        _ => None,
+    }
+    .unwrap_or_default();
     let feedback = s
         .configuration
         .as_ref()

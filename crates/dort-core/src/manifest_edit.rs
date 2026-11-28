@@ -64,6 +64,31 @@ pub struct FileChange {
     pub before: Option<ManagedFile>,
 }
 
+/// What a file mapping uses to reach Home: a link source, template text in dort.toml
+/// or a template file in the repository.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Content {
+    Link,
+    Inline,
+    File,
+}
+
+impl Content {
+    fn of(file: &ManagedFile) -> Option<Self> {
+        Some(match file.mode {
+            FileMode::Link => Self::Link,
+            FileMode::Template if file.template.is_some() => Self::Inline,
+            FileMode::Template => Self::File,
+            FileMode::Secret => return None,
+        })
+    }
+
+    /// Generated mappings render; link mappings point at an existing source file.
+    fn renders(self) -> bool {
+        !matches!(self, Self::Link)
+    }
+}
+
 pub struct Preview {
     repository: PathBuf,
     backup_root: PathBuf,
@@ -71,10 +96,12 @@ pub struct Preview {
     config: Entry,
     manifest: Entry,
     watched_target: Option<Entry>,
+    /// Template file read for the rendered output. Approval compares it again.
+    watched_source: Option<Entry>,
     original: Vec<u8>,
     replacement: String,
     description: String,
-    generated: Option<generated::Preview>,
+    generated: Option<generated::DeclarationPreview>,
 }
 
 pub struct Approval(Preview);
@@ -192,6 +219,8 @@ fn edit_file(doc: &mut DocumentMut, manifest: &Manifest, file: &ManagedFile) -> 
             ("source", before.source != file.source),
             ("template", before.template != file.template),
             ("inputs", before.inputs != file.inputs),
+            ("host_inputs", before.host_inputs != file.host_inputs),
+            ("local_inputs", before.local_inputs != file.local_inputs),
             ("target", before.target != file.target),
             ("profiles", before.profiles != file.profiles),
             ("requires", before.requires != file.requires),
@@ -245,12 +274,20 @@ fn same_entry(before: &Entry, after: &Entry) -> bool {
 
 impl Preview {
     pub fn prepare(host: &HostContext, repository: &Path, change: &Change) -> Result<Self> {
+        Self::prepare_with_source(host, repository, change, None)
+    }
+
+    /// `pending` supplies a template file's text before the file exists, so one
+    /// request can create a template file and its mapping together.
+    pub(crate) fn prepare_with_source(
+        host: &HostContext,
+        repository: &Path,
+        change: &Change,
+        pending: Option<(&Path, &str)>,
+    ) -> Result<Self> {
         let (local, config) = LocalConfig::load_bound(host)?;
         let repository_id = local
-            .repositories
-            .iter()
-            .find(|(_, r)| r.root == repository)
-            .map(|(id, _)| id.clone())
+            .repository_id(repository)
             .ok_or_else(|| invalid("Choose a registered repository."))?;
         let path = repository.join("dort.toml");
         let (manifest, entry) = observation::read_manifest(&path).map_err(|error| match error {
@@ -344,11 +381,8 @@ impl Preview {
                     mapping: file,
                     before,
                 } = change.as_ref();
-                let inline =
-                    |file: &ManagedFile| file.mode == FileMode::Template && file.template.is_some();
-                if file.mode != FileMode::Link && !inline(file) {
-                    return Err(invalid("Choose a link mapping or an inline template."));
-                }
+                let content = Content::of(file)
+                    .ok_or_else(|| invalid("Choose a link mapping or a template."))?;
                 let previous = manifest
                     .files
                     .iter()
@@ -370,10 +404,10 @@ impl Preview {
                     return Err(invalid("That mapping changed. Refresh and edit it again."));
                 }
                 if let Some(previous) = previous {
-                    if previous.mode != file.mode || inline(previous) != inline(file) {
+                    if Content::of(previous) != Some(content) {
                         return Err(invalid("Keep the existing file mode and source type."));
                     }
-                    if inline(file) {
+                    if content.renders() {
                         if previous.profiles != file.profiles
                             || previous.requires != file.requires
                             || previous.permissions != file.permissions
@@ -405,9 +439,30 @@ impl Preview {
                 if previous != Some(file) {
                     edit_file(&mut doc, &manifest, file)?;
                 }
-                if inline(file) {
+                if content.renders() {
                     generated_id = Some(file.id.as_str());
-                    format!("Save generated file {:?}.", file.id)
+                    let mut description = format!("Save generated file {:?}.", file.id);
+                    if content == Content::File {
+                        description.push_str(&format!(
+                            "\nTemplate file: {:?}\nDort writes dort.toml only. The template file and Home file stay as they are.",
+                            file.source_for(host.platform).unwrap_or(Path::new(""))
+                        ));
+                    }
+                    if file.local_inputs.is_some()
+                        || previous.is_some_and(|mapping| mapping.local_inputs.is_some())
+                    {
+                        let names = file.local_inputs.as_deref().unwrap_or_default();
+                        description.push_str(&format!(
+                            "\nHome destination: {:?}\nDeclared local inputs: {}",
+                            file.target,
+                            if names.is_empty() {
+                                "None".into()
+                            } else {
+                                names.join(", ")
+                            },
+                        ));
+                    }
+                    description
                 } else {
                     let override_path = |p: Platform| {
                         file.overrides
@@ -446,17 +501,35 @@ impl Preview {
             error => error,
         })?;
         parsed.validate_file_targets(host, &parsed.profiles.known(), Some(repository), None)?;
-        let generated = generated_id
-            .map(|id| generated::Preview::from_manifest(host, repository, &parsed, id))
-            .transpose()?;
+        let (generated, watched_source) = match generated_id {
+            Some(id) => {
+                let (preview, source) = generated::Preview::from_manifest(
+                    host,
+                    repository,
+                    Some(repository_id),
+                    &parsed,
+                    id,
+                    pending,
+                )?;
+                (
+                    Some(preview),
+                    source.map(|mut entry| {
+                        entry.sha256 = None;
+                        entry
+                    }),
+                )
+            }
+            None => (None, None),
+        };
         Ok(Self {
             generated,
             repository: repository.to_owned(),
-            backup_root: repository_state_path(host, &repository_id)?.join("manifest-edits"),
+            backup_root: repository_state_path(host, repository_id)?.join("manifest-edits"),
             repair_git: None,
             config,
             manifest: entry,
             watched_target,
+            watched_source,
             original,
             replacement,
             description,
@@ -464,7 +537,11 @@ impl Preview {
     }
 
     pub fn generated(&self) -> Option<&generated::Preview> {
-        self.generated.as_ref()
+        self.generated.as_ref()?.as_ref().ok()
+    }
+
+    pub fn local_input_setup(&self) -> Option<&generated::LocalInputSetup> {
+        self.generated.as_ref()?.as_ref().err()
     }
 
     pub fn unchanged(&self) -> bool {
@@ -472,10 +549,15 @@ impl Preview {
     }
 
     pub fn human(&self) -> String {
-        format!(
+        let mut review = format!(
             "Repository: {:?}\n\n{}\n\nUpdate dort.toml only. Home files and packages stay in place. The previous manifest is backed up privately.",
             self.repository, self.description
-        )
+        );
+        if let Some(setup) = self.local_input_setup() {
+            review.push_str("\n\nNo rendered preview yet. Save the declaration only, then open Local inputs on this file in Generated.\n");
+            review.push_str(setup.guidance());
+        }
+        review
     }
 
     pub fn approve(self) -> Approval {
@@ -485,10 +567,15 @@ impl Preview {
 
 impl Approval {
     pub fn execute(self, host: &HostContext) -> Result<Option<PathBuf>> {
-        let p = self.0;
         let lock = WriterLock::acquire(host)?;
         lock.check_context(host)?;
         journal::ensure_writable(host)?;
+        self.execute_locked(host)
+    }
+
+    /// Commit the reviewed manifest under a writer lock the caller already holds.
+    pub(crate) fn execute_locked(self, host: &HostContext) -> Result<Option<PathBuf>> {
+        let p = self.0;
         let path = &p.manifest.path;
         let compare = || -> Result<()> {
             let config = match &p.repair_git {
@@ -506,6 +593,16 @@ impl Approval {
                 && !same_entry(before, &observation::inspect(&before.path, false)?)
             {
                 return Err(invalid("The Home destination changed. Review again."));
+            }
+            if let Some(source) = &p.watched_source {
+                let current = observation::inspect(&source.path, false).map_err(|_| {
+                    invalid("Cannot read the template file. Review the generated file again.")
+                })?;
+                if !same_entry(source, &current) {
+                    return Err(invalid(
+                        "The template file changed. Review the generated file again.",
+                    ));
+                }
             }
             Ok(())
         };

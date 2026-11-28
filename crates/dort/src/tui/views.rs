@@ -47,7 +47,9 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, _height: u16, _width: u
             "Repository: {:?}\n\nUp/Down select a line. Ctrl-U clears it, Backspace edits its end, Del removes it, and F4 inserts a line after it. Enter validates the draft and opens the diff.\n\nOnly dort.toml is saved after approval. If a legacy tool has more than one rule or an unsupported manager, choose a supported rule or manage that tool separately and fix its references. Edit larger repairs externally.",
             app.shell.repair.as_ref().map(|draft| draft.repository())
         ),
-        Overlay::Form(Form::Generated) => "Use Tab or the arrow keys to move between fields. Backspace edits the end of a field. Ctrl-U clears it. Paste text into the focused field. The review shows the rendered output before saving only dort.toml.".into(),
+        Overlay::Form(Form::TemplateFile) => "Source files live in the repository. Create or edit .jinja files under templates/.".into(),
+        Overlay::Form(Form::LocalInputs) => "Read or set declared inputs for this file. Settings stay on this machine. No secrets.".into(),
+        Overlay::Form(Form::Generated) => "Use Tab or the arrow keys to move between fields. Backspace edits the end of a field. Ctrl-U clears it. Paste text into the focused field. The review shows the exact bytes and output before saving.".into(),
         Overlay::Form(Form::Configure) => {
             "Review the changes to dort.toml before saving. Home files and packages stay in place."
                 .into()
@@ -71,7 +73,7 @@ pub(super) fn overlay_text(app: &App, overlay: &Overlay, _height: u16, _width: u
                 }
             )
         }
-        Overlay::About => format!(
+        Overlay::About | Overlay::DraftAbout(_) => format!(
             "Version: {}\nLicense: MIT\nHosts: macOS, Linux and WSL, ARM64 / x86_64\n\nWorks here:\nLocal repository create/attach, file discovery and links, recovery, manifest checks, read-only Git, and Homebrew/npm checks and installs.\n\nTool effects:\nChecks and installs can run package-manager code and change shared state. Homebrew installs its current formula; npm installs an exact package. No sandbox or rollback. Installs stop after 10 minutes.\n\nSafety:\nWrites need a fresh review. A failed write may leave partial effects. Git patches and selected-file previews show content on purpose. Backups are private, not encrypted. Recovery is manual.\n\nNot supported:\nGenerated file deployment, secrets, sync, Git writes and other package managers.",
             env!("CARGO_PKG_VERSION")
         ),

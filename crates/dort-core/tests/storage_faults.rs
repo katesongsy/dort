@@ -206,6 +206,9 @@ impl Fixture {
                     requires: vec![],
                     overrides: BTreeMap::new(),
                     inputs: Default::default(),
+                    syntax: None,
+                    host_inputs: None,
+                    local_inputs: None,
                     permissions: None,
                 },
             },
@@ -283,6 +286,9 @@ fn mapping(id: &str) -> ManagedFile {
         requires: vec![],
         overrides: BTreeMap::new(),
         inputs: Default::default(),
+        syntax: None,
+        host_inputs: None,
+        local_inputs: None,
         permissions: None,
     }
 }

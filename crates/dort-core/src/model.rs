@@ -42,6 +42,83 @@ pub enum FileMode {
     Secret,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u8)]
+pub enum HostInput {
+    Os,
+    Arch,
+    /// OS account name for the effective UID.
+    User,
+    /// OS hostname, not the friendly macOS computer name.
+    Hostname,
+    Home,
+    /// Resolved configuration base without Dort's subdirectory.
+    ConfigHome,
+}
+impl HostInput {
+    pub const ALL: [Self; 6] = [
+        Self::Os,
+        Self::Arch,
+        Self::User,
+        Self::Hostname,
+        Self::Home,
+        Self::ConfigHome,
+    ];
+
+    fn bit(self) -> u8 {
+        1 << self as u8
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "Vec<HostInput>", into = "Vec<HostInput>")]
+pub struct HostInputs(u8);
+
+impl HostInputs {
+    pub fn contains(self, input: HostInput) -> bool {
+        self.0 & input.bit() != 0
+    }
+
+    pub fn iter(self) -> impl Iterator<Item = HostInput> {
+        HostInput::ALL
+            .into_iter()
+            .filter(move |&input| self.contains(input))
+    }
+}
+impl FromIterator<HostInput> for HostInputs {
+    fn from_iter<T: IntoIterator<Item = HostInput>>(inputs: T) -> Self {
+        Self(inputs.into_iter().fold(0, |set, input| set | input.bit()))
+    }
+}
+impl From<HostInputs> for Vec<HostInput> {
+    fn from(inputs: HostInputs) -> Self {
+        inputs.iter().collect()
+    }
+}
+impl TryFrom<Vec<HostInput>> for HostInputs {
+    type Error = &'static str;
+
+    fn try_from(inputs: Vec<HostInput>) -> Result<Self, Self::Error> {
+        let allowlist: Self = inputs.iter().copied().collect();
+        if allowlist.0.count_ones() as usize != inputs.len() {
+            return Err("list each host input once");
+        }
+        Ok(allowlist)
+    }
+}
+
+/// Older `syntax` key. Dort accepts any value, ignores it and leaves the line alone.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct LegacySyntax;
+
+impl<'de> Deserialize<'de> for LegacySyntax {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        serde::de::IgnoredAny::deserialize(deserializer)?;
+        Ok(Self)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedFile {
@@ -60,6 +137,13 @@ pub struct ManagedFile {
     pub overrides: BTreeMap<Platform, PathBuf>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub inputs: BTreeMap<String, String>,
+    /// Older key. Dort accepts it and never writes it.
+    #[serde(default, skip_serializing)]
+    pub syntax: Option<LegacySyntax>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_inputs: Option<HostInputs>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_inputs: Option<Vec<String>>,
     pub permissions: Option<String>,
 }
 

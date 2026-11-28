@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use dort_core::{
     Error, bootstrap,
     context::HostContext,
-    generated::{UpdateOutcome, pending_update, recover_reviewed_update},
+    generated::{UpdateAction, UpdateOutcome, pending_update, recover_reviewed_update},
     git, journal,
     local::LocalConfig,
     planner::{self, Request, UnmanageMode},
@@ -175,7 +175,7 @@ enum RecoveryCommand {
         repository_id: String,
         transaction_id: String,
     },
-    /// Resolve an interrupted generated update without replacing either file.
+    /// Resolve an interrupted generated file change without writing the destination.
     RecoverUpdate,
     /// List operation records and write blockers.
     List,
@@ -228,8 +228,23 @@ enum FilesCommand {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
+    /// List, show, create or edit repository template files.
+    Templates {
+        #[command(subcommand)]
+        command: TemplateCommand,
+    },
     /// Show rendered output and deployment status without writing files.
     PreviewGenerated { id: String },
+    /// Show the declared local inputs and values for one generated file. No writes.
+    LocalInputs { id: String },
+    /// Set a non-secret value on this machine. Pass an empty string to set it empty.
+    SetLocalInput {
+        id: String,
+        name: String,
+        value: String,
+    },
+    /// Clear a local input value without changing its declaration or deploying the file.
+    ClearLocalInput { id: String, name: String },
     /// Review and create one generated file at a missing Home destination.
     DeployGenerated {
         id: String,
@@ -242,6 +257,18 @@ enum FilesCommand {
         #[arg(long = "profile")]
         profiles: Vec<String>,
     },
+    /// Replace a locally changed tracked generated file and retain the local file.
+    ReplaceGenerated {
+        id: String,
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
+    /// Recreate a tracked generated file that was deleted locally.
+    RecreateGenerated {
+        id: String,
+        #[arg(long = "profile")]
+        profiles: Vec<String>,
+    },
     /// Preview only. No writes, approvals, backups or history records.
     Plan {
         #[arg(long = "profile", global = true)]
@@ -249,6 +276,30 @@ enum FilesCommand {
         #[command(subcommand)]
         command: PlanCommand,
     },
+}
+
+#[derive(Subcommand)]
+enum TemplateCommand {
+    /// List template paths, mapping counts and edit access without reading source text.
+    List,
+    /// Show one template's source text without rendering it.
+    Show { path: PathBuf },
+    /// Review and create a .jinja file under templates/.
+    Create {
+        path: PathBuf,
+        /// Read the proposed text from this local file.
+        #[arg(long)]
+        from: PathBuf,
+    },
+    /// Review and replace an existing .jinja file under templates/.
+    Edit {
+        path: PathBuf,
+        /// Read the proposed text from this local file.
+        #[arg(long)]
+        from: PathBuf,
+    },
+    /// Review and delete a .jinja file that no mapping references.
+    Delete { path: PathBuf },
 }
 
 #[derive(Subcommand)]
@@ -1154,7 +1205,7 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                 }
                 if let Some(location) = generated {
                     println!(
-                        "A generated update needs recovery. Run `dort recovery recover-update --dry-run` to inspect both paths.\n{}",
+                        "Run `dort recovery recover-update --dry-run` to review the interrupted action.\n{}",
                         generated_update::recovery_review(&location)
                     );
                 }
@@ -1225,6 +1276,44 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
             }
         }
         Command::Files { command } => match command {
+            FilesCommand::Templates { command } => {
+                return templates(cli, &host, &local, command);
+            }
+            FilesCommand::LocalInputs { id } => {
+                let root = local_input_repository(cli, &local)?;
+                let rows = dort_core::generated::local_inputs::inspect(&host, &root, id)?;
+                if cli.json {
+                    let inputs: Vec<_> = rows
+                        .iter()
+                        .map(|row| serde_json::json!({"name": row.name, "value": row.value}))
+                        .collect();
+                    print_ascii_json(
+                        &serde_json::json!({"schema": 1, "read_only": true, "repository": root, "id": id, "inputs": inputs}),
+                        "could not encode local inputs",
+                    )?;
+                } else {
+                    println!(
+                        "Local inputs for {} on this machine",
+                        presentation::inline(id)
+                    );
+                    if rows.is_empty() {
+                        println!("No local inputs declared.");
+                    }
+                    for row in &rows {
+                        println!(
+                            "local.{}: {}",
+                            presentation::inline(&row.name),
+                            presentation::local_input_value(row.value.as_deref())
+                        );
+                    }
+                }
+            }
+            FilesCommand::SetLocalInput { id, name, value } => {
+                return change_local_input(cli, &host, &local, id, name, Some(value));
+            }
+            FilesCommand::ClearLocalInput { id, name } => {
+                return change_local_input(cli, &host, &local, id, name, None);
+            }
             FilesCommand::PreviewGenerated { id } => {
                 let preview =
                     crate::services::preview_generated(&host, &local, cli.repo.as_deref(), id)?;
@@ -1272,33 +1361,15 @@ fn execute(cli: &Cli) -> dort_core::Result<ExitCode> {
                     }
                 }
             }
-            FilesCommand::UpdateGenerated { id, profiles } => {
-                if cli.confirm_remove.is_some() {
-                    return Err(Error::Invalid(
-                        "Generated updates do not use --confirm-remove.".into(),
-                    ));
-                }
-                let update = crate::services::review_generated_update(
-                    &host,
-                    cli.repo.as_deref(),
-                    id,
-                    profiles,
-                )?;
-                let change = update.review();
-                let review = generated_update::review(change)?;
-                if cli.dry_run && cli.json {
-                    let change = update.review();
-                    print_ascii_json(
-                        &serde_json::json!({"schema": 1, "read_only": true, "id": change.id, "repository": change.repository, "active_profiles": change.active_profiles, "destination": change.destination, "deployed_permissions": change.deployed_permissions, "proposed_permissions": change.proposed_permissions, "review": review}),
-                        "could not encode generated update review",
-                    )?;
-                } else if !cli.json {
-                    print_update_review(&review)?;
-                }
-                if !cli.dry_run {
-                    approve(cli)?;
-                    return generated_update_result(cli, update.approve().execute()?, false);
-                }
+            FilesCommand::UpdateGenerated { id, profiles }
+            | FilesCommand::ReplaceGenerated { id, profiles }
+            | FilesCommand::RecreateGenerated { id, profiles } => {
+                let action = match command {
+                    FilesCommand::UpdateGenerated { .. } => UpdateAction::Update,
+                    FilesCommand::ReplaceGenerated { .. } => UpdateAction::Replace,
+                    _ => UpdateAction::Recreate,
+                };
+                return change_generated(cli, &host, id, profiles, action);
             }
             FilesCommand::Add {
                 target,
@@ -1534,6 +1605,211 @@ fn approve(cli: &Cli) -> dort_core::Result<()> {
     }
     Ok(())
 }
+fn templates(
+    cli: &Cli,
+    host: &HostContext,
+    local: &LocalConfig,
+    command: &TemplateCommand,
+) -> dort_core::Result<ExitCode> {
+    use crate::services::template_files as report;
+    use dort_core::template_files::{self, Change, Outcome, Preview};
+    use serde_json::json;
+
+    if cli.confirm_remove.is_some() {
+        return Err(Error::Invalid(
+            "Template files do not use --confirm-remove.".into(),
+        ));
+    }
+    let root = local.select_repository(cli.repo.as_deref())?;
+    let encode =
+        |value: serde_json::Value| print_ascii_json(&value, "could not encode template output");
+    let (change, from) = match command {
+        TemplateCommand::List => {
+            let rows = template_files::list(host, &root)?;
+            if cli.json {
+                let templates: Vec<_> = rows
+                    .iter()
+                    .map(|row| {
+                        json!({
+                            "path": row.path, "mappings": row.mappings, "editable": row.editable,
+                        })
+                    })
+                    .collect();
+                encode(json!({"templates": templates}))?;
+            } else {
+                print!("{}", report::list(&rows));
+            }
+            return Ok(ExitCode::SUCCESS);
+        }
+        TemplateCommand::Show { path } => {
+            let source = template_files::show(host, &root, path)?;
+            if cli.json {
+                encode(
+                    json!({"path": source.row().path, "mappings": source.row().mappings,
+                    "editable": source.row().editable, "permissions": source.permissions(), "text": source.text()}),
+                )?;
+            } else {
+                print!("{}", report::show(&source));
+            }
+            return Ok(ExitCode::SUCCESS);
+        }
+        TemplateCommand::Create { path, from } => (Change::Create(path.clone()), Some(from)),
+        TemplateCommand::Edit { path, from } => (
+            Change::Edit(template_files::show(host, &root, path)?),
+            Some(from),
+        ),
+        TemplateCommand::Delete { path } => (
+            Change::Delete(template_files::show(host, &root, path)?),
+            None,
+        ),
+    };
+    let text = match from {
+        Some(from) => report::read_proposed(from)?,
+        None => String::new(),
+    };
+    let preview = Preview::prepare(host, &root, change, text)?;
+    if cli.dry_run {
+        let review = preview.review();
+        if cli.json {
+            encode(json!({
+                "read_only": true,
+                "action": review.action.label().to_lowercase(),
+                "path": review.path,
+                "folder": review.folder.as_ref().map(|folder| json!({
+                    "path": folder.path, "permissions": folder.permissions
+                })),
+                "before": review.before,
+                "after": review.after,
+                "permissions": review.permissions,
+                "mappings": review.mappings,
+                "retained": review.retained.map(|paths| json!({"reviewed": paths.reviewed, "displaced": paths.displaced})),
+                "removed": review.removed,
+            }))?;
+        } else {
+            print!("{}", report::review(review));
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+    if !cli.yes && interactive(cli) {
+        print!("{}", report::review(preview.review()));
+    }
+    approve(cli)?;
+    let outcome = preview.approve().execute(host)?;
+    if cli.json {
+        encode(match &outcome {
+            Outcome::Created { folder_created } => {
+                json!({"outcome": "created", "folder_created": folder_created})
+            }
+            Outcome::Edited(paths) => json!({"outcome": "edited",
+                "retained": {"reviewed": paths.reviewed, "displaced": paths.displaced}}),
+            Outcome::Deleted(removed) => json!({"outcome": "deleted", "removed": removed.path}),
+            Outcome::NeedsAttention {
+                retained,
+                removed,
+                folder_created,
+                competing_change,
+                durability_unknown,
+            } => json!({
+                "outcome": "needs_attention", "competing_change": competing_change,
+                "durability_unknown": durability_unknown, "folder_created": folder_created,
+                "retained": retained.as_ref().map(|paths| json!({"reviewed": paths.reviewed, "displaced": paths.displaced})),
+                "removed": removed.as_ref().map(|removed| &removed.path),
+            }),
+        })?;
+    } else {
+        print!("{}", report::outcome(&outcome));
+    }
+    Ok(if matches!(outcome, Outcome::NeedsAttention { .. }) {
+        ExitCode::from(4)
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+fn local_input_repository(cli: &Cli, local: &LocalConfig) -> dort_core::Result<PathBuf> {
+    if cli.confirm_remove.is_some() {
+        return Err(Error::Invalid(
+            "Local inputs do not use --confirm-remove.".into(),
+        ));
+    }
+    local.select_repository(cli.repo.as_deref())
+}
+
+fn change_local_input(
+    cli: &Cli,
+    host: &HostContext,
+    local: &LocalConfig,
+    id: &str,
+    name: &str,
+    value: Option<&str>,
+) -> dort_core::Result<ExitCode> {
+    let root = local_input_repository(cli, local)?;
+    let preview =
+        dort_core::generated::local_inputs::Preview::prepare(host, &root, id, name, value)?;
+    let action = if value.is_some() { "set" } else { "clear" };
+    if cli.dry_run && cli.json {
+        let review = preview.review();
+        print_ascii_json(
+            &serde_json::json!({"schema": 1, "read_only": true, "action": action, "repository": review.repository, "id": review.id, "name": review.name, "previous": review.previous, "proposed": review.proposed}),
+            "could not encode local input review",
+        )?;
+    } else if cli.dry_run || (!cli.yes && interactive(cli)) {
+        print_update_review(&presentation::local_input_review(preview.review()))?;
+    }
+    if cli.dry_run {
+        return Ok(ExitCode::SUCCESS);
+    }
+    approve(cli)?;
+    let changed = preview.approve().execute()?;
+    if cli.json {
+        print_ascii_json(
+            &serde_json::json!({"schema": 1, "action": action, "id": id, "name": name, "changed": changed}),
+            "could not encode local input result",
+        )?;
+    } else {
+        println!(
+            "{} Preview the generated file to see its output.",
+            match (changed, value.is_some()) {
+                (false, _) => "Local input unchanged.",
+                (true, true) => "Local input saved.",
+                (true, false) => "Local input cleared.",
+            }
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn change_generated(
+    cli: &Cli,
+    host: &HostContext,
+    id: &str,
+    profiles: &[String],
+    action: UpdateAction,
+) -> dort_core::Result<ExitCode> {
+    if cli.confirm_remove.is_some() {
+        return Err(Error::Invalid(
+            "Generated file changes do not use --confirm-remove.".into(),
+        ));
+    }
+    let update =
+        crate::services::review_generated_update(host, cli.repo.as_deref(), id, profiles, action)?;
+    let change = update.review();
+    let review = generated_update::review(&change)?;
+    if cli.dry_run && cli.json {
+        print_ascii_json(
+            &serde_json::json!({"schema": 1, "read_only": true, "action": change.action, "detected": change.detected, "id": change.id, "repository": change.repository, "active_profiles": change.active_profiles, "destination": change.destination, "deployed_permissions": change.deployed_permissions, "recorded_permissions": change.recorded_permissions, "proposed_permissions": change.proposed_permissions, "resolved_inputs": change.resolved_inputs, "review": review}),
+            "could not encode generated file review",
+        )?;
+    } else if !cli.json {
+        print_update_review(&review)?;
+    }
+    if cli.dry_run {
+        return Ok(ExitCode::SUCCESS);
+    }
+    approve(cli)?;
+    generated_update_result(cli, update.approve().execute()?, false)
+}
+
 fn recover_generated_update(cli: &Cli, host: &HostContext) -> dort_core::Result<ExitCode> {
     if cli.repo.is_some() || cli.confirm_remove.is_some() {
         return Err(Error::Invalid(

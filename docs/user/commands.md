@@ -35,7 +35,7 @@ Reviews show exact effects. Confirm once. Help keeps drafts; choosing another de
 After a failure, `R` retries a read or asks for a fresh preview. It never replays an approval. After a failed write, `R` only refreshes; use `h` for Recovery. A blocked earlier operation names its repository and action; open Recovery.
 
 ### Files
-Press `f` to open **1 Managed**. Use `2` for **Discover**, `3` for **Ignored paths**, and `4` for **Generated**. `g` opens Git.
+Press `f` to open **1 Managed**. Use `2` for **Discover**, `3` for **Ignored paths**, `4` for **Generated**, and `5` for **Templates**. `g` opens Git.
 - **Managed:** `u` Unmanage keeps the local file; `U` Unmanage marked does the same for marked files. `m` Manual adopt opens an adoption draft. `a` Apply reviews all active files; `A` Apply marked reviews marked files only.
 - **Discover:** `a` Adopt opens a draft for the selected file; `A` Adopt marked opens a batch draft. `i` Ignore reviews excluding the selected path from discovery.
 - In **Managed**, use **Add mapping** for a file already in the repository. Select a mapping and use **Edit file mapping** to change its declaration. Review and save before applying. Adoption also lets you choose active profiles.
@@ -43,19 +43,39 @@ Press `f` to open **1 Managed**. Use `2` for **Discover**, `3` for **Ignored pat
 - **Delete link** and **Delete marked** are separate actions. Review the paths and confirm the exact mapping IDs before deleting links.
 #### Generated files
 
-In **Files**, press `4` to open **Generated**. Press `s` or choose **New generated file**. Enter a file ID and a Home destination. Press `Tab` or `Shift+Tab` to move between fields. In **Template**, `Enter` adds a newline. Use the arrows, `Home`, and `End` to edit, or paste several lines at once. Use `{{ name }}` for an input. Keep secrets out of templates and inputs.
+In **Files**, press `4` to open **Generated**. Press `s` or choose **New generated file**. Enter a file ID and a Home destination. Press `Tab` or `Shift+Tab` to move between fields. In **Template**, `Enter` adds a newline. Use the arrows, `Home`, and `End` to edit, or paste several lines at once. Keep secrets out of templates and inputs.
+
+Templates use Jinja. Use `{{ name }}` or `{{ inputs.name }}` for a manifest input. Use `{{ host.os }}` for the operating system or `{{ host.hostname }}` for the hostname. See [Jinja templates](manifest.md#jinja-templates) for examples and all host values.
+
+Press `Tab` to the **Template content** row, then `Space` to cycle **In dort.toml**, **Template file** and **New template file**. **Template file** saves the path of a file already under `templates/`. **New template file** asks for a path such as `templates/editor.jinja` and keeps its text in **Template**. The review shows the folder, the escaped text, mode `0644`, the mapping destination and the rendered output. One approval writes the file and the mapping. When the mapping is not written, the file stays and the result names its path; approving the same draft again writes the mapping alone.
 
 Choose **Open in editor** (`F5`) to edit the template in an external editor. Set `VISUAL` or `EDITOR` before starting Dort, for example `VISUAL='code --wait'`. Dort tries `VISUAL` first. Choose an editor command that waits until you close the file. The editor gets a temporary copy of the template. Save and exit the editor to return to the draft.
 
-Choose **Continue** (`F4`). If the template uses inputs, enter the named values. Leave a value blank to render nothing. Choose **Review generated file** after entering inputs. Read the output. Press `y` when **Save generated file** is ready. `Esc` from the review or inputs returns to the draft. Saving changes only `dort.toml`.
+Press Esc to leave the field, then Enter to continue. You can also click **Continue**. Leave unused inputs unset. Use `F6` to set an empty string or unset a value. Press `Space` or click to allow a host field. **Referenced** marks fields the template may use, even in branches that do not run. For `{{ local.name }}`, press `Space` or click to declare the name.
 
-Select a saved template in **Generated**. Press `Enter` or `v` for **Preview generated file**. Scroll with the arrows or page keys. `End` jumps to the end of the output. `Esc` returns to the selected template. Press `e` for **Edit generated file**. Edit file-backed templates in the repository.
+Choose **Review generated file** after entering inputs. Check the resolved values, their sources, and the output. Press `y` when **Save generated file** is ready. Esc from review returns to the draft. Leaving with unsaved changes asks whether to discard them. If a declared local input needs a value, choose **Save declaration only**. Saving changes only `dort.toml`.
 
-The preview shows the proposed output and the file's status. **Update available** means the template output or permissions changed while the deployed file stayed the same. A local edit, permission change or deletion takes precedence. The preview leaves your local file alone.
+Select the saved file and open **Local inputs** (`l`). Select a name and press `Enter` to set its value. Blank sets an empty string. **Clear** (`F6`) makes a set value unset. Review the change, scroll to the end, then press `y` to save it only on this machine. Keep secrets out of local inputs. Preview again to see the new output before deployment.
+
+Select a saved template in **Generated**. Press `Enter` or `v` for **Preview generated file**. Scroll with the arrows or page keys. `End` jumps to the end of the output. `Esc` returns to the selected template. Press `e` for **Edit generated file**. Open **Files / Templates** to edit a repository template file.
+
+The preview shows the resolved inputs and their sources, the proposed output, and the file's status. **Update available** means the template output or permissions changed while the deployed file stayed the same. A local edit, permission change or deletion takes precedence. The preview leaves your local file alone.
 
 For a new file, choose **Review deployment** (`R`). Read the destination, permissions and escaped output. Scroll to the end, then press `y` when **Deploy generated file** appears. `Esc` cancels the review.
 
-When the preview says **Update available**, choose **Review update** (`R`). Read the permission change and the exact lines marked `OLD` and `NEW`. Scroll to the end, then press `y` when **Update generated file** appears. `Esc` returns to the selected file without updating it.
+When the preview says **Update available**, choose **Review update** (`R`). Read the permission change and the exact lines marked `OLD` and `NEW`. Scroll to the end, then press `y` when **Update generated file** appears.
+
+For local edits or changed permissions, **Review replacement** (`R`) compares the exact local file with the proposed output. Dort keeps the local file at the private path shown in the review if you approve. For a tracked deletion, **Review recreation** (`R`) shows the exact output and permissions. Dort creates the file only if the destination is still missing and its folder already exists. Scroll to the end before pressing `y`. Press `Esc` to keep the local file or leave it missing.
+
+#### Repository template files
+
+Press `5` in **Files** to open **Templates**. The list shows repository paths, mapping counts, and whether you can edit each path. Press `Enter` to view the selected source without rendering it. **Read only** files can be viewed but not edited here.
+
+Press `s` for **New template file**, or press `Enter` in an editable source view. For a new file, enter a repository-relative path such as `templates/editor.jinja`. When `templates/` is missing, the review creates it first with mode `0755`. A subfolder you name must already exist. Dort edits only `.jinja` files under `templates/`.
+
+Press `d` on an editable row for **Delete template file**. Dort deletes the file only when no mapping uses it, and names every mapping that does. The review shows the text and the private path that keeps the file. The file moves there instead of being unlinked.
+
+Use `Tab` to move between fields. In **Template**, `Enter` adds a line. Press `Esc` to leave the field, then `Enter` to review. Read the escaped source and scroll to the end before pressing `y`. Saving leaves mappings and Home files unchanged. An edit shows the private paths where Dort kept the reviewed and replaced copies. Keep secrets out of template files.
 
 ## Tools
 
@@ -149,6 +169,21 @@ dort --repo PATH files list --profile dev
 
 Shows active mappings and blockers without touching files or tools.
 
+### List, view, or change template files
+
+```sh
+dort files templates list
+dort files templates show templates/editor.jinja
+dort --dry-run files templates create templates/editor.jinja --from ./draft.jinja
+dort --yes files templates create templates/editor.jinja --from ./draft.jinja
+dort --dry-run files templates edit templates/editor.jinja --from ./draft.jinja
+dort --yes files templates edit templates/editor.jinja --from ./draft.jinja
+dort --dry-run files templates delete templates/editor.jinja
+dort --yes files templates delete templates/editor.jinja
+```
+
+Use a regular UTF-8 file for `--from`. Keep secrets out of the proposed text. When `templates/` is missing, `create` makes it with mode `0755` first. A named subfolder must already exist. `delete` refuses a file that any mapping uses and moves the file to private state instead of unlinking it. Review with `--dry-run`, or omit `--yes` in a terminal to review and confirm. `--json` gives the exact text for `show` and `--dry-run`. If a write needs attention, inspect the template and any retained copy before retrying.
+
 ### Preview a generated file
 
 ```sh
@@ -156,7 +191,18 @@ dort --repo PATH files preview-generated editor-settings
 dort --repo PATH --json files preview-generated editor-settings
 ```
 
-Renders the template with literal inputs from `dort.toml`. If Dort recorded the deployment, the status distinguishes template changes from local edits, permission changes and deletion. A file over 128 KiB or one that cannot be read safely stays unverified. Dort never reads the contents of an unrecorded destination. JSON includes the status, proposed text and input values. No files are written.
+Renders the template with its declared inputs. If Dort recorded the deployment, the status distinguishes template changes from local edits, permission changes, and deletion. A file over 128 KiB or one that cannot be read safely stays unverified. Dort never reads the contents of an unrecorded destination. JSON includes the status, proposed text, and resolved values with their sources. No files are written.
+
+### Read or change local inputs
+
+```sh
+dort files local-inputs editor-settings
+dort --dry-run files set-local-input editor-settings editor vim
+dort --yes files set-local-input editor-settings editor vim
+dort --yes files clear-local-input editor-settings editor
+```
+
+Use the registered repository and the declared name without `local.`. Use `--repo PATH` to select another registered repository. Pass `''` to set an empty string. Clearing unsets the value and keeps its declaration. These commands leave the manifest and generated file in place. JSON reads and dry runs show the selected values; write results report only what changed. Never pass secrets as values.
 
 ### Deploy a generated file
 
@@ -167,7 +213,7 @@ dort --json --dry-run files deploy-generated editor-settings
 dort --json --yes files deploy-generated editor-settings
 ```
 
-Review the destination, permissions and exact rendered output before confirming. Use a registered repository. JSON and nonterminal writes require `--yes`.
+Review the destination, permissions, resolved inputs, and exact rendered output before confirming. Use a registered repository. JSON and nonterminal writes require `--yes`.
 
 First deployment creates one regular file at a missing path below HOME. Create the destination folder first. Dort refuses symlinks, shared writable folders, protected paths, inactive profiles and files with tool requirements. The default mode is `0600`. The mode cannot grant group or other users write access.
 
@@ -182,9 +228,24 @@ dort --json --dry-run files update-generated editor-settings --profile dev
 dort --json --yes files update-generated editor-settings --profile dev
 ```
 
-Dort updates only a file that still matches its last deployment. Read the old and new permissions, escaped changes to the contents and final newline status. If the full review cannot fit, split the change into smaller steps. JSON and nonterminal writes require `--yes`. A dry run cannot approve a later write.
+Dort updates only a file that still matches its last deployment. Read the resolved inputs, permission changes, escaped content changes, and final newline status. If the full review cannot fit, split the change into smaller steps. JSON and nonterminal writes require `--yes`. A dry run cannot approve a later write.
 
 The update replaces the file and keeps the previous file in a private folder beside it. Dort reports the path. The destination filesystem must support exchanging the two files. A local edit, permission change or deletion prevents an update.
+
+### Replace or recreate a tracked generated file
+
+```sh
+dort files replace-generated editor-settings --dry-run
+dort files replace-generated editor-settings
+dort files recreate-generated editor-settings --dry-run
+dort files recreate-generated editor-settings
+```
+
+`replace-generated` requires local edits or changed permissions. Read the escaped comparison, permission changes and private path. Dort keeps the exact local file at that path on success. As with an update, the filesystem must support exchanging files.
+
+`recreate-generated` requires a tracked deletion and an existing, safe destination folder. Read the exact escaped output and permissions. Dort leaves any file that appears at the destination untouched. The filesystem must support moving a file without replacing an existing one.
+
+JSON and nonterminal writes require `--yes`. A dry run never writes or approves a later run.
 
 ### Plan
 
@@ -327,14 +388,14 @@ dort recovery abandon REPOSITORY_ID OPERATION_ID --dry-run
 - `resume`: continue an intact repository setup.
 - `abandon`: mark an incomplete setup abandoned. It keeps any published repository and registration.
 
-For an interrupted generated update, open **Recovery** and choose **Review generated recovery** (`u`), or run:
+For an interrupted generated update, replacement or recreation, open **Recovery** and choose **Review generated recovery** (`u`), or run:
 
 ```sh
 dort recovery recover-update --dry-run
 dort recovery recover-update
 ```
 
-The new file may already be at the destination. Recovery finishes or clears the pending record without replacing either file. If it stops on a conflict, keep both files and check the reported paths. If the destination folder moved, use the reported private folder device and inode to identify it. While the update remains unresolved, Dort blocks other writes across all repositories.
+The new file may already be at the destination. Recovery checks the destination, private path and deployment record before closing the action. It never publishes a staged file. After a successful recreation the private file is absent. If recovery stops, keep any files and check the reported paths. If the destination folder moved, use the reported private folder device and inode to identify it. Dort blocks other writes across all repositories until recovery finishes.
 
 Recovery checks current files and refuses changed state. It never runs automatically. An unresolved or damaged record can block new writes until you inspect it.
 

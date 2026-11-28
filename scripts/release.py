@@ -227,9 +227,9 @@ Dort manages local dotfiles and tools from the terminal or command line.
 
 ## What's new
 
-- Clone a repository, save a profile for this machine, and resume an interrupted environment setup.
-- Manage repositories, profiles, file mappings, and tool settings in the terminal app. Pick declared profiles and tools in forms.
-- Press F1 for help with the current screen or field.
+- Create and edit templates in **Files → Generated**, or open a draft in your editor.
+- Write Jinja templates with conditions, loops, and filters. Use manifest inputs, explicit host values, and private machine-local values.
+- Review the exact output before deployment. Dort distinguishes template updates from local changes and keeps the previous file when you approve a replacement.
 
 ## Upgrade from v0.1.0
 

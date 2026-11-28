@@ -20,9 +20,11 @@ pub(super) enum Topic {
     ManagedContent,
     Managed,
     ManagedDetails,
+    TemplateFiles,
     GeneratedFiles,
     Generated,
     GeneratedDraft,
+    LocalInputs,
     Recovery,
     RecoveryDetails,
     Checks,
@@ -56,6 +58,7 @@ pub(super) enum Topic {
     CloseRecordReview,
     More,
     ProfileChoice,
+    ChooseTemplateFile,
     DeclarationProvider,
     DraftReferences,
     CloseRecordProvider,
@@ -110,7 +113,9 @@ impl Topic {
                 Kind::Repair => Self::OpenRepair,
             },
             Form::Repair => Self::Repair,
+            Form::TemplateFile => Self::TemplateFiles,
             Form::Generated => Self::GeneratedDraft,
+            Form::LocalInputs => Self::LocalInputs,
             Form::Check => Self::CheckForm,
             Form::Choose => Self::ChoosePath,
             Form::Clone => Self::Clone,
@@ -211,6 +216,7 @@ impl Topic {
         if let Some(preview) = &app.preview {
             use super::full_check::Destination;
             return match &preview.pending {
+                Pending::LocalInput(_) => Self::LocalInputs,
                 Pending::Environment(_) => Self::Environment,
                 Pending::FullCheck(check) => match check.destination {
                     Destination::Environment { .. } => Self::EnvironmentCheck,
@@ -237,7 +243,7 @@ impl Topic {
                 }
                 Overlay::Ignored { .. } => Some(Self::Ignored),
                 Overlay::Generated(_) => Some(Self::Generated),
-                Overlay::About => Some(Self::About),
+                Overlay::About | Overlay::DraftAbout(_) => Some(Self::About),
                 Overlay::Repositories { .. } => Some(Self::Repositories),
                 Overlay::Profiles(picker) if picker.standalone => Some(Self::StandaloneProfiles),
                 Overlay::Profiles(_) => Some(Self::TemporaryProfiles),
@@ -250,6 +256,9 @@ impl Topic {
             Tab::Overview if app.profiles.open => Self::Profiles,
             Tab::Overview if app.overview_details => Self::OverviewDetails,
             Tab::Overview => Self::Overview,
+            Tab::Files if app.files_page == super::inventory::Page::Templates => {
+                Self::TemplateFiles
+            }
             Tab::Files if app.files_page == super::inventory::Page::Generated => {
                 Self::GeneratedFiles
             }

@@ -13,6 +13,7 @@ pub fn nodes(app: &App) -> Arc<[Node]> {
     match app.files_page {
         Page::Discover => super::discovery_tree::snapshot(app).all.clone(),
         Page::Managed => managed_nodes(app).into(),
+        Page::Templates => std::sync::Arc::default(),
         Page::Generated => app
             .visible_file_rows()
             .into_iter()
@@ -156,6 +157,7 @@ pub fn select(app: &mut App, key: usize) {
                 Page::Discover => app.candidate_selected = raw,
                 Page::Managed => app.selected = raw,
                 Page::Generated => app.inventory.generated_selected = raw,
+                Page::Templates => app.templates.select(raw),
             }
         }
         // Synthetic groups retain an explicit cursor, not the previous file identity.

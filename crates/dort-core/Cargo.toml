@@ -13,6 +13,8 @@ publish = ["crates-io"]
 include = ["/src/**", "/tests/**", "/examples/dort.toml", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE"]
 
 [dependencies]
+libc = "0.2"
+minijinja = { version = "=3.1.0", default-features = false, features = ["fuel", "unstable_machinery"] }
 rustix.workspace = true
 semver.workspace = true
 serde.workspace = true

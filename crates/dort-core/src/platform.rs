@@ -9,6 +9,13 @@ pub enum Platform {
 }
 
 impl Platform {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Macos => "macos",
+            Self::Linux => "linux",
+        }
+    }
+
     pub fn detect() -> Result<Self> {
         match std::env::consts::OS {
             "macos" => Ok(Self::Macos),
@@ -28,6 +35,13 @@ pub enum Architecture {
 }
 
 impl Architecture {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::X86_64 => "x86_64",
+            Self::Aarch64 => "aarch64",
+        }
+    }
+
     pub fn detect() -> Result<Self> {
         match std::env::consts::ARCH {
             "x86_64" => Ok(Self::X86_64),

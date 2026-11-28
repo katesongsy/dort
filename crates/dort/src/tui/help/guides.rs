@@ -64,7 +64,7 @@ impl Topic {
             Self::Managed => {
                 guide!("Managed files", "A mapping tells Dort which repository file to link into your home folder. Select a mapping and press Enter to inspect its source, destination and status.";
                     "Read status" => "Linked means the destination points to the expected source. Needs apply means it is not in place yet. Blocked means Dort found a conflict. Read the reason in Details before applying.",
-                    "Generated files" => "Press 4 to open Generated.",
+                    "Template files" => "Press 5 to open Templates. Press 4 for Generated.",
                     "Choose which files to apply" => "Apply reviews the active profiles, even with a filter on screen. To review a subset, press Space to mark the mappings and use Apply marked. Marks can be hidden by the filter.",
                     "Change what Dort manages" => "Add file mapping or Edit file mapping saves a declaration for later apply. Unmanage leaves a regular copy at the destination. Delete link removes the link at the destination. Both keep the repository source.",
                 )
@@ -75,33 +75,52 @@ impl Topic {
                     "Return to the list" => "Press Esc to choose a different mapping or mark a group. Apply marked uses the marks. Filtering alone never limits Apply.",
                 )
             }
+            Self::TemplateFiles => {
+                guide!("Template files", "Browse repository template paths and mapping counts. Enter reads the selected source without rendering it.";
+                    "Create or edit" => "Press s for a new file. In a source view, press Enter to edit an editable .jinja file under templates/. Create any missing folders in the repository first.",
+                    "Review and save" => "Tab moves between fields. Enter in the template adds a line. Press Esc to leave the field, then Enter to review. Scroll to the end and press y to save. Home files and mappings stay unchanged.",
+                )
+            }
             Self::GeneratedFiles => {
                 guide!("Generated files", "Press s for New generated file. Select a template to see its destination and source.";
                     "Preview" => "Press Enter or v for rendered output and current destination status.",
-                    "Edit" => "Press e to edit an inline template or its inputs. Edit file-backed templates in the repository.",
+                    "Edit" => "Press e to edit the template in dort.toml or its inputs. Open Files / Templates to edit a template file.",
+                    "Local inputs" => "Press l on a file with declared local inputs. Review a value change or clear it. Settings stay on this machine.",
                     "Inspect" => "Press F3 for details. Esc returns to the selected row.",
                 )
             }
             Self::GeneratedDraft => {
-                guide!("Generated file draft", "Set the Home destination and template. Use {{ name }} for inputs. Tab moves between fields. In Template, Enter adds a line. Paste several lines at once.";
-                    "Open in editor" => "Press F5 to use VISUAL or EDITOR. Save and exit the editor to return to the draft.",
-                    "Enter inputs" => "Press F4 to continue. Empty values and spaces are kept. Esc goes back without losing values. Never enter secrets.",
-                    "Review before saving" => "Review generated file shows the rendered text. Save generated file only updates dort.toml. Your Home files stay in place.",
+                guide!("Generated file draft", "Set the Home destination and template. Tab moves between fields. In Template, Enter adds a line. Paste several lines at once.";
+                    "Template content" => "In dort.toml holds the template text here. Template file reads an existing .jinja file under templates/. Enter or Space chooses one. Only repository template files that Dort can read appear.",
+                    "Continue" => "Press Esc to leave the field, then Enter. You can also click Continue or Review. Tab or click a field to edit again.",
+                    "Enter inputs" => "Use Space or click to allow host fields. Use F6 to set an empty string or unset a value. Never enter secrets.",
+                    "Open in editor" => "Press F5 to use VISUAL or EDITOR. Save and exit the editor to return to the draft. It edits dort.toml text only, so it is unavailable for a template file.",
+                    "Declare local inputs" => "Use local.name. On the inputs step, use Space or click to declare a name. Choose Save declaration only if a value is still needed.",
+                    "Set local values" => "In Generated, select the saved file and open Local inputs (l). Enter sets a value. Blank means empty. F6 clears the value. Review before saving. No secrets.",
+                    "Review before saving" => "Check the resolved values and rendered text. Save generated file only updates dort.toml. Your Home files stay in place.",
+                )
+            }
+            Self::LocalInputs => {
+                guide!("Local inputs", "Read values for the selected generated file. Values stay on this machine. No secrets.";
+                    "Set a value" => "Select a name and press Enter. Ctrl-U clears the draft. Leave it blank to set an empty string.",
+                    "Clear a value" => "Use F6 on a set or empty value to make it unset.",
+                    "Review and save" => "Press Esc to leave the value field, then Enter to review. You can also click Review value. Scroll to the end and press y to save. Esc from review keeps the draft.",
                 )
             }
             Self::Generated => {
-                guide!("Generated file preview", "Read the template output and its destination status. Inputs come from dort.toml. No files are written.";
+                guide!("Generated file preview", "Read the resolved values, their sources, the template output, and the destination status. No files are written.";
                     "Read the output" => "Use arrows or page keys to scroll. Home goes to the top; End goes to the last line. Esc returns to Generated.",
                     "Check the status" => "Dort shows template updates and local changes separately. The preview leaves the deployed file alone.",
                     "Deploy for the first time" => "For a new file, choose Review deployment (R). Press y when Deploy generated file appears. Esc cancels the review.",
-                    "Update a deployed file" => "When Update available appears, choose Review update (R). Read the contents and permission changes. Press y when Update generated file appears at the end. Esc returns to the selected file.",
+                    "Update a deployed file" => "When Update available appears, choose Review update (R). Read the contents and permission changes. Press y when Update generated file appears at the end.",
+                    "Keep or replace local changes" => "Choose Review replacement (R) to compare local changes. Dort keeps the local file at the private path shown if you approve. For a local deletion, choose Review recreation (R). Scroll to the end before pressing y. Esc leaves the destination alone.",
                 )
             }
             Self::Recovery => {
                 guide!("Recovery", "Select an operation record and press Enter to inspect its state and available recovery actions. This list includes records from other repositories.";
                     "Pick a recovery action" => "Rollback reviews which files can be restored. Resume continues recoverable setup. Abandon closes incomplete setup and keeps what was published, including private files. Read the reason if an action is blocked.",
                     "Check current files" => "Dort checks paths and refuses to restore files that no longer match the expected state. Rollback does not uninstall packages. Backups are private files, not encrypted.",
-                    "Generated update" => "If a generated update stopped, choose Review generated recovery (u). The new file may already be visible. Recovery checks the current state without replacing either file.",
+                    "Generated file change" => "If an update, replacement or recreation stopped, choose Review generated recovery (u). Keep any files at the reported paths. Recovery checks what happened without creating or replacing the file.",
                 )
             }
             Self::RecoveryDetails => {
@@ -293,6 +312,12 @@ impl Topic {
             Self::ProfileChoice => {
                 guide!("Choose saved profile setting", "Choose how this profile behaves on this machine. Use defaults follows the repository and platform defaults. On enables the group here. Off disables it here.";
                     "Before saving" => "Enter opens a review of the local setting. It does not edit dort.toml. Esc returns with the current setting unchanged.",
+                )
+            }
+            Self::ChooseTemplateFile => {
+                guide!("Choose a template file", "Use the arrows to move and Enter to read the file into this generated file draft. Only repository template files that Dort can read appear here.";
+                    "What changes" => "The draft holds the repository path. Review shows the rendered output. Saving writes dort.toml only and leaves the template file and Home file alone.",
+                    "No files" => "Create one in Files / Templates, then choose again. Cancel with Esc keeps the draft unchanged.",
                 )
             }
             Self::DraftReferences => {

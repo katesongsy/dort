@@ -222,6 +222,7 @@ impl RepairDraft {
             config: self.config.clone(),
             manifest: self.manifest.clone(),
             watched_target: None,
+            watched_source: None,
             original: self.original.clone(),
             replacement,
             description: diff,

@@ -413,6 +413,37 @@ impl App {
         None
     }
 
+    /// One request wrote the template file and the mapping. A missing mapping keeps the draft so
+    /// another approval writes it alone.
+    pub(super) fn accept_compose(
+        &mut self,
+        outcome: dort_core::generated::compose::Outcome,
+    ) -> Option<Task> {
+        use dort_core::generated::compose::Outcome;
+        self.receipt = None;
+        self.failure = None;
+        self.details_scroll = 0;
+        let saved = !matches!(outcome, Outcome::MappingNotWritten { .. });
+        if saved {
+            self.draft_exit = None;
+            if let Some(draft) = self.shell.generated.take() {
+                self.inventory.saved_template = Some(draft.id().into());
+                self.inventory.details = false;
+            }
+            self.clear_template_form();
+            self.shell.back();
+        }
+        self.result = Some(crate::services::compose::outcome(&outcome));
+        self.show_result = true;
+        self.status = if saved {
+            "Template file and mapping saved."
+        } else {
+            "Template file is in place. Mapping not written."
+        }
+        .into();
+        (!self.quit && saved).then_some(Task::Refresh)
+    }
+
     pub(super) fn accept_generated_deployment(
         &mut self,
         result: Result<dort_core::generated::Published, String>,
@@ -452,13 +483,13 @@ impl App {
         self.receipt = None;
         self.failure = None;
         self.details_scroll = 0;
-        self.status = match &outcome {
-            Some(UpdateOutcome::Updated { .. }) => "Generated update recorded.",
-            Some(UpdateOutcome::NotExchanged { .. }) => "Deployed file was not replaced.",
-            Some(UpdateOutcome::NeedsRecovery { .. }) => "Generated update needs recovery.",
-            None => "No generated update needs recovery.",
-        }
-        .into();
+        self.status = outcome
+            .as_ref()
+            .map_or(
+                "No generated update needs recovery.",
+                crate::services::generated_update::status,
+            )
+            .into();
         self.result = Some(outcome.as_ref().map_or_else(
             || "No generated update needs recovery.".into(),
             crate::services::generated_update::outcome,
@@ -499,10 +530,15 @@ impl App {
             }
             return None;
         }
+        let mut local_input_note = "";
         if completion.operation == "Manifest change"
             && matches!(self.shell.overlay, Some(Overlay::Form(Form::Generated)))
             && let Some(draft) = self.shell.generated.take()
         {
+            self.draft_exit = None;
+            if draft.has_local_inputs() {
+                local_input_note = "\nReturn to Generated and open Local inputs (l) to set values on this machine.";
+            }
             self.inventory.saved_template = Some(draft.id().into());
             self.inventory.details = false;
         }
@@ -546,7 +582,7 @@ impl App {
         }
         self.shell.back();
         self.result = Some(format!(
-            "{} completed.\n{}",
+            "{} completed.\n{}{local_input_note}",
             completion.operation,
             completion
                 .transaction_id

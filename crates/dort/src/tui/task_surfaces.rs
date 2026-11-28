@@ -117,9 +117,19 @@ impl Activity {
             Task::DiscoverContent(_) | Task::DiscoveryTree(_) | Task::GitPreview(_) => {
                 unreachable!("private passive reads have no activity surface")
             }
+            Task::InspectLocalInputs(_) => "Read local inputs",
+            Task::ReviewLocalInput(_) => "Review local input",
+            Task::ListTemplates(_) => "List template files",
+            Task::ListDraftSources(_) => "List template files for this draft",
+            Task::ReadDraftSource(..) => "Read template file for this draft",
+            Task::ShowTemplate(..) => "Read template source",
+            Task::ReviewTemplate(..) => "Review template file",
+            Task::ReviewTemplateDelete(..) => "Review template file deletion",
             Task::PreviewGenerated(_) => "Preview generated file",
             Task::ReviewGeneratedDeployment(_) => "Review deployment",
-            Task::ReviewGeneratedUpdate(_) => "Review update",
+            Task::ReviewGeneratedUpdate(_, action) => {
+                crate::services::generated_update::review_label(*action)
+            }
             Task::ReviewGeneratedRecovery => "Review generated recovery",
             Task::IgnoredPaths => "Manage ignored paths",
             Task::Ignore(..) => "Preview discovery preferences",
@@ -167,9 +177,15 @@ impl Activity {
                     Approved::FullCheck(_) => "Run checks",
                     Approved::EnvironmentAbandon(_) => "Abandon environment run",
                     Approved::Profile(_) => "Save profile choice",
+                    Approved::LocalInput(_) => "Save local settings",
+                    Approved::TemplateFile(..) => "Save template file",
                     Approved::GeneratedDeployment(_) => "Deploy generated file",
-                    Approved::GeneratedUpdate(_) => "Update generated file",
-                    Approved::GeneratedRecovery(_) => "Recover generated update",
+                    Approved::GeneratedUpdate(p) => {
+                        crate::services::generated_update::confirmation_label(p.action())
+                    }
+                    Approved::GeneratedRecovery(location) => {
+                        crate::services::generated_update::recovery_label(location.action)
+                    }
                     Approved::Configuration(_) => "Save configuration change",
                     Approved::Ignore(_) => "Discovery preferences",
                     Approved::Files(_) => "File operation",
@@ -364,16 +380,27 @@ impl Activity {
             ),
             Pending::Environment(_) => ("Environment", vec![]),
             Pending::Profile(_) => ("Save profile choice", vec![]),
+            Pending::LocalInput(p) => (
+                pending.confirmation_label(),
+                vec![("Generated file", p.review().id.to_owned())],
+            ),
+            Pending::TemplateFile(p, root) => (
+                pending.confirmation_label(),
+                vec![
+                    ("Repository", root.display().to_string()),
+                    ("Template", p.review().path.display().to_string()),
+                ],
+            ),
             Pending::GeneratedDeployment(p) => (
                 "Deploy generated file",
                 vec![("Destination", p.review().destination.display().to_string())],
             ),
             Pending::GeneratedUpdate(p) => (
-                "Update generated file",
+                crate::services::generated_update::confirmation_label(p.action()),
                 vec![("Destination", p.review().destination.display().to_string())],
             ),
             Pending::GeneratedRecovery(location) => (
-                "Recover generated update",
+                crate::services::generated_update::recovery_label(location.action),
                 vec![("Destination", location.destination.display().to_string())],
             ),
             Pending::Ignore(_) => (

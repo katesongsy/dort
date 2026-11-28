@@ -6,15 +6,13 @@ Dort is pre-1.0. No dates are promised. Each feature ships for CLI and TUI toget
 
 Local repositories, file links and recovery, Git inspection, manifest checks, and Homebrew/npm tool checks and installs on macOS, Linux and WSL.
 
+Generated files with literal or Jinja templates, explicit inputs, drift detection, and reviewed deployment and updates.
+
 ## Next
 
 ### Environments
 
 Persistent profile controls with clear semantics, cloning without deployment, one plan covering files and tools, dependency-ordered changes and resume after failure.
-
-### Generated configuration
-
-First deployment creates one missing file after review. Next: detect drift and review replacement.
 
 ### Secrets
 

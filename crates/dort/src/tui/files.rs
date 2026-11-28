@@ -153,7 +153,7 @@ fn details(app: &App) -> Text<'static> {
                     row.source
                         .as_ref()
                         .and_then(|path| path.to_str())
-                        .unwrap_or("Inline in dort.toml"),
+                        .unwrap_or("In dort.toml"),
                 ),
                 ui::metadata("Profiles", &file.profiles.join(", ")),
                 Line::default(),
@@ -276,6 +276,12 @@ pub(super) fn controls(app: &App) -> impl Iterator<Item = ui::ActionButton> {
     };
     let generated = [
         (
+            Action::LocalInputs.label(),
+            "l",
+            Action::LocalInputs,
+            app.action_reason(Action::LocalInputs).is_none(),
+        ),
+        (
             Action::NewGenerated.label(),
             "s",
             Action::NewGenerated,
@@ -291,12 +297,14 @@ pub(super) fn controls(app: &App) -> impl Iterator<Item = ui::ActionButton> {
             Action::EditGenerated.label(),
             "e",
             Action::EditGenerated,
-            app.registered_repository() && mapping.is_some_and(|file| file.template.is_some()),
+            app.registered_repository()
+                && mapping.is_some_and(|file| file.template.is_some() || file.source.is_some()),
         ),
     ];
     match app.files_page {
         Page::Managed => &managed[..],
         Page::Generated => &generated[..],
+        Page::Templates => &[],
         Page::Discover => &[],
     }
     .iter()
@@ -479,7 +487,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         Collection::new(
             [
                 Constraint::Percentage(32),
-                Constraint::Length(11),
+                Constraint::Length(13),
                 Constraint::Min(4),
             ],
             Header::Heading(["FILE", "TEMPLATE", "DESTINATION"]),
@@ -577,9 +585,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                         }),
                         if generated {
                             Cell::from(if row.source.is_some() {
-                                "File-backed"
+                                "Template file"
                             } else {
-                                "Inline"
+                                "In dort.toml"
                             })
                         } else {
                             Cell::from(row.state).style(ui::state(row.state))

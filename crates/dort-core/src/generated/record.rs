@@ -12,6 +12,7 @@ use rustix::{fs, io::Errno, process};
 use serde::{Deserialize, Serialize};
 use std::{
     ffi::OsStr,
+    fs::File,
     path::{Path, PathBuf},
 };
 
@@ -45,6 +46,25 @@ pub(super) struct DeploymentRecord {
     pub(super) deployed: Stamp,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) retained: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) recreation: Option<String>,
+}
+
+impl DeploymentRecord {
+    pub(super) fn valid(&self) -> bool {
+        self.deployed.valid()
+            && self
+                .recreation
+                .as_deref()
+                .is_none_or(|id| self.retained.is_none() && transaction_id_valid(id))
+    }
+}
+
+pub(super) fn transaction_id_valid(id: &str) -> bool {
+    id.len() == 64
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -55,6 +75,8 @@ struct Receipt {
     deployed: Stamp,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     retained: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    recreation: Option<String>,
 }
 
 impl Slot {
@@ -102,22 +124,22 @@ impl Slot {
         }
         let bytes = observation::read_at_checked(&dir.file, name, &path, &fp, LIMIT)?;
         let receipt: Receipt = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
-        if receipt.schema != SCHEMA
-            || receipt.identity != self.identity
-            || !receipt.deployed.valid()
-        {
-            return Err(invalid());
-        }
-        Ok(Some(DeploymentRecord {
+        let deployment = DeploymentRecord {
             deployed: receipt.deployed,
             retained: receipt.retained,
-        }))
+            recreation: receipt.recreation,
+        };
+        if receipt.schema != SCHEMA || receipt.identity != self.identity || !deployment.valid() {
+            return Err(invalid());
+        }
+        Ok(Some(deployment))
     }
 
     pub(super) fn save(self, deployed: Stamp) -> Result<()> {
         let deployment = DeploymentRecord {
             deployed,
             retained: None,
+            recreation: None,
         };
         let text = self.encode(deployment)?;
         let dir = PrivateDir::open(&self.folder, true)?.expect("created deployment records folder");
@@ -143,6 +165,7 @@ impl Slot {
             identity: self.identity.clone(),
             deployed: deployment.deployed,
             retained: deployment.retained,
+            recreation: deployment.recreation,
         };
         let text = serde_json::to_string(&receipt).map_err(|_| invalid())?;
         if text.len() as u64 > LIMIT {
@@ -173,13 +196,11 @@ impl Stamp {
     }
 
     pub(super) fn valid(&self) -> bool {
-        self.mode <= 0o777
-            && Mode(self.mode).permits_deployment()
-            && self.sha256.len() == 64
-            && self
-                .sha256
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        Self::mode_safe(self.mode) && transaction_id_valid(&self.sha256)
+    }
+
+    fn mode_safe(mode: u32) -> bool {
+        mode <= 0o777 && Mode(mode).permits_deployment()
     }
 
     pub(super) fn observe(
@@ -207,6 +228,36 @@ impl Stamp {
     }
 }
 
+pub(super) fn check_file_access(
+    dir: &File,
+    name: &OsStr,
+    path: &Path,
+    fp: &Fingerprint,
+) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let file = fs::openat(
+            dir,
+            name,
+            fs::OFlags::RDONLY | fs::OFlags::NOFOLLOW | fs::OFlags::CLOEXEC | fs::OFlags::NONBLOCK,
+            fs::Mode::empty(),
+        )
+        .map(File::from)
+        .map_err(|err| io_error("check generated file access", path, err))?;
+        let stat =
+            fs::fstat(&file).map_err(|error| io_error("inspect generated file", path, error))?;
+        if Fingerprint::from_stat(&stat) != *fp {
+            return Err(Error::Invalid(
+                "The generated file changed. Open a new preview.".into(),
+            ));
+        }
+        super::deploy::acl::require_private_stage(&file, path)?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (dir, name, path, fp);
+    Ok(())
+}
+
 pub(super) fn read_tracked(
     path: &Path,
     handle: &ParentHandle,
@@ -219,6 +270,11 @@ pub(super) fn read_tracked(
     if fp.mode & 0o400 == 0 {
         return Err(DriftStatus::Unverifiable);
     }
+    if !Stamp::mode_safe(fp.mode & 0o7777) {
+        return Err(DriftStatus::Unsafe);
+    }
+    check_file_access(&handle.directory, &handle.name, path, &fp)
+        .map_err(|_| DriftStatus::Unsafe)?;
     let bytes = observation::read_checked_bounded(handle, path, &fp, OUTPUT_LIMIT as u64)
         .map_err(|_| DriftStatus::Unverifiable)?;
     if observation::inspect(path, false).ok().is_none_or(|after| {

@@ -6,6 +6,9 @@ use super::{
 
 impl App {
     pub(super) fn dialog_title(&self) -> Option<&'static str> {
+        if self.draft_exit.is_some() {
+            return Some("Discard unsaved changes?");
+        }
         if self.help.is_some() {
             return Some("Help");
         }
@@ -14,6 +17,9 @@ impl App {
         }
         if let Some(menu) = &self.more {
             return Some(menu.title);
+        }
+        if matches!(self.shell.overlay, Some(Overlay::DraftAbout(_))) {
+            return Some("About Dort");
         }
         if self.error.is_some() || self.busy || self.show_result || self.preview.is_some() {
             return None; // A retained choice is not the currently displayed surface.
@@ -73,6 +79,11 @@ impl App {
                     Form::Clone => "Session / Clone repository",
                     Form::Repair => "Manifest repair draft",
                     Form::Generated => "Files / Generated file draft",
+                    Form::TemplateFile if self.form_page().is_some() => {
+                        "Files / Template file draft"
+                    }
+                    Form::TemplateFile => "Files / Template source",
+                    Form::LocalInputs => "Files / Local inputs",
                     Form::Configure => self
                         .shell
                         .configuration
@@ -173,6 +184,7 @@ impl App {
         self.retry = None;
         self.show_result = false;
         self.status = "".into();
+        self.clear_template_form();
         self.shell.overlay = None;
         self.shell.return_to_adopt = false;
         self.profiles.open = false;

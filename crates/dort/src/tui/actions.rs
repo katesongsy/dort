@@ -6,7 +6,7 @@ use dort_core::{
     bootstrap,
     context::HostContext,
     generated::{
-        Update, UpdateApproval, UpdateLocation, UpdateOutcome, pending_update,
+        Update, UpdateAction, UpdateApproval, UpdateLocation, UpdateOutcome, pending_update,
         recover_reviewed_update,
     },
     journal,
@@ -15,6 +15,7 @@ use dort_core::{
     planner::{self, Plan, Request, UnmanageMode},
     recovery,
     state::WriterLock,
+    template_files,
 };
 use std::path::{Path, PathBuf};
 
@@ -354,6 +355,8 @@ pub enum Pending {
     Profile(Box<dort_core::local::ProfilePreview>),
     ToolDeclaration(Box<dort_core::tools::declaration::Preview>),
     Ignore(dort_core::discovery_ignore::Preview),
+    LocalInput(Box<dort_core::generated::local_inputs::Preview>),
+    TemplateFile(Box<template_files::Preview>, PathBuf),
     GeneratedDeployment(Box<dort_core::generated::Deployment>),
     GeneratedUpdate(Box<Update>),
     GeneratedRecovery(UpdateLocation),
@@ -368,10 +371,12 @@ impl Pending {
         Ok(match self {
             Self::ToolDeclaration(p) => crate::services::declaration::report(p),
             Self::Ignore(preview) => preview.human(),
+            Self::LocalInput(p) => crate::services::presentation::local_input_review(p.review()),
+            Self::TemplateFile(p, _) => crate::services::template_files::review(p.review()),
             Self::GeneratedDeployment(p) => {
                 crate::services::presentation::generated_deployment(p.review())
             }
-            Self::GeneratedUpdate(p) => generated_update::review(p.review())?,
+            Self::GeneratedUpdate(p) => generated_update::review(&p.review())?,
             Self::GeneratedRecovery(location) => generated_update::recovery_review(location),
             Self::Profile(p) => p.human(),
             Self::Configuration(p) => p.human(),
@@ -432,9 +437,16 @@ impl Pending {
             Self::FullCheck(_) => "Run checks",
             Self::EnvironmentAbandon(_) => "Abandon environment run",
             Self::Profile(_) => "Save profile choice",
+            Self::LocalInput(p) if p.review().proposed.is_none() => "Clear local input",
+            Self::LocalInput(_) => "Save local input",
+            Self::TemplateFile(p, _) => match p.review().action {
+                template_files::Action::Create => "Create template file",
+                template_files::Action::Edit => "Save template file",
+                template_files::Action::Delete => "Delete template file",
+            },
             Self::GeneratedDeployment(_) => "Deploy generated file",
-            Self::GeneratedUpdate(_) => "Update generated file",
-            Self::GeneratedRecovery(_) => "Recover generated update",
+            Self::GeneratedUpdate(p) => generated_update::confirmation_label(p.action()),
+            Self::GeneratedRecovery(location) => generated_update::recovery_label(location.action),
             Self::Configuration(p) => p.label(),
             _ if self.adoption() => "Adopt all",
             _ => "Confirm changes",
@@ -479,6 +491,8 @@ impl Pending {
             Self::ToolDeclaration(p) => dort_core::tools::declaration::Approval::from_preview(*p)
                 .map(|a| Approved::ToolDeclaration(Box::new(a))),
             Self::Ignore(preview) => Ok(Approved::Ignore(preview.approve())),
+            Self::LocalInput(p) => Ok(Approved::LocalInput(Box::new(p.approve()))),
+            Self::TemplateFile(p, root) => Ok(Approved::TemplateFile(Box::new(p.approve()), root)),
             Self::GeneratedDeployment(p) => {
                 Ok(Approved::GeneratedDeployment(Box::new(p.approve())))
             }
@@ -525,6 +539,8 @@ pub enum Approved {
     Profile(Box<dort_core::local::ProfileApproval>),
     ToolDeclaration(Box<dort_core::tools::declaration::Approval>),
     Ignore(dort_core::discovery_ignore::Approval),
+    LocalInput(Box<dort_core::generated::local_inputs::Approval>),
+    TemplateFile(Box<template_files::Approval>, PathBuf),
     GeneratedDeployment(Box<dort_core::generated::Approval>),
     GeneratedUpdate(Box<UpdateApproval>),
     GeneratedRecovery(UpdateLocation),
@@ -563,6 +579,11 @@ impl Approved {
                     .map(str::to_owned);
                 ("Manifest change", id, None)
             }
+            Self::Configuration(super::configuration::Approval::Compose(p)) => {
+                return p
+                    .execute(host)
+                    .map(|outcome| Output::ComposeFinished(Box::new(outcome)));
+            }
             Self::Environment(p) => return p.execute(host, observer).map(Output::EnvironmentRun),
             Self::FullCheck(p) => return p.execute(host),
             Self::EnvironmentAbandon(p) => return p.execute(host).map(Output::EnvironmentRun),
@@ -587,6 +608,12 @@ impl Approved {
             Self::Ignore(approval) => {
                 approval.execute(host, false)?;
                 ("Discovery preferences", None, None)
+            }
+            Self::LocalInput(approval) => return approval.execute().map(Output::LocalInputSaved),
+            Self::TemplateFile(approval, root) => {
+                let outcome = approval.execute(host)?;
+                let rows = template_files::list(host, &root).map_err(|error| diagnostic(&error));
+                return Ok(Output::TemplateWritten(outcome, rows));
             }
             Self::GeneratedDeployment(approval) => {
                 return match approval.execute() {
@@ -751,9 +778,17 @@ pub enum Task {
     ToolDeclaration(crate::services::declaration::Request),
     IgnoredPaths,
     Ignore(PathBuf, bool),
+    InspectLocalInputs(String),
+    ReviewLocalInput(super::local_inputs::Change),
+    ListTemplates(PathBuf),
+    ListDraftSources(PathBuf),
+    ReadDraftSource(PathBuf, PathBuf),
+    ShowTemplate(PathBuf, PathBuf),
+    ReviewTemplate(PathBuf, Box<template_files::Change>, String),
+    ReviewTemplateDelete(PathBuf, PathBuf),
     PreviewGenerated(String),
     ReviewGeneratedDeployment(String),
-    ReviewGeneratedUpdate(String),
+    ReviewGeneratedUpdate(String, UpdateAction),
     ReviewGeneratedRecovery,
     DiscoveryTree(super::discovery_tree::Read),
     DiscoverContent(super::discover_content::Read),
@@ -819,7 +854,18 @@ pub enum Output {
     ToolClosePreview(Box<dort_core::tools::install::ClosePreview>),
     ToolClosed(std::result::Result<dort_core::tools::install::Attempt, String>),
     IgnoredPaths(Vec<PathBuf>),
+    LocalInputs(String, Vec<dort_core::generated::local_inputs::Row>),
+    LocalInputSaved(bool),
+    TemplateList(Vec<template_files::Row>),
+    DraftSources(Vec<template_files::Row>),
+    DraftSource(PathBuf, Box<template_files::Source>),
+    TemplateSource(Box<template_files::Source>),
+    TemplateWritten(
+        template_files::Outcome,
+        std::result::Result<Vec<template_files::Row>, String>,
+    ),
     Generated(Box<dort_core::generated::Preview>),
+    ComposeFinished(Box<dort_core::generated::compose::Outcome>),
     GeneratedDeployed(std::result::Result<dort_core::generated::Published, String>),
     GeneratedUpdated(Option<UpdateOutcome>),
     DiscoveryTree(super::discovery_tree::Report),
@@ -1022,6 +1068,39 @@ pub fn perform_scoped_with_install_progress(
             dort_core::discovery_ignore::Preview::prepare(host, relative, ignored)
                 .map(|p| Output::Preview(Pending::Ignore(p)))
         }
+        Task::InspectLocalInputs(id) => {
+            let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
+            dort_core::generated::local_inputs::inspect(host, &root, &id)
+                .map(|rows| Output::LocalInputs(id, rows))
+        }
+        Task::ReviewLocalInput(change) => {
+            let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
+            dort_core::generated::local_inputs::Preview::prepare(
+                host,
+                &root,
+                &change.id,
+                &change.name,
+                change.value.as_deref(),
+            )
+            .map(|p| Output::Preview(Pending::LocalInput(Box::new(p))))
+        }
+        Task::ListTemplates(root) => template_files::list(host, &root).map(Output::TemplateList),
+        Task::ListDraftSources(root) => template_files::list(host, &root).map(Output::DraftSources),
+        Task::ReadDraftSource(root, path) => template_files::show(host, &root, &path)
+            .map(|source| Output::DraftSource(path, Box::new(source))),
+        Task::ShowTemplate(root, path) => template_files::show(host, &root, &path)
+            .map(|source| Output::TemplateSource(Box::new(source))),
+        Task::ReviewTemplate(root, change, text) => {
+            template_files::Preview::prepare(host, &root, *change, text)
+                .map(|p| Output::Preview(Pending::TemplateFile(Box::new(p), root)))
+        }
+        Task::ReviewTemplateDelete(root, path) => template_files::Preview::prepare(
+            host,
+            &root,
+            template_files::Change::Delete(template_files::show(host, &root, &path)?),
+            String::new(),
+        )
+        .map(|p| Output::Preview(Pending::TemplateFile(Box::new(p), root))),
         Task::PreviewGenerated(id) => crate::services::preview_generated(
             host,
             &LocalConfig::load(host)?,
@@ -1036,10 +1115,14 @@ pub fn perform_scoped_with_install_progress(
             requested,
         )
         .map(|p| Output::Preview(Pending::GeneratedDeployment(Box::new(p)))),
-        Task::ReviewGeneratedUpdate(id) => {
-            crate::services::review_generated_update(host, repository.as_deref(), &id, requested)
-                .map(|p| Output::Preview(Pending::GeneratedUpdate(Box::new(p))))
-        }
+        Task::ReviewGeneratedUpdate(id, action) => crate::services::review_generated_update(
+            host,
+            repository.as_deref(),
+            &id,
+            requested,
+            action,
+        )
+        .map(|p| Output::Preview(Pending::GeneratedUpdate(Box::new(p)))),
         Task::ReviewGeneratedRecovery => Ok(match pending_update(host)? {
             Some(location) => Output::Preview(Pending::GeneratedRecovery(location)),
             None => Output::GeneratedUpdated(None),
@@ -1157,6 +1240,12 @@ pub fn perform_scoped_with_install_progress(
                         return Ok(Output::MappingUnchanged);
                     }
                     Preview::Manifest(Box::new(preview))
+                }
+                Request::Compose { mapping, text } => {
+                    let root = LocalConfig::load(host)?.select_repository(repository.as_deref())?;
+                    Preview::Compose(Box::new(dort_core::generated::compose::Preview::prepare(
+                        host, &root, *mapping, text,
+                    )?))
                 }
                 Request::OpenRepair(root, git) => {
                     return dort_core::manifest_edit::RepairDraft::open(host, &root, &git)

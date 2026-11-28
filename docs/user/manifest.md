@@ -64,11 +64,46 @@ mode = "template"
 inputs = { theme = "dark" }
 ```
 
-Dort renders `theme = dark` followed by a newline. Use `template` for text in `dort.toml`, or use `source` to point to a UTF-8 file in the repository. An inline template cannot use `source` or platform source overrides. Use a single input name in each `{{ ... }}`. Names use ASCII letters, digits and underscores and start with a letter or underscore. Values are literal strings from `dort.toml`, never expanded again. Keep secrets out of templates and inputs. Dort refuses content that looks like credentials.
+Dort renders `theme = dark` followed by a newline. Use `template` for text in `dort.toml`, or use `source` to point to a UTF-8 file in the repository. An inline template cannot use `source` or platform source overrides.
+
+All templates use Jinja. Input names use ASCII letters, digits, and underscores and start with a letter or underscore. Inputs are strings and are not expanded again. Keep secrets out of templates and inputs. Dort refuses content that looks like credentials.
+
+If you used an older literal template, review its output before deploying. Jinja now interprets `{%` and `{#` in template text. `true`, `false`, and `none` are Jinja values; use `inputs.true`, `inputs.false`, or `inputs.none` to read manifest inputs with those names. Dort ignores the old `syntax` key.
 
 Dort still reads the older `recipe` key. Use only one spelling. Saving an edit writes `template`.
 
 Limits: 64 KiB per UTF-8 template, 16 KiB per input value, and 128 KiB of rendered text.
+
+#### Jinja templates
+
+Use `inputs.name` or `name` for a value from the manifest. Use `host.hostname` for the OS hostname. List each host field you want to allow in `host_inputs`. For a value set on each machine, use `local.name` and list `name` in `local_inputs`. Store only names in the manifest. Set non-secret values in [Files / Generated](commands.md#generated-files).
+
+```toml
+[[files]]
+id = "editor-settings"
+mode = "template"
+target = "~/.config/editor/settings.conf"
+host_inputs = ["os"]
+inputs = { theme = "dark" }
+template = '''
+{% if host.os == "linux" %}
+{% for value in [inputs.theme, "compact"] %}
+option = {{ value }}
+{% endfor %}
+{% endif %}
+'''
+```
+
+| Template name | `host_inputs` entry | Value |
+| --- | --- | --- |
+| `host.os` | `os` | `linux` or `macos` |
+| `host.arch` | `arch` | `x86_64` or `aarch64` |
+| `host.user` | `user` | Effective OS account name |
+| `host.hostname` | `hostname` | OS hostname |
+| `host.home` | `home` | Home directory Dort uses |
+| `host.config_home` | `config_home` | Configuration base without Dort's subfolder |
+
+Jinja supports `if`, `elif`, `else`, and `for` over short lists. Use `is defined` before reading an optional value. A missing value stops the render only if the template tries to use it. Use `upper_ascii` and `lower_ascii` for text filters. Templates cannot read arbitrary environment variables or include other files.
 
 ## Profiles
 

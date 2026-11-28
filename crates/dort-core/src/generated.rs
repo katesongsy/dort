@@ -1,7 +1,11 @@
 //! Previews and deployment of repository-declared generated files.
+pub mod compose;
 mod deploy;
+mod inputs;
+pub mod local_inputs;
 mod record;
 mod update;
+pub use crate::model::{HostInput, HostInputs};
 use crate::{
     Error, Manifest, Result,
     context::HostContext,
@@ -9,23 +13,25 @@ use crate::{
     manifest::paths_overlap,
     model::{FileContent, FileMode, ManagedFile},
     observation::{self, Entry, Kind},
+    template::{self, Input, Issue, Template, TemplateError},
 };
 pub use deploy::{Approval, Deployment, DeploymentReview, Published};
+pub use inputs::{InputProvenance, ResolvedInput, ResolvedInputs};
 use rustix::{fs, io::Errno};
 use serde::Serialize;
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
 };
 pub(crate) use update::ensure_no_pending_update;
 pub use update::{
-    ExchangeStatus, Update, UpdateApproval, UpdateLocation, UpdateOutcome, UpdateReview,
-    pending_update, recover_reviewed_update, recover_update,
+    ExchangeStatus, Update, UpdateAction, UpdateApproval, UpdateLocation, UpdateOutcome,
+    UpdateReview, pending_update, recover_reviewed_update, recover_update,
 };
 
-pub const TEMPLATE_LIMIT: usize = 64 * 1024;
-pub const VALUE_LIMIT: usize = 16 * 1024;
-const OUTPUT_LIMIT: usize = 128 * 1024;
+use template::OUTPUT_LIMIT;
+pub use template::{SOURCE_LIMIT as TEMPLATE_LIMIT, VALUE_LIMIT};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Mode(u32);
@@ -56,12 +62,30 @@ pub struct Preview {
     pub source: Option<PathBuf>,
     pub destination: PathBuf,
     pub inputs: BTreeMap<String, String>,
+    /// All resolved declarations, including unused values. Names are qualified.
+    pub resolved_inputs: ResolvedInputs,
     pub rendered: String,
     pub destination_status: DestinationStatus,
     pub permissions: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub drift_status: Option<DriftStatus>,
 }
+
+/// An unrendered declaration with machine-local values still unset.
+#[derive(Debug)]
+pub struct LocalInputSetup {
+    /// Declared but unset names referenced by the template. Some branches may not use them.
+    pub names: Vec<String>,
+    guidance: String,
+}
+
+impl LocalInputSetup {
+    pub fn guidance(&self) -> &str {
+        &self.guidance
+    }
+}
+
+pub(crate) type DeclarationPreview = std::result::Result<Preview, LocalInputSetup>;
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -128,11 +152,9 @@ impl DriftStatus {
             Self::LocallyEdited
             | Self::LocalPermissionsChanged
             | Self::LocallyEditedAndPermissionsChanged => {
-                "Inspect the local file before making changes. Dort leaves it alone."
+                "Keep your local changes or review a replacement."
             }
-            Self::LocallyDeleted => {
-                "Restore the file yourself or leave it missing. First deployment cannot recreate it."
-            }
+            Self::LocallyDeleted => "Leave the file missing or review recreation.",
             Self::Unsafe => "Check the destination path and access. Dort leaves it alone.",
             Self::Unverifiable => {
                 "Check file access, size and Dort's local state, then preview again."
@@ -142,6 +164,10 @@ impl DriftStatus {
 }
 
 impl Preview {
+    fn same_render(&self, other: &Self) -> bool {
+        self.resolved_inputs == other.resolved_inputs && self.rendered == other.rendered
+    }
+
     pub fn proposed_permissions(&self) -> String {
         Mode::declared(self.permissions.as_deref()).label()
     }
@@ -151,64 +177,105 @@ impl Preview {
         let (manifest, _) = observation::read_manifest(&repository.join("dort.toml")).map_err(
             |error| match error {
                 Error::Parse(_) => Error::Invalid(
-                    "Invalid dort.toml. Use literal strings for generated inputs.".into(),
+                    "Invalid dort.toml. Use literal strings for generated inputs. Check syntax, host_inputs and local_inputs.".into(),
                 ),
                 other => other,
             },
         )?;
-        let mut preview = Self::from_manifest(host, repository, &manifest, id)?;
         let local = LocalConfig::load(host)?;
+        let repository_id = local.repository_id(repository);
+        let mut preview =
+            Self::from_manifest(host, repository, repository_id, &manifest, id, None)?
+                .0
+                .map_err(|setup| {
+                    let guidance = setup.guidance();
+                    Error::Invalid(if repository_id.is_some() {
+                        guidance.to_owned()
+                    } else {
+                        format!("Register this repository first. {guidance}")
+                    })
+                })?;
         preview.drift_status = Some(preview.drift_status(host, &local, repository, &manifest));
         Ok(preview)
     }
 
+    /// Renders one declaration. Also returns the template file read for it, if any.
+    /// `pending` supplies a template file's text before it exists.
     pub(crate) fn from_manifest(
         host: &HostContext,
         repository: &Path,
+        repository_id: Option<&str>,
         manifest: &Manifest,
         id: &str,
-    ) -> Result<Self> {
+        pending: Option<(&Path, &str)>,
+    ) -> Result<(DeclarationPreview, Option<Entry>)> {
         let file = find_file(manifest, id)?;
         let destination = host.target_path(&file.target, Some(repository))?;
-        Self::render_file(host, repository, manifest, file, destination).map(|(preview, _)| preview)
+        Self::render_file(
+            host,
+            repository,
+            repository_id,
+            manifest,
+            file,
+            destination,
+            pending,
+        )
     }
 
     fn render_file(
         host: &HostContext,
         repository: &Path,
+        repository_id: Option<&str>,
         manifest: &Manifest,
         file: &ManagedFile,
         destination: PathBuf,
-    ) -> Result<(Self, Option<Entry>)> {
+        pending: Option<(&Path, &str)>,
+    ) -> Result<(DeclarationPreview, Option<Entry>)> {
         if file.mode != FileMode::Template {
             return Err(Error::Invalid(
                 "Preview requires a file with mode = \"template\".".into(),
             ));
         }
-        let (source, rendered) = match file.content_for(host.platform) {
+        let (source, text) = match file.content_for(host.platform) {
+            Some(FileContent::Source(path)) if pending.is_some_and(|(other, _)| other == path) => (
+                None,
+                Cow::Borrowed(pending.expect("checked pending source").1),
+            ),
             Some(FileContent::Source(path)) => {
                 let (text, entry) =
                     read_template(&repository.join(path), repository, &manifest.files)?;
-                (Some(entry), render(&text, &file.inputs)?)
+                (Some(entry), Cow::Owned(text))
             }
-            Some(FileContent::Template(text)) => (None, render(text, &file.inputs)?),
+            Some(FileContent::Template(text)) => (None, Cow::Borrowed(text)),
             None => {
                 return Err(Error::Invalid(
                     "Template needs a source or an inline template.".into(),
                 ));
             }
         };
+        let template = compile(&file.id, &text)?;
+        let local = local_inputs::load(host, repository_id, file)?;
+        let (context, resolved_inputs) = inputs::resolve(file, host, &local)?;
+        let rendered = match template.render(&context) {
+            Ok(rendered) => rendered,
+            Err(error) if error.issue == Issue::MissingInput => {
+                let setup = missing_jinja_inputs(file, &template, &resolved_inputs, error)?;
+                return Ok((Err(setup), source));
+            }
+            Err(error) => return Err(renderer_error(error)),
+        };
         Ok((
-            Self {
+            Ok(Self {
                 id: file.id.clone(),
                 source: source.as_ref().map(|entry| entry.path.clone()),
                 destination_status: destination_status(&destination),
                 destination,
                 inputs: file.inputs.clone(),
+                resolved_inputs,
                 rendered,
                 permissions: file.permissions.clone(),
                 drift_status: None,
-            },
+            }),
             source,
         ))
     }
@@ -250,24 +317,25 @@ impl Preview {
             )
         };
         let mode = Mode::declared(self.permissions.as_deref());
+        if overlaps_secret_target(host, repository, manifest, path, stat.as_ref().ok()) {
+            return DriftStatus::Unsafe;
+        }
         match stat {
+            Err(Errno::NOENT) if handle.missing => DriftStatus::MissingParent,
             Err(Errno::NOENT) => match stamp {
-                Some(_) => DriftStatus::LocallyDeleted,
-                None if !mode.permits_deployment() => DriftStatus::Unsafe,
-                None if handle.missing => DriftStatus::MissingParent,
-                None => DriftStatus::Missing,
+                Some(_) if mode.permits_update() => DriftStatus::LocallyDeleted,
+                None if mode.permits_deployment() => DriftStatus::Missing,
+                _ => DriftStatus::Unsafe,
             },
             Ok(stat) => match stamp {
-                Some(record)
-                    if !overlaps_secret_target(host, repository, manifest, path, &stat) =>
-                {
+                Some(record) => {
                     let drift = record.deployed.observe(
                         path,
                         &handle,
                         &stat,
                         &record::Stamp::new(self.rendered.as_bytes(), mode),
                     );
-                    if drift == DriftStatus::UpdateAvailable && !mode.permits_update() {
+                    if UpdateAction::for_drift(drift).is_some() && !mode.permits_update() {
                         DriftStatus::Unsafe
                     } else {
                         drift
@@ -292,9 +360,9 @@ fn overlaps_secret_target(
     repository: &Path,
     manifest: &Manifest,
     path: &Path,
-    stat: &fs::Stat,
+    stat: Option<&fs::Stat>,
 ) -> bool {
-    let fp = observation::Fingerprint::from_stat(stat);
+    let fp = stat.map(observation::Fingerprint::from_stat);
     manifest
         .files
         .iter()
@@ -304,12 +372,14 @@ fn overlaps_secret_target(
                 .ok()
                 .is_some_and(|secret| {
                     paths_overlap(&secret, path)
-                        || observation::inspect(&secret, false)
-                            .ok()
-                            .and_then(|e| e.fingerprint)
-                            .is_some_and(|other| {
-                                fp.device == other.device && fp.inode == other.inode
-                            })
+                        || fp.as_ref().is_some_and(|fp| {
+                            observation::inspect(&secret, false)
+                                .ok()
+                                .and_then(|e| e.fingerprint)
+                                .is_some_and(|other| {
+                                    fp.device == other.device && fp.inode == other.inode
+                                })
+                        })
                 })
         })
 }
@@ -362,32 +432,60 @@ fn read_template(
 
 pub(crate) fn input_issues(file: &ManagedFile) -> impl Iterator<Item = String> {
     let mut issues = Vec::new();
-    if file.mode == FileMode::Template {
-        for (name, value) in &file.inputs {
-            if !input_name(name) {
-                issues.push(format!("{}: invalid input name; use letters, digits and underscores, starting with a letter or underscore", file.id));
-            } else if value.len() > VALUE_LIMIT {
-                issues.push(format!("{}: input {name} exceeds 16 KiB", file.id));
+    if file.mode != FileMode::Template {
+        for (present, message) in [
+            (!file.inputs.is_empty(), "inputs require template mode"),
+            (
+                file.host_inputs.is_some(),
+                "host_inputs requires template mode",
+            ),
+            (
+                file.local_inputs.is_some(),
+                "local_inputs requires template mode",
+            ),
+        ] {
+            if present {
+                issues.push(format!("{}: {message}", file.id));
             }
         }
-        if issues.is_empty()
-            && let Some(text) = &file.template
-            && let Err(error) = render(text, &file.inputs)
-        {
-            issues.push(format!("{}: {error}", file.id));
+        return issues.into_iter();
+    }
+    if let Some(names) = &file.local_inputs {
+        if names.iter().any(|name| !template::is_input_name(name)) {
+            issues.push(format!("{}: invalid local input name; use letters, digits and underscores, starting with a letter or underscore", file.id));
         }
-    } else if !file.inputs.is_empty() {
-        issues.push(format!("{}: inputs require template mode", file.id));
+        if names.iter().collect::<BTreeSet<_>>().len() != names.len() {
+            issues.push(format!("{}: list each local input once", file.id));
+        }
+    }
+    for (name, value) in &file.inputs {
+        if !template::is_input_name(name) {
+            issues.push(format!("{}: invalid input name; use letters, digits and underscores, starting with a letter or underscore", file.id));
+        } else if value.len() > VALUE_LIMIT {
+            issues.push(format!("{}: input {name} exceeds 16 KiB", file.id));
+        }
+    }
+    if issues.is_empty()
+        && let Err(error) = validate_declaration(file)
+    {
+        issues.push(error.to_string());
     }
     issues.into_iter()
 }
 
-fn input_name(name: &str) -> bool {
-    let mut bytes = name.bytes();
-    bytes
-        .next()
-        .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
-        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
+fn validate_declaration(file: &ManagedFile) -> Result<()> {
+    if let Some(text) = &file.template {
+        compile(&file.id, text)?;
+    }
+    let mut context = inputs::manifest_context(file);
+    if let Some(names) = &file.local_inputs {
+        let declarations = names
+            .iter()
+            .map(|name| (name.clone(), Input::Text(String::new())))
+            .collect();
+        context.insert("local".into(), Input::Map(declarations));
+    }
+    template::validate_context(&file.id, &context).map_err(renderer_error)
 }
 
 fn inspect_template(path: &Path) -> Result<Entry> {
@@ -489,78 +587,88 @@ fn destination_status(path: &Path) -> DestinationStatus {
     }
 }
 
-enum Part<'a> {
-    Literal(&'a str),
-    Input(&'a str),
+/// Discover possible input references without resolving any values or reading the host.
+/// Names are qualified, such as `inputs.theme`, `host.os` and `local.editor`.
+pub fn input_names_for(id: &str, text: &str) -> Result<BTreeSet<String>> {
+    Ok(compile(id, text)?.input_names().clone())
 }
 
-fn parse_template(mut text: &str) -> Result<Vec<Part<'_>>> {
-    if text.len() > TEMPLATE_LIMIT {
-        return Err(Error::Invalid("Template exceeds 64 KiB.".into()));
-    }
-    if observation::sensitive_content(text.as_bytes()) {
-        return Err(Error::Invalid(
-            "Template may contain secrets. Use text without credentials or private keys.".into(),
-        ));
-    }
-    let invalid = || {
-        Error::Invalid(
-            "Invalid template expression. Use {{ name }} with a single input name.".into(),
-        )
-    };
-    let mut parts = Vec::new();
-    while let Some((literal, rest)) = text.split_once("{{") {
-        let (expression, remaining) = rest.split_once("}}").ok_or_else(invalid)?;
-        let name = expression.trim_matches([' ', '\t']);
-        if !input_name(name) {
-            return Err(invalid());
-        }
-        parts.extend([Part::Literal(literal), Part::Input(name)]);
-        text = remaining;
-    }
-    parts.push(Part::Literal(text));
-    Ok(parts)
+fn compile(id: &str, text: &str) -> Result<Template> {
+    Template::compile(id, text).map_err(renderer_error)
 }
 
-pub fn input_names(text: &str) -> Result<BTreeSet<&str>> {
-    Ok(parse_template(text)?
-        .into_iter()
-        .filter_map(|part| match part {
-            Part::Input(name) => Some(name),
-            Part::Literal(_) => None,
-        })
-        .collect())
-}
-
-fn render(text: &str, inputs: &BTreeMap<String, String>) -> Result<String> {
-    let parts = parse_template(text)?;
-    if inputs
-        .values()
-        .any(|value| observation::sensitive_content(value.as_bytes()))
+fn missing_jinja_inputs(
+    file: &ManagedFile,
+    template: &Template,
+    resolved: &ResolvedInputs,
+    error: TemplateError,
+) -> Result<LocalInputSetup> {
+    let declared: BTreeSet<_> = file
+        .local_inputs
+        .iter()
+        .flatten()
+        .map(String::as_str)
+        .collect();
+    let mut unset = Vec::new();
+    let mut undeclared = Vec::new();
+    let mut missing = Vec::new();
+    let mut other = false;
+    for name in template
+        .input_names()
+        .iter()
+        .filter(|name| !resolved.contains_key(resolved_name(name).as_ref()))
     {
-        return Err(Error::Invalid(
-            "An input may contain secrets. Use only non-secret values.".into(),
-        ));
-    }
-    let mut rendered = String::new();
-    for part in parts {
-        let text = match part {
-            Part::Literal(text) => text,
-            Part::Input(name) => inputs.get(name).ok_or_else(|| {
-                Error::Invalid(format!(
-                    "Missing input {name}. Add a literal string for it in inputs in dort.toml."
-                ))
-            })?,
-        };
-        if rendered.len() + text.len() > OUTPUT_LIMIT {
-            return Err(Error::Invalid("Rendered text exceeds 128 KiB.".into()));
+        match name.split_once('.') {
+            Some(("local", key)) if declared.contains(key) => unset.push(key.to_owned()),
+            Some(("local", key)) => undeclared.push(key),
+            Some(("inputs", key)) => missing.push(key.to_owned()),
+            Some(_) => other = true,
+            None => missing.push(name.clone()),
         }
-        rendered.push_str(text);
     }
-    if observation::sensitive_content(rendered.as_bytes()) {
-        return Err(Error::Invalid(
-            "Rendered text may contain secrets. Use only non-secret content.".into(),
+    let mut message = error.to_string();
+    if other || (unset.is_empty() && undeclared.is_empty() && missing.is_empty()) {
+        message.push_str(" Declare manifest inputs in inputs and host inputs in host_inputs.");
+    }
+    if !missing.is_empty() {
+        message.push_str(&format!(
+            " Declare these names in inputs in dort.toml: {}.",
+            missing.join(", ")
         ));
     }
-    Ok(rendered)
+    if !undeclared.is_empty() {
+        message.push_str(&format!(
+            " Declare these names in the generated file editor or local_inputs in dort.toml: {}.",
+            undeclared.join(", ")
+        ));
+    }
+    if unset.is_empty() {
+        return Err(Error::Invalid(message));
+    }
+    message.push_str(&format!(
+        " Check Local inputs in Files / Generated, or run `dort files local-inputs {:?}`. Set the values the template uses, then preview again: {}.",
+        file.id,
+        unset.join(", ")
+    ));
+    Ok(LocalInputSetup {
+        names: unset,
+        guidance: message,
+    })
+}
+
+/// A bare name reads the same value as `inputs.name`.
+fn resolved_name(name: &str) -> Cow<'_, str> {
+    if name.contains('.') {
+        Cow::Borrowed(name)
+    } else {
+        Cow::Owned(format!("inputs.{name}"))
+    }
+}
+
+fn renderer_error(error: TemplateError) -> Error {
+    let mut message = error.to_string();
+    if error.issue == Issue::MissingInput {
+        message.push_str(" Declare manifest inputs in inputs and host inputs in host_inputs.");
+    }
+    Error::Invalid(message)
 }

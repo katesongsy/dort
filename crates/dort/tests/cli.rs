@@ -620,7 +620,7 @@ inputs = { name = "\u202efriendly", color = "blue" }
     for expected in [
         "Status: Unrecorded existing file",
         "No files written.",
-        "Inputs from dort.toml: color, name",
+        "color = \"blue\" (dort.toml)",
         "name=\\u{202e}friendly",
         "\\u{1b}[31m",
     ] {
@@ -918,6 +918,224 @@ fn tracked_generated_update_cli_is_reviewed_scoped_and_single_use() {
     let drift = update().arg("--yes").assert().code(2);
     assert!(String::from_utf8_lossy(&drift.get_output().stderr).contains("Local edits"));
     assert_eq!(fs::read(&dest).unwrap(), b"local edit");
+
+    let explicit = |action: &str| {
+        let mut cmd = sandbox.command();
+        cmd.args([
+            "--repo",
+            "repository",
+            "files",
+            action,
+            "settings",
+            "--profile",
+            "work",
+        ]);
+        cmd
+    };
+    use std::os::unix::fs::MetadataExt;
+    let replace = "replace-generated";
+    let recreate = "recreate-generated";
+    explicit(recreate).arg("--yes").assert().code(2);
+    fs::set_permissions(&dest, fs::Permissions::from_mode(0o640)).unwrap();
+    let local = fs::metadata(&dest).unwrap();
+    let preview = explicit(replace)
+        .args(["--json", "--dry-run", "--yes"])
+        .assert()
+        .success();
+    let json: serde_json::Value = serde_json::from_slice(&preview.get_output().stdout).unwrap();
+    assert_eq!(json["action"], "replace");
+    assert_eq!(json["deployed_permissions"], "0640");
+    assert_eq!(json["recorded_permissions"], "0644");
+    assert!(
+        json["review"]
+            .as_str()
+            .unwrap()
+            .contains("OLD | local\\x20edit")
+    );
+    explicit(replace).arg("--json").assert().code(2).stdout("");
+    assert_eq!(fs::read(&dest).unwrap(), b"local edit");
+    assert_eq!(fs::metadata(&dest).unwrap().ino(), local.ino());
+    let receipt = explicit(replace)
+        .args(["--json", "--yes"])
+        .assert()
+        .success();
+    let json: serde_json::Value = serde_json::from_slice(&receipt.get_output().stdout).unwrap();
+    assert_eq!(json["location"]["action"], "replace");
+    let private = json["location"]["artifact"].as_str().unwrap();
+    assert_eq!(fs::read(private).unwrap(), b"local edit");
+    assert_eq!(fs::metadata(private).unwrap().ino(), local.ino());
+    assert_eq!(fs::metadata(private).unwrap().mode() & 0o7777, 0o640);
+    assert_eq!(fs::read(&dest).unwrap(), changed.as_bytes());
+    explicit(replace).arg("--yes").assert().code(2);
+
+    fs::remove_file(&dest).unwrap();
+    update().arg("--yes").assert().code(2);
+    explicit(replace).arg("--yes").assert().code(2);
+    explicit(recreate).arg("--json").assert().code(2).stdout("");
+    let preview = explicit(recreate)
+        .args(["--json", "--dry-run", "--yes"])
+        .assert()
+        .success();
+    let json: serde_json::Value = serde_json::from_slice(&preview.get_output().stdout).unwrap();
+    assert_eq!(json["action"], "recreate");
+    assert!(json["deployed_permissions"].is_null());
+    let review = json["review"].as_str().unwrap();
+    assert!(review.contains("Detected: Local file deleted"));
+    assert!(review.contains("NEW | new\\x20config\\t=\\x1b\\\\\\x20\\x20"));
+    assert!(!review.contains("OLD |"));
+    assert!(!dest.exists());
+    let receipt = explicit(recreate)
+        .args(["--json", "--yes"])
+        .assert()
+        .success();
+    let json: serde_json::Value = serde_json::from_slice(&receipt.get_output().stdout).unwrap();
+    assert_eq!(json["location"]["action"], "recreate");
+    assert!(!std::path::Path::new(json["location"]["artifact"].as_str().unwrap()).exists());
+    assert_eq!(fs::read(&dest).unwrap(), changed.as_bytes());
+    let live = fs::metadata(&dest).unwrap();
+    assert_eq!(live.mode() & 0o7777, 0o644);
+    explicit(recreate).arg("--yes").assert().code(2);
+    assert_eq!(fs::metadata(&dest).unwrap().ino(), live.ino());
+}
+
+#[test]
+fn file_backed_jinja_cli_reports_escaped_input_sources_before_deploy_and_update() {
+    use dort_core::{context::HostContext, local::RepositoryRegistry, state::WriterLock};
+
+    let sandbox = Sandbox::new();
+    let manifest = sandbox.manifest(
+        r#"schema = 1
+[[files]]
+id = "settings"
+mode = "template"
+source = "file.tmpl"
+target = "~/settings"
+syntax = "jinja"
+host_inputs = ["os", "arch", "user", "hostname", "home", "config_home"]
+inputs = { theme = "a\u001bb\n" }
+"#,
+    );
+    let root = manifest.parent().unwrap();
+    fs::create_dir(root.join(".git")).unwrap();
+    let host = HostContext::new(
+        sandbox.home.clone(),
+        None,
+        None,
+        dort_core::platform::Platform::detect().unwrap(),
+        dort_core::platform::Architecture::detect().unwrap(),
+    )
+    .unwrap();
+    RepositoryRegistry::register(&host, &WriterLock::acquire(&host).unwrap(), root).unwrap();
+    let template = root.join("file.tmpl");
+    let source = concat!(
+        "{% if inputs.unset is not defined %}",
+        "{% for item in [host.os, host.arch, inputs.theme] %}{{ item }}{% endfor %}",
+        "{% endif %}"
+    );
+    fs::write(&template, source).unwrap();
+    let destination = sandbox.home.join("settings");
+    let expected = format!(
+        "{}{}a\u{1b}b\n",
+        host.platform.as_str(),
+        host.architecture.as_str()
+    );
+    let command = |verb: &str| {
+        let mut cmd = sandbox.command();
+        cmd.arg("--repo")
+            .arg(root)
+            .args(["files", verb, "settings"]);
+        cmd
+    };
+    let provenance = |report: &str| {
+        assert!(
+            report.contains("inputs.theme = \"a\\u{1b}b\\n\" (dort.toml)"),
+            "{report}"
+        );
+        assert!(
+            report.contains(&format!(
+                "host.os = \"{}\" (this host)",
+                host.platform.as_str()
+            )),
+            "{report}"
+        );
+        assert!(!report.contains('\u{1b}'), "{report}");
+    };
+    let preview = command("preview-generated")
+        .arg("--json")
+        .assert()
+        .success();
+    let json: serde_json::Value = serde_json::from_slice(&preview.get_output().stdout).unwrap();
+    assert_eq!(json["rendered"], expected);
+    assert_eq!(json["inputs"]["theme"], "a\u{1b}b\n");
+    assert_eq!(
+        json["resolved_inputs"]["inputs.theme"]["provenance"],
+        "manifest"
+    );
+    let inputs = json["resolved_inputs"].as_object().unwrap();
+    for key in ["os", "arch", "user", "hostname", "home", "config_home"] {
+        let value = &inputs[&format!("host.{key}")];
+        assert_eq!(value["provenance"]["host"], key);
+        assert!(!value["value"].as_str().unwrap().is_empty());
+    }
+    assert_eq!(inputs["host.home"]["value"], sandbox.home.to_str().unwrap());
+    assert_eq!(
+        inputs["host.config_home"]["value"],
+        sandbox.home.join(".config").to_str().unwrap()
+    );
+    let preview = command("preview-generated").assert().success();
+    provenance(std::str::from_utf8(&preview.get_output().stdout).unwrap());
+    let deploy = command("deploy-generated")
+        .arg("--dry-run")
+        .assert()
+        .success();
+    provenance(std::str::from_utf8(&deploy.get_output().stdout).unwrap());
+    assert!(!destination.exists());
+    command("deploy-generated").arg("--yes").assert().success();
+    assert_eq!(fs::read(&destination).unwrap(), expected.as_bytes());
+
+    fs::write(&template, format!("{source}{{{{ host.nonexistent }}}}")).unwrap();
+    let rejected = command("update-generated").arg("--yes").assert().code(2);
+    assert!(
+        String::from_utf8_lossy(&rejected.get_output().stderr).contains("Supply the missing input")
+    );
+    assert_eq!(fs::read(&destination).unwrap(), expected.as_bytes());
+    fs::write(&template, format!("{source}updated")).unwrap();
+    let original = fs::read_to_string(&manifest).unwrap();
+    let oversized = original.replace(
+        " }",
+        &format!(", unused = \"{}\" }}", "\\u001b".repeat(16_000)),
+    );
+    fs::write(&manifest, oversized).unwrap();
+    let blocked = command("update-generated").arg("--yes").assert().code(2);
+    assert!(
+        String::from_utf8_lossy(&blocked.get_output().stderr)
+            .contains("full update review is too large")
+    );
+    assert_eq!(fs::read(&destination).unwrap(), expected.as_bytes());
+    fs::write(&manifest, original).unwrap();
+    let review = command("update-generated")
+        .arg("--dry-run")
+        .assert()
+        .success();
+    provenance(std::str::from_utf8(&review.get_output().stdout).unwrap());
+    let review = command("update-generated")
+        .args(["--dry-run", "--json"])
+        .assert()
+        .success();
+    let json: serde_json::Value = serde_json::from_slice(&review.get_output().stdout).unwrap();
+    assert_eq!(json["schema"], 1);
+    assert_eq!(json["read_only"], true);
+    assert_eq!(
+        json["resolved_inputs"],
+        serde_json::Value::Object(inputs.clone())
+    );
+    provenance(json["review"].as_str().unwrap());
+    assert_eq!(fs::read(&destination).unwrap(), expected.as_bytes());
+    command("update-generated").arg("--yes").assert().success();
+    assert_eq!(
+        fs::read(&destination).unwrap(),
+        format!("{expected}updated").as_bytes()
+    );
 }
 
 #[test]

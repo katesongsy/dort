@@ -3,6 +3,95 @@
 Generated with git-cliff from committed Git history. Do not edit entries by hand.
 Uncommitted changes are not included. Untagged history appears under Unreleased.
 
+## Unreleased
+
+### Documentation
+
+- **files:** show the draft focus and discard flow ([2495ee7](https://github.com/katesongsy/dort/commit/2495ee73f3428186676bfb36126507987e60e9aa))
+
+- **files:** explain the single Jinja template syntax ([dd6f79b](https://github.com/katesongsy/dort/commit/dd6f79b3a36afcad8218282b1ff5155cec6af392))
+
+- **release:** include Homebrew and Cargo by default ([97c9d0b](https://github.com/katesongsy/dort/commit/97c9d0bf79ab5bb566c9bad44c0cc66477bd756c))
+
+### Features
+
+- **files:** manage named local template inputs ([6ea4b9c](https://github.com/katesongsy/dort/commit/6ea4b9c16f1fff1bbbe96cd09aea00389cead2c0))
+
+- **core:** support machine-local template inputs ([dac58cf](https://github.com/katesongsy/dort/commit/dac58cf0d15bfed77ff302bb702dafa023cded35))
+
+- **files:** opt in to Jinja and explicit host inputs ([6b157e2](https://github.com/katesongsy/dort/commit/6b157e2286aff6f6411b30b0700922a9af34b3a4))
+
+- **core:** resolve explicit generated template inputs ([02ebd32](https://github.com/katesongsy/dort/commit/02ebd32c0ee2d8fa74cab02d3e175a835c30acfb))
+
+- **core:** add bounded template rendering ([343c91d](https://github.com/katesongsy/dort/commit/343c91d0bd50b8cc340e1ee191a144a2e9a97858))
+
+- **files:** review and resolve tracked generated file drift ([2e3b794](https://github.com/katesongsy/dort/commit/2e3b7945300363331d3c95b23459de179327b364))
+
+- **files:** review tracked generated updates and recover explicitly ([baf026e](https://github.com/katesongsy/dort/commit/baf026e767a0e236adb87439421e86298ccb599f))
+
+- **core:** guard reviewed generated file updates ([9ee4bb1](https://github.com/katesongsy/dort/commit/9ee4bb1ab3c8d84ffe2585948677d86b4eb2e187))
+
+- **tui:** give generated files a dedicated page ([92b7d09](https://github.com/katesongsy/dort/commit/92b7d09e6675dbce55a3fd837c267756c8a9bf38))
+
+- **files:** record generated deployments and show drift ([73e31f7](https://github.com/katesongsy/dort/commit/73e31f759702b4a0d8b4f179fa77a3eea59d338f))
+
+- **files:** review generated deployment in TUI and CLI ([3593aec](https://github.com/katesongsy/dort/commit/3593aecbeba57e8da5f90a7013d96ae92ea95808))
+
+- **files:** guard first generated deployment ([d4e0348](https://github.com/katesongsy/dort/commit/d4e03481098fc2f4325ad0912d94ac680527790c))
+
+- **files:** edit generated templates as multiline text ([c62a445](https://github.com/katesongsy/dort/commit/c62a445aa6308c4f8a5aaa6e9b3717327f513a23))
+
+- **files:** author generated recipes in the TUI ([b59f366](https://github.com/katesongsy/dort/commit/b59f366b852bf1b0904e1a97927584b49336a7a7))
+
+- **files:** preview repository-generated configuration ([5830afe](https://github.com/katesongsy/dort/commit/5830afef3c9c682ed4a01e8587a3d49560999ca3))
+
+### Fixes
+
+- **tui:** preserve generated drafts until discard ([a513bb2](https://github.com/katesongsy/dort/commit/a513bb22595b10da197346ae8346b65d308036e5))
+
+- **tui:** use shared local input list controls ([a2aa43f](https://github.com/katesongsy/dort/commit/a2aa43f939e1900695e5587d84261c549af4abdd))
+
+- **app:** initialize template settings on file mappings ([35e09b8](https://github.com/katesongsy/dort/commit/35e09b810b23e3e0181189feec4c6ee26f5cb680))
+
+- **core:** block unrelated writes during generated recovery ([8cee003](https://github.com/katesongsy/dort/commit/8cee0038081675a210e699de992d54283e517a3c))
+
+- **core:** bind generated recovery to reviewed pending update ([b64d437](https://github.com/katesongsy/dort/commit/b64d437d4936bef5098f0910e628b9aa58502cf9))
+
+- **tui:** guide generated files to deployment review ([53ad057](https://github.com/katesongsy/dort/commit/53ad057d4b36639eb25963af12183e3567c40b53))
+
+- **files:** enforce destination trust before publishing ([0671013](https://github.com/katesongsy/dort/commit/067101376be178d54c620ae4638a4285ababa411))
+
+- **tui:** redraw after closing the external editor ([b6627b6](https://github.com/katesongsy/dort/commit/b6627b600beda55d6edfee1a21afc57fb6416f2e))
+
+- **files:** keep edit visible in file details ([c08a4a6](https://github.com/katesongsy/dort/commit/c08a4a66737846fc4c3564d1fa12c0ad1896936b))
+
+- **files:** keep line endings from the external editor ([d93486b](https://github.com/katesongsy/dort/commit/d93486bf83a231f3f53823fdbd39f3228cc7cf02))
+
+- **files:** preserve actions in narrower terminals ([20a4849](https://github.com/katesongsy/dort/commit/20a4849a2f42c8bc62beef0d0e556e19b0b975cd))
+
+- **files:** append generated inputs to the right mapping ([4857b5b](https://github.com/katesongsy/dort/commit/4857b5b372cef117fe5a2fcaf611f2ae7236eccf))
+
+### Maintenance
+
+- **core:** make Jinja the only template language ([724ca61](https://github.com/katesongsy/dort/commit/724ca61c0c782b39659fb2d0c1127b438c8af173))
+
+### Tests
+
+- **files:** document live machine-local inputs proof ([0d4df15](https://github.com/katesongsy/dort/commit/0d4df15958f9d69d0b359ec60f3b000b1a7439ef))
+
+- **files:** document live Jinja and host input proof ([f72dc19](https://github.com/katesongsy/dort/commit/f72dc195d6407884125980b6a9d9dd6c729fd621))
+
+- **files:** document local replacement and recreation proofs ([5afca31](https://github.com/katesongsy/dort/commit/5afca31a18f578bc0b50b4e78ecc09ecc1e5bdb9))
+
+- **files:** document live generated update proof ([fb0a3ff](https://github.com/katesongsy/dort/commit/fb0a3ff3cb05074a1dfaae1ad0220b491742410f))
+
+- **tui:** drive the Generated page in live proofs ([94d42dd](https://github.com/katesongsy/dort/commit/94d42dd5bcd07d12cb4cbbe9a6fbe6cec29876ee))
+
+- **files:** document live generated drift proof ([a6d32e6](https://github.com/katesongsy/dort/commit/a6d32e6ff7e0bdf474022b780db7172bb3d02881))
+
+- **files:** document live generated setup proof ([5ae5d11](https://github.com/katesongsy/dort/commit/5ae5d11acf88fdfa2c3f9a2818bf553491ad0dab))
+
+- **files:** document live generated preview proof ([fca570e](https://github.com/katesongsy/dort/commit/fca570e958628828f8f0d79618334cf37815a097))
 ## v0.3.0 — 2026-11-26
 
 ### Documentation

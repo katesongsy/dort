@@ -497,3 +497,312 @@ fn clone_review_and_invalid_manifest_keep_home_targets_untouched() {
     assert!(!s.home.join(".editor").exists());
     s.cmd().args(["profiles", "list"]).assert().success();
 }
+
+#[test]
+fn local_input_cli_reviews_private_values_and_keeps_repository_and_mapping_scope() {
+    let s = Sandbox::new();
+    s.init();
+    let manifest = r#"schema = 1
+[[files]]
+id = "editor"
+mode = "template"
+target = "~/settings"
+syntax = "jinja"
+local_inputs = ["name", "unused"]
+template = "editor={{ local.name }}"
+[[files]]
+id = "other"
+mode = "template"
+target = "~/other"
+syntax = "jinja"
+local_inputs = ["name"]
+template = "{{ local.name }}"
+"#;
+    let path = s.repo.join("dort.toml");
+    fs::write(&path, manifest).unwrap();
+    let alternate = s.root.join("alternate");
+    fs::create_dir_all(alternate.join(".git")).unwrap();
+    fs::write(alternate.join("dort.toml"), manifest).unwrap();
+    let output = s
+        .cmd()
+        .arg("--repo")
+        .arg(&alternate)
+        .args(["files", "local-inputs", "editor"])
+        .assert()
+        .failure();
+    assert!(
+        String::from_utf8_lossy(&output.get_output().stderr).contains("Register this repository")
+    );
+    s.cmd()
+        .args(["--yes", "init"])
+        .arg(&alternate)
+        .assert()
+        .success();
+    let json = |mut cmd: Command, args: &[&str]| {
+        let output = cmd.args(args).assert().success();
+        serde_json::from_slice::<serde_json::Value>(&output.get_output().stdout).unwrap()
+    };
+    let rows = |id| json(s.repo(), &["--json", "files", "local-inputs", id]);
+    assert_eq!(
+        rows("editor")["inputs"][0]["value"],
+        serde_json::Value::Null
+    );
+    s.repo()
+        .args([
+            "--yes",
+            "files",
+            "set-local-input",
+            "editor",
+            "name",
+            "--dry-run",
+        ])
+        .assert()
+        .failure();
+    assert_eq!(
+        rows("editor")["inputs"][0]["value"],
+        serde_json::Value::Null
+    );
+    let proposal = json(
+        s.repo(),
+        &[
+            "--json",
+            "--dry-run",
+            "--yes",
+            "files",
+            "set-local-input",
+            "editor",
+            "name",
+            "",
+        ],
+    );
+    assert_eq!(proposal["previous"], serde_json::Value::Null);
+    assert_eq!(proposal["proposed"], "");
+    assert_eq!(
+        rows("editor")["inputs"][0]["value"],
+        serde_json::Value::Null
+    );
+    let set = [
+        "files",
+        "set-local-input",
+        "editor",
+        "name",
+        "a\tprivate\nvalue",
+    ];
+    let denied = s.repo().args(set).assert().failure().stdout("");
+    assert!(String::from_utf8_lossy(&denied.get_output().stderr).contains("write requires --yes"));
+    let mut set_cmd = s.repo();
+    set_cmd.args(["--yes", "--json"]);
+    let result = json(set_cmd, &set);
+    assert_eq!(result["changed"], true);
+    assert!(!result.to_string().contains("private"));
+    assert_eq!(rows("editor")["inputs"][0]["value"], "a\tprivate\nvalue");
+    assert_eq!(
+        rows("editor")["inputs"][1]["value"],
+        serde_json::Value::Null
+    );
+    assert_eq!(rows("other")["inputs"][0]["value"], serde_json::Value::Null);
+    let mut alt_cmd = s.cmd();
+    alt_cmd.arg("--repo").arg(&alternate);
+    assert_eq!(
+        json(alt_cmd, &["--json", "files", "local-inputs", "editor"])["inputs"][0]["value"],
+        serde_json::Value::Null
+    );
+    let output = s
+        .repo()
+        .args(["files", "local-inputs", "editor"])
+        .assert()
+        .success();
+    assert!(
+        String::from_utf8_lossy(&output.get_output().stdout).contains("\"a\\tprivate\\nvalue\"")
+    );
+    let rendered = json(
+        s.repo(),
+        &["--json", "files", "preview-generated", "editor"],
+    );
+    assert_eq!(rendered["rendered"], "editor=a\tprivate\nvalue");
+    assert_eq!(
+        rendered["resolved_inputs"]["local.name"]["provenance"],
+        "machine_local"
+    );
+    let output = s
+        .repo()
+        .args([
+            "--yes",
+            "files",
+            "set-local-input",
+            "editor",
+            "undeclared",
+            "not-recorded",
+        ])
+        .assert()
+        .failure();
+    assert!(String::from_utf8_lossy(&output.get_output().stderr).contains("Declare the input"));
+    s.repo()
+        .args(["--yes", "files", "set-local-input", "editor", "name", ""])
+        .assert()
+        .success();
+    assert_eq!(rows("editor")["inputs"][0]["value"], "");
+    assert_eq!(
+        json(
+            s.repo(),
+            &[
+                "--json",
+                "--dry-run",
+                "files",
+                "clear-local-input",
+                "editor",
+                "name"
+            ]
+        )["proposed"],
+        serde_json::Value::Null
+    );
+    assert_eq!(rows("editor")["inputs"][0]["value"], "");
+    s.repo()
+        .args(["--yes", "files", "clear-local-input", "editor", "name"])
+        .assert()
+        .success();
+    assert_eq!(
+        rows("editor")["inputs"][0]["value"],
+        serde_json::Value::Null
+    );
+    assert_eq!(fs::read_to_string(path).unwrap(), manifest);
+    assert_eq!(
+        fs::read_to_string(alternate.join("dort.toml")).unwrap(),
+        manifest
+    );
+    assert!(!s.home.join("settings").exists());
+    assert!(!s.home.join("other").exists());
+}
+
+#[test]
+fn template_files_cli_reviews_exact_bytes_and_keeps_displaced_copies() {
+    let s = Sandbox::new();
+    s.init();
+    let source = s.root.join("draft.txt");
+    let path = "templates/editor.jinja";
+    let destination = s.repo.join(path);
+    let original = "key=1 \r\nlast";
+    fs::write(&source, original).unwrap();
+    let write = |verb: &str, flags: &[&str]| {
+        s.repo()
+            .args(flags)
+            .args(["files", "templates", verb, path, "--from"])
+            .arg(&source)
+            .assert()
+    };
+    let missing = write("create", &["--dry-run"]).success();
+    let review = String::from_utf8_lossy(&missing.get_output().stdout).to_string();
+    assert!(
+        review.contains("Create folder: templates | permissions 0755")
+            && review.contains("Create template file: templates/editor.jinja"),
+        "{review}"
+    );
+    assert!(!s.repo.join("templates").exists());
+    let review = write("create", &["--json", "--dry-run", "--yes"]).success();
+    let review: serde_json::Value = serde_json::from_slice(&review.get_output().stdout).unwrap();
+    assert_eq!(review["action"], "create");
+    assert_eq!(review["folder"]["path"], "templates");
+    assert_eq!(review["folder"]["permissions"], 0o755);
+    assert_eq!(review["after"], original);
+    assert!(!destination.exists());
+    write("create", &[]).code(2);
+    assert!(!destination.exists());
+    write("create", &["--yes"])
+        .success()
+        .stdout("Created templates/ with permissions 0755.\nCreated template file.\n");
+    assert_eq!(
+        fs::metadata(s.repo.join("templates"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o755
+    );
+    assert_eq!(fs::read(&destination).unwrap(), original.as_bytes());
+    s.repo()
+        .args(["files", "templates", "list"])
+        .assert()
+        .success()
+        .stdout("templates/editor.jinja | 0 mappings | Editable\n");
+    let shown = s
+        .repo()
+        .args(["files", "templates", "show", path])
+        .assert()
+        .success();
+    assert!(String::from_utf8_lossy(&shown.get_output().stdout).contains("|key=1 \\r\\n|\n|last|"));
+
+    fs::write(&source, "key=2\n").unwrap();
+    let result = write("edit", &["--json", "--yes"]).success();
+    let result: serde_json::Value = serde_json::from_slice(&result.get_output().stdout).unwrap();
+    assert_eq!(result["outcome"], "edited");
+    assert_eq!(fs::read(&destination).unwrap(), b"key=2\n");
+    for name in ["reviewed", "displaced"] {
+        assert_eq!(
+            fs::read(result["retained"][name].as_str().unwrap()).unwrap(),
+            original.as_bytes()
+        );
+    }
+    assert_eq!(fs::read(s.repo.join("dort.toml")).unwrap(), b"schema = 1\n");
+}
+
+#[test]
+fn template_files_cli_delete_reviews_moves_and_refuses_referenced_files() {
+    let s = Sandbox::new();
+    s.init();
+    fs::create_dir(s.repo.join("templates")).unwrap();
+    fs::write(s.repo.join("templates/unused.jinja"), "keep me\n").unwrap();
+    fs::write(s.repo.join("templates/used.jinja"), "used\n").unwrap();
+    fs::write(
+        s.repo.join("dort.toml"),
+        "schema = 1\n[[files]]\nid = \"used\"\nmode = \"template\"\nsource = \"templates/used.jinja\"\ntarget = \"~/used\"\n",
+    )
+    .unwrap();
+    let delete = |path: &str, flags: &[&str]| {
+        s.repo()
+            .args(flags)
+            .args(["files", "templates", "delete", path])
+            .assert()
+    };
+    let refused = delete("templates/used.jinja", &["--dry-run"]).code(2);
+    assert!(
+        String::from_utf8_lossy(&refused.get_output().stderr)
+            .contains("Mappings still use this template file: used (source)"),
+        "{}",
+        String::from_utf8_lossy(&refused.get_output().stderr)
+    );
+    assert!(s.repo.join("templates/used.jinja").exists());
+
+    let review = delete("templates/unused.jinja", &["--json", "--dry-run"]).success();
+    let review: serde_json::Value = serde_json::from_slice(&review.get_output().stdout).unwrap();
+    assert_eq!(review["action"], "delete");
+    assert_eq!(review["before"], "keep me\n");
+    assert!(review["after"].is_null() && review["retained"].is_null());
+    assert_eq!(review["mappings"], 0);
+    assert_eq!(review["permissions"], 0o644);
+    let removed = review["removed"].as_str().unwrap().to_string();
+    assert!(!std::path::Path::new(&removed).exists());
+    assert!(s.repo.join("templates/unused.jinja").exists());
+
+    let text = delete("templates/unused.jinja", &["--dry-run"]).success();
+    let text = String::from_utf8_lossy(&text.get_output().stdout).to_string();
+    assert!(
+        text.starts_with("Delete template file: templates/unused.jinja\n")
+            && text.contains("Retained copy: ")
+            && text.contains("|keep me\\n|"),
+        "{text}"
+    );
+
+    delete("templates/unused.jinja", &[]).code(2);
+    assert!(s.repo.join("templates/unused.jinja").exists());
+
+    let done = delete("templates/unused.jinja", &["--json", "--yes"]).success();
+    let done: serde_json::Value = serde_json::from_slice(&done.get_output().stdout).unwrap();
+    assert_eq!(done["outcome"], "deleted");
+    let removed = done["removed"].as_str().unwrap();
+    assert_eq!(fs::read(removed).unwrap(), b"keep me\n");
+    assert!(!s.repo.join("templates/unused.jinja").exists());
+    assert_eq!(
+        fs::read_to_string(s.repo.join("dort.toml")).unwrap(),
+        "schema = 1\n[[files]]\nid = \"used\"\nmode = \"template\"\nsource = \"templates/used.jinja\"\ntarget = \"~/used\"\n"
+    );
+}
