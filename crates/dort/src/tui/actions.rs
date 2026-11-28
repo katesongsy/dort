@@ -6,7 +6,7 @@ use dort_core::{
     bootstrap,
     context::HostContext,
     generated::{
-        Update, UpdateApproval, UpdateLocation, UpdateOutcome, pending_update,
+        Update, UpdateAction, UpdateApproval, UpdateLocation, UpdateOutcome, pending_update,
         recover_reviewed_update,
     },
     journal,
@@ -371,7 +371,7 @@ impl Pending {
             Self::GeneratedDeployment(p) => {
                 crate::services::presentation::generated_deployment(p.review())
             }
-            Self::GeneratedUpdate(p) => generated_update::review(p.review())?,
+            Self::GeneratedUpdate(p) => generated_update::review(&p.review())?,
             Self::GeneratedRecovery(location) => generated_update::recovery_review(location),
             Self::Profile(p) => p.human(),
             Self::Configuration(p) => p.human(),
@@ -433,8 +433,8 @@ impl Pending {
             Self::EnvironmentAbandon(_) => "Abandon environment run",
             Self::Profile(_) => "Save profile choice",
             Self::GeneratedDeployment(_) => "Deploy generated file",
-            Self::GeneratedUpdate(_) => "Update generated file",
-            Self::GeneratedRecovery(_) => "Recover generated update",
+            Self::GeneratedUpdate(p) => generated_update::confirmation_label(p.action()),
+            Self::GeneratedRecovery(location) => generated_update::recovery_label(location.action),
             Self::Configuration(p) => p.label(),
             _ if self.adoption() => "Adopt all",
             _ => "Confirm changes",
@@ -753,7 +753,7 @@ pub enum Task {
     Ignore(PathBuf, bool),
     PreviewGenerated(String),
     ReviewGeneratedDeployment(String),
-    ReviewGeneratedUpdate(String),
+    ReviewGeneratedUpdate(String, UpdateAction),
     ReviewGeneratedRecovery,
     DiscoveryTree(super::discovery_tree::Read),
     DiscoverContent(super::discover_content::Read),
@@ -1036,10 +1036,14 @@ pub fn perform_scoped_with_install_progress(
             requested,
         )
         .map(|p| Output::Preview(Pending::GeneratedDeployment(Box::new(p)))),
-        Task::ReviewGeneratedUpdate(id) => {
-            crate::services::review_generated_update(host, repository.as_deref(), &id, requested)
-                .map(|p| Output::Preview(Pending::GeneratedUpdate(Box::new(p))))
-        }
+        Task::ReviewGeneratedUpdate(id, action) => crate::services::review_generated_update(
+            host,
+            repository.as_deref(),
+            &id,
+            requested,
+            action,
+        )
+        .map(|p| Output::Preview(Pending::GeneratedUpdate(Box::new(p)))),
         Task::ReviewGeneratedRecovery => Ok(match pending_update(host)? {
             Some(location) => Output::Preview(Pending::GeneratedRecovery(location)),
             None => Output::GeneratedUpdated(None),

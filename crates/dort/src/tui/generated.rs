@@ -1,5 +1,5 @@
 use super::{app::App, components as ui, input::Wheel};
-use dort_core::generated::{DriftStatus, Preview};
+use dort_core::generated::{DriftStatus, Preview, UpdateAction};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -92,8 +92,8 @@ impl Report {
         self.drift_status == Some(DriftStatus::Missing)
     }
 
-    pub fn can_review_update(&self) -> bool {
-        self.drift_status == Some(DriftStatus::UpdateAvailable)
+    pub fn review_action(&self) -> Option<UpdateAction> {
+        self.drift_status.and_then(UpdateAction::for_drift)
     }
 
     pub fn draw(&self, frame: &mut Frame, area: Rect, app: &App) {

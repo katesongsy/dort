@@ -373,9 +373,8 @@ fn require_missing(path: &Path, handle: &ParentHandle, recorded: bool) -> Result
     };
     match stat {
         Err(Errno::NOENT) if recorded => Err(invalid(format!(
-            "{}. {}",
+            "{}. First deployment cannot recreate it. Open the generated preview.",
             DriftStatus::LocallyDeleted.label(),
-            DriftStatus::LocallyDeleted.guidance()
         ))),
         Err(Errno::NOENT) if handle.missing => Err(invalid(format!(
             "Destination folder {} is missing. Create it, then review again.",

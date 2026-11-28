@@ -119,7 +119,9 @@ impl Activity {
             }
             Task::PreviewGenerated(_) => "Preview generated file",
             Task::ReviewGeneratedDeployment(_) => "Review deployment",
-            Task::ReviewGeneratedUpdate(_) => "Review update",
+            Task::ReviewGeneratedUpdate(_, action) => {
+                crate::services::generated_update::review_label(*action)
+            }
             Task::ReviewGeneratedRecovery => "Review generated recovery",
             Task::IgnoredPaths => "Manage ignored paths",
             Task::Ignore(..) => "Preview discovery preferences",
@@ -168,8 +170,12 @@ impl Activity {
                     Approved::EnvironmentAbandon(_) => "Abandon environment run",
                     Approved::Profile(_) => "Save profile choice",
                     Approved::GeneratedDeployment(_) => "Deploy generated file",
-                    Approved::GeneratedUpdate(_) => "Update generated file",
-                    Approved::GeneratedRecovery(_) => "Recover generated update",
+                    Approved::GeneratedUpdate(p) => {
+                        crate::services::generated_update::confirmation_label(p.action())
+                    }
+                    Approved::GeneratedRecovery(location) => {
+                        crate::services::generated_update::recovery_label(location.action)
+                    }
                     Approved::Configuration(_) => "Save configuration change",
                     Approved::Ignore(_) => "Discovery preferences",
                     Approved::Files(_) => "File operation",
@@ -369,11 +375,11 @@ impl Activity {
                 vec![("Destination", p.review().destination.display().to_string())],
             ),
             Pending::GeneratedUpdate(p) => (
-                "Update generated file",
+                crate::services::generated_update::confirmation_label(p.action()),
                 vec![("Destination", p.review().destination.display().to_string())],
             ),
             Pending::GeneratedRecovery(location) => (
-                "Recover generated update",
+                crate::services::generated_update::recovery_label(location.action),
                 vec![("Destination", location.destination.display().to_string())],
             ),
             Pending::Ignore(_) => (

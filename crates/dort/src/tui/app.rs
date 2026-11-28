@@ -1637,10 +1637,10 @@ impl App {
                 if report.can_review_deployment() {
                     return Some(Task::ReviewGeneratedDeployment(report.id.clone()));
                 }
-                if report.can_review_update() {
+                if let Some(action) = report.review_action() {
                     let id = report.id.clone();
                     self.shell.back();
-                    return Some(Task::ReviewGeneratedUpdate(id));
+                    return Some(Task::ReviewGeneratedUpdate(id, action));
                 }
             }
             if key.code == KeyCode::Esc {

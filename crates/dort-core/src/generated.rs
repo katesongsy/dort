@@ -19,8 +19,8 @@ use std::{
 };
 pub(crate) use update::ensure_no_pending_update;
 pub use update::{
-    ExchangeStatus, Update, UpdateApproval, UpdateLocation, UpdateOutcome, UpdateReview,
-    pending_update, recover_reviewed_update, recover_update,
+    ExchangeStatus, Update, UpdateAction, UpdateApproval, UpdateLocation, UpdateOutcome,
+    UpdateReview, pending_update, recover_reviewed_update, recover_update,
 };
 
 pub const TEMPLATE_LIMIT: usize = 64 * 1024;
@@ -128,11 +128,9 @@ impl DriftStatus {
             Self::LocallyEdited
             | Self::LocalPermissionsChanged
             | Self::LocallyEditedAndPermissionsChanged => {
-                "Inspect the local file before making changes. Dort leaves it alone."
+                "Keep your local changes or review a replacement."
             }
-            Self::LocallyDeleted => {
-                "Restore the file yourself or leave it missing. First deployment cannot recreate it."
-            }
+            Self::LocallyDeleted => "Leave the file missing or review recreation.",
             Self::Unsafe => "Check the destination path and access. Dort leaves it alone.",
             Self::Unverifiable => {
                 "Check file access, size and Dort's local state, then preview again."
@@ -250,24 +248,25 @@ impl Preview {
             )
         };
         let mode = Mode::declared(self.permissions.as_deref());
+        if overlaps_secret_target(host, repository, manifest, path, stat.as_ref().ok()) {
+            return DriftStatus::Unsafe;
+        }
         match stat {
+            Err(Errno::NOENT) if handle.missing => DriftStatus::MissingParent,
             Err(Errno::NOENT) => match stamp {
-                Some(_) => DriftStatus::LocallyDeleted,
-                None if !mode.permits_deployment() => DriftStatus::Unsafe,
-                None if handle.missing => DriftStatus::MissingParent,
-                None => DriftStatus::Missing,
+                Some(_) if mode.permits_update() => DriftStatus::LocallyDeleted,
+                None if mode.permits_deployment() => DriftStatus::Missing,
+                _ => DriftStatus::Unsafe,
             },
             Ok(stat) => match stamp {
-                Some(record)
-                    if !overlaps_secret_target(host, repository, manifest, path, &stat) =>
-                {
+                Some(record) => {
                     let drift = record.deployed.observe(
                         path,
                         &handle,
                         &stat,
                         &record::Stamp::new(self.rendered.as_bytes(), mode),
                     );
-                    if drift == DriftStatus::UpdateAvailable && !mode.permits_update() {
+                    if UpdateAction::for_drift(drift).is_some() && !mode.permits_update() {
                         DriftStatus::Unsafe
                     } else {
                         drift
@@ -292,9 +291,9 @@ fn overlaps_secret_target(
     repository: &Path,
     manifest: &Manifest,
     path: &Path,
-    stat: &fs::Stat,
+    stat: Option<&fs::Stat>,
 ) -> bool {
-    let fp = observation::Fingerprint::from_stat(stat);
+    let fp = stat.map(observation::Fingerprint::from_stat);
     manifest
         .files
         .iter()
@@ -304,12 +303,14 @@ fn overlaps_secret_target(
                 .ok()
                 .is_some_and(|secret| {
                     paths_overlap(&secret, path)
-                        || observation::inspect(&secret, false)
-                            .ok()
-                            .and_then(|e| e.fingerprint)
-                            .is_some_and(|other| {
-                                fp.device == other.device && fp.inode == other.inode
-                            })
+                        || fp.as_ref().is_some_and(|fp| {
+                            observation::inspect(&secret, false)
+                                .ok()
+                                .and_then(|e| e.fingerprint)
+                                .is_some_and(|other| {
+                                    fp.device == other.device && fp.inode == other.inode
+                                })
+                        })
                 })
         })
 }

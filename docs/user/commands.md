@@ -55,7 +55,9 @@ The preview shows the proposed output and the file's status. **Update available*
 
 For a new file, choose **Review deployment** (`R`). Read the destination, permissions and escaped output. Scroll to the end, then press `y` when **Deploy generated file** appears. `Esc` cancels the review.
 
-When the preview says **Update available**, choose **Review update** (`R`). Read the permission change and the exact lines marked `OLD` and `NEW`. Scroll to the end, then press `y` when **Update generated file** appears. `Esc` returns to the selected file without updating it.
+When the preview says **Update available**, choose **Review update** (`R`). Read the permission change and the exact lines marked `OLD` and `NEW`. Scroll to the end, then press `y` when **Update generated file** appears.
+
+For local edits or changed permissions, **Review replacement** (`R`) compares the exact local file with the proposed output. Dort keeps the local file at the private path shown in the review if you approve. For a tracked deletion, **Review recreation** (`R`) shows the exact output and permissions. Dort creates the file only if the destination is still missing and its folder already exists. Scroll to the end before pressing `y`. Press `Esc` to keep the local file or leave it missing.
 
 ## Tools
 
@@ -185,6 +187,21 @@ dort --json --yes files update-generated editor-settings --profile dev
 Dort updates only a file that still matches its last deployment. Read the old and new permissions, escaped changes to the contents and final newline status. If the full review cannot fit, split the change into smaller steps. JSON and nonterminal writes require `--yes`. A dry run cannot approve a later write.
 
 The update replaces the file and keeps the previous file in a private folder beside it. Dort reports the path. The destination filesystem must support exchanging the two files. A local edit, permission change or deletion prevents an update.
+
+### Replace or recreate a tracked generated file
+
+```sh
+dort files replace-generated editor-settings --dry-run
+dort files replace-generated editor-settings
+dort files recreate-generated editor-settings --dry-run
+dort files recreate-generated editor-settings
+```
+
+`replace-generated` requires local edits or changed permissions. Read the escaped comparison, permission changes and private path. Dort keeps the exact local file at that path on success. As with an update, the filesystem must support exchanging files.
+
+`recreate-generated` requires a tracked deletion and an existing, safe destination folder. Read the exact escaped output and permissions. Dort leaves any file that appears at the destination untouched. The filesystem must support moving a file without replacing an existing one.
+
+JSON and nonterminal writes require `--yes`. A dry run never writes or approves a later run.
 
 ### Plan
 
@@ -327,14 +344,14 @@ dort recovery abandon REPOSITORY_ID OPERATION_ID --dry-run
 - `resume`: continue an intact repository setup.
 - `abandon`: mark an incomplete setup abandoned. It keeps any published repository and registration.
 
-For an interrupted generated update, open **Recovery** and choose **Review generated recovery** (`u`), or run:
+For an interrupted generated update, replacement or recreation, open **Recovery** and choose **Review generated recovery** (`u`), or run:
 
 ```sh
 dort recovery recover-update --dry-run
 dort recovery recover-update
 ```
 
-The new file may already be at the destination. Recovery finishes or clears the pending record without replacing either file. If it stops on a conflict, keep both files and check the reported paths. If the destination folder moved, use the reported private folder device and inode to identify it. While the update remains unresolved, Dort blocks other writes across all repositories.
+The new file may already be at the destination. Recovery checks the destination, private path and deployment record before closing the action. It never publishes a staged file. After a successful recreation the private file is absent. If recovery stops, keep any files and check the reported paths. If the destination folder moved, use the reported private folder device and inode to identify it. Dort blocks other writes across all repositories until recovery finishes.
 
 Recovery checks current files and refuses changed state. It never runs automatically. An unresolved or damaged record can block new writes until you inspect it.
 

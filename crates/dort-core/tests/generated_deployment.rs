@@ -133,7 +133,7 @@ fn drift_distinguishes_proposed_changes_from_local_edits_permissions_and_deletio
     assert_eq!(f.status(), DriftStatus::LocallyDeleted);
     assert!(f.blocked().contains("First deployment cannot recreate it"));
     fs::remove_dir(&f.folder).unwrap();
-    assert_eq!(f.status(), DriftStatus::LocallyDeleted);
+    assert_eq!(f.status(), DriftStatus::MissingParent);
     assert!(f.blocked().contains("First deployment cannot recreate it"));
 }
 
@@ -151,7 +151,7 @@ fn reviewed_update_publishes_exact_bytes_and_mode_and_keeps_the_old_inode() {
         let update = f.update().unwrap();
         let view = update.review();
         assert_eq!(view.deployed, RENDERED);
-        assert_eq!(view.deployed_permissions, "0600");
+        assert_eq!(view.deployed_permissions.as_deref(), Some("0600"));
         assert_eq!(view.proposed.as_bytes(), proposed);
         assert_eq!(view.proposed_permissions, "0644");
         drop(update);
@@ -295,6 +295,57 @@ fn drift_fails_closed_for_replacements_sensitive_content_and_unreadable_or_large
     ));
     assert_eq!(f.status(), DriftStatus::Unsafe);
     assert_eq!(fs::read(&credential).unwrap(), b"private");
+}
+
+#[test]
+fn explicit_local_actions_require_a_record_and_a_safe_destination() {
+    use dort_core::generated::UpdateAction::{Recreate, Replace};
+    let f = Fixture::new();
+    let path = f.destination();
+    let prepare = |action| Update::prepare_action(&f.home.host, None, "settings", &[], action);
+    assert!(prepare(Recreate).is_err());
+    fs::write(&path, b"unrecorded local file").unwrap();
+    assert!(prepare(Replace).is_err());
+    assert_eq!(fs::read(&path).unwrap(), b"unrecorded local file");
+    fs::remove_file(&path).unwrap();
+    f.deploy();
+    assert!(prepare(Replace).is_err());
+    assert!(prepare(Recreate).is_err());
+
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+    assert_eq!(
+        prepare(Replace).unwrap().review().detected,
+        DriftStatus::LocalPermissionsChanged
+    );
+    for mode in [0o000, 0o666, 0o4600] {
+        fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+        assert!(prepare(Replace).is_err(), "accepted mode {mode:o}");
+        assert!(prepare(Recreate).is_err());
+    }
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::write(&path, "token=do-not-report-this").unwrap();
+    assert!(prepare(Replace).is_err());
+    fs::remove_file(&path).unwrap();
+    let other = f.home.host.home.join("other");
+    fs::write(&other, b"untouched").unwrap();
+    symlink(&other, &path).unwrap();
+    assert!(prepare(Replace).is_err());
+    assert!(prepare(Recreate).is_err());
+    assert_eq!(fs::read_link(&path).unwrap(), other);
+    assert_eq!(fs::read(&other).unwrap(), b"untouched");
+    fs::remove_file(&path).unwrap();
+    fs::hard_link(&other, &path).unwrap();
+    assert!(prepare(Replace).is_err());
+    fs::remove_file(&path).unwrap();
+
+    assert!(prepare(Recreate).is_ok());
+    f.manifest(&format!("schema = 1\n[profiles]\navailable = ['work']\n{FILE}\n[[files]]\nid = 'secret'\nmode = 'secret'\nprofiles = ['work']\ntarget = '~/app/settings'\n"));
+    assert!(prepare(Recreate).is_err());
+    assert!(!path.exists());
+    f.manifest(&format!("schema = 1\n{FILE}"));
+    fs::remove_dir(&f.folder).unwrap();
+    assert!(prepare(Recreate).is_err());
+    assert!(!f.folder.exists());
 }
 
 #[test]

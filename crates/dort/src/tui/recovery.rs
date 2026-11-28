@@ -181,7 +181,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     ])
     .split(area);
     if let Some(pending) = generated {
-        let notice = if pending.is_ok() {
+        let notice = if let Ok(location) = pending {
             if !app.history_search.editing {
                 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
                 app.presented(
@@ -190,7 +190,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                     Target::Key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE)),
                 );
             }
-            "Generated update needs recovery."
+            crate::services::generated_update::recovery_status(location.action)
         } else {
             "Generated recovery unavailable. r retries."
         };

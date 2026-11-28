@@ -49,7 +49,7 @@ A failed or interrupted write keeps a private record. New writes may be blocked 
 
 Recovery rechecks current files and refuses changed state. It never replays automatically. A completed link or declaration operation can still be rolled back if its files still match.
 
-For a generated update, the new file may already be visible. Choose **Review generated recovery** in Recovery or run `dort recovery recover-update --dry-run` to find both paths. Keep the destination and private file in place. Recovery does not exchange them again.
+If a generated file change stops, the new file may already be visible. Choose **Review generated recovery** in Recovery or run `dort recovery recover-update --dry-run` to find both paths. Keep any files in place. Recovery never publishes or replaces a file.
 
 File and install history are separate. Closing an install record acknowledges it. Retry, repair and rollback stay manual.
 
