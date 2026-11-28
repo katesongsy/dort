@@ -72,6 +72,15 @@ impl Fixture {
     fn edit(&self, source: Source, text: &str) -> Result<Preview> {
         Preview::prepare(&self.host, &self.root, Change::Edit(source), text.into())
     }
+
+    fn delete(&self, path: &str) -> Result<Preview> {
+        Preview::prepare(
+            &self.host,
+            &self.root,
+            Change::Delete(self.show(path)?),
+            String::new(),
+        )
+    }
 }
 
 #[test]
@@ -95,10 +104,66 @@ fn template_files_unregistered_repositories_cannot_be_opened() {
 fn template_files_blank_repository_lists_without_creating_folders() {
     let f = Fixture::registered();
     assert!(list(&f.host, &f.root).unwrap().is_empty());
-    let Some(Error::Invalid(message)) = f.create("templates/new.jinja", "hello").err() else {
-        panic!("missing folder should block the preview");
+    let preview = f.create("templates/new.jinja", "hello").unwrap();
+    let review = preview.review();
+    assert_eq!(review.action, Action::Create);
+    assert_eq!(
+        review.folder,
+        Some(Folder {
+            path: "templates".into(),
+            permissions: 0o755
+        })
+    );
+    assert_eq!(review.permissions, 0o644);
+    assert!(!f.root.join("templates").exists());
+    let Outcome::Created { folder_created } = preview.approve().execute(&f.host).unwrap() else {
+        panic!("folder and file create should succeed")
     };
-    assert!(message.contains("Create templates/"));
+    assert!(folder_created);
+    assert_eq!(
+        fs::metadata(f.root.join("templates")).unwrap().mode() & 0o777,
+        0o755
+    );
+    assert_eq!(
+        fs::read(f.root.join("templates/new.jinja")).unwrap(),
+        b"hello"
+    );
+    assert_eq!(list(&f.host, &f.root).unwrap().len(), 1);
+}
+
+#[test]
+fn template_files_create_refuses_a_folder_that_appears_after_the_review() {
+    let f = Fixture::registered();
+    let path = "templates/new.jinja";
+    let preview = f.create(path, "reviewed").unwrap();
+    fs::create_dir(f.root.join("templates")).unwrap();
+    fs::set_permissions(f.root.join("templates"), fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(preview.approve().execute(&f.host).is_err());
+    assert!(!f.root.join(path).exists());
+    assert_eq!(
+        fs::metadata(f.root.join("templates")).unwrap().mode() & 0o777,
+        0o700
+    );
+    let link = Fixture::registered();
+    fs::create_dir(link.root.join("elsewhere")).unwrap();
+    let preview = link.create(path, "reviewed").unwrap();
+    symlink("elsewhere", link.root.join("templates")).unwrap();
+    assert!(preview.approve().execute(&link.host).is_err());
+    assert!(!link.root.join("elsewhere/new.jinja").exists());
+    let file = Fixture::registered();
+    let preview = file.create(path, "reviewed").unwrap();
+    file.write("templates", "not a folder");
+    assert!(preview.approve().execute(&file.host).is_err());
+    assert!(!file.root.join(path).exists());
+}
+
+#[test]
+fn template_files_nested_folder_without_templates_refuses_the_review() {
+    let f = Fixture::registered();
+    let Some(Error::Invalid(message)) = f.create("templates/nested/new.jinja", "hi").err() else {
+        panic!("a missing nested folder should block the preview");
+    };
+    assert!(message.contains("Create templates/"), "{message}");
     assert!(!f.root.join("templates").exists());
 }
 
@@ -110,19 +175,26 @@ fn template_files_create_reviews_exact_text_and_does_not_write_until_approved() 
     let before_manifest = fs::read(f.root.join("dort.toml")).unwrap();
     let preview = f.create(path, text).unwrap();
     let review = preview.review();
+    assert_eq!(review.action, Action::Create);
     assert_eq!(review.path, Path::new(path));
     assert_eq!(review.permissions, 0o644);
+    assert!(review.folder.is_none());
     assert_eq!(review.before, None);
-    assert_eq!(review.after.as_bytes(), text.as_bytes());
+    assert_eq!(review.after, Some(text));
     assert!(review.retained.is_none());
     assert!(list(&f.host, &f.root).unwrap().is_empty());
     let config = LocalConfig::load(&f.host).unwrap();
     let state = repository_state_path(&f.host, config.repository_id(&f.root).unwrap()).unwrap();
     assert!(!state.join("template-edits").exists());
-    assert!(matches!(
-        preview.approve().execute(&f.host).unwrap(),
-        Outcome::Created
-    ));
+    assert!(
+        matches!(
+            preview.approve().execute(&f.host).unwrap(),
+            Outcome::Created {
+                folder_created: false
+            }
+        ),
+        "an existing folder is not a reviewed effect"
+    );
     assert_eq!(fs::read(f.root.join(path)).unwrap(), text.as_bytes());
     assert_eq!(
         fs::metadata(f.root.join(path)).unwrap().mode() & 0o777,
@@ -197,9 +269,11 @@ fn template_files_edit_keeps_exact_predecessor_and_mode() {
     let old = fs::metadata(&absolute).unwrap();
     let preview = f.edit(f.show(path).unwrap(), after).unwrap();
     let review = preview.review();
+    assert_eq!(review.action, Action::Edit);
     assert_eq!(review.before, Some(before));
-    assert_eq!(review.after, after);
+    assert_eq!(review.after, Some(after));
     assert_eq!(review.permissions, 0o640);
+    assert!(review.folder.is_none());
     let paths = review.retained.unwrap();
     assert!(!paths.reviewed.parent().unwrap().exists());
     assert_eq!(fs::read(&absolute).unwrap(), before.as_bytes());
@@ -287,6 +361,7 @@ fn template_files_edit_reports_last_moment_race_and_retains_both_objects() {
         retained: Some(retained),
         competing_change: true,
         durability_unknown: false,
+        ..
     } = outcome
     else {
         panic!("expected a conflict: {outcome:?}");
@@ -381,4 +456,190 @@ target = "~/generated"
         fs::read(f.root.join("templates/linked.jinja")).unwrap(),
         b"cross reference"
     );
+}
+
+#[test]
+fn template_files_delete_moves_unreferenced_file_and_keeps_bytes() {
+    let f = Fixture::with_templates();
+    let path = "templates/unused.jinja";
+    let absolute = f.root.join(path);
+    let text = "kept \r\nbytes ";
+    f.write(path, text);
+    fs::set_permissions(&absolute, fs::Permissions::from_mode(0o600)).unwrap();
+    let old = fs::metadata(&absolute).unwrap();
+    let preview = f.delete(path).unwrap();
+    let review = preview.review();
+    assert_eq!(review.action, Action::Delete);
+    assert_eq!(review.path, Path::new(path));
+    assert_eq!(review.before, Some(text));
+    assert_eq!(review.after, None);
+    assert_eq!(review.permissions, 0o600);
+    assert_eq!(review.mappings, 0);
+    assert!(review.folder.is_none() && review.retained.is_none());
+    let removed = review.removed.unwrap();
+    assert!(!removed.parent().unwrap().exists());
+    assert_eq!(fs::read(&absolute).unwrap(), text.as_bytes());
+    let Outcome::Deleted(removed) = preview.approve().execute(&f.host).unwrap() else {
+        panic!("delete should succeed")
+    };
+    assert!(!absolute.exists());
+    assert_eq!(fs::read(&removed.path).unwrap(), text.as_bytes());
+    let moved = fs::metadata(&removed.path).unwrap();
+    assert_eq!((moved.dev(), moved.ino()), (old.dev(), old.ino()));
+    assert_eq!(moved.mode() & 0o777, 0o600);
+    assert_eq!(
+        fs::metadata(removed.path.parent().unwrap()).unwrap().mode() & 0o777,
+        0o700
+    );
+    assert!(list(&f.host, &f.root).unwrap().is_empty());
+    let config = LocalConfig::load(&f.host).unwrap();
+    let state = repository_state_path(&f.host, config.repository_id(&f.root).unwrap()).unwrap();
+    assert!(removed.path.starts_with(state));
+}
+
+#[test]
+fn template_files_delete_refuses_referenced_files_by_id() {
+    let f = Fixture::with_templates();
+    f.manifest(
+        r#"
+[[files]]
+id = "shared"
+mode = "template"
+source = "templates/shared.jinja"
+target = "~/shared"
+
+[[files]]
+id = "theme"
+mode = "template"
+source = "templates/base.jinja"
+target = "~/theme"
+overrides = { linux = "templates/shared.jinja" }
+"#,
+    );
+    f.write("templates/shared.jinja", "shared");
+    f.write("templates/base.jinja", "base");
+    let Some(Error::Invalid(message)) = f.delete("templates/shared.jinja").err() else {
+        panic!("references should refuse the review");
+    };
+    assert!(message.contains("shared (source)"), "{message}");
+    assert!(message.contains("theme (linux override)"), "{message}");
+    assert_eq!(
+        fs::read(f.root.join("templates/shared.jinja")).unwrap(),
+        b"shared"
+    );
+}
+
+#[test]
+fn template_files_delete_refuses_unsafe_stale_and_foreign_paths() {
+    let f = Fixture::with_templates();
+    f.manifest(
+        r#"
+[[files]]
+id = "legacy"
+mode = "template"
+source = "legacy.jinja"
+target = "~/legacy"
+"#,
+    );
+    f.write("legacy.jinja", "legacy");
+    f.write("templates/regular.jinja", "valid source");
+    fs::hard_link(
+        f.root.join("templates/regular.jinja"),
+        f.root.join("templates/hard.jinja"),
+    )
+    .unwrap();
+    symlink("regular.jinja", f.root.join("templates/soft.jinja")).unwrap();
+    f.write("templates/private.jinja", "password = example");
+    f.write("templates/world.jinja", "unsafe mode");
+    fs::set_permissions(
+        f.root.join("templates/world.jinja"),
+        fs::Permissions::from_mode(0o666),
+    )
+    .unwrap();
+    f.write("templates/notes.txt", "not a template");
+    for path in [
+        "legacy.jinja",
+        "dort.toml",
+        "templates/hard.jinja",
+        "templates/soft.jinja",
+        "templates/private.jinja",
+        "templates/world.jinja",
+        "templates/notes.txt",
+        "templates/secrets.jinja",
+        "templates/missing.jinja",
+        "templates/../legacy.jinja",
+    ] {
+        assert!(f.delete(path).is_err(), "should not delete {path}");
+    }
+    for path in [
+        "legacy.jinja",
+        "templates/regular.jinja",
+        "templates/hard.jinja",
+    ] {
+        assert!(f.root.join(path).exists());
+    }
+    let path = "templates/changing.jinja";
+    f.write(path, "before");
+    let preview = f.delete(path).unwrap();
+    f.write(path, "changed after review");
+    assert!(preview.approve().execute(&f.host).is_err());
+    assert_eq!(
+        fs::read(f.root.join(path)).unwrap(),
+        b"changed after review"
+    );
+}
+
+#[test]
+fn template_files_delete_cancel_writes_nothing() {
+    let f = Fixture::with_templates();
+    let path = "templates/unused.jinja";
+    f.write(path, "keep");
+    let preview = f.delete(path).unwrap();
+    let removed = preview.review().removed.unwrap();
+    drop(preview);
+    assert_eq!(fs::read(f.root.join(path)).unwrap(), b"keep");
+    assert!(!removed.parent().unwrap().exists());
+    let config = LocalConfig::load(&f.host).unwrap();
+    let state = repository_state_path(&f.host, config.repository_id(&f.root).unwrap()).unwrap();
+    assert!(!state.join("template-edits").exists());
+}
+
+#[test]
+fn template_files_delete_refuses_a_file_that_returns_at_the_last_moment() {
+    let f = Fixture::with_templates();
+    let path = "templates/unused.jinja";
+    f.write(path, "reviewed");
+    let preview = f.delete(path).unwrap();
+    let removed = preview.review().removed.unwrap();
+    let incoming = f.root.join("incoming");
+    fs::write(&incoming, "racer").unwrap();
+    assert!(
+        preview
+            .approve()
+            .execute_before_publish(&f.host, || {
+                fs::rename(&incoming, f.root.join(path)).unwrap();
+            })
+            .is_err()
+    );
+    assert_eq!(fs::read(f.root.join(path)).unwrap(), b"racer");
+    assert!(!removed.exists());
+}
+
+#[test]
+fn template_files_delete_never_overwrites_an_earlier_retained_copy() {
+    let f = Fixture::with_templates();
+    let path = "templates/unused.jinja";
+    f.write(path, "one");
+    let first = f.delete(path).unwrap();
+    let Outcome::Deleted(first) = first.approve().execute(&f.host).unwrap() else {
+        panic!("first delete should succeed")
+    };
+    f.write(path, "two");
+    let second = f.delete(path).unwrap();
+    let Outcome::Deleted(second) = second.approve().execute(&f.host).unwrap() else {
+        panic!("second delete should succeed")
+    };
+    assert_ne!(first.path, second.path);
+    assert_eq!(fs::read(&first.path).unwrap(), b"one");
+    assert_eq!(fs::read(&second.path).unwrap(), b"two");
 }

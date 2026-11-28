@@ -24,8 +24,10 @@ use std::{
 mod tests;
 
 const DIRECTORY: &str = "templates";
+const FOLDER_PERMISSIONS: u32 = 0o755;
 const BEFORE: &str = "reviewed-before";
 const DISPLACED: &str = "previous-entry";
+const REMOVED: &str = "removed";
 const INVENTORY_LIMIT: usize = 4096;
 const DIRECTORY_FLAGS: fs::OFlags = fs::OFlags::RDONLY
     .union(fs::OFlags::DIRECTORY)
@@ -116,6 +118,22 @@ impl<'a> Repository<'a> {
                 file.mode == FileMode::Template && file.source_paths().any(|source| source == path)
             })
             .count()
+    }
+
+    /// Every mapping in every mode that declares this path, by ID and field.
+    fn referencing(&self, path: &Path) -> Vec<String> {
+        let mut found = vec![];
+        for file in &self.mappings.files {
+            if file.source.as_deref() == Some(path) {
+                found.push(format!("{} (source)", file.id));
+            }
+            for (platform, override_path) in &file.overrides {
+                if override_path == path {
+                    found.push(format!("{} ({} override)", file.id, platform.as_str()));
+                }
+            }
+        }
+        found
     }
 
     fn checked_path(&self, path: &Path) -> Result<PathBuf> {
@@ -351,6 +369,48 @@ pub fn show(host: &HostContext, root: &Path, path: &Path) -> Result<Source> {
 pub enum Change {
     Create(PathBuf),
     Edit(Source),
+    Delete(Source),
+}
+
+impl Change {
+    pub fn action(&self) -> Action {
+        match self {
+            Self::Create(_) => Action::Create,
+            Self::Edit(_) => Action::Edit,
+            Self::Delete(_) => Action::Delete,
+        }
+    }
+
+    fn path(&self) -> &Path {
+        match self {
+            Self::Create(path) => path,
+            Self::Edit(source) | Self::Delete(source) => &source.row.path,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    Create,
+    Edit,
+    Delete,
+}
+
+impl Action {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Create => "Create",
+            Self::Edit => "Edit",
+            Self::Delete => "Delete",
+        }
+    }
+}
+
+/// The folder a reviewed create makes before the file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Folder {
+    pub path: PathBuf,
+    pub permissions: u32,
 }
 
 pub struct Preview {
@@ -364,15 +424,21 @@ pub struct Preview {
     text: String,
     parents: Vec<Parent>,
     mappings: usize,
+    folder: Option<Folder>,
 }
 
 pub struct Review<'a> {
+    pub action: Action,
     pub path: &'a Path,
+    /// Set when the review creates `templates/` first.
+    pub folder: Option<Folder>,
     pub before: Option<&'a str>,
-    pub after: &'a str,
+    pub after: Option<&'a str>,
     pub permissions: u32,
     pub mappings: usize,
     pub retained: Option<Retained>,
+    /// Private path the removed file moves to.
+    pub removed: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -381,14 +447,25 @@ pub struct Retained {
     pub displaced: PathBuf,
 }
 
+/// A removed template file, moved into private Dort state instead of unlinked.
+#[derive(Debug, Clone)]
+pub struct Removed {
+    pub path: PathBuf,
+}
+
 pub struct Approval(Preview);
 
 #[derive(Debug)]
 pub enum Outcome {
-    Created,
+    Created {
+        folder_created: bool,
+    },
     Edited(Retained),
+    Deleted(Removed),
     NeedsAttention {
         retained: Option<Retained>,
+        removed: Option<Removed>,
+        folder_created: bool,
         competing_change: bool,
         durability_unknown: bool,
     },
@@ -399,10 +476,7 @@ impl Preview {
         let (config, binding) = LocalConfig::load_bound(host)?;
         let id = registered(&config, root)?;
         let repo = Repository::open(host, root)?;
-        let path = match &change {
-            Change::Create(path) => path,
-            Change::Edit(before) => &before.row.path,
-        };
+        let path = change.path();
         let absolute = repo.checked_path(path)?;
         if !writable_name(path) {
             return Err(invalid(
@@ -410,17 +484,29 @@ impl Preview {
             ));
         }
         let handle = trusted_parent(root, &absolute)?;
-        if handle.missing {
-            return Err(invalid(
-                "Template folder is missing. Create templates/ and any needed subfolder in the repository, then review again.",
-            ));
-        }
+        let folder = match (handle.missing, path.parent()) {
+            (false, _) => None,
+            (true, Some(parent)) if parent == Path::new(DIRECTORY) => Some(Folder {
+                path: PathBuf::from(DIRECTORY),
+                permissions: FOLDER_PERMISSIONS,
+            }),
+            (true, _) => {
+                return Err(invalid(
+                    "Template folder is missing. Create templates/ and any needed subfolder in the repository, then review again.",
+                ));
+            }
+        };
         check_entry(&repo, &change, &handle, &absolute)?;
-        if !safe_text(&text) {
-            return Err(invalid("Template must be plain text."));
+        match &change {
+            Change::Delete(_) => unreferenced(&repo, path)?,
+            _ => {
+                if !safe_text(&text) {
+                    return Err(invalid("Template must be plain text."));
+                }
+                Template::compile(path.to_str().expect("checked path"), &text)
+                    .map_err(|e| Error::Invalid(e.to_string()))?;
+            }
         }
-        Template::compile(path.to_str().expect("checked path"), &text)
-            .map_err(|e| Error::Invalid(e.to_string()))?;
         let backup = repository_state_path(host, id)?
             .join("template-edits")
             .join(transaction_id());
@@ -436,26 +522,41 @@ impl Preview {
             text,
             parents: handle.parents,
             mappings,
+            folder,
         })
     }
 
     pub fn review(&self) -> Review<'_> {
-        let (path, before, permissions, retained) = match &self.change {
-            Change::Create(path) => (path.as_path(), None, 0o644, None),
+        let (path, before, permissions, retained, removed) = match &self.change {
+            Change::Create(path) => (path.as_path(), None, 0o644, None, None),
             Change::Edit(source) => (
                 source.row.path.as_path(),
                 Some(source.text()),
                 source.permissions(),
                 Some(self.retained()),
+                None,
+            ),
+            Change::Delete(source) => (
+                source.row.path.as_path(),
+                Some(source.text()),
+                source.permissions(),
+                None,
+                Some(self.backup.join(REMOVED)),
             ),
         };
         Review {
+            action: self.change.action(),
             path,
+            folder: self.folder.clone(),
             before,
-            after: &self.text,
+            after: match &self.change {
+                Change::Delete(_) => None,
+                _ => Some(&self.text),
+            },
             permissions,
             mappings: self.mappings,
             retained,
+            removed,
         }
     }
 
@@ -470,26 +571,82 @@ impl Preview {
         Approval(self)
     }
 
-    fn recheck<'a>(
-        &'a self,
-        host: &HostContext,
-        path: &Path,
-        absolute: &Path,
-    ) -> Result<(Repository<'a>, ParentHandle)> {
+    fn recheck_base(&self, host: &HostContext) -> Result<Repository<'_>> {
         let (config, binding) = LocalConfig::load_bound(host)?;
         registered(&config, &self.root)?;
         let repo = Repository::open(host, &self.root)?;
         if binding.stable_parents() != self.config || repo.manifest != self.manifest {
             return Err(stale());
         }
+        Ok(repo)
+    }
+
+    fn recheck<'a>(
+        &'a self,
+        host: &HostContext,
+        path: &Path,
+        absolute: &Path,
+    ) -> Result<(Repository<'a>, ParentHandle)> {
+        let repo = self.recheck_base(host)?;
         repo.checked_path(path)?;
         let handle = trusted_parent(&self.root, absolute)?;
-        if handle.missing
-            || !observation::same_parent_identity_and_access(&handle.parents, &self.parents)
-        {
+        if handle.missing || !reviewed_parents(&self.parents, &handle.parents) {
             return Err(stale());
         }
         Ok((repo, handle))
+    }
+
+    /// Refuse when the reviewed folder is no longer absent.
+    fn check_folder(&self, folder: &Folder) -> Result<ParentHandle> {
+        let absolute = self.root.join(&folder.path);
+        let handle = trusted_parent(&self.root, &absolute)?;
+        if !reviewed_parents(&self.parents, &handle.parents) {
+            return Err(stale());
+        }
+        match fs::statat(
+            &handle.directory,
+            &handle.name,
+            fs::AtFlags::SYMLINK_NOFOLLOW,
+        ) {
+            Err(Errno::NOENT) => Ok(handle),
+            Ok(_) => Err(invalid(
+                "Something now exists at templates/. Review the change again.",
+            )),
+            Err(e) => Err(io_error("inspect template folder", &absolute, e)),
+        }
+    }
+
+    /// Create the reviewed folder. Returns whether it reached disk.
+    fn create_folder(&self, folder: &Folder) -> Result<bool> {
+        let absolute = self.root.join(&folder.path);
+        let handle = self.check_folder(folder)?;
+        let mode = fs::Mode::from_bits_truncate(folder.permissions as _);
+        fs::mkdirat(&handle.directory, &handle.name, mode).map_err(|e| match e {
+            Errno::EXIST => invalid("Something now exists at templates/. Review the change again."),
+            e => io_error("create template folder", &absolute, e),
+        })?;
+        let dir = File::from(
+            fs::openat(
+                &handle.directory,
+                &handle.name,
+                DIRECTORY_FLAGS,
+                fs::Mode::empty(),
+            )
+            .map_err(|e| io_error("open new template folder", &absolute, e))?,
+        );
+        fs::fchmod(&dir, mode)
+            .map_err(|e| io_error("set template folder permissions", &absolute, e))?;
+        let stat =
+            fs::fstat(&dir).map_err(|e| io_error("inspect new template folder", &absolute, e))?;
+        if fs::FileType::from_raw_mode(stat.st_mode) != fs::FileType::Directory
+            || stat.st_uid != process::geteuid().as_raw()
+            || (stat.st_mode as u32) & 0o7777 != folder.permissions
+        {
+            return Err(invalid(
+                "The new templates/ folder has unexpected permissions or owner.",
+            ));
+        }
+        Ok(handle.directory.sync_all().is_ok())
     }
 }
 
@@ -504,7 +661,7 @@ fn check_entry(
         Change::Create(_) => Err(invalid(
             "A file already exists at this path. Choose a different path.",
         )),
-        Change::Edit(before) => {
+        Change::Edit(before) | Change::Delete(before) => {
             let current = repo.read(&before.row.path)?;
             if before.fingerprint != current.fingerprint
                 || before.text != current.text
@@ -516,6 +673,23 @@ fn check_entry(
             Ok(())
         }
     }
+}
+
+/// Compare the reviewed parents with the live ones, which may now include the folder the review creates.
+fn reviewed_parents(reviewed: &[Parent], live: &[Parent]) -> bool {
+    reviewed.len() <= live.len()
+        && observation::same_parent_identity_and_access(reviewed, &live[..reviewed.len()])
+}
+
+fn unreferenced(repo: &Repository<'_>, path: &Path) -> Result<()> {
+    let referencing = repo.referencing(path);
+    if referencing.is_empty() {
+        return Ok(());
+    }
+    Err(invalid(&format!(
+        "Mappings still use this template file: {}. Remove those references first.",
+        referencing.join(", ")
+    )))
 }
 
 impl Approval {
@@ -539,11 +713,31 @@ impl Approval {
         journal::ensure_writable(host)?;
         let review = p.review();
         let absolute = p.root.join(review.path);
+        let repo = p.recheck_base(host)?;
+        repo.checked_path(review.path)?;
+        let mut durable = true;
+        if let Some(folder) = &p.folder {
+            durable = p.create_folder(folder)?;
+        }
         let check = || {
             let (repo, handle) = p.recheck(host, review.path, &absolute)?;
             check_entry(&repo, &p.change, &handle, &absolute)?;
             Ok::<_, Error>(handle)
         };
+        if let Change::Delete(source) = &p.change {
+            let handle = check()?;
+            unreferenced(&p.recheck_base(host)?, review.path)?;
+            return delete(
+                host,
+                &p,
+                source,
+                &handle,
+                &absolute,
+                !durable,
+                before_publish,
+            );
+        }
+        let folder_created = p.folder.is_some();
         let handle = check()?;
         let state = stage_dir(host, &p.backup, &handle)?;
         let old = match &p.change {
@@ -620,7 +814,7 @@ impl Approval {
         }
         let destination_synced = handle.directory.sync_all().is_ok();
         let stage_synced = state.sync().is_ok();
-        let durability_unknown = !destination_synced || !stage_synced;
+        let durability_unknown = !destination_synced || !stage_synced || !durable;
         let competing_change = !stage_matches(host, &state)
             || old.is_some_and(|old| {
                 !matches_file(
@@ -648,13 +842,80 @@ impl Approval {
         if competing_change || durability_unknown {
             Ok(Outcome::NeedsAttention {
                 retained,
+                removed: None,
+                folder_created,
                 competing_change,
                 durability_unknown,
             })
         } else {
-            Ok(retained.map_or(Outcome::Created, Outcome::Edited))
+            Ok(retained.map_or(Outcome::Created { folder_created }, Outcome::Edited))
         }
     }
+}
+
+/// Move the reviewed file into private state. Never overwrite an earlier copy.
+fn delete(
+    host: &HostContext,
+    p: &Preview,
+    source: &Source,
+    handle: &ParentHandle,
+    absolute: &Path,
+    durability_unknown: bool,
+    before_publish: impl FnOnce(),
+) -> Result<Outcome> {
+    let state = stage_dir(host, &p.backup, handle)?;
+    let kept = state.path.join(REMOVED);
+    before_publish();
+    if !matches_file(
+        &handle.directory,
+        &handle.name,
+        absolute,
+        &source.fingerprint,
+        &source.text,
+        false,
+    ) {
+        return Err(stale());
+    }
+    match fs::renameat_with(
+        &handle.directory,
+        &handle.name,
+        &state.file,
+        REMOVED,
+        fs::RenameFlags::NOREPLACE,
+    ) {
+        Ok(()) => (),
+        Err(Errno::NOENT) => {
+            return Err(invalid("The template file moved. Choose the file again."));
+        }
+        Err(Errno::EXIST) => {
+            return Err(invalid(
+                "A retained copy already exists for this change. Review it again.",
+            ));
+        }
+        Err(e) => return Err(io_error("move template file", absolute, e)),
+    }
+    let moved = matches_file(
+        &state.file,
+        OsStr::new(REMOVED),
+        &kept,
+        &source.fingerprint,
+        &source.text,
+        true,
+    );
+    let gone = matches!(entry(handle, absolute), Ok(None));
+    let durability_unknown =
+        durability_unknown || !handle.directory.sync_all().is_ok() || !state.sync().is_ok();
+    let removed = Removed { path: kept };
+    if moved && gone && !durability_unknown {
+        return Ok(Outcome::Deleted(removed));
+    }
+    Ok(Outcome::NeedsAttention {
+        retained: None,
+        removed: Some(removed),
+        folder_created: false,
+        competing_change: !moved || !gone,
+        durability_unknown,
+    })
 }
 
 fn stage_dir(host: &HostContext, path: &Path, handle: &ParentHandle) -> Result<PrivateDir> {

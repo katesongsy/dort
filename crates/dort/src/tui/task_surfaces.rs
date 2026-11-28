@@ -124,6 +124,7 @@ impl Activity {
             Task::ReadDraftSource(..) => "Read template file for this draft",
             Task::ShowTemplate(..) => "Read template source",
             Task::ReviewTemplate(..) => "Review template file",
+            Task::ReviewTemplateDelete(..) => "Review template file deletion",
             Task::PreviewGenerated(_) => "Preview generated file",
             Task::ReviewGeneratedDeployment(_) => "Review deployment",
             Task::ReviewGeneratedUpdate(_, action) => {
