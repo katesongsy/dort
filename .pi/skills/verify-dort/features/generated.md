@@ -105,7 +105,7 @@ python3 "$drive" tui generated-setup-proof --label save \
 python3 "$drive" tui generated-setup-proof --label reopen \
   'wait:loaded.' "send:'f'" "wait:Managed" "send:'4'" 'wait:Preview generated file' "send:'v'" \
   'wait:font-size = 18' 'wait:color = dark' 'snap:preview' "send:'\x1b'" 'wait:Files / Generated'
-python3 "$drive" tui generated-setup-proof --label edit \
+python3 "$drive" tui generated-setup-proof --label edit --size 28 140 \
   'wait:loaded.' "send:'f'" "wait:Managed" "send:'4'" 'wait:Edit generated file' "send:'e'" 'wait:Open in editor' \
   "send:'\x1b'" 'wait:Enter Continue' "send:'\r'" 'wait:Input: size' \
   "send:'\x7f\x7f22'" "send:'\x1b'" 'wait:Enter Review' "send:'\r'" 'wait:font-size = 22' \
