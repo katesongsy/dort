@@ -11,7 +11,7 @@ Preview how a repository template will render for this computer.
 
 ## How to get to it (user POV)
 
-In **Files → Generated (`4`)**, choose **New generated file** (`s`). Enter an ID, destination, and template. Enter adds a line in Template. Use **Open in editor** (`F5`) to edit outside Dort. Choose **Continue** (`F4`), fill in the named inputs, then review and save. Select a saved template and choose **Preview generated file** (`v`). For an inline template, choose **Edit generated file** (`e`).
+In **Files → Generated (`4`)**, choose **New generated file** (`s`). Enter an ID, destination, and template. Enter adds a line in Template. Use **Open in editor** (`F5`) to edit outside Dort. Press Esc to leave the field, then Enter to continue. Fill in the named inputs, then review and save. Select a saved template and choose **Preview generated file** (`v`). For an inline template, choose **Edit generated file** (`e`).
 
 ## Driving it with drive.py
 
@@ -81,11 +81,14 @@ python3 "$drive" new generated-setup-proof
   cp "$HOME/.editor.conf" "$DORT_EVIDENCE/home-before.txt"
 )
 python3 "$drive" tui generated-setup-proof --label cancel \
-  'wait:loaded.' "send:'f'" "wait:Managed" "send:'4'" 'wait:New generated file' 'click:New generated file' \
+  'wait:loaded.' "send:'f'" "wait:Managed" "send:'4'" 'wait:New generated file' "send:'s'" \
   'wait:Open in editor' "send:'editor\t~/.editor.conf\tfont-size = {{ size }}'" \
-  'wait:font-size' "send:'\x1b[14~'" 'wait:Input: size' "send:'18\r'" \
+  'wait:font-size' "send:'\x1b'" 'wait:Enter Continue' "send:'\r'" \
+  'wait:Input: size' "send:'18'" "send:'\x1b'" 'wait:Enter Review' "send:'\r'" \
   'wait:font-size = 18' 'snap:review' "send:'\x1b'" 'wait:Input: size' \
-  "send:'\x1b'" 'wait:Open in editor' "send:'\x1b'" 'wait:No mappings'
+  'click:1 Managed' 'wait:Destination: Files / Managed' 'snap:discard' \
+  "send:'\x1b'" 'wait:Input: size' 'click:1 Managed' 'wait:Destination: Files / Managed' \
+  "send:'d'" 'wait:No mappings' 'wait:Files / Managed'
 (
   eval "$(python3 "$drive" env generated-setup-proof)"
   cmp "$DORT_EVIDENCE/before.toml" "$DORT_REPO/dort.toml"
@@ -95,7 +98,8 @@ python3 "$drive" tui generated-setup-proof --label save \
   'wait:loaded.' "send:'f'" "wait:Managed" "send:'4'" 'wait:New generated file' "send:'s'" \
   'wait:Open in editor' "send:'editor\t~/.editor.conf\tfont-size = {{ size }}\r'" \
   'wait:font-size' "send:'\x1b[200~color = dark\n\x1b[201~'" 'wait:color = dark' \
-  "send:'\x1b[14~'" 'wait:Input: size' "send:'18\r'" 'wait:font-size = 18' \
+  "send:'\x1b'" 'wait:Enter Continue' "send:'\r'" 'wait:Input: size' \
+  "send:'18'" "send:'\x1b'" 'wait:Enter Review' "send:'\r'" 'wait:font-size = 18' \
   'wait:color = dark' 'wait:y Save generated file' 'snap:review' "send:'y'" \
   'wait:Manifest change completed.' 'snap:saved' 'click:Enter Done' 'wait:Files / Generated'
 python3 "$drive" tui generated-setup-proof --label reopen \
@@ -103,7 +107,8 @@ python3 "$drive" tui generated-setup-proof --label reopen \
   'wait:font-size = 18' 'wait:color = dark' 'snap:preview' "send:'\x1b'" 'wait:Files / Generated'
 python3 "$drive" tui generated-setup-proof --label edit \
   'wait:loaded.' "send:'f'" "wait:Managed" "send:'4'" 'wait:Edit generated file' "send:'e'" 'wait:Open in editor' \
-  "send:'\x1b[14~'" 'wait:Input: size' "send:'\x7f\x7f22\r'" 'wait:font-size = 22' \
+  "send:'\x1b'" 'wait:Enter Continue' "send:'\r'" 'wait:Input: size' \
+  "send:'\x7f\x7f22'" "send:'\x1b'" 'wait:Enter Review' "send:'\r'" 'wait:font-size = 22' \
   'wait:y Save generated file' "send:'y'" 'wait:Manifest change completed.' \
   'snap:saved' 'click:Enter Done' 'wait:Files / Generated'
 python3 "$drive" cli generated-setup-proof --label cli -- \
@@ -195,13 +200,13 @@ theme=[{{ inputs.theme }}]
 {% if host.os is defined %}{% for item in [host.os, host.arch] %}{{ item }};{% endfor %}{% endif %}{% if false %}{{ inputs.optional }}{% endif %}
 ```
 
-Tab from Template to **Syntax**. Open the picker with Enter, select **Jinja**, and press F4 to continue. Leave `inputs.optional` unset. Enter `dark` for `inputs.theme` and enable `host.os` and `host.arch`. Review and save. Check that approving the manifest does not create the destination.
+Press Esc to leave Template, then Enter to continue. Leave `inputs.optional` unset. Enter `dark` for `inputs.theme` and enable `host.os` and `host.arch`. Review and save. Check that approving the manifest does not create the destination.
 
 Open the saved preview and choose **Review deployment**. Confirm that `inputs.theme` comes from `dort.toml` and the two host values come from **this host**. Approve and compare the file to `theme=[dark]\n<os>;<arch>;\n`, using the exact values from the review. Confirm the same output and value sources with `dort --json files preview-generated prefs`. Clean up the run.
 
 ## Use a machine-local input
 
-In a blank disposable repository, create a generated file named `prefs` with destination `~/settings` and template `editor=[{{ local.editor }}]`. Select **Jinja** and press F4. Press Space to declare `local.editor`, then open the review. Press End and choose **Save declaration only**. Keep a copy of `dort.toml`; the destination should be absent.
+In a blank disposable repository, create a generated file named `prefs` with destination `~/settings` and template `editor=[{{ local.editor }}]`. Press Esc, then Enter to continue. Press Space to declare `local.editor`, then press Esc and Enter to review. Press End and choose **Save declaration only**. Keep a copy of `dort.toml`; the destination should be absent.
 
 Open **Local inputs** (`l`). Set `editor` to `vim`. Cancel the first review and check `dort --json files local-inputs prefs` still reports a null value. Reopen and save the value. Preview and deploy. Check the destination contains `editor=[vim]` and the preview lists **local settings on this machine** as the source.
 

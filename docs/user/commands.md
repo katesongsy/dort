@@ -49,9 +49,9 @@ Templates use Jinja. Use `{{ name }}` or `{{ inputs.name }}` for a manifest inpu
 
 Choose **Open in editor** (`F5`) to edit the template in an external editor. Set `VISUAL` or `EDITOR` before starting Dort, for example `VISUAL='code --wait'`. Dort tries `VISUAL` first. Choose an editor command that waits until you close the file. The editor gets a temporary copy of the template. Save and exit the editor to return to the draft.
 
-Choose **Continue** (`F4`). Leave unused inputs unset. Use `F6` to set an empty string or unset a value. Press `Space` or click to allow a host field. **Referenced** marks fields the template may use, even in branches that do not run. For `{{ local.name }}`, press `Space` or click to declare the name.
+Press Esc to leave the field, then Enter to continue. You can also click **Continue**. Leave unused inputs unset. Use `F6` to set an empty string or unset a value. Press `Space` or click to allow a host field. **Referenced** marks fields the template may use, even in branches that do not run. For `{{ local.name }}`, press `Space` or click to declare the name.
 
-Choose **Review generated file** after entering inputs. Check the resolved values, their sources, and the output. Press `y` when **Save generated file** is ready. `Esc` keeps your draft inputs. If a declared local input needs a value, choose **Save declaration only**. Saving changes only `dort.toml`.
+Choose **Review generated file** after entering inputs. Check the resolved values, their sources, and the output. Press `y` when **Save generated file** is ready. Esc from review returns to the draft. Leaving with unsaved changes asks whether to discard them. If a declared local input needs a value, choose **Save declaration only**. Saving changes only `dort.toml`.
 
 Select the saved file and open **Local inputs** (`l`). Select a name and press `Enter` to set its value. Blank sets an empty string. **Clear** (`F6`) makes a set value unset. Review the change, scroll to the end, then press `y` to save it only on this machine. Keep secrets out of local inputs. Preview again to see the new output before deployment.
 
