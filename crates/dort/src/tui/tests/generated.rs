@@ -1910,3 +1910,39 @@ fn generated_draft_discards_a_new_template_file_without_writing() {
     assert_eq!(w.manifest(), original);
     assert_eq!(fs::read_dir(&w.host.home).unwrap().count(), 0);
 }
+
+#[test]
+fn generated_draft_maps_a_template_file_that_is_already_in_place() {
+    let mut w = Workshop::new(120, 32);
+    let text = "theme=dark\n";
+    let path = w.template_file("prefs.jinja", text);
+    let original = w.manifest();
+    w.new_file_draft("prefs", "prefs.jinja");
+    w.press(KeyCode::Tab);
+    w.paste(text);
+    w.continue_form();
+    let review = w.review().to_owned();
+    assert!(
+        review.contains("This file is already in place. The approval writes the mapping only."),
+        "{review}"
+    );
+    assert!(!review.contains("Create folder:"), "{review}");
+    assert_eq!(w.manifest(), original);
+    w.approve();
+    assert_eq!(fs::read_to_string(&path).unwrap(), text);
+    let saved = dort_core::Manifest::parse(&w.manifest()).unwrap();
+    assert_eq!(
+        saved.files[0].source.as_deref(),
+        Some(std::path::Path::new("templates/prefs.jinja"))
+    );
+    assert_eq!(saved.files[0].template, None);
+    let screen = w.screen();
+    assert!(
+        screen.contains("Template file was already in place."),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("Wrote the mapping in dort.toml."),
+        "{screen}"
+    );
+}
