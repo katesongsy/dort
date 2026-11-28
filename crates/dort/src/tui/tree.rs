@@ -1,5 +1,5 @@
 //! Read-only tree over typed discovery rows.
-use super::app::App;
+use super::{app::App, inventory::Page};
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 #[derive(Clone)]
 pub struct Node {
@@ -10,10 +10,23 @@ pub struct Node {
     pub branch: bool,
 }
 pub fn nodes(app: &App) -> Arc<[Node]> {
-    if app.discovering {
-        return super::discovery_tree::snapshot(app).all.clone();
+    match app.files_page {
+        Page::Discover => super::discovery_tree::snapshot(app).all.clone(),
+        Page::Managed => managed_nodes(app).into(),
+        Page::Generated => app
+            .visible_file_rows()
+            .into_iter()
+            .map(|raw| Node {
+                key: raw,
+                raw: Some(raw),
+                path: app.data.as_ref().expect("template inventory").managed[raw]
+                    .target
+                    .clone(),
+                depth: 0,
+                branch: false,
+            })
+            .collect(),
     }
-    managed_nodes(app).into()
 }
 fn managed_nodes(app: &App) -> Vec<Node> {
     let mut paths = vec![];
@@ -96,10 +109,10 @@ pub(super) fn build(
     nodes
 }
 pub fn visible(app: &App) -> super::discovery_tree::Rows {
-    if app.discovering {
+    if app.discovering() {
         return super::discovery_tree::rows(app);
     }
-    let all = managed_nodes(app);
+    let all = nodes(app);
     let closed: std::collections::BTreeSet<_> = all
         .iter()
         .filter(|n| n.branch && app.inventory.managed_folded.contains(&n.path))
@@ -110,20 +123,20 @@ pub fn visible(app: &App) -> super::discovery_tree::Rows {
         .map(|n| i32::from(n.path.ancestors().skip(1).any(|p| closed.contains(p))))
         .collect();
     let mask = super::visibility::Mask::new(&hidden);
-    super::discovery_tree::Rows::new(all.into(), mask)
+    super::discovery_tree::Rows::new(all, mask)
 }
 pub fn position(app: &App, key: usize) -> Option<usize> {
-    if app.discovering {
+    if app.discovering() {
         super::discovery_tree::position(app, key)
     } else {
         visible(app).iter().position(|n| n.key == key)
     }
 }
 pub fn marked(app: &App, node: &Node) -> bool {
-    if node.branch {
+    if node.branch || app.files_page == Page::Generated {
         return false;
     }
-    if app.discovering {
+    if app.discovering() {
         app.inventory.candidate_marks.contains(&node.path)
     } else {
         node.raw
@@ -139,10 +152,10 @@ pub fn select(app: &mut App, key: usize) {
     if let Some(node) = position(app, key).and_then(|i| visible.get(i)) {
         app.inventory.group = if node.branch { Some(key) } else { None };
         if let Some(raw) = node.raw {
-            if app.discovering {
-                app.candidate_selected = raw;
-            } else {
-                app.selected = raw;
+            match app.files_page {
+                Page::Discover => app.candidate_selected = raw,
+                Page::Managed => app.selected = raw,
+                Page::Generated => app.inventory.generated_selected = raw,
             }
         }
         // Synthetic groups retain an explicit cursor, not the previous file identity.
@@ -158,6 +171,9 @@ pub fn selected(app: &App) -> Option<Node> {
         .cloned()
 }
 pub fn fold(app: &mut App, close: bool) {
+    if app.files_page == Page::Generated {
+        return;
+    }
     if let Some(node) = selected(app) {
         let path = if node.branch {
             Some(node.path)
@@ -172,7 +188,7 @@ pub fn fold(app: &mut App, close: bool) {
                 .binary_search_by(|n| n.path.cmp(&path))
                 .ok()
                 .map(|i| all[i].key);
-            if app.discovering {
+            if app.discovering() {
                 super::discovery_tree::set_fold(app, path, close);
             } else {
                 Arc::make_mut(&mut app.inventory.managed_folded).set(path, close);
@@ -192,7 +208,7 @@ pub fn expand(app: &mut App) {
     if !node.branch {
         return;
     }
-    let folded = if app.discovering {
+    let folded = if app.discovering() {
         app.inventory.candidate_folded.clone()
     } else {
         app.inventory.managed_folded.clone()
@@ -209,6 +225,9 @@ pub fn expand(app: &mut App) {
     }
 }
 pub fn toggle(app: &mut App) {
+    if app.files_page == Page::Generated {
+        return;
+    }
     let Some(node) = selected(app) else {
         return;
     };
@@ -218,13 +237,6 @@ pub fn toggle(app: &mut App) {
     } else {
         std::slice::from_ref(&node)
     };
-    let templates = app
-        .data
-        .iter()
-        .flat_map(|data| &data.file_declarations)
-        .filter(|file| file.mode == dort_core::model::FileMode::Template)
-        .map(|file| file.id.as_str())
-        .collect::<std::collections::BTreeSet<_>>();
     let matching = scope
         .iter()
         .filter(|n| {
@@ -237,22 +249,25 @@ pub fn toggle(app: &mut App) {
             !n.branch && (n.path == node.path || (node.branch && n.path.starts_with(&node.path)))
         })
         .filter(|n| {
-            if app.discovering {
+            if app.discovering() {
                 n.raw
                     .and_then(|r| app.discovery.as_ref()?.report.candidates.get(r))
-                    .is_some_and(|c| c.supported_for_adoption)
+                    .is_some_and(|c| {
+                        c.supported_for_adoption
+                            && app
+                                .managed_destination(&c.entry.path)
+                                .is_none_or(|row| row.mode != dort_core::model::FileMode::Template)
+                    })
             } else {
-                !n.raw
-                    .and_then(|r| app.data.as_ref()?.files.get(r))
-                    .is_some_and(|(id, _)| templates.contains(id.as_str()))
+                true
             }
         })
         .collect();
     if eligible.is_empty() {
-        let reason = if app.discovering {
-            "Cannot mark: no eligible files. Only owned, single-link regular files can be adopted."
+        let reason = if app.discovering() {
+            "Cannot mark: no eligible files to adopt."
         } else {
-            "No files to mark. Open a generated file to review deployment."
+            "No files to mark."
         };
         app.inventory.mark_refusal = Some(reason.into());
         app.status = reason.into();
@@ -262,12 +277,12 @@ pub fn toggle(app: &mut App) {
     app.inventory.mark_refusal =
         (skipped > 0).then(|| format!("Skipped {skipped} files that cannot be marked."));
     let all = eligible.iter().all(|n| marked(app, n));
-    if app.discovering {
+    if app.discovering() {
         app.inventory.candidate_mark_revision =
             app.inventory.candidate_mark_revision.wrapping_add(1);
     }
     for n in eligible {
-        if app.discovering {
+        if app.discovering() {
             if all {
                 app.inventory.candidate_marks.remove(&n.path);
             } else {

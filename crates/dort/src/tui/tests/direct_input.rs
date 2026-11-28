@@ -34,6 +34,7 @@ fn fixture(tab: Tab) -> App {
             .into_iter()
             .map(|id| ManagedRow {
                 id: id.into(),
+                mode: dort_core::model::FileMode::Link,
                 source: Some(format!("/synthetic/{}/source-end", long_path("source")).into()),
                 target: format!("/synthetic/{id}").into(),
                 state: "Blocked",

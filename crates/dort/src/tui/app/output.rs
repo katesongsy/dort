@@ -461,13 +461,20 @@ impl App {
                 self.inventory.candidate_mark_revision.wrapping_add(1);
             self.shell.back();
             self.tab = Tab::Files;
-            self.discovering = true;
+            self.files_page = FilesPage::Discover;
             self.inventory.details = false;
             self.status = "Discovery preferences saved. Refreshing discovery; undo in Actions > Manage ignored paths.".into();
             if !self.quit {
                 return Some(Task::Discover);
             }
             return None;
+        }
+        if completion.operation == "Manifest change"
+            && matches!(self.shell.overlay, Some(Overlay::Form(Form::Generated)))
+            && let Some(draft) = self.shell.generated.take()
+        {
+            self.inventory.saved_template = Some(draft.id().into());
+            self.inventory.details = false;
         }
         self.receipt = Some(crate::tui::task_surfaces::Receipt {
             operation: completion.operation,
@@ -520,7 +527,7 @@ impl App {
         if adopted {
             self.rediscovering_after_adoption = true;
             self.tab = Tab::Files;
-            self.discovering = true;
+            self.files_page = FilesPage::Discover;
             self.show_result = false;
             self.inventory.details = false;
             self.inventory.candidate_marks.clear();

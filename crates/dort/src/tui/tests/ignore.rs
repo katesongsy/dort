@@ -4,6 +4,7 @@ use super::{
     shell::{self, Overlay},
     tests::render,
 };
+use crate::tui::inventory::Page as FilesPage;
 use dort_core::{
     context::HostContext,
     discovery_ignore::Rules,
@@ -33,7 +34,7 @@ impl Fixture {
     fn app(&self, dry: bool) -> App {
         let mut app = App::new(dry);
         app.tab = Tab::Files;
-        app.discovering = true;
+        app.files_page = FilesPage::Discover;
         self.finish(&mut app, Task::Discover);
         app
     }
@@ -53,7 +54,7 @@ fn approve(app: &mut App) -> Task {
 fn ignore_folder_confirm_refresh_manage_and_unignore_are_complete_tui_workflows() {
     let f = Fixture::new();
     let mut app = f.app(false);
-    assert!(app.tab == Tab::Files && app.discovering);
+    assert!(app.tab == Tab::Files && app.discovering());
     let task = action(&mut app, "Ignore selected");
     f.finish(&mut app, task);
     assert!(!f.host.state_dir.exists());

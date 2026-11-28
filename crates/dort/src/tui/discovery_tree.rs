@@ -289,7 +289,7 @@ pub fn contains(app: &App, raw: usize) -> bool {
     snapshot(app).matching.binary_search(&raw).is_ok()
 }
 pub fn next(app: &App) -> Option<Task> {
-    if !app.discovering || app.tab != Tab::Files || app.busy || app.quit || app.exit_requested {
+    if !app.discovering() || app.tab != Tab::Files || app.busy || app.quit || app.exit_requested {
         return None;
     }
     let mut state = app.inventory.tree.borrow_mut();

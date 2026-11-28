@@ -2,6 +2,7 @@
 use super::input::{Target, Wheel};
 use super::workspace::{Region, Scope, Workspace};
 use super::{app::App, components as ui, views::safe};
+use super::{inventory::Page, shell::Action};
 use dort_core::{
     model::{FileMode, ManagedFile},
     observation::Kind,
@@ -87,7 +88,7 @@ fn details(app: &App) -> Text<'static> {
                 "Marking a folder marks its eligible files. Marks stay through filters and folds.",
             ));
         }
-    } else if app.discovering {
+    } else if app.discovering() {
         if let Some(candidate) = app
             .discovery
             .as_ref()
@@ -95,11 +96,7 @@ fn details(app: &App) -> Text<'static> {
             .filter(|_| super::discovery_tree::contains(app, app.candidate_selected))
         {
             let eligible = candidate.supported_for_adoption;
-            let managed = app.data.as_ref().and_then(|d| {
-                d.managed
-                    .iter()
-                    .find(|row| row.target == candidate.entry.path)
-            });
+            let managed = app.managed_destination(&candidate.entry.path);
             lines.push(section(kind(&candidate.entry.kind)));
             lines.push(field(
                 "Path",
@@ -116,15 +113,18 @@ fn details(app: &App) -> Text<'static> {
             lines.push(field("Status", status, tone));
             if let Some(row) = managed {
                 lines.push(field("Managed", &row.id, Tone::Neutral));
-                lines.push(Line::raw(
-                    "Already managed. Change the existing entry in Managed.",
-                ));
-            }
-            lines.push(Line::raw(if eligible {
-                "Choose Adopt to edit target, ID and source."
+                lines.push(Line::raw(if row.mode == FileMode::Template {
+                    "Open Files / Generated for this destination."
+                } else {
+                    "Change the existing entry in Managed."
+                }));
             } else {
-                "Adoption needs an owned, single-link regular file without special permission bits."
-            }));
+                lines.push(Line::raw(if eligible {
+                    "Choose Adopt to edit target, ID and source."
+                } else {
+                    "Adoption needs an owned, single-link regular file without special permission bits."
+                }));
+            }
             if let Some(d) = &app.discovery {
                 for warning in &d.report.warnings {
                     lines.push(Line::styled(safe(warning), Tone::Attention.style()));
@@ -138,6 +138,33 @@ fn details(app: &App) -> Text<'static> {
         } else {
             lines.push(Line::raw("Select a file, or clear the filter."));
         }
+    } else if app.files_page == Page::Generated {
+        if let Some(file) = app.selected_mapping()
+            && let Some(row) = app
+                .data
+                .as_ref()
+                .and_then(|data| data.managed.get(app.file_selection()))
+        {
+            lines.extend([
+                section(&file.id),
+                ui::metadata("Destination", row.target.to_str().unwrap_or("unavailable")),
+                ui::metadata(
+                    "Template",
+                    row.source
+                        .as_ref()
+                        .and_then(|path| path.to_str())
+                        .unwrap_or("Inline in dort.toml"),
+                ),
+                ui::metadata("Profiles", &file.profiles.join(", ")),
+                Line::default(),
+                Line::raw("Preview for current output and destination status."),
+                Line::raw(if file.template.is_some() {
+                    "Edit to change the inline template or its inputs."
+                } else {
+                    "Edit the template source in the repository."
+                }),
+            ]);
+        }
     } else if let Some(data) = &app.data {
         if let Some(error) = &data.files_error {
             lines.extend(Text::from(safe(error)).lines);
@@ -147,21 +174,6 @@ fn details(app: &App) -> Text<'static> {
             .filter(|_| app.visible_file_rows().contains(&app.selected))
         {
             lines.push(section(&row.id));
-            if app.template_selected() {
-                lines.extend([
-                    field("Type", "Generated configuration", Tone::Neutral),
-                    ui::metadata(
-                        "Source",
-                        row.source
-                            .as_ref()
-                            .and_then(|p| p.to_str())
-                            .unwrap_or("Inline template in dort.toml"),
-                    ),
-                    ui::metadata("Destination", row.target.to_str().unwrap_or("unavailable")),
-                    Line::raw("Open the preview to review a first deployment."),
-                ]);
-                return Text::from(lines);
-            }
             lines.push(field(
                 "Status",
                 row.state,
@@ -212,6 +224,17 @@ fn details(app: &App) -> Text<'static> {
 }
 
 impl App {
+    pub(super) fn managed_destination(
+        &self,
+        path: &std::path::Path,
+    ) -> Option<&super::actions::ManagedRow> {
+        self.data
+            .as_ref()?
+            .managed
+            .iter()
+            .find(|row| row.target == path)
+    }
+
     fn mapping_at(&self, index: usize) -> Option<&ManagedFile> {
         let data = self.data.as_ref()?;
         let (id, _) = data.files.get(index)?;
@@ -219,135 +242,139 @@ impl App {
     }
 
     pub(super) fn selected_mapping(&self) -> Option<&ManagedFile> {
-        if self.tab != super::app::Tab::Files || self.discovering {
+        if self.tab != super::app::Tab::Files || self.discovering() {
             return None;
         }
         self.mapping_at(super::tree::selected(self)?.raw?)
     }
 
     pub(super) fn template_selected(&self) -> bool {
-        self.selected_mapping()
-            .is_some_and(|file| file.mode == FileMode::Template)
+        self.files_page == Page::Generated && self.selected_mapping().is_some()
     }
 }
 
-pub(super) fn managed_controls(app: &App, width: u16) -> impl Iterator<Item = ui::ActionButton> {
-    use super::{configuration::Kind, shell::Action};
+pub(super) fn controls(app: &App) -> impl Iterator<Item = ui::ActionButton> {
+    use super::configuration::Kind;
     let mapping = app.selected_mapping();
-    let template = mapping.is_some_and(|file| file.mode == FileMode::Template);
-    let inline =
-        mapping.is_some_and(|file| file.mode == FileMode::Template && file.template.is_some());
-    let environment = app.registered_repository()
-        && mapping.is_some_and(|file| file.mode != FileMode::Template && !file.requires.is_empty());
-    let preview = (
-        Action::PreviewGenerated.label(),
-        "v",
-        Action::PreviewGenerated,
-        template,
-    );
-    let new_generated = (
-        Action::NewGenerated.label(),
-        "s",
-        Action::NewGenerated,
-        app.registered_repository(),
-    );
-    let edit_generated = (
-        Action::EditGenerated.label(),
-        "e",
-        Action::EditGenerated,
-        inline && app.registered_repository(),
+    let environment = (
+        Action::EnvironmentPlan.label(),
+        "w",
+        Action::EnvironmentPlan,
+        app.registered_repository() && mapping.is_some_and(|file| !file.requires.is_empty()),
     );
     let add = ("Add file mapping", "n", Action::Configure(Kind::File), true);
     let edit = (
         "Edit file mapping",
         "e",
         Action::Configure(Kind::EditFile),
-        mapping.is_some() && !template,
+        mapping.is_some(),
     );
-    let review = (
-        Action::EnvironmentPlan.label(),
-        "w",
-        Action::EnvironmentPlan,
-        environment,
-    );
-    if mapping.is_none() {
-        [new_generated, add, preview, review, edit_generated, edit]
-    } else if app.inventory.details {
-        [preview, review, edit_generated, edit, add, new_generated]
-    } else if width >= 80 && !template {
-        [new_generated, review, add, edit, preview, edit_generated]
+    let managed = if app.inventory.details {
+        [environment, edit, add]
     } else {
-        [preview, review, edit_generated, add, edit, new_generated]
+        [environment, add, edit]
+    };
+    let generated = [
+        (
+            Action::NewGenerated.label(),
+            "s",
+            Action::NewGenerated,
+            app.action_reason(Action::NewGenerated).is_none(),
+        ),
+        (
+            Action::PreviewGenerated.label(),
+            "v",
+            Action::PreviewGenerated,
+            mapping.is_some(),
+        ),
+        (
+            Action::EditGenerated.label(),
+            "e",
+            Action::EditGenerated,
+            app.registered_repository() && mapping.is_some_and(|file| file.template.is_some()),
+        ),
+    ];
+    match app.files_page {
+        Page::Managed => &managed[..],
+        Page::Generated => &generated[..],
+        Page::Discover => &[],
     }
-    .into_iter()
+    .iter()
+    .copied()
     .filter(|&(_, _, _, visible)| visible)
     .map(|(label, key, action, _)| ui::ActionButton {
         label,
         key,
         target: Target::Action(action),
     })
+    .collect::<Vec<_>>()
+    .into_iter()
 }
-
 pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
-    if !app.discovering {
-        for control in managed_controls(app, frame.area().width) {
-            app.hits.present(control);
-        }
+    for control in controls(app) {
+        app.hits.present(control);
     }
+    let generated = app.files_page == Page::Generated;
     let sections = Layout::vertical([
-        Constraint::Length(1),
+        Constraint::Length(u16::from(!generated)),
         Constraint::Length(1),
         Constraint::Min(3),
     ])
     .split(area);
     let nodes = super::tree::visible(app);
-    let marked = if app.discovering {
-        app.inventory.candidate_marks.len()
-    } else {
-        app.inventory.managed_marks.len()
-    };
-    let shown_marks = if marked == 0 {
-        0
-    } else if app.discovering {
-        super::discovery_tree::shown_marks(app)
-    } else {
-        nodes.iter().filter(|n| super::tree::marked(app, n)).count()
-    };
-    let title = format!(
-        "{} marked ({} hidden)",
-        marked,
-        marked.saturating_sub(shown_marks)
-    );
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                app.inventory
-                    .mark_refusal
-                    .as_ref()
-                    .map(|r| format!(" {r} "))
-                    .unwrap_or_else(|| format!(" {title}  ")),
-                if app.inventory.mark_refusal.is_some() {
-                    ui::danger()
-                } else {
-                    ui::heading()
-                },
-            ),
-            Span::styled(
-                if app.discovering {
-                    "Selected-file preview"
-                } else {
-                    "Full active-profile scope"
-                },
-                ui::muted(),
-            ),
-        ])),
-        sections[0],
-    );
-    let search = app.inventory.search(app.discovering);
+    if !generated {
+        let marked = if app.discovering() {
+            app.inventory.candidate_marks.len()
+        } else {
+            app.inventory.managed_marks.len()
+        };
+        let shown_marks = if marked == 0 {
+            0
+        } else if app.discovering() {
+            super::discovery_tree::shown_marks(app)
+        } else {
+            nodes.iter().filter(|n| super::tree::marked(app, n)).count()
+        };
+        let title = format!(
+            "{} marked ({} hidden)",
+            marked,
+            marked.saturating_sub(shown_marks)
+        );
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(
+                    app.inventory
+                        .mark_refusal
+                        .as_ref()
+                        .map(|r| format!(" {r} "))
+                        .unwrap_or_else(|| format!(" {title}  ")),
+                    if app.inventory.mark_refusal.is_some() {
+                        ui::danger()
+                    } else {
+                        ui::heading()
+                    },
+                ),
+                Span::styled(
+                    if app.discovering() {
+                        "Selected-file preview"
+                    } else {
+                        "Full active-profile scope"
+                    },
+                    ui::muted(),
+                ),
+            ])),
+            sections[0],
+        );
+    }
+    let search = app.inventory.search(app.files_page);
     ui::design::filter(
         frame,
         sections[1],
-        "Filter files",
+        if generated {
+            "Filter generated files"
+        } else {
+            "Filter files"
+        },
         &search.query,
         search.editing && app.hits.input_focus_allowed() && !app.busy,
     );
@@ -361,12 +388,14 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             )),
         );
     } else if app.template_selected() {
-        use super::shell::Action;
         app.presented(
             Action::PreviewGenerated.label(),
             "Enter",
             Target::Action(Action::PreviewGenerated),
         );
+        if !app.inventory.details {
+            app.presented("Details", "F3", Target::Action(Action::Inspect));
+        }
     } else if !nodes.is_empty() && !app.inventory.details && !app.content.focused {
         app.presented(
             "Details",
@@ -384,11 +413,14 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         Region::Queue
     };
-    let scope = Scope::Files {
-        discovering: app.discovering,
-    };
+    let scope = Scope::Files(app.files_page);
     let workspace = Workspace::new(scope, content, active, !nodes.is_empty());
-    if !workspace.is_split() && app.result.is_some() && app.receipt.is_none() && !search.editing {
+    if !generated
+        && !workspace.is_split()
+        && app.result.is_some()
+        && app.receipt.is_none()
+        && !search.editing
+    {
         draw_selected(frame, content, app, true);
         return;
     }
@@ -401,16 +433,20 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     };
     let focused = active == Region::Queue;
     let selected = super::tree::position(app, app.file_selection());
-    let total = if app.discovering {
+    let total = if app.discovering() {
         app.discovery
             .as_ref()
             .map_or(0, |d| d.report.candidates.len())
     } else {
-        app.data.as_ref().map_or(0, |d| d.files.len())
+        app.data.as_ref().map_or(0, |d| {
+            (0..d.files.len())
+                .filter(|i| d.is_template(*i) == generated)
+                .count()
+        })
     };
     let title = format!(
         "{} / {} shown",
-        if app.discovering {
+        if app.discovering() {
             super::discovery_tree::snapshot(app).matching.len()
         } else {
             app.visible_file_rows().len()
@@ -422,7 +458,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         (16, 9)
     };
-    let name_width = if app.discovering {
+    let name_width = if app.discovering() {
         list_area
             .width
             .saturating_sub(adoption_width + kind_width + 4)
@@ -430,7 +466,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         list_area.width.saturating_mul(32) / 100
     };
     let indent_limit = usize::from(name_width.saturating_sub(15) / 2).min(12);
-    let collection = if app.discovering {
+    let collection = if app.discovering() {
         Collection::new(
             [
                 Constraint::Min(18),
@@ -438,6 +474,15 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                 Constraint::Length(kind_width),
             ],
             Header::Heading(["NAME", "ADOPTION", "TYPE"]),
+        )
+    } else if generated {
+        Collection::new(
+            [
+                Constraint::Percentage(32),
+                Constraint::Length(11),
+                Constraint::Min(4),
+            ],
+            Header::Heading(["FILE", "TEMPLATE", "DESTINATION"]),
         )
     } else {
         Collection::new(
@@ -452,7 +497,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
     .titled(&title, focused);
     let window = collection.window(
         list_area,
-        app.inventory.viewport(app.discovering),
+        app.inventory.viewport(app.files_page),
         nodes.len(),
         selected,
     );
@@ -466,7 +511,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             "{}{} {}",
             "  ".repeat(node.depth.min(indent_limit)),
             if node.branch {
-                let folded = if app.discovering {
+                let folded = if app.discovering() {
                     &app.inventory.candidate_folded
                 } else {
                     &app.inventory.managed_folded
@@ -493,16 +538,13 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
                 Cell::from("Dir").style(kind_style(&Kind::Directory)),
             ]));
         } else if let Some(i) = node.raw {
-            if app.discovering {
+            if app.discovering() {
                 if let Some(c) = app
                     .discovery
                     .as_ref()
                     .and_then(|d| d.report.candidates.get(i))
                 {
-                    let managed = app
-                        .data
-                        .as_ref()
-                        .and_then(|d| d.managed.iter().find(|row| row.target == c.entry.path));
+                    let managed = app.managed_destination(&c.entry.path);
                     let state = if managed.is_some() {
                         "Managed"
                     } else if c.supported_for_adoption {
@@ -519,22 +561,29 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             } else if let Some(data) = &app.data {
                 if let Some(row) = data.managed.get(i) {
                     rows.push(Row::new(vec![
-                        Cell::from(format!(
-                            "{}{} {}",
-                            "  ".repeat(node.depth.min(indent_limit)),
-                            if app
-                                .mapping_at(i)
-                                .is_some_and(|file| file.mode == FileMode::Template)
-                            {
-                                "   "
-                            } else if super::tree::marked(app, node) {
-                                "[x]"
-                            } else {
-                                "[ ]"
-                            },
+                        Cell::from(if generated {
                             ui::inline(&row.id)
-                        )),
-                        Cell::from(row.state).style(ui::state(row.state)),
+                        } else {
+                            format!(
+                                "{}{} {}",
+                                "  ".repeat(node.depth.min(indent_limit)),
+                                if super::tree::marked(app, node) {
+                                    "[x]"
+                                } else {
+                                    "[ ]"
+                                },
+                                ui::inline(&row.id)
+                            )
+                        }),
+                        if generated {
+                            Cell::from(if row.source.is_some() {
+                                "File-backed"
+                            } else {
+                                "Inline"
+                            })
+                        } else {
+                            Cell::from(row.state).style(ui::state(row.state))
+                        },
                         Cell::from(ui::inline(
                             node.path
                                 .file_name()
@@ -564,7 +613,17 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
         }
     }
     if nodes.is_empty() {
-        let message = if !app.discovering {
+        let message = if generated {
+            if total != 0 {
+                "No matches. Delete clears the display filter."
+            } else if app.action_reason(Action::NewGenerated).is_none() {
+                "No generated files. Press s for New generated file."
+            } else if !app.registered_repository() {
+                "Choose a registered repository to create a generated file."
+            } else {
+                "Open Checks to fix the manifest before creating a generated file."
+            }
+        } else if !app.discovering() {
             app.data
                 .as_ref()
                 .and_then(|d| d.files_error.as_deref())
@@ -583,7 +642,9 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             "No matches. Delete clears the display filter."
         };
         frame.render_widget(
-            Paragraph::new(safe(message)).block(ui::pane(&title, focused)),
+            Paragraph::new(safe(message))
+                .wrap(ratatui::widgets::Wrap { trim: true })
+                .block(ui::pane(&title, focused)),
             list_area,
         );
     } else {
@@ -603,14 +664,7 @@ pub fn draw(frame: &mut Frame, area: Rect, app: &App) {
             .zip(visible.into_iter().skip(rendered.offset))
         {
             let x = row.x + 2 + (node.depth.min(indent_limit) * 2) as u16;
-            if x + 3 < row.right()
-                && (app.discovering
-                    || node.branch
-                    || !node
-                        .raw
-                        .and_then(|i| app.mapping_at(i))
-                        .is_some_and(|file| file.mode == FileMode::Template))
-            {
+            if !generated && x + 3 < row.right() {
                 app.hits.click(
                     Rect::new(x, row.y, 3, 1),
                     if node.branch {

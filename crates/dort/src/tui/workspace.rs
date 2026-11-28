@@ -29,7 +29,7 @@ impl Region {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
     Recovery,
-    Files { discovering: bool },
+    Files(super::inventory::Page),
     Git,
     DeclaredTools,
     InstalledTools,

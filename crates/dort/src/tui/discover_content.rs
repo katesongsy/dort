@@ -176,7 +176,7 @@ pub fn sync(app: &mut App, width: u16, height: u16) {
         && app.shell.overlay.is_none()
         && !app.batch_editor.as_ref().is_some_and(|e| e.open);
     let selected = if quiet
-        && app.discovering
+        && app.discovering()
         && app.inventory.group.is_none()
         && width >= 48
         && height >= 14
@@ -206,7 +206,9 @@ pub fn sync(app: &mut App, width: u16, height: u16) {
                 })
                 .map(|c| Selection::Candidate(c.entry.clone(), d.repository.clone()))
         })
-    } else if quiet && !app.discovering && (app.inventory.details || (width >= 110 && height >= 14))
+    } else if quiet
+        && app.files_page == super::inventory::Page::Managed
+        && (app.inventory.details || (width >= 110 && height >= 14))
     {
         app.data
             .as_ref()
@@ -231,13 +233,13 @@ pub fn sync(app: &mut App, width: u16, height: u16) {
         app.content.end.set(0);
     }
     if app.content.available()
-        && app.discovering
+        && app.discovering()
         && app.inventory.details
-        && !app.inventory.search(app.discovering).editing
+        && !app.inventory.search(app.files_page).editing
     {
         app.content.focused = true;
     }
-    if app.inventory.search(app.discovering).editing {
+    if app.inventory.search(app.files_page).editing {
         app.content.focused = false;
     }
 }

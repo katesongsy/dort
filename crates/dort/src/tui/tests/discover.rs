@@ -5,6 +5,7 @@ use super::{
     shell::{Action, Overlay},
     tests::render,
 };
+use crate::tui::inventory::Page as FilesPage;
 use dort_core::{
     context::HostContext,
     platform::{Architecture, Platform},
@@ -38,7 +39,7 @@ impl Fixture {
     fn app(&self) -> App {
         let mut app = App::new(false);
         app.tab = Tab::Files;
-        app.discovering = true;
+        app.files_page = FilesPage::Discover;
         app.complete(Ok(actions::perform(
             Task::Discover,
             &self.host,
@@ -439,6 +440,7 @@ fn managed_files_preview_without_opening_details_in_a_wide_split() {
     let mut data = super::actions::Data::default();
     data.managed.push(ManagedRow {
         id: "a".into(),
+        mode: dort_core::model::FileMode::Link,
         source: Some("/synthetic/source".into()),
         target: f.host.home.join(".a"),
         state: "Linked",
@@ -468,6 +470,7 @@ fn already_managed_candidates_are_marked_and_cannot_be_adopted_again() {
     let mut data = super::actions::Data::default();
     data.managed.push(ManagedRow {
         id: "existing".into(),
+        mode: dort_core::model::FileMode::Link,
         source: Some("/synthetic/source".into()),
         target: target.clone(),
         state: "Linked",
@@ -500,6 +503,15 @@ fn already_managed_candidates_are_marked_and_cannot_be_adopted_again() {
     assert!(key(&mut app, KeyCode::Char('a')).is_none());
     assert!(app.shell.overlay.is_none());
     assert!(app.status.contains("Already managed"), "{}", app.status);
+
+    app.data.as_mut().unwrap().managed[0].mode = dort_core::model::FileMode::Template;
+    assert!(key(&mut app, KeyCode::Char('a')).is_none());
+    assert!(app.shell.overlay.is_none());
+    assert!(app.status.contains("Files / Generated"), "{}", app.status);
+    key(&mut app, KeyCode::Char(' '));
+    assert!(!app.inventory.candidate_marks.contains(&target));
+    assert!(key(&mut app, KeyCode::Char('A')).is_none());
+    assert!(app.batch_editor.is_none());
 }
 
 #[test]
@@ -534,13 +546,13 @@ fn files_viewport_stays_put_on_up_and_mouse_uses_actual_rendered_offset() {
             .draw(|frame| super::views::draw(frame, &app))
             .unwrap();
     }
-    let before = app.inventory.viewport(true).first();
+    let before = app.inventory.viewport(FilesPage::Discover).first();
     assert!(before > 0);
     app.key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), 140, 24);
     terminal
         .draw(|frame| super::views::draw(frame, &app))
         .unwrap();
-    assert_eq!(before, app.inventory.viewport(true).first());
+    assert_eq!(before, app.inventory.viewport(FilesPage::Discover).first());
     let old = app.candidate_selected;
     app.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), 140, 24);
     terminal
@@ -577,5 +589,5 @@ fn files_viewport_stays_put_on_up_and_mouse_uses_actual_rendered_offset() {
     terminal
         .draw(|frame| super::views::draw(frame, &app))
         .unwrap();
-    assert_eq!(app.inventory.viewport(true).first(), 0);
+    assert_eq!(app.inventory.viewport(FilesPage::Discover).first(), 0);
 }

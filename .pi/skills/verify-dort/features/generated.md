@@ -4,14 +4,14 @@ Preview how a repository template will render for this computer.
 
 ## Sub-features
 
-- Create and edit inline templates from Files → Managed.
+- Create and edit inline templates from Files → Generated (`4`).
 - Substitute named values from `dort.toml`.
 - Check whether the destination exists without opening it.
 - Preview without creating or changing files.
 
 ## How to get to it (user POV)
 
-In **Files → Managed**, choose **New generated file** (`s`). Enter an ID, destination, and template. Enter adds a line in Template. Use **Open in editor** (`F5`) to edit outside Dort. Choose **Continue** (`F4`), fill in the named inputs, then review and save. Select a saved template and choose **Preview generated file** (`v`). For an inline template, choose **Edit generated file** (`e`).
+In **Files → Generated (`4`)**, choose **New generated file** (`s`). Enter an ID, destination, and template. Enter adds a line in Template. Use **Open in editor** (`F5`) to edit outside Dort. Choose **Continue** (`F4`), fill in the named inputs, then review and save. Select a saved template and choose **Preview generated file** (`v`). For an inline template, choose **Edit generated file** (`e`).
 
 ## Driving it with drive.py
 
@@ -37,7 +37,7 @@ inputs = { size = "18" }
 TOML
 )
 python3 "$drive" tui generated-preview --label preview \
-  "wait:loaded." "send:'f'" "wait:Preview generated file" \
+  "wait:loaded." "send:'f'" "wait:Managed" "send:'4'" "wait:Preview generated file" \
   "click:Preview generated file" "wait:font-size = 18" \
   "wait:Status: New file" "snap:output"
 python3 "$drive" cli generated-preview --label cli-preview -- \
@@ -48,17 +48,17 @@ python3 "$drive" cli generated-preview --label cli-preview -- \
   printf 'font-size = 27\n' > "$HOME/.editor.conf"
 )
 python3 "$drive" tui generated-preview --label existing \
-  "wait:loaded." "send:'f'" "wait:Preview generated file" \
+  "wait:loaded." "send:'f'" "wait:Managed" "send:'4'" "wait:Preview generated file" \
   "send:'v'" "wait:font-size = 18" \
   "wait:Unrecorded existing file" "snap:existing" \
-  "send:'\x1b'" "wait:Managed"
+  "send:'\x1b'" "wait:Files / Generated"
 (
   eval "$(python3 "$drive" env generated-preview)"
   printf 'font-size = 27\n' | cmp - "$HOME/.editor.conf"
   printf 'font-size = {{ missing }}\n' > "$DORT_REPO/templates/editor.conf"
 )
 python3 "$drive" tui generated-preview --label missing-input \
-  "wait:loaded." "send:'f'" "wait:Preview generated file" \
+  "wait:loaded." "send:'f'" "wait:Managed" "send:'4'" "wait:Preview generated file" \
   "send:'\r'" "wait:Missing input missing" "snap:missing-input"
 python3 "$drive" cleanup generated-preview
 ```
@@ -81,7 +81,7 @@ python3 "$drive" new generated-setup-proof
   cp "$HOME/.editor.conf" "$DORT_EVIDENCE/home-before.txt"
 )
 python3 "$drive" tui generated-setup-proof --label cancel \
-  'wait:loaded.' "send:'f'" 'wait:New generated file' 'click:New generated file' \
+  'wait:loaded.' "send:'f'" "wait:Managed" "send:'4'" 'wait:New generated file' 'click:New generated file' \
   'wait:Open in editor' "send:'editor\t~/.editor.conf\tfont-size = {{ size }}'" \
   'wait:font-size' "send:'\x1b[14~'" 'wait:Input: size' "send:'18\r'" \
   'wait:font-size = 18' 'snap:review' "send:'\x1b'" 'wait:Input: size' \
@@ -92,20 +92,20 @@ python3 "$drive" tui generated-setup-proof --label cancel \
   cmp "$DORT_EVIDENCE/home-before.txt" "$HOME/.editor.conf"
 )
 python3 "$drive" tui generated-setup-proof --label save \
-  'wait:loaded.' "send:'f'" 'wait:New generated file' "send:'s'" \
+  'wait:loaded.' "send:'f'" "wait:Managed" "send:'4'" 'wait:New generated file' "send:'s'" \
   'wait:Open in editor' "send:'editor\t~/.editor.conf\tfont-size = {{ size }}\r'" \
   'wait:font-size' "send:'\x1b[200~color = dark\n\x1b[201~'" 'wait:color = dark' \
   "send:'\x1b[14~'" 'wait:Input: size' "send:'18\r'" 'wait:font-size = 18' \
   'wait:color = dark' 'wait:y Save generated file' 'snap:review' "send:'y'" \
-  'wait:Manifest change completed.' 'snap:saved' 'click:Enter Done' 'wait:Managed'
+  'wait:Manifest change completed.' 'snap:saved' 'click:Enter Done' 'wait:Files / Generated'
 python3 "$drive" tui generated-setup-proof --label reopen \
-  'wait:loaded.' "send:'f'" 'wait:Preview generated file' "send:'v'" \
-  'wait:font-size = 18' 'wait:color = dark' 'snap:preview' "send:'\x1b'" 'wait:Managed'
+  'wait:loaded.' "send:'f'" "wait:Managed" "send:'4'" 'wait:Preview generated file' "send:'v'" \
+  'wait:font-size = 18' 'wait:color = dark' 'snap:preview' "send:'\x1b'" 'wait:Files / Generated'
 python3 "$drive" tui generated-setup-proof --label edit \
-  'wait:loaded.' "send:'f'" 'wait:Edit generated file' "send:'e'" 'wait:Open in editor' \
+  'wait:loaded.' "send:'f'" "wait:Managed" "send:'4'" 'wait:Edit generated file' "send:'e'" 'wait:Open in editor' \
   "send:'\x1b[14~'" 'wait:Input: size' "send:'\x7f\x7f22\r'" 'wait:font-size = 22' \
   'wait:y Save generated file' "send:'y'" 'wait:Manifest change completed.' \
-  'snap:saved' 'click:Enter Done' 'wait:Managed'
+  'snap:saved' 'click:Enter Done' 'wait:Files / Generated'
 python3 "$drive" cli generated-setup-proof --label cli -- \
   --json --repo @REPO files preview-generated editor
 (
@@ -131,15 +131,15 @@ Use the first fixture above, with `permissions = "0640"` in the mapping. Leave `
 
 ```sh
 python3 "$drive" tui generated-preview --label deploy-cancel \
-  'wait:loaded.' "send:'f'" 'wait:Preview generated file' "send:'v'" \
+  'wait:loaded.' "send:'f'" "wait:Managed" "send:'4'" 'wait:Preview generated file' "send:'v'" \
   'wait:Review deployment' "send:'R'" 'wait:Review changes' 'snap:review' \
-  "send:'\x1b'" 'wait:Review deployment' "send:'\x1b'" 'wait:Managed'
+  "send:'\x1b'" 'wait:Review deployment' "send:'\x1b'" 'wait:Files / Generated'
 (
   eval "$(python3 "$drive" env generated-preview)"
   test ! -e "$HOME/.editor.conf" && test ! -L "$HOME/.editor.conf"
 )
 python3 "$drive" tui generated-preview --label deploy \
-  'wait:loaded.' "send:'f'" 'wait:Preview generated file' "send:'v'" \
+  'wait:loaded.' "send:'f'" "wait:Managed" "send:'4'" 'wait:Preview generated file' "send:'v'" \
   'wait:Review deployment' 'click:Review deployment' 'wait:Review changes' \
   "send:'\x1b[F'" 'wait:y Deploy generated file' 'snap:approved' "send:'y'" \
   'wait:Generated file deployed.' 'snap:deployed'
@@ -157,4 +157,4 @@ Reopen the preview. It should say **Up to date**. Change `size` to `24` in the m
 - Exit the draft with Esc before the harness sends `q`. A focused field treats `q` as text.
 - Save updates the manifest, not the destination. Edit file-backed templates in their source files.
 - To test **Open in editor**, pass `--visual COMMAND` to `drive.py tui`. Use a script that checks its standard streams are terminals, writes template text to the final argument, and exits. Press F5 (`\x1b[15~`). Verify the new text appears in the draft before saving and that the temporary file is gone after the editor closes.
-- Use one mapping in the fixture so Managed starts on the template.
+- Use one mapping in the fixture so Generated starts on the template.

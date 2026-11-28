@@ -18,13 +18,34 @@ impl Search {
     }
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum Page {
+    #[default]
+    Managed,
+    Discover,
+    Generated,
+}
+impl Page {
+    pub fn location(self) -> &'static str {
+        match self {
+            Self::Managed => "Files / Managed",
+            Self::Discover => "Files / Discover",
+            Self::Generated => "Files / Generated",
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Inventory {
     pub tree: std::cell::RefCell<super::discovery_tree::State>,
     candidate_viewport: super::navigation::ListViewport,
     managed_viewport: super::navigation::ListViewport,
+    generated_viewport: super::navigation::ListViewport,
     pub managed: Search,
     pub candidates: Search,
+    generated: Search,
+    pub generated_selected: usize,
+    pub saved_template: Option<String>,
     pub details: bool,
     pub mark_refusal: Option<String>,
     pub group: Option<usize>,
@@ -35,26 +56,27 @@ pub struct Inventory {
     pub managed_folded: std::sync::Arc<super::visibility::Folds>,
 }
 impl Inventory {
-    pub fn viewport(&self, discovering: bool) -> &super::navigation::ListViewport {
-        if discovering {
-            &self.candidate_viewport
-        } else {
-            &self.managed_viewport
+    pub fn viewport(&self, page: Page) -> &super::navigation::ListViewport {
+        match page {
+            Page::Managed => &self.managed_viewport,
+            Page::Discover => &self.candidate_viewport,
+            Page::Generated => &self.generated_viewport,
         }
     }
 
-    pub fn search(&self, discovering: bool) -> &Search {
-        if discovering {
-            &self.candidates
-        } else {
-            &self.managed
+    pub fn search(&self, page: Page) -> &Search {
+        match page {
+            Page::Managed => &self.managed,
+            Page::Discover => &self.candidates,
+            Page::Generated => &self.generated,
         }
     }
-    pub fn search_mut(&mut self, discovering: bool) -> &mut Search {
-        if discovering {
-            &mut self.candidates
-        } else {
-            &mut self.managed
+
+    pub fn search_mut(&mut self, page: Page) -> &mut Search {
+        match page {
+            Page::Managed => &mut self.managed,
+            Page::Discover => &mut self.candidates,
+            Page::Generated => &mut self.generated,
         }
     }
 }

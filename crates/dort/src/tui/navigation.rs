@@ -3,6 +3,7 @@ use super::{
     app::{App, Tab},
     components as ui,
     input::Target,
+    inventory::Page as FilesPage,
     shell::Action,
 };
 use ratatui::{Frame, layout::Rect};
@@ -84,6 +85,7 @@ pub fn section_place(tab: Tab) -> Place {
     match tab {
         Tab::Checks => Place::Manifest,
         Tab::Git => Place::Action(Action::GitStatus),
+        Tab::Files => Place::Files(FilesPage::Managed),
         tab => Place::Destination(tab),
     }
 }
@@ -94,6 +96,7 @@ pub fn section_hint(tab: Tab) -> &'static str {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Place {
     Destination(Tab),
+    Files(FilesPage),
     Manifest,
     Action(Action),
 }
@@ -106,9 +109,10 @@ pub fn local_catalog(group: usize) -> &'static [(&'static str, Place)] {
             ("3 Environment", Place::Action(Action::EnvironmentPlan)),
         ],
         2 => &[
-            ("1 Managed", Place::Destination(Tab::Files)),
+            ("1 Managed", Place::Files(FilesPage::Managed)),
             ("2 Discover", Place::Action(Action::Discover)),
             ("3 Ignored paths", Place::Action(Action::ManageIgnored)),
+            ("4 Generated", Place::Files(FilesPage::Generated)),
         ],
         4 => &[
             ("1 Manifest checks", Place::Manifest),
@@ -157,8 +161,7 @@ pub fn location(app: &App) -> &'static str {
             | super::tools_install::Mode::CloseReview => "Tools / Close record",
         },
         Tab::Tools => "Tools / Declared tools",
-        Tab::Files if app.discovering => "Files / Discover",
-        Tab::Files => "Files / Managed",
+        Tab::Files => app.files_page.location(),
         Tab::Recovery => "Recovery / All repositories",
         Tab::Checks if app.showing_diagnostics => "Checks / Diagnostics",
         Tab::Checks => "Checks / Manifest",
@@ -201,6 +204,10 @@ impl App {
                 self.showing_diagnostics = false;
                 None
             }
+            Place::Files(page) => {
+                self.go_files_page(page);
+                None
+            }
             Place::Destination(tab) => self.activate(Action::Destination(tab)),
             Place::Action(action) => self.activate(action),
         }
@@ -219,7 +226,8 @@ fn current(app: &App, group: usize) -> Place {
         {
             Place::Action(Action::ManageIgnored)
         }
-        Tab::Files if app.discovering => Place::Action(Action::Discover),
+        Tab::Files if app.discovering() => Place::Action(Action::Discover),
+        Tab::Files => Place::Files(app.files_page),
         Tab::Checks if app.showing_diagnostics => Place::Action(Action::Diagnostics),
         Tab::Checks => Place::Manifest,
         Tab::Git => Place::Action(match app.git_view.comparison {
@@ -283,17 +291,19 @@ pub fn local(frame: &mut Frame, area: Rect, app: &App) -> Rect {
     if items.len() < 2 {
         return area;
     }
-    ui::navigation::local(
-        frame,
-        Rect::new(area.x, area.y, area.width, 1),
-        &items,
-        None,
-        &app.hits,
-    );
-    Rect::new(
-        area.x,
-        area.y + 1,
-        area.width,
-        area.height.saturating_sub(1),
-    )
+    let wrap = app.tab == Tab::Files
+        && items.iter().map(|item| item.label.len() + 3).sum::<usize>() > usize::from(area.width);
+    let per_line = if wrap { 2 } else { items.len() };
+    let mut height = 0;
+    for row in items.chunks(per_line).take(usize::from(area.height)) {
+        ui::navigation::local(
+            frame,
+            Rect::new(area.x, area.y + height, area.width, 1),
+            row,
+            None,
+            &app.hits,
+        );
+        height += 1;
+    }
+    Rect::new(area.x, area.y + height, area.width, area.height - height)
 }

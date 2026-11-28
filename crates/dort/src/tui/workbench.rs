@@ -270,11 +270,11 @@ fn compact(label: &'static str) -> &'static str {
     } else if label == Action::EnvironmentPlan.label() {
         "Env plan"
     } else if label == Action::PreviewGenerated.label() {
-        "Preview generated"
+        "Preview"
     } else if label == Action::NewGenerated.label() {
-        "New generated"
+        "New"
     } else if label == Action::EditGenerated.label() {
-        "Edit generated"
+        "Edit"
     } else if label == "Open in editor" {
         "Editor"
     } else if label == "Add file mapping" {
@@ -467,8 +467,7 @@ fn title(app: &App) -> &'static str {
     }
     match app.tab {
         Tab::Overview => "Overview",
-        Tab::Files if app.discovering => "Files / Discover",
-        Tab::Files => "Files / Managed",
+        Tab::Files => app.files_page.location(),
         Tab::Recovery => "Recovery / All repositories",
         Tab::Checks if app.showing_diagnostics => "Checks / Diagnostics",
         Tab::Checks => "Checks / Manifest",
