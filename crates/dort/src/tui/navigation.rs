@@ -308,7 +308,7 @@ pub fn local(frame: &mut Frame, area: Rect, app: &App) -> Rect {
     }
     let wrap = app.tab == Tab::Files
         && items.iter().map(|item| item.label.len() + 3).sum::<usize>() > usize::from(area.width);
-    let per_line = if wrap { 2 } else { items.len() };
+    let per_line = if wrap { 3 } else { items.len() };
     let mut height = 0;
     for row in items.chunks(per_line).take(usize::from(area.height)) {
         ui::navigation::local(
