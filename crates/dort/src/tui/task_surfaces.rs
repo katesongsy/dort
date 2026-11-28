@@ -131,6 +131,8 @@ impl Activity {
                 crate::services::generated_update::review_label(*action)
             }
             Task::ReviewGeneratedRecovery => "Review generated recovery",
+            Task::ReviewConversion(_) => crate::services::generated_convert::REVIEW_LABEL,
+            Task::ReviewConversionRecovery => "Review conversion recovery",
             Task::IgnoredPaths => "Manage ignored paths",
             Task::Ignore(..) => "Preview discovery preferences",
             Task::Refresh => "Refresh data",
@@ -185,6 +187,12 @@ impl Activity {
                     }
                     Approved::GeneratedRecovery(location) => {
                         crate::services::generated_update::recovery_label(location.action)
+                    }
+                    Approved::Conversion(_) => {
+                        crate::services::generated_convert::CONFIRMATION_LABEL
+                    }
+                    Approved::ConversionRecovery => {
+                        crate::services::generated_convert::RECOVERY_LABEL
                     }
                     Approved::Configuration(_) => "Save configuration change",
                     Approved::Ignore(_) => "Discovery preferences",
@@ -401,6 +409,17 @@ impl Activity {
             ),
             Pending::GeneratedRecovery(location) => (
                 crate::services::generated_update::recovery_label(location.action),
+                vec![("Destination", location.destination.display().to_string())],
+            ),
+            Pending::Conversion(p) => (
+                crate::services::generated_convert::CONFIRMATION_LABEL,
+                vec![
+                    ("Destination", p.review().destination.display().to_string()),
+                    ("Template file", p.review().template.display().to_string()),
+                ],
+            ),
+            Pending::ConversionRecovery(location) => (
+                crate::services::generated_convert::RECOVERY_LABEL,
                 vec![("Destination", location.destination.display().to_string())],
             ),
             Pending::Ignore(_) => (
@@ -700,11 +719,9 @@ pub fn draw(frame: &mut Frame, area: Rect, actions: Rect, app: &App) {
                 );
             }
         }
-        if app
-            .data
-            .as_ref()
-            .is_some_and(|data| data.generated_recovery.is_some())
-        {
+        if app.data.as_ref().is_some_and(|data| {
+            data.generated_recovery.is_some() || data.conversion_recovery.is_some()
+        }) {
             app.presented("Recovery", "h", Target::Feedback(Control::Recovery));
         }
         app.presented("Back", "Esc", Target::Back);

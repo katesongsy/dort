@@ -19,7 +19,7 @@ use std::{
 const SCHEMA: u32 = 1;
 const LIMIT: u64 = 32 * 1024;
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Identity {
     pub(super) repository_id: String,
@@ -27,6 +27,7 @@ pub(super) struct Identity {
     pub(super) destination: String,
 }
 
+#[derive(Debug)]
 pub(super) struct Slot {
     folder: PathBuf,
     name: String,
@@ -136,11 +137,15 @@ impl Slot {
     }
 
     pub(super) fn save(self, deployed: Stamp) -> Result<()> {
-        let deployment = DeploymentRecord {
+        self.save_record(DeploymentRecord {
             deployed,
             retained: None,
             recreation: None,
-        };
+        })
+    }
+
+    /// Write a receipt for a mapping that has none yet.
+    pub(super) fn save_record(&self, deployment: DeploymentRecord) -> Result<()> {
         let text = self.encode(deployment)?;
         let dir = PrivateDir::open(&self.folder, true)?.expect("created deployment records folder");
         dir.create(&self.name, text.as_bytes())

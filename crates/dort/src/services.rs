@@ -4,6 +4,7 @@ pub mod declaration;
 pub mod declared_tools;
 #[cfg(test)]
 pub(crate) mod declared_tools_tests;
+pub mod generated_convert;
 pub mod generated_update;
 pub mod inspection_defaults;
 #[cfg(test)]
@@ -88,6 +89,15 @@ pub fn review_generated_update(
 ) -> Result<dort_core::generated::Update> {
     let root = absolute_repository(repository)?;
     dort_core::generated::Update::prepare_action(host, root.as_deref(), id, profiles, action)
+}
+pub fn review_generated_conversion(
+    host: &HostContext,
+    repository: Option<&Path>,
+    id: &str,
+    profiles: &[String],
+) -> Result<dort_core::generated::Convert> {
+    let root = absolute_repository(repository)?;
+    dort_core::generated::Convert::prepare(host, root.as_deref(), id, profiles)
 }
 fn absolute_repository(repository: Option<&Path>) -> Result<Option<PathBuf>> {
     repository

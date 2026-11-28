@@ -22,6 +22,9 @@ mod configuration;
 mod consistency_tests;
 mod context;
 #[cfg(test)]
+#[path = "tests/convert.rs"]
+mod convert_tests;
+#[cfg(test)]
 #[path = "tests/declaration_changes.rs"]
 mod declaration_changes_tests;
 mod declared_tools;
