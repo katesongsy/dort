@@ -91,9 +91,10 @@ impl Topic {
             }
             Self::GeneratedDraft => {
                 guide!("Generated file draft", "Set the Home destination and template. Tab moves between fields. In Template, Enter adds a line. Paste several lines at once.";
+                    "Template content" => "In dort.toml holds the template text here. Template file reads an existing .jinja file under templates/. Enter or Space chooses one. Only repository template files that Dort can read appear.",
                     "Continue" => "Press Esc to leave the field, then Enter. You can also click Continue or Review. Tab or click a field to edit again.",
                     "Enter inputs" => "Use Space or click to allow host fields. Use F6 to set an empty string or unset a value. Never enter secrets.",
-                    "Open in editor" => "Press F5 to use VISUAL or EDITOR. Save and exit the editor to return to the draft.",
+                    "Open in editor" => "Press F5 to use VISUAL or EDITOR. Save and exit the editor to return to the draft. It edits dort.toml text only, so it is unavailable for a template file.",
                     "Declare local inputs" => "Use local.name. On the inputs step, use Space or click to declare a name. Choose Save declaration only if a value is still needed.",
                     "Set local values" => "In Generated, select the saved file and open Local inputs (l). Enter sets a value. Blank means empty. F6 clears the value. Review before saving. No secrets.",
                     "Review before saving" => "Check the resolved values and rendered text. Save generated file only updates dort.toml. Your Home files stay in place.",
