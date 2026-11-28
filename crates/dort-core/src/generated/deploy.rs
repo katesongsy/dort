@@ -302,6 +302,7 @@ impl Declaration {
             &self.manifest,
             &self.file,
             self.destination.clone(),
+            None,
         )?;
         let mut preview = preview.map_err(|setup| invalid(setup.guidance()))?;
         if let Some(source) = &source {

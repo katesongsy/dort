@@ -1,4 +1,5 @@
 //! Previews and deployment of repository-declared generated files.
+pub mod compose;
 mod deploy;
 mod inputs;
 pub mod local_inputs;
@@ -183,31 +184,42 @@ impl Preview {
         )?;
         let local = LocalConfig::load(host)?;
         let repository_id = local.repository_id(repository);
-        let mut preview = Self::from_manifest(host, repository, repository_id, &manifest, id)?
-            .0
-            .map_err(|setup| {
-                let guidance = setup.guidance();
-                Error::Invalid(if repository_id.is_some() {
-                    guidance.to_owned()
-                } else {
-                    format!("Register this repository first. {guidance}")
-                })
-            })?;
+        let mut preview =
+            Self::from_manifest(host, repository, repository_id, &manifest, id, None)?
+                .0
+                .map_err(|setup| {
+                    let guidance = setup.guidance();
+                    Error::Invalid(if repository_id.is_some() {
+                        guidance.to_owned()
+                    } else {
+                        format!("Register this repository first. {guidance}")
+                    })
+                })?;
         preview.drift_status = Some(preview.drift_status(host, &local, repository, &manifest));
         Ok(preview)
     }
 
     /// Renders one declaration. Also returns the template file read for it, if any.
+    /// `pending` supplies a template file's text before it exists.
     pub(crate) fn from_manifest(
         host: &HostContext,
         repository: &Path,
         repository_id: Option<&str>,
         manifest: &Manifest,
         id: &str,
+        pending: Option<(&Path, &str)>,
     ) -> Result<(DeclarationPreview, Option<Entry>)> {
         let file = find_file(manifest, id)?;
         let destination = host.target_path(&file.target, Some(repository))?;
-        Self::render_file(host, repository, repository_id, manifest, file, destination)
+        Self::render_file(
+            host,
+            repository,
+            repository_id,
+            manifest,
+            file,
+            destination,
+            pending,
+        )
     }
 
     fn render_file(
@@ -217,6 +229,7 @@ impl Preview {
         manifest: &Manifest,
         file: &ManagedFile,
         destination: PathBuf,
+        pending: Option<(&Path, &str)>,
     ) -> Result<(DeclarationPreview, Option<Entry>)> {
         if file.mode != FileMode::Template {
             return Err(Error::Invalid(
@@ -224,6 +237,10 @@ impl Preview {
             ));
         }
         let (source, text) = match file.content_for(host.platform) {
+            Some(FileContent::Source(path)) if pending.is_some_and(|(other, _)| other == path) => (
+                None,
+                Cow::Borrowed(pending.expect("checked pending source").1),
+            ),
             Some(FileContent::Source(path)) => {
                 let (text, entry) =
                     read_template(&repository.join(path), repository, &manifest.files)?;
