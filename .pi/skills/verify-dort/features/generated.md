@@ -220,7 +220,7 @@ Open `templates/editor.jinja`, choose **Edit template file**, and append a line.
 
 Choose **New template file** (`s`). Create `templates/new.jinja`, then compare the approved text and mode `0644` on disk. Verify both paths with `dort files templates list` and `dort files templates show templates/new.jinja`. Clean up the run.
 
-Run this once against a repository with no `templates/` folder. The review names `Create folder: templates | permissions 0755` before the file, and approval makes both. The folder is `drwxr-xr-x`. Make a folder with `mkdir` after the review and confirm approval refuses without writing the file.
+Run this once against a repository with no `templates/` folder. The review names `Create folder: templates | permissions 0755` before the file, and approval makes both. The folder is `drwxr-xr-x`. For the refusal, open the review and create `templates/` from another shell before pressing `y`; Dort refuses without writing the file. The test harness cannot inject that step, so the unit test holds it.
 
 ## Delete a template file
 
