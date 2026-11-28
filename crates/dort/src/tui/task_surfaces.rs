@@ -120,6 +120,8 @@ impl Activity {
             Task::InspectLocalInputs(_) => "Read local inputs",
             Task::ReviewLocalInput(_) => "Review local input",
             Task::ListTemplates(_) => "List template files",
+            Task::ListDraftSources(_) => "List template files for this draft",
+            Task::ReadDraftSource(..) => "Read template file for this draft",
             Task::ShowTemplate(..) => "Read template source",
             Task::ReviewTemplate(..) => "Review template file",
             Task::PreviewGenerated(_) => "Preview generated file",

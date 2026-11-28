@@ -195,6 +195,53 @@ enum Value {
         provider: &'static str,
     },
 }
+/// Template files the generated draft can reference. Dort reads only these paths.
+struct Sources {
+    rows: Vec<dort_core::template_files::Row>,
+    current: Option<String>,
+}
+
+impl Sources {
+    fn rows(&self) -> Vec<(String, String)> {
+        self.rows
+            .iter()
+            .map(|row| {
+                let mappings = match row.mappings {
+                    0 => "Unused".to_string(),
+                    1 => "1 mapping".to_string(),
+                    count => format!("{count} mappings"),
+                };
+                (row.path.display().to_string(), mappings)
+            })
+            .collect()
+    }
+
+    fn note(&self) -> Option<&'static str> {
+        if self.rows.is_empty() {
+            Some("No template files yet. Create one in Files / Templates, then choose again.")
+        } else {
+            Some("Enter reads the file into this draft. Esc keeps the draft unchanged.")
+        }
+    }
+
+    fn selected(&self) -> usize {
+        self.current
+            .as_deref()
+            .and_then(|current| {
+                self.rows
+                    .iter()
+                    .position(|row| row.path.to_str() == Some(current))
+            })
+            .unwrap_or(0)
+    }
+
+    fn path(&self, index: usize) -> Option<String> {
+        self.rows
+            .get(index)
+            .map(|row| row.path.display().to_string())
+    }
+}
+
 struct Item {
     label: String,
     scope: String,
@@ -203,6 +250,7 @@ struct Item {
 enum Choices {
     Commands(Vec<Item>),
     References(References),
+    Sources(Sources),
 }
 pub(super) struct Choice {
     pub title: &'static str,
@@ -229,10 +277,11 @@ impl Choice {
         match &self.choices {
             Choices::Commands(items) => items.len(),
             Choices::References(references) => references.options.len(),
+            Choices::Sources(sources) => sources.rows.len(),
         }
     }
     pub(super) fn edits_draft(&self) -> bool {
-        matches!(&self.choices, Choices::References(_))
+        matches!(&self.choices, Choices::References(_) | Choices::Sources(_))
     }
     pub(super) fn can_toggle(&self) -> bool {
         matches!(&self.choices, Choices::References(r) if r.field.multiple() && !r.options.is_empty())
@@ -257,17 +306,30 @@ impl Choice {
         hits: &super::input::Hits,
         feedback: Option<&'static str>,
     ) {
-        let (rows, column, note) = match &self.choices {
-            Choices::Commands(items) => (
-                items
-                    .iter()
-                    .map(|item| (item.label.as_str(), item.scope.as_str()))
-                    .collect(),
-                "SCOPE",
-                None,
-            ),
-            Choices::References(references) => (references.rows(), "STATUS", references.note),
+        let source_rows = match &self.choices {
+            Choices::Sources(sources) => sources.rows(),
+            _ => Vec::new(),
         };
+        let (rows, column, note): (Vec<(&str, &str)>, &'static str, Option<&'static str>) =
+            match &self.choices {
+                Choices::Commands(items) => (
+                    items
+                        .iter()
+                        .map(|item| (item.label.as_str(), item.scope.as_str()))
+                        .collect(),
+                    "SCOPE",
+                    None,
+                ),
+                Choices::References(references) => (references.rows(), "STATUS", references.note),
+                Choices::Sources(sources) => (
+                    source_rows
+                        .iter()
+                        .map(|(path, mappings)| (path.as_str(), mappings.as_str()))
+                        .collect(),
+                    "MAPPINGS",
+                    sources.note(),
+                ),
+            };
         ui::choice::draw(
             frame,
             area,
@@ -285,6 +347,25 @@ impl Choice {
     }
 }
 impl App {
+    /// Picker over the repository template files a generated draft can reference.
+    pub(super) fn open_source_choice(&mut self, rows: Vec<dort_core::template_files::Row>) {
+        let current = self
+            .shell
+            .generated
+            .as_ref()
+            .and_then(|draft| draft.source_path())
+            .map(str::to_owned);
+        let sources = Sources { rows, current };
+        let selected = sources.selected();
+        self.choice = Some(Choice::new(
+            "Choose a template file",
+            super::help::Topic::ChooseTemplateFile,
+            Choices::Sources(sources),
+            selected,
+        ));
+        self.hits.clear();
+    }
+
     pub(super) fn open_profile_choice(&mut self, row: dort_core::profiles::Row) {
         use dort_core::profiles::Choice as P;
         let values = [P::Defaults, P::On, P::Off];
@@ -463,6 +544,14 @@ impl App {
                 choice.feedback = Some("Choose a value or cancel before opening another menu.")
             }
             KeyCode::Enter => {
+                if let Some(choice) = &mut self.choice
+                    && matches!(&choice.choices, Choices::Sources(sources) if sources.rows.is_empty())
+                {
+                    choice.feedback = Some(
+                        "No template files to choose. Cancel and create one in Files / Templates.",
+                    );
+                    return None;
+                }
                 let choice = self.choice.take()?;
                 self.hits.clear();
                 let value = match choice.choices {
@@ -472,6 +561,13 @@ impl App {
                             .field
                             .apply(self, references.value(choice.selected));
                         return None;
+                    }
+                    Choices::Sources(sources) => {
+                        let path = sources.path(choice.selected)?;
+                        self.shell.generated.as_mut()?.choose_source(path.clone());
+                        self.shell.form_feedback = None;
+                        let root = self.template_repository()?;
+                        return Some(super::actions::Task::ReadDraftSource(root, path.into()));
                     }
                 };
                 match value {

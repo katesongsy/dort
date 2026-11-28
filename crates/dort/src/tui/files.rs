@@ -297,7 +297,8 @@ pub(super) fn controls(app: &App) -> impl Iterator<Item = ui::ActionButton> {
             Action::EditGenerated.label(),
             "e",
             Action::EditGenerated,
-            app.registered_repository() && mapping.is_some_and(|file| file.template.is_some()),
+            app.registered_repository()
+                && mapping.is_some_and(|file| file.template.is_some() || file.source.is_some()),
         ),
     ];
     match app.files_page {

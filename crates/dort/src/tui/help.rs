@@ -58,6 +58,7 @@ pub(super) enum Topic {
     CloseRecordReview,
     More,
     ProfileChoice,
+    ChooseTemplateFile,
     DeclarationProvider,
     DraftReferences,
     CloseRecordProvider,

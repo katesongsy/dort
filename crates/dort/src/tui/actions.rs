@@ -773,6 +773,8 @@ pub enum Task {
     InspectLocalInputs(String),
     ReviewLocalInput(super::local_inputs::Change),
     ListTemplates(PathBuf),
+    ListDraftSources(PathBuf),
+    ReadDraftSource(PathBuf, PathBuf),
     ShowTemplate(PathBuf, PathBuf),
     ReviewTemplate(PathBuf, Box<template_files::Change>, String),
     PreviewGenerated(String),
@@ -846,6 +848,8 @@ pub enum Output {
     LocalInputs(String, Vec<dort_core::generated::local_inputs::Row>),
     LocalInputSaved(bool),
     TemplateList(Vec<template_files::Row>),
+    DraftSources(Vec<template_files::Row>),
+    DraftSource(PathBuf, Box<template_files::Source>),
     TemplateSource(Box<template_files::Source>),
     TemplateWritten(
         template_files::Outcome,
@@ -1071,6 +1075,9 @@ pub fn perform_scoped_with_install_progress(
             .map(|p| Output::Preview(Pending::LocalInput(Box::new(p))))
         }
         Task::ListTemplates(root) => template_files::list(host, &root).map(Output::TemplateList),
+        Task::ListDraftSources(root) => template_files::list(host, &root).map(Output::DraftSources),
+        Task::ReadDraftSource(root, path) => template_files::show(host, &root, &path)
+            .map(|source| Output::DraftSource(path, Box::new(source))),
         Task::ShowTemplate(root, path) => template_files::show(host, &root, &path)
             .map(|source| Output::TemplateSource(Box::new(source))),
         Task::ReviewTemplate(root, change, text) => {

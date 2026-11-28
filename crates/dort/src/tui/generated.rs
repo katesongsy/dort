@@ -119,11 +119,36 @@ pub(super) struct Draft {
     id: String,
     target: String,
     pub template: TemplateBuffer,
+    content: Content,
+    /// Text read from the chosen template file. Finds the inputs it may use.
+    source_text: Option<String>,
     host_inputs: HostInputs,
     local_inputs: Vec<String>,
     values: BTreeMap<String, String>,
     step: Step,
     template_focus: usize,
+}
+
+/// Where the generated text comes from.
+#[derive(Clone, PartialEq, Eq)]
+enum Content {
+    /// Jinja text in dort.toml.
+    Inline,
+    /// An existing repository template file, by repository-relative path.
+    File(String),
+}
+
+impl Content {
+    fn of(file: &ManagedFile) -> Self {
+        if file.template.is_some() {
+            return Self::Inline;
+        }
+        Self::File(
+            file.source
+                .as_ref()
+                .map_or_else(String::new, |path| path.display().to_string()),
+        )
+    }
 }
 
 enum Step {
@@ -142,6 +167,12 @@ enum InputField {
 
 impl Draft {
     pub fn new(before: Option<ManagedFile>) -> Self {
+        let content = before.as_ref().map_or(Content::Inline, Content::of);
+        let rows = if before.is_some() { 1 } else { 2 };
+        let template_focus = match &content {
+            Content::Inline if before.is_some() => rows + 1,
+            _ => 0,
+        };
         Self {
             id: before.as_ref().map_or_else(String::new, |f| f.id.clone()),
             target: before
@@ -153,6 +184,8 @@ impl Draft {
                     .and_then(|f| f.template.clone())
                     .unwrap_or_default(),
             ),
+            content,
+            source_text: None,
             host_inputs: before
                 .as_ref()
                 .and_then(|f| f.host_inputs)
@@ -165,7 +198,7 @@ impl Draft {
                 .as_ref()
                 .map_or_else(BTreeMap::new, |f| f.inputs.clone()),
             step: Step::Template,
-            template_focus: if before.is_some() { 1 } else { 0 },
+            template_focus,
             before,
         }
     }
@@ -174,6 +207,7 @@ impl Draft {
         let before = self.before.as_ref();
         self.id != before.map_or("", |file| &file.id)
             || self.target != before.and_then(|file| file.target.to_str()).unwrap_or("")
+            || self.content != before.map_or(Content::Inline, Content::of)
             || self.template.text()
                 != before
                     .and_then(|file| file.template.as_deref())
@@ -208,13 +242,89 @@ impl Draft {
     pub fn instructions(&self) -> &'static str {
         if self.entering_inputs() {
             "Declare local names. Set their values after saving. Leave unused inputs unset. No secrets."
+        } else if self.content_is_file() {
+            "Enter or Space chooses a template file. Dort saves the path and writes dort.toml only."
         } else {
             "Use {{ name }}, {{ host.os }} or {{ local.name }}. In Template, Enter adds a line."
         }
     }
 
-    pub fn template_field(&self) -> usize {
+    /// Field rows above the content choice. A new draft also names the file.
+    fn field_rows(&self) -> usize {
         if self.before.is_some() { 1 } else { 2 }
+    }
+
+    pub fn content_row(&self) -> usize {
+        self.field_rows()
+    }
+
+    /// Index of the template editor or the read-only template file pane.
+    pub fn template_field(&self) -> usize {
+        self.content_row() + 1
+    }
+
+    pub fn on_content_row(&self) -> bool {
+        matches!(self.step, Step::Template) && self.template_focus == self.content_row()
+    }
+
+    pub fn content_is_inline(&self) -> bool {
+        matches!(self.content, Content::Inline)
+    }
+
+    pub fn content_is_file(&self) -> bool {
+        matches!(self.content, Content::File(_))
+    }
+
+    pub fn content_value(&self) -> String {
+        match &self.content {
+            Content::Inline => "In dort.toml".into(),
+            Content::File(path) if path.is_empty() => "Choose a file".into(),
+            Content::File(path) => path.clone(),
+        }
+    }
+
+    pub fn source_path(&self) -> Option<&str> {
+        match &self.content {
+            Content::File(path) if !path.is_empty() => Some(path),
+            _ => None,
+        }
+    }
+
+    /// Space and Enter on the content row. True when a template file is still needed.
+    pub fn content_action(&mut self, toggle: bool) -> bool {
+        if self.entering_inputs() || !self.on_content_row() {
+            return false;
+        }
+        if toggle && self.content_is_file() {
+            self.content = Content::Inline;
+        } else if self.content_is_inline() {
+            self.content = Content::File(String::new());
+        }
+        self.content_is_file()
+    }
+
+    pub fn choose_source(&mut self, path: String) {
+        if self.content != Content::File(path.clone()) {
+            self.source_text = None;
+        }
+        self.content = Content::File(path);
+    }
+
+    /// Keep the text read for the current choice. False when it was replaced.
+    pub fn set_source_text(&mut self, path: &str, text: String) -> bool {
+        if self.source_path() != Some(path) {
+            return false;
+        }
+        self.source_text = Some(text);
+        true
+    }
+
+    /// Text that declares the inputs a render may use.
+    fn reference_text(&self) -> &str {
+        match (&self.content, &self.source_text) {
+            (Content::File(_), Some(text)) => text,
+            _ => self.template.text(),
+        }
     }
 
     pub fn entering_inputs(&self) -> bool {
@@ -349,7 +459,7 @@ impl Draft {
     }
 
     fn discover(&self) -> Result<Vec<InputField>> {
-        let references = input_names_for(self.id(), self.template.text())?;
+        let references = input_names_for(self.id(), self.reference_text())?;
         let names: BTreeSet<_> = references
             .iter()
             .filter_map(|name| match name.strip_prefix("inputs.") {
@@ -407,6 +517,11 @@ impl Draft {
                     "Enter a file ID and Home destination.".into(),
                 ));
             }
+            if self.content_is_file() && self.source_path().is_none() {
+                return Err(Error::Invalid(
+                    "Choose a template file for this generated file.".into(),
+                ));
+            }
             let fields = self.discover()?;
             if !fields.is_empty() {
                 self.step = Step::Inputs { fields, focus: 0 };
@@ -430,7 +545,10 @@ impl Draft {
             permissions: None,
         });
         mapping.target = self.target.trim().into();
-        mapping.template = Some(self.template.text().into());
+        mapping.template = self
+            .content_is_inline()
+            .then(|| self.template.text().into());
+        mapping.source = self.source_path().map(Into::into);
         mapping.inputs = inputs;
         mapping.host_inputs = Some(self.host_inputs).filter(|keys| *keys != HostInputs::default());
         if self.local_inputs_changed(mapping.local_inputs.as_deref()) {
@@ -445,14 +563,16 @@ impl Draft {
 
     pub fn draw_template(&self, frame: &mut Frame, area: Rect, hits: &super::input::Hits) {
         use super::input::Target;
-        let fields: &[(&str, &str)] = if self.before.is_some() {
-            &[("Home destination (~/path)", &self.target)]
+        let content = self.content_value();
+        let mut fields: Vec<(&str, &str)> = if self.before.is_some() {
+            vec![("Home destination (~/path)", self.target.as_str())]
         } else {
-            &[
-                ("File ID", &self.id),
-                ("Home destination (~/path)", &self.target),
+            vec![
+                ("File ID", self.id.as_str()),
+                ("Home destination (~/path)", self.target.as_str()),
             ]
         };
+        fields.push(("Template content", content.as_str()));
         let focus = hits.input_focus_allowed();
         let body = area;
         let mut y = area.y;
@@ -470,7 +590,12 @@ impl Draft {
             y += 1;
         }
         let outer = Rect::new(area.x, y, area.width, body.bottom().saturating_sub(y));
-        if !outer.is_empty() {
+        if outer.is_empty() {
+            return;
+        }
+        if self.content_is_file() {
+            self.draw_source(frame, outer);
+        } else {
             let active = focus && self.template_focused();
             let inner = if outer.height >= 3 {
                 let block = ui::design::pane("Template", active);
@@ -487,12 +612,41 @@ impl Draft {
                 Rect::new(outer.x, outer.y + 1, outer.width, outer.height - 1)
             };
             self.template.draw(frame, inner, active);
-            hits.click(outer, Target::FormControl(self.template_field(), false));
         }
+        hits.click(outer, Target::FormControl(self.template_field(), false));
+    }
+
+    /// The chosen file answers for the text. The draft only saves its path.
+    fn draw_source(&self, frame: &mut Frame, area: Rect) {
+        let inner = if area.height >= 3 {
+            let block = ui::design::pane("Template file", false);
+            let inner = block.inner(area);
+            frame.render_widget(block, area);
+            inner
+        } else {
+            ui::prose(
+                frame,
+                Rect::new(area.x, area.y, area.width, 1),
+                "Template file",
+                ui::heading(),
+            );
+            Rect::new(area.x, area.y + 1, area.width, area.height - 1)
+        };
+        let text = match self.source_path() {
+            Some(path) => {
+                format!("{path}\nRead only. Dort saves the path and writes dort.toml only.")
+            }
+            None => {
+                "Choose a file with Enter. Nothing is written until you review and save.".into()
+            }
+        };
+        ui::prose(frame, inner, &text, ui::muted());
     }
 
     pub fn template_focused(&self) -> bool {
-        !self.entering_inputs() && self.template_focus == self.template_field()
+        self.content_is_inline()
+            && !self.entering_inputs()
+            && self.template_focus == self.template_field()
     }
 
     pub fn focus_template(&mut self) {
@@ -518,10 +672,12 @@ impl Draft {
                 self.values.get_mut(name)
             };
         }
+        if self.template_focus >= self.template_field() || self.on_content_row() {
+            return None;
+        }
         match self.template_focus {
             0 if self.before.is_none() => Some(&mut self.id),
-            n if n < self.template_field() => Some(&mut self.target),
-            _ => None,
+            _ => Some(&mut self.target),
         }
     }
 

@@ -432,6 +432,99 @@ target = "~/.editor"
 }
 
 #[test]
+fn saving_a_template_file_mapping_reviews_the_file_and_blocks_when_it_changes() {
+    use dort_core::{
+        local::RepositoryRegistry,
+        manifest_edit::{Change, FileChange, Preview as EditPreview},
+        model::{FileMode, ManagedFile},
+        state::WriterLock,
+    };
+    let f = Fixture::new();
+    RepositoryRegistry::register(
+        &f.home.host,
+        &WriterLock::acquire(&f.home.host).unwrap(),
+        &f.repo,
+    )
+    .unwrap();
+    let path = f.repo.join("dort.toml");
+    let original = fs::read_to_string(&path).unwrap();
+    let source = f.repo.join("templates/prefs.jinja");
+    let text = "theme={{ theme }}\n";
+    fs::write(&source, text).unwrap();
+    let mapping = ManagedFile {
+        id: "prefs".into(),
+        source: Some("templates/prefs.jinja".into()),
+        template: None,
+        target: "~/.prefs".into(),
+        mode: FileMode::Template,
+        profiles: dort_core::model::base_profiles(),
+        requires: vec![],
+        overrides: Default::default(),
+        inputs: [("theme".to_string(), "dark".to_string())].into(),
+        syntax: None,
+        host_inputs: None,
+        local_inputs: None,
+        permissions: None,
+    };
+    let change = || {
+        Change::File(Box::new(FileChange {
+            before: None,
+            mapping: mapping.clone(),
+        }))
+    };
+
+    let edit = EditPreview::prepare(&f.home.host, &f.repo, &change()).unwrap();
+    let preview = edit.generated().expect("rendered from the template file");
+    assert_eq!(preview.source.as_deref(), Some(source.as_path()));
+    assert_eq!(preview.rendered, "theme=dark\n");
+    assert!(
+        edit.human().contains("templates/prefs.jinja"),
+        "{}",
+        edit.human()
+    );
+    assert!(edit.human().contains("Dort writes dort.toml only"));
+
+    fs::write(&source, "theme=changed\n").unwrap();
+    let error = edit
+        .approve()
+        .execute(&f.home.host)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("template file changed"),
+        "{error:?} must name the changed template file"
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+
+    fs::write(&source, text).unwrap();
+    let edit = EditPreview::prepare(&f.home.host, &f.repo, &change()).unwrap();
+    fs::remove_file(&source).unwrap();
+    let error = edit
+        .approve()
+        .execute(&f.home.host)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("template file changed"),
+        "{error:?} must name the removed template file"
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+
+    fs::write(&source, text).unwrap();
+    let edit = EditPreview::prepare(&f.home.host, &f.repo, &change()).unwrap();
+    edit.approve().execute(&f.home.host).unwrap();
+    let saved = fs::read_to_string(&path).unwrap();
+    assert!(
+        saved.contains("source = \"templates/prefs.jinja\""),
+        "{saved}"
+    );
+    assert!(!saved.contains("template ="), "{saved}");
+    assert_eq!(fs::read_to_string(&source).unwrap(), text);
+    assert!(!f.home.host.home.join(".prefs").exists());
+    assert_eq!(fs::read_to_string(&path).unwrap(), saved);
+}
+
+#[test]
 fn generated_edit_previews_the_replacement_and_preserves_other_declarations() {
     use dort_core::{
         local::RepositoryRegistry,

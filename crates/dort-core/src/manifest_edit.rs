@@ -64,6 +64,31 @@ pub struct FileChange {
     pub before: Option<ManagedFile>,
 }
 
+/// What a file mapping uses to reach Home: a link source, template text in dort.toml
+/// or a template file in the repository.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Content {
+    Link,
+    Inline,
+    File,
+}
+
+impl Content {
+    fn of(file: &ManagedFile) -> Option<Self> {
+        Some(match file.mode {
+            FileMode::Link => Self::Link,
+            FileMode::Template if file.template.is_some() => Self::Inline,
+            FileMode::Template => Self::File,
+            FileMode::Secret => return None,
+        })
+    }
+
+    /// Generated mappings render; link mappings point at an existing source file.
+    fn renders(self) -> bool {
+        !matches!(self, Self::Link)
+    }
+}
+
 pub struct Preview {
     repository: PathBuf,
     backup_root: PathBuf,
@@ -71,6 +96,8 @@ pub struct Preview {
     config: Entry,
     manifest: Entry,
     watched_target: Option<Entry>,
+    /// Template file read for the rendered output. Approval compares it again.
+    watched_source: Option<Entry>,
     original: Vec<u8>,
     replacement: String,
     description: String,
@@ -343,11 +370,8 @@ impl Preview {
                     mapping: file,
                     before,
                 } = change.as_ref();
-                let inline =
-                    |file: &ManagedFile| file.mode == FileMode::Template && file.template.is_some();
-                if file.mode != FileMode::Link && !inline(file) {
-                    return Err(invalid("Choose a link mapping or an inline template."));
-                }
+                let content = Content::of(file)
+                    .ok_or_else(|| invalid("Choose a link mapping or a template."))?;
                 let previous = manifest
                     .files
                     .iter()
@@ -369,10 +393,10 @@ impl Preview {
                     return Err(invalid("That mapping changed. Refresh and edit it again."));
                 }
                 if let Some(previous) = previous {
-                    if previous.mode != file.mode || inline(previous) != inline(file) {
+                    if Content::of(previous) != Some(content) {
                         return Err(invalid("Keep the existing file mode and source type."));
                     }
-                    if inline(file) {
+                    if content.renders() {
                         if previous.profiles != file.profiles
                             || previous.requires != file.requires
                             || previous.permissions != file.permissions
@@ -404,9 +428,15 @@ impl Preview {
                 if previous != Some(file) {
                     edit_file(&mut doc, &manifest, file)?;
                 }
-                if inline(file) {
+                if content.renders() {
                     generated_id = Some(file.id.as_str());
                     let mut description = format!("Save generated file {:?}.", file.id);
+                    if content == Content::File {
+                        description.push_str(&format!(
+                            "\nTemplate file: {:?}\nDort writes dort.toml only. The template file and Home file stay as they are.",
+                            file.source_for(host.platform).unwrap_or(Path::new(""))
+                        ));
+                    }
                     if file.local_inputs.is_some()
                         || previous.is_some_and(|mapping| mapping.local_inputs.is_some())
                     {
@@ -460,17 +490,25 @@ impl Preview {
             error => error,
         })?;
         parsed.validate_file_targets(host, &parsed.profiles.known(), Some(repository), None)?;
-        let generated = generated_id
-            .map(|id| {
-                generated::Preview::from_manifest(
+        let (generated, watched_source) = match generated_id {
+            Some(id) => {
+                let (preview, source) = generated::Preview::from_manifest(
                     host,
                     repository,
                     Some(repository_id),
                     &parsed,
                     id,
+                )?;
+                (
+                    Some(preview),
+                    source.map(|mut entry| {
+                        entry.sha256 = None;
+                        entry
+                    }),
                 )
-            })
-            .transpose()?;
+            }
+            None => (None, None),
+        };
         Ok(Self {
             generated,
             repository: repository.to_owned(),
@@ -479,6 +517,7 @@ impl Preview {
             config,
             manifest: entry,
             watched_target,
+            watched_source,
             original,
             replacement,
             description,
@@ -537,6 +576,16 @@ impl Approval {
                 && !same_entry(before, &observation::inspect(&before.path, false)?)
             {
                 return Err(invalid("The Home destination changed. Review again."));
+            }
+            if let Some(source) = &p.watched_source {
+                let current = observation::inspect(&source.path, false).map_err(|_| {
+                    invalid("Cannot read the template file. Review the generated file again.")
+                })?;
+                if !same_entry(source, &current) {
+                    return Err(invalid(
+                        "The template file changed. Review the generated file again.",
+                    ));
+                }
             }
             Ok(())
         };

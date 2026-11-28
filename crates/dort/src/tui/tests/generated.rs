@@ -258,6 +258,7 @@ fn generated_fields_own_keys_until_esc_and_continue_accepts_a_click() {
     w.press(KeyCode::Tab);
     w.paste("~/settings");
     w.press(KeyCode::Tab);
+    w.press(KeyCode::Tab);
     w.paste("theme={{ theme }}");
     w.press(KeyCode::Enter);
     w.press(KeyCode::Char('q'));
@@ -508,6 +509,7 @@ fn blank_repository_can_create_cancel_save_preview_and_edit_generated_template()
         w.press(KeyCode::BackTab);
         w.paste(" ");
         w.press(KeyCode::Tab);
+        w.press(KeyCode::Tab);
         w.paste("{broken={{ env.HOME }}");
         w.continue_form();
         assert!(w.app.preview.is_none());
@@ -607,6 +609,7 @@ fn jinja_draft_opts_in_and_keeps_explicit_values_and_host_choices_until_review()
         w.paste("prefs");
         w.press(KeyCode::Tab);
         w.paste("~/settings");
+        w.press(KeyCode::Tab);
         w.press(KeyCode::Tab);
         let template = concat!(
             "theme=[{{ inputs.theme }}]\n",
@@ -726,6 +729,7 @@ fn generated_local_inputs_from_empty_repository_to_deploy_and_update() {
         w.paste("prefs");
         w.press(KeyCode::Tab);
         w.paste("~/settings");
+        w.press(KeyCode::Tab);
         w.press(KeyCode::Tab);
         w.paste("editor=[{{ local.editor }}]\n{% if false %}{{ local.later }}{% endif %}{# local.comment #}");
         w.continue_form();
@@ -930,6 +934,7 @@ fn stale_generated_review_cannot_replace_a_new_manifest() {
     w.press(KeyCode::Tab);
     w.paste("~/settings");
     w.press(KeyCode::Tab);
+    w.press(KeyCode::Tab);
     w.paste("theme=dark");
     w.continue_form();
     assert!(w.review().contains("theme=dark"));
@@ -970,6 +975,7 @@ fn generated_save_selects_the_saved_template_even_when_a_filter_hides_it() {
     w.paste("zeta");
     w.press(KeyCode::Tab);
     w.paste("~/.zeta");
+    w.press(KeyCode::Tab);
     w.press(KeyCode::Tab);
     w.paste("second output");
     w.continue_form();
@@ -1576,5 +1582,211 @@ fn check_generated_recovery(
         w.app
             .key(key(KeyCode::Char('y')), w.width, w.height)
             .is_none()
+    );
+}
+
+impl Workshop {
+    /// A repository template file the generated draft can reference.
+    fn template_file(&self, name: &str, text: &str) -> std::path::PathBuf {
+        fs::create_dir_all(self.repo.join("templates")).unwrap();
+        let path = self.repo.join("templates").join(name);
+        fs::write(&path, text).unwrap();
+        path
+    }
+
+    /// Space on the Template content row opens the template file picker.
+    fn content_row(&mut self) {
+        self.press(KeyCode::Tab);
+        self.press(KeyCode::Char(' '));
+    }
+}
+
+#[test]
+fn generated_draft_saves_a_mapping_that_references_a_template_file() {
+    for (width, height) in [(48, 14), (100, 26)] {
+        let mut w = Workshop::new(width, height);
+        let original = w.manifest();
+        let text = "theme={{ theme }}\n";
+        let source = w.template_file("prefs.jinja", text);
+        w.press(KeyCode::Char('s'));
+        w.paste("prefs");
+        w.press(KeyCode::Tab);
+        w.paste("~/settings");
+        w.content_row();
+        let screen = w.screen();
+        assert!(screen.contains("Choose a template file"), "{screen}");
+        assert!(screen.contains("templates/prefs.jinja"), "{screen}");
+        w.press(KeyCode::Enter);
+        let screen = w.screen();
+        assert!(screen.contains("templates/prefs.jinja"), "{screen}");
+        assert!(screen.contains("Read only"), "{screen}");
+        assert_eq!(w.manifest(), original);
+        w.continue_form();
+        assert!(w.screen().contains("Input: theme"), "{}", w.screen());
+        w.paste("dark");
+        w.continue_form();
+        let review = w.review().to_owned();
+        assert!(review.contains("templates/prefs.jinja"), "{review}");
+        assert!(review.contains("theme=dark"), "{review}");
+        assert!(review.contains("Update dort.toml only"), "{review}");
+        assert_eq!(w.manifest(), original);
+        w.approve();
+        assert!(w.app.error.is_none(), "{:?}", w.app.error);
+        let saved = dort_core::Manifest::parse(&w.manifest()).unwrap();
+        let mapping = &saved.files[0];
+        assert_eq!(mapping.id, "prefs");
+        assert_eq!(
+            mapping.source.as_deref(),
+            Some("templates/prefs.jinja".as_ref())
+        );
+        assert_eq!(mapping.template, None);
+        assert_eq!(mapping.inputs["theme"], "dark");
+        assert_eq!(fs::read_to_string(&source).unwrap(), text);
+        assert!(!w.host.home.join("settings").exists());
+        assert_eq!(fs::read_dir(&w.host.home).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn generated_draft_keeps_its_text_and_inputs_when_the_file_picker_cancels() {
+    let mut w = Workshop::new(100, 26);
+    w.template_file("prefs.jinja", "theme={{ theme }}\n");
+    w.press(KeyCode::Char('s'));
+    w.paste("prefs");
+    w.press(KeyCode::Tab);
+    w.paste("~/settings");
+    w.press(KeyCode::Tab);
+    w.press(KeyCode::Tab);
+    w.paste("kept={{ theme }}");
+    w.press(KeyCode::BackTab);
+    assert!(w.screen().contains("Template content"), "{}", w.screen());
+    w.press(KeyCode::Char(' '));
+    assert!(
+        w.screen().contains("Choose a template file"),
+        "{}",
+        w.screen()
+    );
+    w.press(KeyCode::Esc);
+    let screen = w.screen();
+    assert!(!screen.contains("Choose a template file"), "{screen}");
+    assert!(screen.contains("Choose a file"), "{screen}");
+    assert!(screen.contains("prefs"), "{screen}");
+    assert!(screen.contains("~/settings"), "{screen}");
+    w.press(KeyCode::Char(' '));
+    let screen = w.screen();
+    assert!(screen.contains("In dort.toml"), "{screen}");
+    assert!(screen.contains("kept={{ theme }}"), "{screen}");
+    assert_eq!(w.manifest(), "schema = 1\n");
+    w.continue_form();
+    assert!(w.screen().contains("Input: theme"), "{}", w.screen());
+    w.paste("dark");
+    w.continue_form();
+    assert!(w.review().contains("kept=dark"), "{:?}", w.review());
+}
+
+#[test]
+fn template_file_picker_explains_an_empty_inventory_and_where_to_create_one() {
+    let mut w = Workshop::new(100, 26);
+    w.press(KeyCode::Char('s'));
+    w.paste("prefs");
+    w.press(KeyCode::Tab);
+    w.paste("~/settings");
+    w.content_row();
+    let screen = w.screen();
+    assert!(screen.contains("Choose a template file"), "{screen}");
+    assert!(screen.contains("Files / Templates"), "{screen}");
+    w.press(KeyCode::Enter);
+    assert!(
+        w.screen().contains("Choose a template file"),
+        "{}",
+        w.screen()
+    );
+    w.press(KeyCode::Esc);
+    assert!(w.screen().contains("Choose a file"), "{}", w.screen());
+    w.continue_form();
+    assert!(
+        w.screen().contains("Choose a template file"),
+        "{}",
+        w.screen()
+    );
+    assert!(w.app.preview.is_none());
+}
+
+#[test]
+fn generated_review_blocks_a_template_file_that_changed_after_review() {
+    let mut w = Workshop::new(100, 26);
+    let original = w.manifest();
+    let source = w.template_file("prefs.jinja", "theme={{ theme }}\n");
+    w.press(KeyCode::Char('s'));
+    w.paste("prefs");
+    w.press(KeyCode::Tab);
+    w.paste("~/settings");
+    w.content_row();
+    w.press(KeyCode::Enter);
+    w.continue_form();
+    w.paste("dark");
+    w.continue_form();
+    assert!(w.review().contains("theme=dark"));
+    fs::write(&source, "theme=changed\n").unwrap();
+    w.approve();
+    let error = w
+        .app
+        .error
+        .as_ref()
+        .expect("changed source blocks approval");
+    assert!(error.contains("template file changed"), "{error}");
+    assert_eq!(w.manifest(), original);
+    assert_eq!(fs::read_to_string(&source).unwrap(), "theme=changed\n");
+    assert!(!w.host.home.join("settings").exists());
+    assert_eq!(fs::read_dir(&w.host.home).unwrap().count(), 0);
+}
+
+#[test]
+fn generated_edit_keeps_the_template_file_and_reads_its_text_from_it() {
+    let mut w = Workshop::new(100, 26);
+    let text = "theme={{ theme }}\n";
+    let source = w.template_file("prefs.jinja", text);
+    fs::write(
+        w.repo.join("dort.toml"),
+        r#"schema = 1
+[[files]]
+id = "prefs"
+mode = "template"
+source = "templates/prefs.jinja"
+target = "~/settings"
+inputs = { theme = "dark" }
+"#,
+    )
+    .unwrap();
+    w.run(Task::Refresh);
+    w.press(KeyCode::Char('e'));
+    let screen = w.screen();
+    assert!(screen.contains("templates/prefs.jinja"), "{screen}");
+    assert!(screen.contains("Read only"), "{screen}");
+    assert!(!screen.contains("Open in editor"), "{screen}");
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Esc);
+    let screen = w.screen();
+    assert!(!screen.contains("Discard unsaved changes?"), "{screen}");
+    assert!(screen.contains("Filter generated files"), "{screen}");
+
+    w.press(KeyCode::Char('e'));
+    w.paste("x");
+    w.continue_form();
+    assert!(w.screen().contains("Input: theme"), "{}", w.screen());
+    w.continue_form();
+    let review = w.review().to_owned();
+    assert!(review.contains("theme=dark"), "{review}");
+    assert!(review.contains("templates/prefs.jinja"), "{review}");
+    assert!(review.contains("settingsx"), "{review}");
+    assert_eq!(fs::read_to_string(&source).unwrap(), text);
+    assert!(!w.host.home.join("settingsx").exists());
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Esc);
+    w.press(KeyCode::Esc);
+    assert!(
+        w.screen().contains("Discard unsaved changes?"),
+        "{}",
+        w.screen()
     );
 }
