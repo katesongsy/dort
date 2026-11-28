@@ -3529,10 +3529,11 @@ impl App {
             }
             Action::EditGenerated
                 if !self.selected_mapping().is_some_and(|file| {
-                    file.mode == dort_core::model::FileMode::Template && file.template.is_some()
+                    file.mode == dort_core::model::FileMode::Template
+                        && (file.template.is_some() || file.source.is_some())
                 }) =>
             {
-                Some("Select a generated file with a template in dort.toml.")
+                Some("Select a generated file with a template or a template file.")
             }
             Action::LocalInputs
                 if !self.selected_mapping().is_some_and(|file| {

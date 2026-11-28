@@ -167,6 +167,12 @@ enum InputField {
 
 impl Draft {
     pub fn new(before: Option<ManagedFile>) -> Self {
+        let content = before.as_ref().map_or(Content::Inline, Content::of);
+        let rows = if before.is_some() { 1 } else { 2 };
+        let template_focus = match &content {
+            Content::Inline if before.is_some() => rows + 1,
+            _ => 0,
+        };
         Self {
             id: before.as_ref().map_or_else(String::new, |f| f.id.clone()),
             target: before
@@ -178,7 +184,7 @@ impl Draft {
                     .and_then(|f| f.template.clone())
                     .unwrap_or_default(),
             ),
-            content: before.as_ref().map_or(Content::Inline, Content::of),
+            content,
             source_text: None,
             host_inputs: before
                 .as_ref()
@@ -192,7 +198,7 @@ impl Draft {
                 .as_ref()
                 .map_or_else(BTreeMap::new, |f| f.inputs.clone()),
             step: Step::Template,
-            template_focus: if before.is_some() { 1 } else { 0 },
+            template_focus,
             before,
         }
     }

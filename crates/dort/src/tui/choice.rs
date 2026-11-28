@@ -544,6 +544,14 @@ impl App {
                 choice.feedback = Some("Choose a value or cancel before opening another menu.")
             }
             KeyCode::Enter => {
+                if let Some(choice) = &mut self.choice
+                    && matches!(&choice.choices, Choices::Sources(sources) if sources.rows.is_empty())
+                {
+                    choice.feedback = Some(
+                        "No template files to choose. Cancel and create one in Files / Templates.",
+                    );
+                    return None;
+                }
                 let choice = self.choice.take()?;
                 self.hits.clear();
                 let value = match choice.choices {
