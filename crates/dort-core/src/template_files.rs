@@ -715,9 +715,9 @@ impl Approval {
         let absolute = p.root.join(review.path);
         let repo = p.recheck_base(host)?;
         repo.checked_path(review.path)?;
-        let mut durable = true;
+        let mut durability_unknown = false;
         if let Some(folder) = &p.folder {
-            durable = p.create_folder(folder)?;
+            durability_unknown = !p.create_folder(folder)?;
         }
         let check = || {
             let (repo, handle) = p.recheck(host, review.path, &absolute)?;
@@ -733,7 +733,7 @@ impl Approval {
                 source,
                 &handle,
                 &absolute,
-                !durable,
+                durability_unknown,
                 before_publish,
             );
         }
@@ -814,7 +814,7 @@ impl Approval {
         }
         let destination_synced = handle.directory.sync_all().is_ok();
         let stage_synced = state.sync().is_ok();
-        let durability_unknown = !destination_synced || !stage_synced || !durable;
+        let durability_unknown = durability_unknown || !destination_synced || !stage_synced;
         let competing_change = !stage_matches(host, &state)
             || old.is_some_and(|old| {
                 !matches_file(
