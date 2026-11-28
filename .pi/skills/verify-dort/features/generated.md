@@ -212,6 +212,14 @@ Open **Local inputs** (`l`). Set `editor` to `vim`. Cancel the first review and 
 
 Use **Clear** (`F6`) and confirm the value is unset. Set it to `nano` and check **Update available** in the preview. Compare `dort.toml` against the saved copy and check the deployed file still contains `editor=[vim]`. Clean up the run.
 
+## Manage repository template files
+
+In a disposable repository, create `templates/editor.jinja` with 40 lines and declare it as a template `source`. Also declare a template source outside `templates/`. In **Files**, choose **Templates** (`5`). Check both reference counts. Open the external-to-`templates/` source and confirm it is read-only.
+
+Open `templates/editor.jinja`, choose **Edit template file**, and append a line. Press Esc to leave the field. Try to quit and choose **Keep editing**. Open review, read to the end, and approve. Compare the edited file and both retained copies in the result against the expected bytes. Check that `dort.toml` and the Home destination did not change.
+
+Choose **New template file** (`s`). Create `templates/new.jinja`, then compare the approved text and mode `0644` on disk. Verify both paths with `dort files templates list` and `dort files templates show templates/new.jinja`. Clean up the run.
+
 ## Gotchas
 
 - Exit the draft with Esc before the harness sends `q`. A focused field treats `q` as text.
